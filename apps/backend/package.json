@@ -18,6 +18,7 @@
     "@ledesma-platform/shared": "*",
     "fastify": "^5.8.5",
     "fastify-plugin": "^5.1.0",
+    "openai": "6.42.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
