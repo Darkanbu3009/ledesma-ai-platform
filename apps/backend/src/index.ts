@@ -1,16 +1,27 @@
+import { parseEnv, type Env } from './config/env.js';
 import { buildServer } from './server.js';
 
-const port = Number(process.env.PORT ?? 3000);
-const host = process.env.HOST ?? '0.0.0.0';
+function loadConfig(): Env {
+  try {
+    return parseEnv();
+  } catch (err) {
+    console.error('Invalid environment configuration:');
+    console.error(err instanceof Error ? err.message : err);
+    process.exit(1);
+  }
+}
 
-const app = buildServer();
+async function main(): Promise<void> {
+  const config = loadConfig();
+  const app = await buildServer(config);
 
-app
-  .listen({ port, host })
-  .then((address) => {
+  try {
+    const address = await app.listen({ port: config.PORT, host: config.HOST });
     app.log.info(`servidor escuchando en ${address}`);
-  })
-  .catch((err) => {
+  } catch (err) {
     app.log.error(err);
     process.exit(1);
-  });
+  }
+}
+
+void main();
