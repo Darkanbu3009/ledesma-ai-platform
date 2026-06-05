@@ -11,9 +11,11 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.100.1",
     "@fastify/cors": "^11.2.0",
     "@fastify/helmet": "^13.0.2",
     "@fastify/rate-limit": "^10.3.0",
+    "@ledesma-platform/shared": "*",
     "fastify": "^5.8.5",
     "fastify-plugin": "^5.1.0",
     "zod": "^4.4.3"
