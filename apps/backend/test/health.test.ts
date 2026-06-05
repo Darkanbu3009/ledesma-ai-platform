@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../src/server.js';
+import { parseEnv } from '../src/config/env.js';
 
 describe('GET /health', () => {
   let app: FastifyInstance;
 
-  beforeAll(() => {
-    app = buildServer();
+  beforeAll(async () => {
+    app = await buildServer(parseEnv({ NODE_ENV: 'test' }));
   });
 
   afterAll(async () => {
