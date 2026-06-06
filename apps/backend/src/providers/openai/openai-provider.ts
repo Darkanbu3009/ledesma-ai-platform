@@ -6,6 +6,7 @@ import type {
 } from '@ledesma-platform/shared';
 import { mapRequestToOpenAI } from './map-request.js';
 import { translateOpenAIStream } from './translate-stream.js';
+import { toProviderError } from '../errors.js';
 
 /**
  * Adaptador de OpenAI (Chat Completions, function calling + streaming).
@@ -16,11 +17,15 @@ export class OpenAIProvider implements ModelProvider {
   public readonly id = 'openai';
 
   async *stream(input: ProviderStreamInput): AsyncIterable<ProviderStreamEvent> {
-    const client = new OpenAI({ apiKey: input.credentials.apiKey });
-    const params = mapRequestToOpenAI(input.request);
+    try {
+      const client = new OpenAI({ apiKey: input.credentials.apiKey });
+      const params = mapRequestToOpenAI(input.request);
 
-    const stream = await client.chat.completions.create(params, { signal: input.signal });
+      const stream = await client.chat.completions.create(params, { signal: input.signal });
 
-    yield* translateOpenAIStream(stream);
+      yield* translateOpenAIStream(stream);
+    } catch (error) {
+      throw toProviderError(error, this.id);
+    }
   }
 }
