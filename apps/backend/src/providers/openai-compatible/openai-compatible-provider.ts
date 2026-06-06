@@ -6,6 +6,7 @@ import type {
 } from '@ledesma-platform/shared';
 import { mapRequestToOpenAI } from '../openai/map-request.js';
 import { translateOpenAIStream } from '../openai/translate-stream.js';
+import { toProviderError } from '../errors.js';
 
 /**
  * Adaptador OpenAI-compatible. Mismo protocolo que OpenAI (Chat Completions, function calling +
@@ -23,11 +24,15 @@ export class OpenAICompatibleProvider implements ModelProvider {
       throw new Error('openai-compatible provider requires credentials.baseUrl');
     }
 
-    const client = new OpenAI({ apiKey: input.credentials.apiKey, baseURL });
-    const params = mapRequestToOpenAI(input.request);
+    try {
+      const client = new OpenAI({ apiKey: input.credentials.apiKey, baseURL });
+      const params = mapRequestToOpenAI(input.request);
 
-    const stream = await client.chat.completions.create(params, { signal: input.signal });
+      const stream = await client.chat.completions.create(params, { signal: input.signal });
 
-    yield* translateOpenAIStream(stream);
+      yield* translateOpenAIStream(stream);
+    } catch (error) {
+      throw toProviderError(error, this.id);
+    }
   }
 }
