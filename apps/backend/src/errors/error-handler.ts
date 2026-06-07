@@ -35,6 +35,21 @@ export function registerErrorHandler(app: FastifyInstance, config: Env): void {
       return;
     }
 
+    const fastifyStatus = (error as { statusCode?: unknown }).statusCode;
+    if (typeof fastifyStatus === 'number' && fastifyStatus >= 400 && fastifyStatus < 500) {
+      const code =
+        fastifyStatus === 413
+          ? 'PAYLOAD_TOO_LARGE'
+          : fastifyStatus === 415
+            ? 'UNSUPPORTED_MEDIA_TYPE'
+            : 'BAD_REQUEST';
+      reply.status(fastifyStatus).send({
+        error: { code, message: config.NODE_ENV === 'production' ? 'Request rejected' : error.message },
+        requestId: req.id,
+      });
+      return;
+    }
+
     req.log.error(error);
     reply.status(500).send({
       error: {
