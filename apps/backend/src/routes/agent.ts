@@ -82,9 +82,10 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
 
     // Cancelacion en desconexion del cliente.
     const controller = new AbortController();
-    request.raw.on('close', () => {
-      controller.abort();
-    });
+
+    // Bandera para distinguir el cierre normal de la respuesta (que provocamos nosotros al terminar
+    // de escribir el stream) de una desconexion real del cliente.
+    let finished = false;
 
     // Tomamos control manual del ciclo de respuesta: a partir de aca escribimos el SSE directamente
     // sobre reply.raw. hijack evita que Fastify intente serializar/enviar (y advierta) al cerrar.
@@ -94,6 +95,15 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
       'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
+    });
+
+    // Solo abortamos si la respuesta se cierra ANTES de que terminemos de escribir, es decir cuando
+    // el cliente corta la conexion con el stream todavia activo. El cierre que provocamos al llamar
+    // reply.raw.end() no cancela porque para entonces finished ya es true.
+    reply.raw.on('close', () => {
+      if (!finished) {
+        controller.abort();
+      }
     });
 
     const stream: AsyncIterable<AgentEvent> = runAgent(
@@ -138,6 +148,9 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
         'agent run failed',
       );
     } finally {
+      // Marcamos finished ANTES de end(): asi el evento close que dispara end() ve finished=true y
+      // no aborta. El orden importa.
+      finished = true;
       reply.raw.end();
     }
 

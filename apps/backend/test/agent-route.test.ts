@@ -92,6 +92,24 @@ describe('POST /v1/agent/run', () => {
     expect(events.at(-1)).toEqual({ event: 'done', data: {} });
   });
 
+  it('una peticion normal no se auto-cancela: no emite evento error', async () => {
+    runModelMock.mockReturnValue(
+      (async function* () {
+        yield { type: 'text_delta', text: 'ok' };
+        yield { type: 'stop', reason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } };
+      })(),
+    );
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/run',
+      headers: { 'x-provider-key': 'sk-A' },
+      payload: { providerId: 'anthropic', model: 'm', messages: [{ role: 'user', content: 'hola' }] },
+    });
+    const events = parseSse(res.payload);
+    expect(events.some((e) => e.event === 'error')).toBe(false);
+    expect(events.at(-1)).toEqual({ event: 'done', data: {} });
+  });
+
   it('pasa la key del header como credencial BYOK a la capa de modelo', async () => {
     runModelMock.mockReturnValue(streamOf([{ type: 'stop', reason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } }]));
 
