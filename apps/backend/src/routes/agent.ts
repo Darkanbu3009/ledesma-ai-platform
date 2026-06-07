@@ -9,26 +9,32 @@ import type {
   ProviderId,
 } from '@ledesma-platform/shared';
 import { AppError } from '../errors/app-error.js';
-import { runAgent } from '../agent/index.js';
+import { runAgent, AGENT_LIMITS } from '../agent/index.js';
 import { ProviderError } from '../providers/index.js';
 import { createDemoRegistry } from '../tools/demo-registry.js';
 
-const RunBodySchema = z.object({
-  providerId: z.enum(['anthropic', 'openai', 'openai-compatible']),
-  model: z.string().min(1),
-  system: z.string().optional(),
-  maxTokens: z.number().int().positive().max(32000).optional(),
-  temperature: z.number().min(0).max(2).optional(),
-  messages: z
-    .array(
-      z.object({
-        role: z.enum(['user', 'assistant']),
-        content: z.string(),
-      }),
-    )
-    .min(1),
-  maxIterations: z.number().int().positive().max(20).optional(),
-});
+const RunBodySchema = z
+  .object({
+    providerId: z.enum(['anthropic', 'openai', 'openai-compatible']),
+    model: z.string().min(1),
+    system: z.string().optional(),
+    maxTokens: z.number().int().positive().max(32000).optional(),
+    temperature: z.number().min(0).max(2).optional(),
+    messages: z
+      .array(z.object({ role: z.enum(['user', 'assistant']), content: z.string() }))
+      .min(1)
+      .max(AGENT_LIMITS.maxMessages),
+    maxIterations: z.number().int().positive().max(AGENT_LIMITS.maxIterationsCap).optional(),
+  })
+  .refine(
+    (body) => {
+      const total =
+        (body.system?.length ?? 0) +
+        body.messages.reduce((sum, message) => sum + message.content.length, 0);
+      return total <= AGENT_LIMITS.maxTotalContentChars;
+    },
+    { message: `Total content length exceeds ${AGENT_LIMITS.maxTotalContentChars} characters` },
+  );
 
 type RunBody = z.infer<typeof RunBodySchema>;
 
@@ -60,7 +66,7 @@ function sseWrite(reply: FastifyReply, payload: { event?: string; data: unknown 
 }
 
 export async function agentRoutes(app: FastifyInstance): Promise<void> {
-  app.post('/v1/agent/run', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/v1/agent/run', { bodyLimit: AGENT_LIMITS.maxBodyBytes }, async (request: FastifyRequest, reply: FastifyReply) => {
     const apiKey = request.headers['x-provider-key'];
     if (typeof apiKey !== 'string' || apiKey.trim() === '') {
       throw new AppError('VALIDATION_ERROR', 400, 'Missing x-provider-key header');

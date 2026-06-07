@@ -11,6 +11,7 @@ import type {
 } from '@ledesma-platform/shared';
 import { runModel, type ModelCallInput } from '../providers/index.js';
 import type { ToolCall, ToolExecutor } from './tool-executor.js';
+import { validateAgentRun } from './limits.js';
 
 export const DEFAULT_MAX_ITERATIONS = 10;
 
@@ -38,6 +39,8 @@ export interface AgentDeps {
  * No persiste ni loguea credenciales: solo las pasa por parametro a la capa de modelo.
  */
 export async function* runAgent(input: AgentRunInput, deps: AgentDeps): AsyncIterable<AgentEvent> {
+  validateAgentRun({ request: input.request, maxIterations: input.maxIterations });
+
   const runModelFn = deps.runModel ?? runModel;
   const maxIterations = input.maxIterations ?? DEFAULT_MAX_ITERATIONS;
 
