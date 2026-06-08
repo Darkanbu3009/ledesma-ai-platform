@@ -7,7 +7,7 @@ describe('GET /health', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    app = await buildServer(parseEnv({ NODE_ENV: 'test' }));
+    app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890' }));
   });
 
   afterAll(async () => {

@@ -10,6 +10,8 @@ const EnvSchema = z.object({
   CORS_ORIGINS: z.string().default('*'),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
   RATE_LIMIT_TIME_WINDOW: z.string().default('1 minute'),
+  DATABASE_URL: z.string().min(1),
+  ADMIN_API_TOKEN: z.string().min(16),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
