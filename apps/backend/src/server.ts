@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { healthRoutes } from './routes/health.js';
 import { agentRoutes } from './routes/agent.js';
+import { adminAgentRoutes } from './routes/admin-agents.js';
 import { securityPlugin } from './plugins/security.js';
 import { registerErrorHandler } from './errors/error-handler.js';
 import { loggerRedaction } from './logger.js';
@@ -18,6 +19,7 @@ export async function buildServer(config: Env): Promise<FastifyInstance> {
   registerErrorHandler(app, config);
   await app.register(healthRoutes);
   await app.register(agentRoutes);
+  await app.register(adminAgentRoutes(config));
 
   return app;
 }

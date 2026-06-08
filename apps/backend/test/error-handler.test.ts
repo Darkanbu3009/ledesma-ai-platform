@@ -5,7 +5,7 @@ import { AppError } from '../src/errors/app-error.js';
 
 describe('error handler', () => {
   it('devuelve sobre estructurado 404 para ruta inexistente', async () => {
-    const app = await buildServer(parseEnv({ NODE_ENV: 'test' }));
+    const app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890' }));
     const res = await app.inject({ method: 'GET', url: '/no-existe' });
     expect(res.statusCode).toBe(404);
     const body = res.json();
@@ -15,7 +15,7 @@ describe('error handler', () => {
   });
 
   it('mapea AppError a su codigo y status', async () => {
-    const app = await buildServer(parseEnv({ NODE_ENV: 'test' }));
+    const app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890' }));
     app.get('/app-error', () => {
       throw new AppError('VALIDATION_ERROR', 422, 'campo invalido');
     });
@@ -26,7 +26,9 @@ describe('error handler', () => {
   });
 
   it('no filtra el mensaje interno en produccion', async () => {
-    const app = await buildServer(parseEnv({ NODE_ENV: 'production' }));
+    const app = await buildServer(
+      parseEnv({ NODE_ENV: 'production', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890' }),
+    );
     app.get('/boom', () => {
       throw new Error('detalle interno secreto');
     });

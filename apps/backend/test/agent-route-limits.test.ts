@@ -22,7 +22,7 @@ beforeEach(async () => {
       yield { type: 'stop', reason: 'end_turn', usage: { inputTokens: 0, outputTokens: 0 } };
     })(),
   );
-  app = await buildServer(parseEnv({ NODE_ENV: 'test' }));
+  app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890' }));
 });
 
 describe('POST /v1/agent/run limites', () => {
