@@ -1,8 +1,16 @@
-export default function App() {
+import { Routes, Route, Navigate } from 'react-router-dom';
+import { LoginPage } from './pages/LoginPage';
+import { DashboardPage } from './pages/DashboardPage';
+import { ProtectedRoute } from './components/ProtectedRoute';
+
+export function App() {
   return (
-    <main>
-      <h1>Ledesma AI Labs — Plataforma</h1>
-      <p>Consola en construcción.</p>
-    </main>
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route element={<ProtectedRoute />}>
+        <Route path="/" element={<DashboardPage />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
