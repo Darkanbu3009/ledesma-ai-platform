@@ -102,4 +102,46 @@ export class AgentRepository {
     `;
     return rows.length > 0;
   }
+
+  async listByOwner(ownerId: string): Promise<AgentConfig[]> {
+    const rows = await this.sql<AgentRow[]>`
+      select * from agents where owner_id = ${ownerId} order by created_at desc
+    `;
+    return rows.map(rowToConfig);
+  }
+
+  async getByIdForOwner(id: string, ownerId: string): Promise<AgentConfig | null> {
+    const rows = await this.sql<AgentRow[]>`
+      select * from agents where id = ${id} and owner_id = ${ownerId}
+    `;
+    const row = rows[0];
+    return row ? rowToConfig(row) : null;
+  }
+
+  async updateForOwner(id: string, ownerId: string, input: AgentConfigInput): Promise<AgentConfig | null> {
+    const rows = await this.sql<AgentRow[]>`
+      update agents set
+        name = ${input.name},
+        description = ${input.description ?? ''},
+        provider_id = ${input.providerId},
+        model = ${input.model},
+        system_prompt = ${input.systemPrompt ?? ''},
+        max_tokens = ${input.maxTokens ?? 1024},
+        temperature = ${input.temperature ?? null},
+        base_url = ${input.baseUrl ?? null},
+        tools = ${this.sql.json((input.tools ?? []) as unknown as Parameters<Sql['json']>[0])},
+        updated_at = now()
+      where id = ${id} and owner_id = ${ownerId}
+      returning *
+    `;
+    const row = rows[0];
+    return row ? rowToConfig(row) : null;
+  }
+
+  async removeForOwner(id: string, ownerId: string): Promise<boolean> {
+    const rows = await this.sql<AgentRow[]>`
+      delete from agents where id = ${id} and owner_id = ${ownerId} returning id
+    `;
+    return rows.length > 0;
+  }
 }

@@ -44,7 +44,7 @@ beforeEach(async () => {
   createMock.mockReset();
   updateMock.mockReset();
   removeMock.mockReset();
-  app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: ADMIN_TOKEN }));
+  app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: ADMIN_TOKEN, SUPABASE_URL: 'https://x.supabase.co' }));
 });
 
 describe('rutas admin de agentes', () => {

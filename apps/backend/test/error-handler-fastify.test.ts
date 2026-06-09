@@ -4,7 +4,7 @@ import { parseEnv } from '../src/config/env.js';
 
 describe('error handler - errores de fastify con statusCode 4xx', () => {
   it('mapea statusCode 413 a PAYLOAD_TOO_LARGE', async () => {
-    const app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890' }));
+    const app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co' }));
     app.get('/e413', () => {
       const err = new Error('too large') as Error & { statusCode: number };
       err.statusCode = 413;
@@ -17,7 +17,7 @@ describe('error handler - errores de fastify con statusCode 4xx', () => {
   });
 
   it('mapea un statusCode 4xx generico a BAD_REQUEST', async () => {
-    const app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890' }));
+    const app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co' }));
     app.get('/e418', () => {
       const err = new Error('teapot') as Error & { statusCode: number };
       err.statusCode = 418;
@@ -30,7 +30,7 @@ describe('error handler - errores de fastify con statusCode 4xx', () => {
   });
 
   it('un error sin statusCode sigue siendo INTERNAL_ERROR 500', async () => {
-    const app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890' }));
+    const app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co' }));
     app.get('/eboom', () => {
       throw new Error('boom');
     });
