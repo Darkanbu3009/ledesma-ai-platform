@@ -8,3 +8,11 @@ export function useAgents() {
     queryFn: () => apiFetch<{ agents: AgentConfig[] }>('/v1/agents').then((r) => r.agents),
   });
 }
+
+export function useAgent(id: string | undefined) {
+  return useQuery({
+    queryKey: ['agents', id],
+    queryFn: () => apiFetch<{ agent: AgentConfig }>(`/v1/agents/${id}`).then((r) => r.agent),
+    enabled: Boolean(id),
+  });
+}
