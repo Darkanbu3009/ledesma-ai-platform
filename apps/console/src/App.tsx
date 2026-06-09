@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { LoginPage } from './pages/LoginPage';
 import { AgentsPage } from './pages/AgentsPage';
+import { AgentFormPage } from './pages/AgentFormPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AppLayout } from './components/layout/AppLayout';
 
@@ -11,6 +12,8 @@ export function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
           <Route path="/agentes" element={<AgentsPage />} />
+          <Route path="/agentes/nuevo" element={<AgentFormPage />} />
+          <Route path="/agentes/:id" element={<AgentFormPage />} />
         </Route>
       </Route>
       <Route path="/" element={<Navigate to="/agentes" replace />} />
