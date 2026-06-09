@@ -1,17 +1,9 @@
-import { Plus } from 'lucide-react';
-import type { AgentSummary } from '../lib/agents';
+import { Plus, RefreshCw } from 'lucide-react';
+import { useAgents } from '../lib/queries';
 import { AgentCard } from '../components/agents/AgentCard';
 
-// Datos de ejemplo (vista previa de diseno). Los agentes reales se conectaran al backend en una
-// etapa proxima (requiere validacion de JWT en el backend).
-const sampleAgents: AgentSummary[] = [
-  { id: '1', name: 'Cotizador', description: 'Genera cotizaciones a partir de solicitudes de clientes.', providerId: 'anthropic', model: 'claude-sonnet-4-6', toolCount: 2 },
-  { id: '2', name: 'Soporte N1', description: 'Responde preguntas frecuentes y clasifica tickets entrantes.', providerId: 'openai', model: 'gpt-5.5', toolCount: 1 },
-  { id: '3', name: 'Conciliador', description: 'Concilia facturas contra ordenes de compra automaticamente.', providerId: 'openai-compatible', model: 'llama-3.3-70b', toolCount: 3 },
-];
-
 export function AgentsPage() {
-  const agents = sampleAgents;
+  const { data: agents, isLoading, isError, refetch } = useAgents();
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -29,11 +21,26 @@ export function AgentsPage() {
         </button>
       </div>
 
-      <div className="mt-4 rounded-lg border border-grafito-border bg-grafito/40 px-4 py-2.5 text-xs text-hueso-muted">
-        Vista previa de diseno. Los agentes reales apareceran aqui cuando se conecte el backend en la proxima etapa.
-      </div>
-
-      {agents.length === 0 ? (
+      {isLoading ? (
+        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="h-40 animate-pulse rounded-xl border border-grafito-border bg-grafito" />
+          ))}
+        </div>
+      ) : isError ? (
+        <div className="mt-10 rounded-xl border border-grafito-border bg-grafito p-8 text-center">
+          <p className="font-display text-lg text-hueso">No pudimos cargar tus agentes</p>
+          <p className="mt-2 text-sm text-hueso-muted">Revisa tu conexion e intenta de nuevo.</p>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="mt-5 inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2 text-sm text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Reintentar
+          </button>
+        </div>
+      ) : !agents || agents.length === 0 ? (
         <div className="mt-10 rounded-xl border border-dashed border-grafito-border py-16 text-center">
           <p className="font-display text-lg text-hueso">Aun no tienes agentes</p>
           <p className="mt-2 text-sm text-hueso-muted">Crea tu primer agente para empezar.</p>
