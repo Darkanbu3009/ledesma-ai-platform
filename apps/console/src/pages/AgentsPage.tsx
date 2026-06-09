@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { Plus, RefreshCw } from 'lucide-react';
 import { useAgents } from '../lib/queries';
 import { AgentCard } from '../components/agents/AgentCard';
@@ -12,13 +13,13 @@ export function AgentsPage() {
           <h1 className="font-display text-2xl font-bold text-hueso">Agentes</h1>
           <p className="mt-1 text-sm text-hueso-muted">Configura y administra tus agentes de IA.</p>
         </div>
-        <button
-          type="button"
+        <Link
+          to="/agentes/nuevo"
           className="inline-flex items-center gap-2 rounded-lg bg-brasa px-4 py-2.5 text-sm font-semibold text-carbon transition hover:bg-brasa-hover"
         >
           <Plus className="h-4 w-4" />
           Crear agente
-        </button>
+        </Link>
       </div>
 
       {isLoading ? (
@@ -48,7 +49,9 @@ export function AgentsPage() {
       ) : (
         <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {agents.map((agent) => (
-            <AgentCard key={agent.id} agent={agent} />
+            <Link key={agent.id} to={`/agentes/${agent.id}`} className="block">
+              <AgentCard agent={agent} />
+            </Link>
           ))}
         </div>
       )}
