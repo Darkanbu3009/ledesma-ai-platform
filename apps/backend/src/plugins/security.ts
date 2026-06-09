@@ -26,6 +26,8 @@ export const securityPlugin = fp<SecurityPluginOptions>(async (app, opts) => {
 
   await app.register(cors, {
     origin: parseOrigins(config.CORS_ORIGINS),
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-token', 'x-provider-key', 'x-provider-base-url'],
   });
 
   await app.register(rateLimit, {
