@@ -3,7 +3,7 @@ import { parseEnv } from '../src/config/env.js';
 
 describe('parseEnv', () => {
   it('aplica valores por defecto con entrada minima', () => {
-    const env = parseEnv({ DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890' });
+    const env = parseEnv({ DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co' });
     expect(env.NODE_ENV).toBe('development');
     expect(env.PORT).toBe(3000);
     expect(env.HOST).toBe('0.0.0.0');
@@ -11,7 +11,7 @@ describe('parseEnv', () => {
   });
 
   it('coacciona PORT de string a number', () => {
-    const env = parseEnv({ PORT: '8080', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890' });
+    const env = parseEnv({ PORT: '8080', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co' });
     expect(env.PORT).toBe(8080);
   });
 
