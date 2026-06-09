@@ -12,6 +12,7 @@ const EnvSchema = z.object({
   RATE_LIMIT_TIME_WINDOW: z.string().default('1 minute'),
   DATABASE_URL: z.string().min(1),
   ADMIN_API_TOKEN: z.string().min(16),
+  SUPABASE_URL: z.string().url(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
