@@ -19,3 +19,20 @@ export function readSupabaseEnv(source: EnvSource): SupabaseEnv {
   }
   return { url, anonKey };
 }
+
+export interface ApiEnv {
+  apiUrl: string;
+}
+
+interface ApiEnvSource {
+  VITE_API_URL?: string;
+}
+
+/** Lee y valida la URL del backend. Lanza en runtime si falta. */
+export function readApiEnv(source: ApiEnvSource): ApiEnv {
+  const apiUrl = source.VITE_API_URL;
+  if (!apiUrl) {
+    throw new Error('Missing API env: VITE_API_URL is required');
+  }
+  return { apiUrl: apiUrl.replace(/\/$/, '') };
+}
