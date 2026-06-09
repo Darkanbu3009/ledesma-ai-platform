@@ -9,6 +9,7 @@ import {
   type AgentFormValues,
 } from '../lib/agent-schema';
 import { providerLabel, type ProviderId } from '../lib/agents';
+import { modelPlaceholder, modelSuggestions } from '../lib/model-catalog';
 import { useAgent } from '../lib/queries';
 import { useCreateAgent, useDeleteAgent, useUpdateAgent } from '../lib/mutations';
 import { Field, inputClass } from '../components/ui/Field';
@@ -43,6 +44,7 @@ export function AgentFormPage() {
     handleSubmit,
     reset,
     watch,
+    setValue,
     formState: { errors },
   } = useForm<AgentFormValues, unknown, AgentFormParsed>({
     resolver: zodResolver(AgentFormSchema),
@@ -135,7 +137,10 @@ export function AgentFormPage() {
           </Field>
 
           <Field label="Proveedor" error={errors.providerId?.message}>
-            <select {...register('providerId')} className={inputClass}>
+            <select
+              {...register('providerId', { onChange: () => setValue('model', '') })}
+              className={inputClass}
+            >
               {PROVIDER_IDS.map((pid) => (
                 <option key={pid} value={pid}>
                   {providerLabel(pid)}
@@ -147,9 +152,19 @@ export function AgentFormPage() {
           <Field
             label="Modelo"
             error={errors.model?.message}
-            hint="Identificador exacto del modelo, p. ej. claude-sonnet-4-6"
+            hint="Sugerencias segun el proveedor; puedes escribir cualquier identificador valido."
           >
-            <input {...register('model')} className={inputClass} placeholder="claude-sonnet-4-6" />
+            <input
+              {...register('model')}
+              className={inputClass}
+              list="model-suggestions"
+              placeholder={modelPlaceholder(providerId)}
+            />
+            <datalist id="model-suggestions">
+              {modelSuggestions(providerId).map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
           </Field>
 
           <Field label="System prompt" error={errors.systemPrompt?.message}>
