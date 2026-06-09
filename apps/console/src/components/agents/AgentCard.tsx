@@ -1,7 +1,7 @@
-import type { AgentSummary } from '../../lib/agents';
+import type { AgentConfig } from '../../lib/agents';
 import { providerLabel } from '../../lib/agents';
 
-export function AgentCard({ agent }: { agent: AgentSummary }) {
+export function AgentCard({ agent }: { agent: AgentConfig }) {
   return (
     <div className="rounded-xl border border-grafito-border bg-grafito p-5 transition hover:border-hueso-muted/40">
       <div className="flex items-start justify-between gap-3">
@@ -13,7 +13,7 @@ export function AgentCard({ agent }: { agent: AgentSummary }) {
       <p className="mt-1 font-mono text-xs text-hueso-muted">{agent.model}</p>
       <p className="mt-3 line-clamp-2 text-sm text-hueso-muted">{agent.description || 'Sin descripcion'}</p>
       <p className="mt-4 text-xs text-hueso-muted">
-        {agent.toolCount} {agent.toolCount === 1 ? 'herramienta' : 'herramientas'}
+        {agent.tools.length} {agent.tools.length === 1 ? 'herramienta' : 'herramientas'}
       </p>
     </div>
   );

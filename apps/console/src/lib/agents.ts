@@ -1,12 +1,26 @@
 export type ProviderId = 'anthropic' | 'openai' | 'openai-compatible';
 
-export interface AgentSummary {
+export interface StoredTool {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+/** Config de un agente tal como la devuelve el backend (sin llaves, por diseno). */
+export interface AgentConfig {
   id: string;
   name: string;
   description: string;
   providerId: ProviderId;
   model: string;
-  toolCount: number;
+  systemPrompt: string;
+  maxTokens: number;
+  temperature: number | null;
+  baseUrl: string | null;
+  tools: StoredTool[];
+  ownerId: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** Etiqueta legible del proveedor. */
