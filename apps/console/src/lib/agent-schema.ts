@@ -1,6 +1,7 @@
 import { z } from 'zod';
+import { ToolFormSchema, toolFormToStored } from './tool-schema';
 
-/** Espejo del AgentInputSchema del backend (sin tools; se mandan []). */
+/** Espejo del AgentInputSchema del backend. */
 export const AgentFormSchema = z
   .object({
     name: z.string().min(1, 'El nombre es obligatorio').max(120),
@@ -16,6 +17,7 @@ export const AgentFormSchema = z
       .optional()
       .transform((v) => (v === '' || v === null || v === undefined ? null : v)),
     baseUrl: z.string().url('Debe ser una URL valida').optional().or(z.literal('')),
+    tools: z.array(ToolFormSchema).max(50).default([]),
   })
   .superRefine((data, ctx) => {
     if (data.providerId === 'openai-compatible' && (!data.baseUrl || data.baseUrl === '')) {
@@ -24,6 +26,18 @@ export const AgentFormSchema = z
         path: ['baseUrl'],
         message: 'Requerido para proveedores compatibles',
       });
+    }
+    const names = new Set<string>();
+    for (const tool of data.tools) {
+      if (names.has(tool.name)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['tools'],
+          message: 'Los nombres de las herramientas deben ser unicos',
+        });
+        break;
+      }
+      names.add(tool.name);
     }
   });
 
@@ -41,6 +55,6 @@ export function toApiInput(values: AgentFormParsed) {
     maxTokens: values.maxTokens,
     temperature: values.temperature,
     baseUrl: values.providerId === 'openai-compatible' ? values.baseUrl || null : null,
-    tools: [] as never[],
+    tools: values.tools.map(toolFormToStored),
   };
 }

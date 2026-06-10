@@ -4,6 +4,7 @@ export interface StoredTool {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  url: string;
 }
 
 /** Config de un agente tal como la devuelve el backend (sin llaves, por diseno). */
