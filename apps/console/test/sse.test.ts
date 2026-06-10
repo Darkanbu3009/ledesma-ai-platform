@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseSseChunks } from '../src/lib/sse';
+import { flushSseRest, parseSseChunks } from '../src/lib/sse';
 
 describe('parseSseChunks', () => {
   it('parsea un bloque completo de text_delta como evento', () => {
@@ -52,5 +52,43 @@ describe('parseSseChunks', () => {
     const { messages, rest } = parseSseChunks('data: {esto no es json}\n\n');
     expect(messages).toEqual([]);
     expect(rest).toBe('');
+  });
+
+  it('parsea el evento error con code INVALID_REQUEST exacto', () => {
+    const { messages } = parseSseChunks(
+      'event: error\ndata: {"code":"INVALID_REQUEST","message":"roles must alternate"}\n\n',
+    );
+    expect(messages).toEqual([
+      { kind: 'error', code: 'INVALID_REQUEST', message: 'roles must alternate' },
+    ]);
+  });
+
+  it('admite campos sin espacio despues de los dos puntos sin perder el code', () => {
+    const { messages } = parseSseChunks(
+      'event:error\ndata:{"code":"AUTHENTICATION","message":"Bad key"}\n\n',
+    );
+    expect(messages).toEqual([{ kind: 'error', code: 'AUTHENTICATION', message: 'Bad key' }]);
+  });
+});
+
+describe('flushSseRest', () => {
+  it('recupera un bloque error final sin linea en blanco de cierre con su code', () => {
+    const incompleto = 'event: error\ndata: {"code":"INVALID_REQUEST","message":"roles must alternate"}';
+    const pendiente = parseSseChunks(incompleto);
+    expect(pendiente.messages).toEqual([]);
+    expect(pendiente.rest).toBe(incompleto);
+
+    expect(flushSseRest(pendiente.rest)).toEqual([
+      { kind: 'error', code: 'INVALID_REQUEST', message: 'roles must alternate' },
+    ]);
+  });
+
+  it('recupera un done final sin linea en blanco de cierre', () => {
+    expect(flushSseRest('event: done\ndata: {}')).toEqual([{ kind: 'done' }]);
+  });
+
+  it('devuelve vacio cuando no quedo nada pendiente', () => {
+    expect(flushSseRest('')).toEqual([]);
+    expect(flushSseRest('\n')).toEqual([]);
   });
 });

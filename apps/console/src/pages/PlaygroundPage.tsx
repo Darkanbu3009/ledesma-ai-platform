@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, RefreshCw, Send, Square, Wrench } from 'lucide-react';
 import { providerLabel } from '../lib/agents';
+import { buildRequestChat, commitTurn } from '../lib/chat-turn';
 import { useAgent } from '../lib/queries';
 import { runAgentStream, type ChatMessage } from '../lib/run-agent';
 import type { SseMessage } from '../lib/sse';
@@ -12,7 +13,7 @@ type ViewItem =
   | { kind: 'assistant'; text: string }
   | { kind: 'tool'; id: string; name: string; isError: boolean }
   | { kind: 'usage'; inputTokens: number; outputTokens: number }
-  | { kind: 'error'; code: string };
+  | { kind: 'error'; code: string; message?: string; retryText: string };
 
 export function PlaygroundPage() {
   const { id } = useParams<{ id: string }>();
@@ -50,26 +51,33 @@ export function PlaygroundPage() {
     });
   }
 
-  /** Cierra el turno una sola vez: si keepText, pasa el texto acumulado al historial del chat. */
-  function closeTurn(baseChat: ChatMessage[], keepText: boolean) {
+  /**
+   * Cierra el turno una sola vez. El historial enviable (chat) es transaccional: solo incorpora
+   * el par (user, assistant) cuando el turno termina bien; en error o abort queda como estaba,
+   * asi el siguiente envio no produce dos user consecutivos (el proveedor exige alternancia).
+   */
+  function closeTurn(userText: string, keepText: boolean) {
     if (!turnClosedRef.current) {
       turnClosedRef.current = true;
       const text = assistantTextRef.current;
       if (keepText && text !== '') {
-        setChat([...baseChat, { role: 'assistant', content: text }]);
+        setChat((prev) => commitTurn(prev, userText, text));
       }
     }
     setRunning(false);
   }
 
-  function handleMessage(message: SseMessage, baseChat: ChatMessage[]) {
+  function handleMessage(message: SseMessage, userText: string) {
     if (message.kind === 'done') {
-      closeTurn(baseChat, true);
+      closeTurn(userText, true);
       return;
     }
     if (message.kind === 'error') {
-      setVista((items) => [...items, { kind: 'error', code: message.code }]);
-      closeTurn(baseChat, false);
+      setVista((items) => [
+        ...items,
+        { kind: 'error', code: message.code, message: message.message, retryText: userText },
+      ]);
+      closeTurn(userText, false);
       return;
     }
     const event = message.event;
@@ -98,14 +106,13 @@ export function PlaygroundPage() {
     }
   }
 
-  async function send() {
-    const content = draft.trim();
+  /** Ejecuta un turno con el texto dado. Si ya hay un turno corriendo, retorna (doble envio). */
+  async function sendText(content: string) {
     if (!agent || running || keyMissing || content === '') return;
 
-    const nextChat: ChatMessage[] = [...chat, { role: 'user', content }];
-    setChat(nextChat);
+    // El request usa el historial confirmado mas este user; chat NO se actualiza todavia.
+    const requestChat: ChatMessage[] = buildRequestChat(chat, content);
     setVista((items) => [...items, { kind: 'user', text: content }]);
-    setDraft('');
     setRunning(true);
     assistantTextRef.current = '';
     turnClosedRef.current = false;
@@ -116,28 +123,37 @@ export function PlaygroundPage() {
       await runAgentStream({
         agent,
         providerKey,
-        messages: nextChat,
+        messages: requestChat,
         signal: controller.signal,
-        onMessage: (message) => handleMessage(message, nextChat),
+        onMessage: (message) => handleMessage(message, content),
       });
-      closeTurn(nextChat, true);
+      closeTurn(content, true);
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
-        // Turno cancelado por el usuario: el texto parcial queda tal cual.
-        closeTurn(nextChat, true);
+        // Turno cancelado por el usuario: la vista conserva el parcial, el historial no.
+        closeTurn(content, false);
       } else {
-        setVista((items) => [...items, { kind: 'error', code: 'UNKNOWN' }]);
-        closeTurn(nextChat, false);
+        if (!turnClosedRef.current) {
+          setVista((items) => [...items, { kind: 'error', code: 'UNKNOWN', retryText: content }]);
+        }
+        closeTurn(content, false);
       }
     } finally {
       abortRef.current = null;
     }
   }
 
+  function send() {
+    const content = draft.trim();
+    if (!agent || running || keyMissing || content === '') return;
+    setDraft('');
+    void sendText(content);
+  }
+
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      if (!running) void send();
+      if (!running) send();
     }
   }
 
@@ -256,7 +272,18 @@ export function PlaygroundPage() {
                         <div key={i} className="flex justify-start">
                           <div className="max-w-[80%] rounded-xl border border-brasa/40 bg-brasa/10 px-4 py-2.5 text-sm text-brasa">
                             <p className="font-mono text-xs font-semibold">{item.code}</p>
-                            <p className="mt-1">Revisa tu key o el identificador del modelo.</p>
+                            <p className="mt-1">
+                              {item.message ?? 'Revisa tu key o el identificador del modelo.'}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => void sendText(item.retryText)}
+                              disabled={running}
+                              className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-brasa/40 px-3 py-1 text-xs font-medium text-brasa transition hover:border-brasa disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <RefreshCw className="h-3.5 w-3.5" />
+                              Reintentar
+                            </button>
                           </div>
                         </div>
                       );
@@ -288,7 +315,7 @@ export function PlaygroundPage() {
             ) : (
               <button
                 type="button"
-                onClick={() => void send()}
+                onClick={() => send()}
                 disabled={keyMissing || draft.trim() === ''}
                 className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-brasa px-4 py-2.5 text-sm font-semibold text-carbon transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
               >
