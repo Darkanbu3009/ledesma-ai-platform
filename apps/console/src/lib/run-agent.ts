@@ -1,5 +1,4 @@
 import { readApiEnv } from './env';
-import type { AgentConfig } from './agents';
 import { flushSseRest, parseSseChunks, type SseMessage } from './sse';
 
 export interface ChatMessage {
@@ -7,39 +6,28 @@ export interface ChatMessage {
   content: string;
 }
 
-export interface RunAgentParams {
-  agent: AgentConfig;
+export interface RunAgentByIdParams {
+  agentId: string;
   providerKey: string;
   messages: ChatMessage[];
   signal: AbortSignal;
   onMessage: (message: SseMessage) => void;
 }
 
-/** Llama POST /v1/agent/run con la config del agente y la key BYOK (solo en headers, solo en
- * memoria). Streamea los eventos SSE via onMessage. */
-export async function runAgentStream(params: RunAgentParams): Promise<void> {
+/** Ejecuta un agente via el contrato publico POST /v1/run/:agentId. La config (cerebro, system
+ * prompt, parametros) vive en la plataforma; aqui solo viajan los mensajes y la key BYOK (header,
+ * en memoria). Es el MISMO contrato que usan las integraciones de clientes. */
+export async function runAgentStream(params: RunAgentByIdParams): Promise<void> {
   const { apiUrl } = readApiEnv(import.meta.env as Record<string, string | undefined>);
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'x-provider-key': params.providerKey,
-  };
-  if (params.agent.providerId === 'openai-compatible' && params.agent.baseUrl) {
-    headers['x-provider-base-url'] = params.agent.baseUrl;
-  }
-
-  const response = await fetch(`${apiUrl}/v1/agent/run`, {
+  const response = await fetch(`${apiUrl}/v1/run/${params.agentId}`, {
     method: 'POST',
-    headers,
+    headers: {
+      'Content-Type': 'application/json',
+      'x-provider-key': params.providerKey,
+    },
     signal: params.signal,
-    body: JSON.stringify({
-      providerId: params.agent.providerId,
-      model: params.agent.model,
-      ...(params.agent.systemPrompt ? { system: params.agent.systemPrompt } : {}),
-      maxTokens: params.agent.maxTokens,
-      ...(params.agent.temperature !== null ? { temperature: params.agent.temperature } : {}),
-      messages: params.messages,
-    }),
+    body: JSON.stringify({ messages: params.messages }),
   });
 
   if (!response.ok || !response.body) {
