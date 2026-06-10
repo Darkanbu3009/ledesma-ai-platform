@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Play, RefreshCw } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
@@ -218,13 +218,22 @@ export function AgentFormPage() {
               {isSaving ? 'Guardando...' : 'Guardar agente'}
             </button>
             {isEdit && (
-              <button
-                type="button"
-                onClick={() => setConfirmOpen(true)}
-                className="rounded-lg border border-grafito-border px-4 py-2.5 text-sm font-medium text-brasa transition hover:border-brasa"
-              >
-                Eliminar agente
-              </button>
+              <div className="flex items-center gap-3">
+                <Link
+                  to={`/agentes/${id}/playground`}
+                  className="inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2.5 text-sm font-medium text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
+                >
+                  <Play className="h-4 w-4" />
+                  Probar agente
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => setConfirmOpen(true)}
+                  className="rounded-lg border border-grafito-border px-4 py-2.5 text-sm font-medium text-brasa transition hover:border-brasa"
+                >
+                  Eliminar agente
+                </button>
+              </div>
             )}
           </div>
         </form>
