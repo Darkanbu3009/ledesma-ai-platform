@@ -96,7 +96,16 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
     // Tomamos control manual del ciclo de respuesta: a partir de aca escribimos el SSE directamente
     // sobre reply.raw. hijack evita que Fastify intente serializar/enviar (y advierta) al cerrar.
     reply.hijack();
+    // writeHead se salta el pipeline de Fastify, asi que arrastramos los headers que los plugins
+    // (CORS, helmet) ya dejaron en reply: sin esto el navegador bloquea la lectura del stream.
+    const existingHeaders: Record<string, string | string[]> = {};
+    for (const [name, value] of Object.entries(reply.getHeaders())) {
+      if (value !== undefined) {
+        existingHeaders[name] = value as string | string[];
+      }
+    }
     reply.raw.writeHead(200, {
+      ...existingHeaders,
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
