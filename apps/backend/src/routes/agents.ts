@@ -11,6 +11,7 @@ const StoredToolSchema = z.object({
   name: z.string().min(1),
   description: z.string(),
   inputSchema: z.record(z.string(), z.unknown()),
+  url: z.string().url().startsWith('https://', 'Webhook URL must use https'),
 });
 
 const AgentInputSchema = z.object({

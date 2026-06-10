@@ -6,6 +6,7 @@ import { AppError } from '../errors/app-error.js';
 import { getSql } from '../db/client.js';
 import { AgentRepository } from '../agents/agent-repository.js';
 import { createDemoRegistry } from '../tools/demo-registry.js';
+import { createWebhookExecutor, storedToolsToDefinitions } from '../tools/webhook-tools.js';
 import { AGENT_LIMITS } from '../agent/index.js';
 import { streamAgentRun } from './sse-runner.js';
 
@@ -47,13 +48,16 @@ export function runAgentByIdRoutes(config: Env) {
         throw new AppError('VALIDATION_ERROR', 400, 'Invalid request body', parsed.error.issues);
       }
 
-      // La config guardada hoy tiene tools declarativas sin handlers: este endpoint usa el mismo
-      // registro demo que /v1/agent/run hasta que llegue el cableado de tools reales.
-      const registry = createDemoRegistry();
+      // Si el agente tiene tools guardadas se ejecutan por webhook; si no, se mantiene el
+      // registro demo (mismo comportamiento que /v1/agent/run).
+      const hasStoredTools = agent.tools.length > 0;
+      const registry = hasStoredTools ? null : createDemoRegistry();
+      const toolDefinitions = hasStoredTools ? storedToolsToDefinitions(agent.tools) : registry!.toToolDefinitions();
+      const executeTool = hasStoredTools ? createWebhookExecutor(agent.tools) : registry!.toExecutor();
       const normalizedRequest: NormalizedRequest = {
         ...(agent.systemPrompt ? { system: agent.systemPrompt } : {}),
         messages: parsed.data.messages.map((m) => ({ role: m.role, content: [{ type: 'text', text: m.content }] })),
-        tools: registry.toToolDefinitions(),
+        tools: toolDefinitions,
         modelConfig: {
           model: agent.model,
           maxTokens: agent.maxTokens,
@@ -74,7 +78,7 @@ export function runAgentByIdRoutes(config: Env) {
           request: normalizedRequest,
           ...(parsed.data.maxIterations !== undefined ? { maxIterations: parsed.data.maxIterations } : {}),
         },
-        registry.toExecutor(),
+        executeTool,
       );
     });
   };

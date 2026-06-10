@@ -5,6 +5,7 @@ export interface StoredTool {
   name: string;
   description: string;
   inputSchema: JsonSchema;
+  url: string;
 }
 
 /** Config de un agente tal como vive en la base de datos. NUNCA incluye llaves. */
