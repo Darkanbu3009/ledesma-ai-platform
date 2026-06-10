@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Play, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Play, Plug, RefreshCw } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
@@ -225,6 +225,13 @@ export function AgentFormPage() {
                 >
                   <Play className="h-4 w-4" />
                   Probar agente
+                </Link>
+                <Link
+                  to={`/agentes/${id}/conectar`}
+                  className="inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2.5 text-sm font-medium text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
+                >
+                  <Plug className="h-4 w-4" />
+                  Conectar
                 </Link>
                 <button
                   type="button"
