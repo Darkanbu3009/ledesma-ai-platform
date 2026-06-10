@@ -10,6 +10,12 @@ export type SseMessage =
   | { kind: 'done' }
   | { kind: 'error'; code: string; message: string };
 
+/** El spec de SSE admite un unico espacio opcional despues de los dos puntos del campo. */
+function fieldValue(line: string, field: string): string {
+  const raw = line.slice(field.length + 1);
+  return raw.startsWith(' ') ? raw.slice(1) : raw;
+}
+
 /**
  * Acumulador de SSE sobre chunks de texto: junta el buffer, separa bloques por doble salto y
  * devuelve los mensajes completos + el resto del buffer. Funcion pura.
@@ -23,8 +29,8 @@ export function parseSseChunks(buffer: string): { messages: SseMessage[]; rest: 
     let eventName = 'message';
     let data = '';
     for (const line of block.split('\n')) {
-      if (line.startsWith('event: ')) eventName = line.slice(7).trim();
-      else if (line.startsWith('data: ')) data = line.slice(6);
+      if (line.startsWith('event:')) eventName = fieldValue(line, 'event').trim();
+      else if (line.startsWith('data:')) data = fieldValue(line, 'data');
     }
     if (eventName === 'done') {
       messages.push({ kind: 'done' });
@@ -44,4 +50,13 @@ export function parseSseChunks(buffer: string): { messages: SseMessage[]; rest: 
     }
   }
   return { messages, rest };
+}
+
+/**
+ * Cierre del stream: parsea lo que quedo en el buffer cuando el ultimo bloque llego sin la
+ * linea en blanco final, para no perder un done o un error con su code. Funcion pura.
+ */
+export function flushSseRest(rest: string): SseMessage[] {
+  if (rest.trim() === '') return [];
+  return parseSseChunks(rest + '\n\n').messages;
 }

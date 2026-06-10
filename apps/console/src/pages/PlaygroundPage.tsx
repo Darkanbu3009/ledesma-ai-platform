@@ -13,7 +13,7 @@ type ViewItem =
   | { kind: 'assistant'; text: string }
   | { kind: 'tool'; id: string; name: string; isError: boolean }
   | { kind: 'usage'; inputTokens: number; outputTokens: number }
-  | { kind: 'error'; code: string };
+  | { kind: 'error'; code: string; message?: string; retryText: string };
 
 export function PlaygroundPage() {
   const { id } = useParams<{ id: string }>();
@@ -73,7 +73,10 @@ export function PlaygroundPage() {
       return;
     }
     if (message.kind === 'error') {
-      setVista((items) => [...items, { kind: 'error', code: message.code }]);
+      setVista((items) => [
+        ...items,
+        { kind: 'error', code: message.code, message: message.message, retryText: userText },
+      ]);
       closeTurn(userText, false);
       return;
     }
@@ -131,7 +134,7 @@ export function PlaygroundPage() {
         closeTurn(content, false);
       } else {
         if (!turnClosedRef.current) {
-          setVista((items) => [...items, { kind: 'error', code: 'UNKNOWN' }]);
+          setVista((items) => [...items, { kind: 'error', code: 'UNKNOWN', retryText: content }]);
         }
         closeTurn(content, false);
       }
@@ -269,7 +272,18 @@ export function PlaygroundPage() {
                         <div key={i} className="flex justify-start">
                           <div className="max-w-[80%] rounded-xl border border-brasa/40 bg-brasa/10 px-4 py-2.5 text-sm text-brasa">
                             <p className="font-mono text-xs font-semibold">{item.code}</p>
-                            <p className="mt-1">Revisa tu key o el identificador del modelo.</p>
+                            <p className="mt-1">
+                              {item.message ?? 'Revisa tu key o el identificador del modelo.'}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => void sendText(item.retryText)}
+                              disabled={running}
+                              className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-brasa/40 px-3 py-1 text-xs font-medium text-brasa transition hover:border-brasa disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <RefreshCw className="h-3.5 w-3.5" />
+                              Reintentar
+                            </button>
                           </div>
                         </div>
                       );
