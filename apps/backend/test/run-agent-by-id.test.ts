@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mockeamos la capa de modelo para no llamar APIs reales: el endpoint usa runModel internamente
 // a traves de runAgent. Interceptamos en el punto de la capa de modelo.
@@ -71,6 +71,10 @@ beforeEach(async () => {
   runModelMock.mockReset();
   getByIdMock.mockReset();
   app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co' }));
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('POST /v1/run/:agentId', () => {
@@ -186,6 +190,91 @@ describe('POST /v1/run/:agentId', () => {
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('con tools guardadas: pasa sus definiciones al modelo y ejecuta por webhook', async () => {
+    const storedTool = {
+      name: 'cotizar',
+      description: 'Calcula el precio de N piezas',
+      inputSchema: { type: 'object', properties: { piezas: { type: 'number' } } },
+      url: 'https://hooks.cliente.com/cotizar',
+    };
+    getByIdMock.mockResolvedValue({ ...anthropicAgent, tools: [storedTool] });
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ content: 'precio: 300 MXN' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    runModelMock
+      .mockReturnValueOnce(
+        streamOf([
+          { type: 'tool_use', id: 'tu_1', name: 'cotizar', input: { piezas: 2 } },
+          { type: 'stop', reason: 'tool_use', usage: { inputTokens: 5, outputTokens: 3 } },
+        ]),
+      )
+      .mockReturnValueOnce(
+        streamOf([
+          { type: 'text_delta', text: 'Son 300 MXN' },
+          { type: 'stop', reason: 'end_turn', usage: { inputTokens: 8, outputTokens: 4 } },
+        ]),
+      );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/run/${AGENT_ID}`,
+      headers: { 'x-provider-key': 'sk-byok' },
+      payload: { messages: [{ role: 'user', content: 'cotiza 2 piezas' }] },
+    });
+
+    expect(res.statusCode).toBe(200);
+
+    // El request al modelo lleva las ToolDefinitions de la config, no la demo.
+    const firstCall = runModelMock.mock.calls[0]?.[0];
+    expect(firstCall?.request?.tools).toEqual([
+      { name: 'cotizar', description: 'Calcula el precio de N piezas', inputSchema: storedTool.inputSchema },
+    ]);
+
+    // El webhook recibe POST { tool, input }.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://hooks.cliente.com/cotizar',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: 'cotizar', input: { piezas: 2 } }),
+      }),
+    );
+
+    // El tool_result reinyectado trae el content del webhook.
+    const events = parseSse(res.payload);
+    expect(events).toContainEqual({
+      event: 'message',
+      data: { type: 'tool_result', toolUseId: 'tu_1', content: 'precio: 300 MXN', isError: false },
+    });
+    const secondCall = runModelMock.mock.calls[1]?.[0];
+    expect(JSON.stringify(secondCall?.request?.messages)).toContain('precio: 300 MXN');
+  });
+
+  it('sin tools guardadas: sigue usando el registro demo', async () => {
+    getByIdMock.mockResolvedValue(anthropicAgent);
+    runModelMock.mockReturnValue(
+      streamOf([{ type: 'stop', reason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } }]),
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/run/${AGENT_ID}`,
+      headers: { 'x-provider-key': 'sk-A' },
+      payload: { messages: [{ role: 'user', content: 'hola' }] },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const call = runModelMock.mock.calls[0]?.[0];
+    const toolNames = (call?.request?.tools ?? []).map((t: { name: string }) => t.name);
+    expect(toolNames).toEqual(['get_current_time']);
   });
 
   it('el SSE de error nunca contiene la key', async () => {
