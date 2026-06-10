@@ -1,19 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Play, Plug, RefreshCw } from 'lucide-react';
-import { useForm } from 'react-hook-form';
+import { FormProvider, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import {
-  AgentFormSchema,
-  type AgentFormParsed,
-  type AgentFormValues,
-} from '../lib/agent-schema';
+import { AgentFormSchema, type AgentFormParsed, type AgentFormValues } from '../lib/agent-schema';
 import { providerLabel, type ProviderId } from '../lib/agents';
 import { modelPlaceholder, modelSuggestions } from '../lib/model-catalog';
+import { storedToToolForm } from '../lib/tool-schema';
 import { useAgent } from '../lib/queries';
 import { useCreateAgent, useDeleteAgent, useUpdateAgent } from '../lib/mutations';
 import { Field, inputClass } from '../components/ui/Field';
 import { DeleteAgentDialog } from '../components/agents/DeleteAgentDialog';
+import { ToolsEditor } from '../components/agents/ToolsEditor';
 
 const PROVIDER_IDS: ProviderId[] = ['anthropic', 'openai', 'openai-compatible'];
 
@@ -26,6 +24,7 @@ const defaultValues: AgentFormValues = {
   maxTokens: 1024,
   temperature: '',
   baseUrl: '',
+  tools: [],
 };
 
 export function AgentFormPage() {
@@ -39,6 +38,10 @@ export function AgentFormPage() {
   const deleteAgent = useDeleteAgent();
   const [confirmOpen, setConfirmOpen] = useState(false);
 
+  const form = useForm<AgentFormValues, unknown, AgentFormParsed>({
+    resolver: zodResolver(AgentFormSchema),
+    defaultValues,
+  });
   const {
     register,
     handleSubmit,
@@ -46,10 +49,7 @@ export function AgentFormPage() {
     watch,
     setValue,
     formState: { errors },
-  } = useForm<AgentFormValues, unknown, AgentFormParsed>({
-    resolver: zodResolver(AgentFormSchema),
-    defaultValues,
-  });
+  } = form;
 
   const providerId = watch('providerId');
 
@@ -64,6 +64,7 @@ export function AgentFormPage() {
         maxTokens: agent.maxTokens,
         temperature: agent.temperature === null ? '' : agent.temperature,
         baseUrl: agent.baseUrl ?? '',
+        tools: agent.tools.map(storedToToolForm),
       });
     }
   }, [agent, reset]);
@@ -99,7 +100,10 @@ export function AgentFormPage() {
       {isEdit && isLoading ? (
         <div className="mt-6 space-y-5">
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="h-16 animate-pulse rounded-xl border border-grafito-border bg-grafito" />
+            <div
+              key={i}
+              className="h-16 animate-pulse rounded-xl border border-grafito-border bg-grafito"
+            />
           ))}
         </div>
       ) : isEdit && isError ? (
@@ -116,134 +120,131 @@ export function AgentFormPage() {
           </button>
         </div>
       ) : (
-        <form onSubmit={(e) => void onSubmit(e)} className="mt-6 space-y-5" noValidate>
-          {saveFailed && (
-            <div className="rounded-lg border border-brasa/40 bg-brasa/10 px-4 py-3 text-sm text-brasa">
-              No pudimos guardar el agente. Intenta de nuevo.
-            </div>
-          )}
-
-          <Field label="Nombre" error={errors.name?.message}>
-            <input {...register('name')} className={inputClass} placeholder="Mi agente" />
-          </Field>
-
-          <Field label="Descripcion" error={errors.description?.message}>
-            <textarea
-              {...register('description')}
-              rows={3}
-              className={inputClass}
-              placeholder="Que hace este agente"
-            />
-          </Field>
-
-          <Field label="Proveedor" error={errors.providerId?.message}>
-            <select
-              {...register('providerId', { onChange: () => setValue('model', '') })}
-              className={inputClass}
-            >
-              {PROVIDER_IDS.map((pid) => (
-                <option key={pid} value={pid}>
-                  {providerLabel(pid)}
-                </option>
-              ))}
-            </select>
-          </Field>
-
-          <Field
-            label="Modelo"
-            error={errors.model?.message}
-            hint="Sugerencias segun el proveedor; puedes escribir cualquier identificador valido."
-          >
-            <input
-              {...register('model')}
-              className={inputClass}
-              list="model-suggestions"
-              placeholder={modelPlaceholder(providerId)}
-            />
-            <datalist id="model-suggestions">
-              {modelSuggestions(providerId).map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
-          </Field>
-
-          <Field label="System prompt" error={errors.systemPrompt?.message}>
-            <textarea
-              {...register('systemPrompt')}
-              rows={6}
-              className={inputClass}
-              placeholder="Instrucciones para el agente"
-            />
-          </Field>
-
-          <Field label="Max tokens" error={errors.maxTokens?.message}>
-            <input type="number" {...register('maxTokens')} className={inputClass} />
-          </Field>
-
-          <Field
-            label="Temperature"
-            error={errors.temperature?.message}
-            hint="Vacio = por defecto del proveedor"
-          >
-            <input type="number" step="0.1" {...register('temperature')} className={inputClass} />
-          </Field>
-
-          {providerId === 'openai-compatible' && (
-            <Field
-              label="Base URL"
-              error={errors.baseUrl?.message}
-              hint="URL base del endpoint compatible con OpenAI"
-            >
-              <input
-                {...register('baseUrl')}
-                className={inputClass}
-                placeholder="https://api.miproveedor.com/v1"
-              />
-            </Field>
-          )}
-
-          <div>
-            <p className="mb-2 block text-sm font-medium text-hueso">Herramientas</p>
-            <div className="rounded-lg border border-dashed border-grafito-border px-4 py-5 text-sm text-hueso-muted">
-              Proximamente: define herramientas para tu agente.
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between gap-4 pt-2">
-            <button
-              type="submit"
-              disabled={isSaving}
-              className="rounded-lg bg-brasa px-4 py-2.5 text-sm font-semibold text-carbon transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isSaving ? 'Guardando...' : 'Guardar agente'}
-            </button>
-            {isEdit && (
-              <div className="flex items-center gap-3">
-                <Link
-                  to={`/agentes/${id}/playground`}
-                  className="inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2.5 text-sm font-medium text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
-                >
-                  <Play className="h-4 w-4" />
-                  Probar agente
-                </Link>
-                <Link
-                  to={`/agentes/${id}/conectar`}
-                  className="inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2.5 text-sm font-medium text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
-                >
-                  <Plug className="h-4 w-4" />
-                  Conectar
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => setConfirmOpen(true)}
-                  className="rounded-lg border border-grafito-border px-4 py-2.5 text-sm font-medium text-brasa transition hover:border-brasa"
-                >
-                  Eliminar agente
-                </button>
+        <FormProvider {...form}>
+          <form onSubmit={(e) => void onSubmit(e)} className="mt-6 space-y-5" noValidate>
+            {saveFailed && (
+              <div className="rounded-lg border border-brasa/40 bg-brasa/10 px-4 py-3 text-sm text-brasa">
+                No pudimos guardar el agente. Intenta de nuevo.
               </div>
             )}
-          </div>
-        </form>
+
+            <Field label="Nombre" error={errors.name?.message}>
+              <input {...register('name')} className={inputClass} placeholder="Mi agente" />
+            </Field>
+
+            <Field label="Descripcion" error={errors.description?.message}>
+              <textarea
+                {...register('description')}
+                rows={3}
+                className={inputClass}
+                placeholder="Que hace este agente"
+              />
+            </Field>
+
+            <Field label="Proveedor" error={errors.providerId?.message}>
+              <select
+                {...register('providerId', { onChange: () => setValue('model', '') })}
+                className={inputClass}
+              >
+                {PROVIDER_IDS.map((pid) => (
+                  <option key={pid} value={pid}>
+                    {providerLabel(pid)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field
+              label="Modelo"
+              error={errors.model?.message}
+              hint="Sugerencias segun el proveedor; puedes escribir cualquier identificador valido."
+            >
+              <input
+                {...register('model')}
+                className={inputClass}
+                list="model-suggestions"
+                placeholder={modelPlaceholder(providerId)}
+              />
+              <datalist id="model-suggestions">
+                {modelSuggestions(providerId).map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
+            </Field>
+
+            <Field label="System prompt" error={errors.systemPrompt?.message}>
+              <textarea
+                {...register('systemPrompt')}
+                rows={6}
+                className={inputClass}
+                placeholder="Instrucciones para el agente"
+              />
+            </Field>
+
+            <Field label="Max tokens" error={errors.maxTokens?.message}>
+              <input type="number" {...register('maxTokens')} className={inputClass} />
+            </Field>
+
+            <Field
+              label="Temperature"
+              error={errors.temperature?.message}
+              hint="Vacio = por defecto del proveedor"
+            >
+              <input type="number" step="0.1" {...register('temperature')} className={inputClass} />
+            </Field>
+
+            {providerId === 'openai-compatible' && (
+              <Field
+                label="Base URL"
+                error={errors.baseUrl?.message}
+                hint="URL base del endpoint compatible con OpenAI"
+              >
+                <input
+                  {...register('baseUrl')}
+                  className={inputClass}
+                  placeholder="https://api.miproveedor.com/v1"
+                />
+              </Field>
+            )}
+
+            <ToolsEditor />
+
+            <div className="flex items-center justify-between gap-4 pt-2">
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="rounded-lg bg-brasa px-4 py-2.5 text-sm font-semibold text-carbon transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSaving ? 'Guardando...' : 'Guardar agente'}
+              </button>
+              {isEdit && (
+                <div className="flex items-center gap-3">
+                  <Link
+                    to={`/agentes/${id}/playground`}
+                    className="inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2.5 text-sm font-medium text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
+                  >
+                    <Play className="h-4 w-4" />
+                    Probar agente
+                  </Link>
+                  <Link
+                    to={`/agentes/${id}/conectar`}
+                    className="inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2.5 text-sm font-medium text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
+                  >
+                    <Plug className="h-4 w-4" />
+                    Conectar
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmOpen(true)}
+                    className="rounded-lg border border-grafito-border px-4 py-2.5 text-sm font-medium text-brasa transition hover:border-brasa"
+                  >
+                    Eliminar agente
+                  </button>
+                </div>
+              )}
+            </div>
+          </form>
+        </FormProvider>
       )}
 
       <DeleteAgentDialog
