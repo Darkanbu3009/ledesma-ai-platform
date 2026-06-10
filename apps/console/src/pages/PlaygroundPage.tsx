@@ -108,7 +108,7 @@ export function PlaygroundPage() {
 
   /** Ejecuta un turno con el texto dado. Si ya hay un turno corriendo, retorna (doble envio). */
   async function sendText(content: string) {
-    if (!agent || running || keyMissing || content === '') return;
+    if (!id || !agent || running || keyMissing || content === '') return;
 
     // El request usa el historial confirmado mas este user; chat NO se actualiza todavia.
     const requestChat: ChatMessage[] = buildRequestChat(chat, content);
@@ -121,7 +121,7 @@ export function PlaygroundPage() {
 
     try {
       await runAgentStream({
-        agent,
+        agentId: id,
         providerKey,
         messages: requestChat,
         signal: controller.signal,
