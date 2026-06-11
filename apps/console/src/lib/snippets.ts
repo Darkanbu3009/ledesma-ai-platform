@@ -48,6 +48,56 @@ for (;;) {
 }`;
 }
 
+/** URL del bundle del widget servido por el backend. */
+export function widgetScriptUrl(p: SnippetParams): string {
+  return `${p.apiUrl}/widget/ledesma-agent.js`;
+}
+
+/** Modo directo: solo pruebas/herramientas internas (la key queda en el HTML). */
+export function widgetDirectSnippet(p: SnippetParams): string {
+  return `<script src="${widgetScriptUrl(p)}"></script>
+
+<ledesma-agent
+  endpoint="${agentEndpoint(p)}"
+  provider-key="TU_API_KEY_DEL_PROVEEDOR"
+  title="Asistente"
+></ledesma-agent>`;
+}
+
+/** Modo proxy: produccion. El endpoint es el backend DEL CLIENTE; sin key en el HTML. */
+export function widgetProxySnippet(p: SnippetParams): string {
+  return `<script src="${widgetScriptUrl(p)}"></script>
+
+<ledesma-agent
+  endpoint="https://TU-BACKEND.com/api/agente"
+  title="Asistente"
+></ledesma-agent>`;
+}
+
+/** Servidor proxy de ejemplo (Node): agrega la key del entorno y retransmite el stream. */
+export function proxyServerSnippet(p: SnippetParams): string {
+  return `// POST /api/agente — reenvia al agente agregando la key desde el entorno del servidor
+app.post('/api/agente', async (req, res) => {
+  const upstream = await fetch('${agentEndpoint(p)}', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-provider-key': process.env.PROVIDER_API_KEY,
+    },
+    body: JSON.stringify({ messages: req.body.messages }),
+  });
+  res.status(upstream.status);
+  res.setHeader('Content-Type', upstream.headers.get('content-type') ?? 'text/event-stream');
+  const reader = upstream.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    res.write(value);
+  }
+  res.end();
+});`;
+}
+
 /** Guia breve de integracion movil/web (texto, no codigo ejecutable). */
 export function mobileWebGuide(p: SnippetParams): string {
   return `Tu app movil o web NO debe contener la API key del proveedor. El patron correcto:
