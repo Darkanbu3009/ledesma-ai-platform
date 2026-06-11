@@ -9,7 +9,7 @@ const ENV = {
   NODE_ENV: 'test',
   DATABASE_URL: 'postgres://x',
   ADMIN_API_TOKEN: 'test-admin-token-1234567890',
-  SUPABASE_URL: 'https://x.supabase.co',
+  SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
   CORS_ORIGINS: 'https://app.ledesma-ai-labs.com',
 };
 

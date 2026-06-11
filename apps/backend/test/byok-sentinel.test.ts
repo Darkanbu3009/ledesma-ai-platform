@@ -6,6 +6,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const KEY = 'sk-SENTINEL-PROVIDER-9f8e7d';
 const ADMIN = 'admin-SENTINEL-token-1234567890';
 const JWT = 'Bearer eyJ-SENTINEL-jwt';
+const SESSION_TOKEN = 'tok-SENTINEL-session-9a8b7c';
+// Secreto de cifrado de tokens de sesion del server de test (no es un centinela: jamas viaja).
+const SESSION_SECRET = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
 const { runModelMock, getByIdMock, listMock, listByOwnerMock } = vi.hoisted(() => ({
   runModelMock: vi.fn(),
@@ -107,7 +110,7 @@ beforeEach(async () => {
   // El ADMIN centinela es el token real del server: si la config completa se filtrara a un log
   // en cualquier request, cualquiera de estos tests lo detectaria via el fragmento SENTINEL.
   app = await buildServer(
-    parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: ADMIN, SUPABASE_URL: 'https://x.supabase.co' }),
+    parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: ADMIN, SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: SESSION_SECRET }),
     { loggerDestination: { write: (m: string) => logs.push(m) } },
   );
 });
@@ -238,6 +241,51 @@ describe('centinelas BYOK: la key del proveedor nunca sale del request', () => {
   });
 });
 
+describe('centinela de tokens de sesion: ni la key ni el token salen del request', () => {
+  it('mint + run con token: la key no aparece en ningun paso y el token no se loguea', async () => {
+    getByIdMock.mockResolvedValue(storedAgent);
+    runModelMock.mockReturnValue(
+      streamOf([
+        { type: 'text_delta', text: 'Hola' },
+        { type: 'stop', reason: 'end_turn', usage: { inputTokens: 5, outputTokens: 2 } },
+      ]),
+    );
+
+    // Paso 1: mint. La KEY centinela viaja en el header y vuelve cifrada dentro del token.
+    const mintRes = await app.inject({
+      method: 'POST',
+      url: '/v1/session-tokens',
+      headers: { 'x-provider-key': KEY },
+      payload: { agentId: AGENT_ID },
+    });
+    expect(mintRes.statusCode).toBe(200);
+    const { token } = mintRes.json() as { token: string };
+    expect(token.length).toBeGreaterThan(20);
+
+    // Paso 2: run con el token, sin x-provider-key.
+    const runRes = await app.inject({
+      method: 'POST',
+      url: `/v1/run/${AGENT_ID}`,
+      headers: { 'x-session-token': token },
+      payload: { messages: [{ role: 'user', content: 'hola' }] },
+    });
+    expect(runRes.statusCode).toBe(200);
+    // Sanidad: la corrida uso la key que viajaba cifrada dentro del token.
+    expect(runModelMock.mock.calls[0]?.[0]?.credentials?.apiKey).toBe(KEY);
+
+    // La KEY no aparece en logs ni en la respuesta de ninguno de los dos pasos: el token es
+    // ciphertext, no una codificacion legible de la key.
+    expectNoLeak([logs.join(''), mintRes.payload, runRes.payload], KEY);
+
+    // El TOKEN es una credencial portadora: tampoco debe loguearse ni reaparecer en el run.
+    // Se busca un fragmento distintivo (prefijo iv+tag, aleatorio por token) para detectar
+    // tambien logueos truncados; el token completo solo es legitimo en el body del mint.
+    const tokenFragment = token.slice(0, 24);
+    expect(logs.join('')).not.toContain(tokenFragment);
+    expect(runRes.payload).not.toContain(tokenFragment);
+  });
+});
+
 describe('centinelas admin y JWT: los tokens de auth tampoco se loguean', () => {
   it('admin con token valido: el token no aparece en logs ni en la respuesta', async () => {
     listMock.mockResolvedValue([{ id: 'a1', name: 'Cotizador' }]);
@@ -284,6 +332,7 @@ describe('sanidad del redact de pino en el logger del server', () => {
             'x-provider-key': KEY,
             'x-provider-base-url': 'https://SENTINEL-base.example.com/v1',
             'x-admin-token': ADMIN,
+            'x-session-token': SESSION_TOKEN,
           },
         },
       },
@@ -294,11 +343,12 @@ describe('sanidad del redact de pino en el logger del server', () => {
     expectNoLeak([output], KEY);
     expectNoLeak([output], ADMIN);
     expectNoLeak([output], JWT);
+    expectNoLeak([output], SESSION_TOKEN);
   });
 
   it('headers de credenciales en el primer nivel del log salen como [REDACTED]', () => {
     app.log.info(
-      { headers: { authorization: JWT, 'x-provider-key': KEY, 'x-admin-token': ADMIN } },
+      { headers: { authorization: JWT, 'x-provider-key': KEY, 'x-admin-token': ADMIN, 'x-session-token': SESSION_TOKEN } },
       'sanity headers sueltos',
     );
 
@@ -307,6 +357,7 @@ describe('sanidad del redact de pino en el logger del server', () => {
     expectNoLeak([output], KEY);
     expectNoLeak([output], ADMIN);
     expectNoLeak([output], JWT);
+    expectNoLeak([output], SESSION_TOKEN);
   });
 
   it('los paths req.headers.* censuran con [REDACTED] (pino sin los serializers de fastify)', () => {
@@ -320,6 +371,7 @@ describe('sanidad del redact de pino en el logger del server', () => {
             'x-provider-key': KEY,
             'x-provider-base-url': 'https://SENTINEL-base.example.com/v1',
             'x-admin-token': ADMIN,
+            'x-session-token': SESSION_TOKEN,
           },
         },
       },
@@ -331,5 +383,6 @@ describe('sanidad del redact de pino en el logger del server', () => {
     expectNoLeak([output], KEY);
     expectNoLeak([output], ADMIN);
     expectNoLeak([output], JWT);
+    expectNoLeak([output], SESSION_TOKEN);
   });
 });

@@ -4,14 +4,14 @@ import { parseEnv } from '../src/config/env.js';
 
 describe('security plugins', () => {
   it('incluye cabeceras de helmet', async () => {
-    const app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co' }));
+    const app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' }));
     const res = await app.inject({ method: 'GET', url: '/health' });
     expect(res.headers['x-content-type-options']).toBe('nosniff');
     await app.close();
   });
 
   it('incluye cabeceras de rate limit', async () => {
-    const app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co' }));
+    const app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' }));
     const res = await app.inject({ method: 'GET', url: '/health' });
     expect(res.headers).toHaveProperty('x-ratelimit-limit');
     await app.close();
@@ -25,7 +25,7 @@ describe('security plugins', () => {
         RATE_LIMIT_TIME_WINDOW: '1 minute',
         DATABASE_URL: 'postgres://x',
         ADMIN_API_TOKEN: 'test-admin-token-1234567890',
-        SUPABASE_URL: 'https://x.supabase.co',
+        SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
       }),
     );
     await app.inject({ method: 'GET', url: '/health' });
@@ -36,7 +36,7 @@ describe('security plugins', () => {
   });
 
   it('refleja el origen en CORS', async () => {
-    const app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co' }));
+    const app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' }));
     const res = await app.inject({
       method: 'GET',
       url: '/health',

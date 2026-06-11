@@ -22,7 +22,7 @@ beforeEach(async () => {
       yield { type: 'stop', reason: 'end_turn', usage: { inputTokens: 0, outputTokens: 0 } };
     })(),
   );
-  app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co' }));
+  app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' }));
 });
 
 describe('POST /v1/agent/run limites', () => {
