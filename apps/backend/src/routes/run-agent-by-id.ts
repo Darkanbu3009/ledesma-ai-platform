@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { NormalizedRequest, ProviderCredentials } from '@ledesma-platform/shared';
 import type { Env } from '../config/env.js';
 import { AppError } from '../errors/app-error.js';
+import { verifySessionToken } from '../auth/session-token.js';
 import { getSql } from '../db/client.js';
 import { AgentRepository } from '../agents/agent-repository.js';
 import { AgentRunRepository } from '../agents/run-repository.js';
@@ -33,14 +34,23 @@ export function runAgentByIdRoutes(config: Env) {
     const repo = new AgentRepository(getSql(config));
     const runRepo = new AgentRunRepository(getSql(config));
 
-    // Plano de ejecucion: BYOK por header; el agentId (uuid) identifica la config. La proteccion
-    // por token publicable por agente se agrega en una etapa de seguridad posterior.
+    // Plano de ejecucion: BYOK por header o token de sesion efimero; el agentId (uuid)
+    // identifica la config.
     app.post('/v1/run/:agentId', { bodyLimit: AGENT_LIMITS.maxBodyBytes }, async (request, reply) => {
-      const apiKey = request.headers['x-provider-key'];
-      if (typeof apiKey !== 'string' || apiKey.trim() === '') {
-        throw new AppError('VALIDATION_ERROR', 400, 'Missing x-provider-key header');
-      }
       const { agentId } = request.params as { agentId: string };
+      // El token de sesion (emitido en /v1/session-tokens) trae la key cifrada y va atado a
+      // este agentId; cualquier fallo (corrupto, expirado, de otro agente) responde 401 generico.
+      const sessionToken = request.headers['x-session-token'];
+      let apiKey: string;
+      if (typeof sessionToken === 'string' && sessionToken !== '') {
+        apiKey = verifySessionToken(sessionToken, agentId, config.SESSION_TOKEN_SECRET).providerKey;
+      } else {
+        const headerKey = request.headers['x-provider-key'];
+        if (typeof headerKey !== 'string' || headerKey.trim() === '') {
+          throw new AppError('VALIDATION_ERROR', 400, 'Missing x-provider-key header');
+        }
+        apiKey = headerKey;
+      }
       const agent = await repo.getById(agentId);
       if (!agent) {
         throw new AppError('NOT_FOUND', 404, 'Agent not found');
