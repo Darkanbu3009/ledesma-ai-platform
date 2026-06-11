@@ -3,7 +3,8 @@ export type ErrorCode =
   | 'NOT_FOUND'
   | 'VALIDATION_ERROR'
   | 'RATE_LIMIT_EXCEEDED'
-  | 'UNAUTHORIZED';
+  | 'UNAUTHORIZED'
+  | 'AUTHENTICATION';
 
 export class AppError extends Error {
   public readonly code: ErrorCode;
