@@ -23,12 +23,17 @@ function makeFetch(blocks: string[]) {
 
 async function runTurno(
   fetchImpl: typeof fetch,
-  opts: { providerKey?: string; onMessage?: (message: SseMessage) => void } = {},
+  opts: {
+    providerKey?: string;
+    sessionToken?: string;
+    onMessage?: (message: SseMessage) => void;
+  } = {},
 ): Promise<void> {
   await streamAgent(
     {
       endpoint: ENDPOINT,
       providerKey: opts.providerKey,
+      sessionToken: opts.sessionToken,
       messages: MESSAGES,
       signal: new AbortController().signal,
       onMessage: opts.onMessage ?? (() => {}),
@@ -65,6 +70,26 @@ describe('streamAgent', () => {
 
     const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
     expect(headers['x-provider-key']).toBe('sk-test');
+  });
+
+  it('manda x-session-token cuando sessionToken viene', async () => {
+    const fetchMock = makeFetch(['event: done\ndata: {}\n\n']);
+
+    await runTurno(fetchMock, { sessionToken: 'tok-1' });
+
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(headers['x-session-token']).toBe('tok-1');
+    expect(headers).not.toHaveProperty('x-provider-key');
+  });
+
+  it('con sessionToken y providerKey juntos manda SOLO x-session-token', async () => {
+    const fetchMock = makeFetch(['event: done\ndata: {}\n\n']);
+
+    await runTurno(fetchMock, { sessionToken: 'tok-1', providerKey: 'sk-test' });
+
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(headers['x-session-token']).toBe('tok-1');
+    expect(headers).not.toHaveProperty('x-provider-key');
   });
 
   it('manda exactamente { messages } en el body', async () => {

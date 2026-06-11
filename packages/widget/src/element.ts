@@ -1,5 +1,6 @@
 import { streamAgent } from './client.js';
 import type { SseMessage } from './sse.js';
+import { createTokenManager, type TokenManager } from './token-manager.js';
 import { buildRequestChat, commitTurn, type ChatMessage } from './turns.js';
 
 /**
@@ -173,13 +174,15 @@ const styles = `
 
 /**
  * <ledesma-agent>: chat embebible contra el contrato publico del agente (POST {endpoint} con
- * { messages }, respuesta SSE). Atributos: endpoint (requerido), provider-key (opcional),
- * title y placeholder. El historial enviable es transaccional via turns.ts: un turno solo se
- * incorpora cuando termina bien.
+ * { messages }, respuesta SSE). Atributos: endpoint (requerido), una credencial (token-url >
+ * session-token > provider-key), title y placeholder. Con token-url el widget pide tokens
+ * efimeros al backend del cliente (cache + renovacion via token-manager.ts) y reintenta UNA vez
+ * el turno si la plataforma responde AUTHENTICATION. El historial enviable es transaccional via
+ * turns.ts: un turno solo se incorpora cuando termina bien.
  */
 export class LedesmaAgentElement extends HTMLElement {
   static get observedAttributes(): string[] {
-    return ['endpoint', 'provider-key', 'title', 'placeholder'];
+    return ['endpoint', 'provider-key', 'session-token', 'token-url', 'title', 'placeholder'];
   }
 
   private chat: ChatMessage[] = [];
@@ -190,6 +193,10 @@ export class LedesmaAgentElement extends HTMLElement {
   private assistantBubble: HTMLDivElement | null = null;
   private readonly toolChips = new Map<string, HTMLSpanElement>();
   private configured = false;
+  // Manager de tokens por elemento, creado lazy en el primer envio con token-url y recreado
+  // solo si el atributo cambia (el cache de token sobrevive entre turnos y re-renders).
+  private tokenManager: TokenManager | null = null;
+  private tokenManagerUrl: string | null = null;
 
   private titleEl: HTMLDivElement | null = null;
   private messagesEl: HTMLDivElement | null = null;
@@ -211,10 +218,17 @@ export class LedesmaAgentElement extends HTMLElement {
 
   attributeChangedCallback(name: string): void {
     if (!this.isConnected) return;
-    if (name === 'endpoint') {
-      // Solo re-monta cuando cambia el modo (configurado <-> sin endpoint); un cambio de URL
-      // se toma en el proximo envio sin perder la conversacion en pantalla.
-      if ((this.endpoint !== null) !== this.configured) this.render();
+    if (
+      name === 'endpoint' ||
+      name === 'provider-key' ||
+      name === 'session-token' ||
+      name === 'token-url'
+    ) {
+      // Re-monta cuando cambia el modo (configurado <-> falta algo) o para refrescar el mensaje
+      // de configuracion; un cambio de valor ya configurado se toma en el proximo envio sin
+      // perder la conversacion en pantalla.
+      const configured = this.endpoint !== null && this.hasCredential();
+      if (configured !== this.configured || !configured) this.render();
       return;
     }
     if (name === 'title' && this.titleEl !== null) this.titleEl.textContent = this.headerTitle;
@@ -223,10 +237,31 @@ export class LedesmaAgentElement extends HTMLElement {
     }
   }
 
-  private get endpoint(): string | null {
-    const value = this.getAttribute('endpoint');
+  /** Lee un atributo normalizado: trim, y vacio cuenta como ausente. */
+  private readAttribute(name: string): string | null {
+    const value = this.getAttribute(name);
     if (value === null || value.trim() === '') return null;
     return value.trim();
+  }
+
+  private get endpoint(): string | null {
+    return this.readAttribute('endpoint');
+  }
+
+  private get tokenUrl(): string | null {
+    return this.readAttribute('token-url');
+  }
+
+  private get sessionToken(): string | null {
+    return this.readAttribute('session-token');
+  }
+
+  private get providerKey(): string | null {
+    return this.readAttribute('provider-key');
+  }
+
+  private hasCredential(): boolean {
+    return this.tokenUrl !== null || this.sessionToken !== null || this.providerKey !== null;
   }
 
   private get headerTitle(): string {
@@ -249,12 +284,17 @@ export class LedesmaAgentElement extends HTMLElement {
     this.turnClosed = false;
     this.assistantBubble = null;
     this.toolChips.clear();
-    this.configured = this.endpoint !== null;
+    this.configured = this.endpoint !== null && this.hasCredential();
 
+    // Mensajes estaticos (nunca interpolan valores de atributos): innerHTML es seguro aqui.
+    const configMessage =
+      this.endpoint === null
+        ? 'Falta el atributo <code>endpoint</code>'
+        : 'Falta <code>session-token</code>, <code>token-url</code> o <code>provider-key</code>';
     const body = this.configured
       ? '<div class="messages"></div>' +
         '<div class="composer"><textarea rows="1"></textarea><button type="button" class="action"></button></div>'
-      : '<div class="config">Falta el atributo <code>endpoint</code></div>';
+      : `<div class="config">${configMessage}</div>`;
     shadow.innerHTML =
       `<style>${styles}</style>` +
       `<div class="root"><div class="header"></div>${body}<div class="footer">Impulsado por Ledesma AI Labs</div></div>`;
@@ -321,15 +361,8 @@ export class LedesmaAgentElement extends HTMLElement {
     this.abortController = controller;
     this.updateAction();
 
-    const providerKey = this.getAttribute('provider-key');
     try {
-      await streamAgent({
-        endpoint,
-        providerKey: providerKey === null || providerKey === '' ? undefined : providerKey,
-        messages: requestChat,
-        signal: controller.signal,
-        onMessage: (message) => this.handleMessage(message, content),
-      });
+      await this.runTurn(endpoint, requestChat, content, controller.signal);
       this.closeTurn(content, true);
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
@@ -344,6 +377,67 @@ export class LedesmaAgentElement extends HTMLElement {
     } finally {
       this.abortController = null;
     }
+  }
+
+  /**
+   * Corre el stream del turno con la credencial por precedencia: token-url (token efimero via
+   * TokenManager) > session-token (atributo estatico, sin renovacion) > provider-key. Con
+   * token-url, el primer error AUTHENTICATION del turno no se pinta: se invalida el cache y se
+   * repite el envio UNA vez con token nuevo (mismo requestChat; la burbuja user ya esta en
+   * pantalla). Si vuelve a fallar, la burbuja de error sale normal.
+   */
+  private async runTurn(
+    endpoint: string,
+    requestChat: ChatMessage[],
+    userText: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const tokenUrl = this.tokenUrl;
+    if (tokenUrl === null) {
+      await streamAgent({
+        endpoint,
+        sessionToken: this.sessionToken ?? undefined,
+        providerKey: this.providerKey ?? undefined,
+        messages: requestChat,
+        signal,
+        onMessage: (message) => this.handleMessage(message, userText),
+      });
+      return;
+    }
+
+    const manager = this.getTokenManager(tokenUrl);
+    let authFailed = false;
+    await streamAgent({
+      endpoint,
+      sessionToken: await manager.get(),
+      messages: requestChat,
+      signal,
+      onMessage: (message) => {
+        if (!authFailed && message.kind === 'error' && message.code === 'AUTHENTICATION') {
+          authFailed = true;
+          return;
+        }
+        this.handleMessage(message, userText);
+      },
+    });
+    if (!authFailed) return;
+    manager.invalidate();
+    await streamAgent({
+      endpoint,
+      sessionToken: await manager.get(),
+      messages: requestChat,
+      signal,
+      onMessage: (message) => this.handleMessage(message, userText),
+    });
+  }
+
+  /** Manager por elemento: lazy en el primer uso y recreado si token-url cambio. */
+  private getTokenManager(tokenUrl: string): TokenManager {
+    if (this.tokenManager === null || this.tokenManagerUrl !== tokenUrl) {
+      this.tokenManager = createTokenManager({ tokenUrl });
+      this.tokenManagerUrl = tokenUrl;
+    }
+    return this.tokenManager;
   }
 
   /**
