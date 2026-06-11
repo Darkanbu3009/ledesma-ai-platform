@@ -97,6 +97,23 @@ app.post('/api/token-agente', async (req, res) => {
 });`;
 }
 
+/** Verificacion de firma en el servidor del cliente (el secreto vive en su entorno). */
+export function webhookVerifySnippet(): string {
+  return `const crypto = require('node:crypto');
+
+function verifyLedesmaWebhook(req) {
+  const timestamp = Number(req.headers['x-ledesma-timestamp']);
+  const signature = String(req.headers['x-ledesma-signature'] ?? '').replace('v1=', '');
+  if (Math.abs(Date.now() / 1000 - timestamp) > 300) return false; // anti-replay
+  const expected = crypto
+    .createHmac('sha256', process.env.LEDESMA_WEBHOOK_SECRET)
+    .update(\`\${timestamp}.\${req.rawBody}\`)
+    .digest('hex');
+  return expected.length === signature.length &&
+    crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(signature, 'hex'));
+}`;
+}
+
 /** Guia breve de integracion movil/web (texto, no codigo ejecutable). */
 export function mobileWebGuide(p: SnippetParams): string {
   return `Tu app movil o web NO debe contener la API key del proveedor. El patron recomendado:
