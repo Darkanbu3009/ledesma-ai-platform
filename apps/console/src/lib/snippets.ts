@@ -64,49 +64,49 @@ export function widgetDirectSnippet(p: SnippetParams): string {
 ></ledesma-agent>`;
 }
 
-/** Modo proxy: produccion. El endpoint es el backend DEL CLIENTE; sin key en el HTML. */
-export function widgetProxySnippet(p: SnippetParams): string {
+/** Endpoint de emision de tokens de la plataforma. */
+export function sessionTokensEndpoint(p: SnippetParams): string {
+  return `${p.apiUrl}/v1/session-tokens`;
+}
+
+/** Modo token: produccion. El widget pide tokens a TU backend y habla directo con la plataforma. */
+export function widgetTokenSnippet(p: SnippetParams): string {
   return `<script src="${widgetScriptUrl(p)}"></script>
 
 <ledesma-agent
-  endpoint="https://TU-BACKEND.com/api/agente"
+  endpoint="${agentEndpoint(p)}"
+  token-url="https://TU-BACKEND.com/api/token-agente"
   title="Asistente"
 ></ledesma-agent>`;
 }
 
-/** Servidor proxy de ejemplo (Node): agrega la key del entorno y retransmite el stream. */
-export function proxyServerSnippet(p: SnippetParams): string {
-  return `// POST /api/agente — reenvia al agente agregando la key desde el entorno del servidor
-app.post('/api/agente', async (req, res) => {
-  const upstream = await fetch('${agentEndpoint(p)}', {
+/** Servidor del cliente: emite tokens efimeros (la key vive en su entorno). */
+export function tokenServerSnippet(p: SnippetParams): string {
+  return `// POST /api/token-agente — emite un token efimero para el widget
+app.post('/api/token-agente', async (req, res) => {
+  // Aqui va TU autenticacion (sesion de usuario, rate limit, etc.).
+  const upstream = await fetch('${sessionTokensEndpoint(p)}', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-provider-key': process.env.PROVIDER_API_KEY,
     },
-    body: JSON.stringify({ messages: req.body.messages }),
+    body: JSON.stringify({ agentId: '${p.agentId}' }),
   });
-  res.status(upstream.status);
-  res.setHeader('Content-Type', upstream.headers.get('content-type') ?? 'text/event-stream');
-  const reader = upstream.body.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    res.write(value);
-  }
-  res.end();
+  res.status(upstream.status).json(await upstream.json()); // { token, expiresAt }
 });`;
 }
 
 /** Guia breve de integracion movil/web (texto, no codigo ejecutable). */
 export function mobileWebGuide(p: SnippetParams): string {
-  return `Tu app movil o web NO debe contener la API key del proveedor. El patron correcto:
+  return `Tu app movil o web NO debe contener la API key del proveedor. El patron recomendado:
 
 1. Tu app llama a TU backend (con tu propia autenticacion de usuarios).
-2. Tu backend agrega el header x-provider-key (guardado como secreto en tu servidor) y reenvia a:
+2. Tu backend emite un token de sesion efimero con la key guardada como secreto en tu servidor:
+   POST ${sessionTokensEndpoint(p)} (header x-provider-key, body { agentId })
+3. Tu app llama directo a la plataforma con el header x-session-token:
    POST ${agentEndpoint(p)}
-3. Tu backend retransmite el stream SSE a tu app.
 
-Asi la key nunca viaja al dispositivo del usuario final. Proximamente: tokens publicables por
-agente para integracion directa desde clientes.`;
+Asi la key nunca viaja al dispositivo del usuario final: solo viaja un token que expira solo y
+tu app renueva pidiendo otro a tu backend.`;
 }

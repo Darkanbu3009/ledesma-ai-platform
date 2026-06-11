@@ -8,9 +8,9 @@ import {
   curlSnippet,
   mobileWebGuide,
   nodeSnippet,
-  proxyServerSnippet,
+  tokenServerSnippet,
   widgetDirectSnippet,
-  widgetProxySnippet,
+  widgetTokenSnippet,
   type SnippetParams,
 } from '../lib/snippets';
 import { CopyButton } from '../components/ui/CopyButton';
@@ -104,7 +104,8 @@ export function ConnectPage() {
             incluyas en una app movil o pagina publica.
           </p>
           <p className="mt-1 text-hueso-muted">
-            Proximamente: tokens publicables por agente para integrar directo desde clientes.
+            Para integrar desde un cliente, tu backend emite tokens de sesion efimeros y el
+            cliente habla directo con la plataforma.
           </p>
         </div>
       </div>
@@ -132,25 +133,26 @@ export function ConnectPage() {
 
         <div className="mt-4 space-y-8">
           <div>
-            <h3 className="text-sm font-medium text-hueso">Modo proxy (produccion)</h3>
+            <h3 className="text-sm font-medium text-hueso">Modo token (produccion)</h3>
             <p className="mt-1 text-sm text-hueso-muted">
-              El widget apunta a TU backend; tu backend agrega la key (variable de entorno) y
-              reenvia a la plataforma. La key nunca llega al navegador.
+              Tu backend emite tokens de sesion efimeros (la key queda como secreto en tu
+              servidor) y el widget habla directo con la plataforma. Cuando el token expira, el
+              widget pide otro solo.
             </p>
             <div className="mt-3 space-y-4">
               <div>
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <p className="text-xs text-hueso-muted">HTML de tu pagina</p>
-                  <CopyButton text={widgetProxySnippet(params)} />
+                  <CopyButton text={widgetTokenSnippet(params)} />
                 </div>
-                <pre className={preClass}>{widgetProxySnippet(params)}</pre>
+                <pre className={preClass}>{widgetTokenSnippet(params)}</pre>
               </div>
               <div>
                 <div className="mb-2 flex items-center justify-between gap-3">
-                  <p className="text-xs text-hueso-muted">Servidor proxy de ejemplo (Node)</p>
-                  <CopyButton text={proxyServerSnippet(params)} />
+                  <p className="text-xs text-hueso-muted">Servidor de tokens de ejemplo (Node)</p>
+                  <CopyButton text={tokenServerSnippet(params)} />
                 </div>
-                <pre className={preClass}>{proxyServerSnippet(params)}</pre>
+                <pre className={preClass}>{tokenServerSnippet(params)}</pre>
               </div>
             </div>
           </div>
