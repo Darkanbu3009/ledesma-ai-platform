@@ -7,6 +7,7 @@ const KEY = 'sk-SENTINEL-PROVIDER-9f8e7d';
 const ADMIN = 'admin-SENTINEL-token-1234567890';
 const JWT = 'Bearer eyJ-SENTINEL-jwt';
 const SESSION_TOKEN = 'tok-SENTINEL-session-9a8b7c';
+const WHSEC = 'whsec_SENTINEL-webhook-3c2b1a';
 // Secreto de cifrado de tokens de sesion del server de test (no es un centinela: jamas viaja).
 const SESSION_SECRET = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
@@ -93,6 +94,7 @@ const storedAgent = {
   temperature: 0.3,
   baseUrl: null,
   tools: [],
+  webhookSecret: WHSEC,
   ownerId: null,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
@@ -238,6 +240,59 @@ describe('centinelas BYOK: la key del proveedor nunca sale del request', () => {
     expect(res.json().error.code).toBe('VALIDATION_ERROR');
 
     expectNoLeak([logs.join(''), res.payload], KEY);
+  });
+});
+
+describe('centinela del secreto de webhooks: solo viaja la firma derivada, nunca el secreto', () => {
+  it('corrida con tool webhook: el secreto no aparece en logs, ni en el SSE, ni en el fetch al webhook', async () => {
+    const storedTool = {
+      name: 'cotizar',
+      description: 'Calcula el precio de N piezas',
+      inputSchema: { type: 'object', properties: { piezas: { type: 'number' } } },
+      url: 'https://hooks.cliente.com/cotizar',
+    };
+    getByIdMock.mockResolvedValue({ ...storedAgent, tools: [storedTool] });
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ content: 'precio: 300 MXN' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    runModelMock
+      .mockReturnValueOnce(
+        streamOf([
+          { type: 'tool_use', id: 'tu_1', name: 'cotizar', input: { piezas: 2 } },
+          { type: 'stop', reason: 'tool_use', usage: { inputTokens: 5, outputTokens: 3 } },
+        ]),
+      )
+      .mockReturnValueOnce(
+        streamOf([
+          { type: 'text_delta', text: 'Son 300 MXN' },
+          { type: 'stop', reason: 'end_turn', usage: { inputTokens: 8, outputTokens: 4 } },
+        ]),
+      );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/run/${AGENT_ID}`,
+      headers: { 'x-provider-key': 'sk-key-cualquiera' },
+      payload: { messages: [{ role: 'user', content: 'cotiza 2 piezas' }] },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Sanidad: el POST al webhook SI va firmado (firma hex derivada, jamas el secreto crudo).
+    const [webhookUrl, webhookInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const webhookHeaders = webhookInit.headers as Record<string, string>;
+    expect(webhookHeaders['x-ledesma-signature']).toMatch(/^v1=[0-9a-f]{64}$/);
+    expect(Number.isInteger(Number(webhookHeaders['x-ledesma-timestamp']))).toBe(true);
+
+    // El secreto no viaja al webhook ni se asoma por logs o por el SSE de la corrida.
+    expectNoLeak([webhookUrl, JSON.stringify(webhookHeaders), String(webhookInit.body)], WHSEC);
+    expectNoLeak([logs.join(''), res.payload], WHSEC);
   });
 });
 

@@ -6,6 +6,7 @@ import {
   nodeSnippet,
   sessionTokensEndpoint,
   tokenServerSnippet,
+  webhookVerifySnippet,
   widgetDirectSnippet,
   widgetScriptUrl,
   widgetTokenSnippet,
@@ -100,5 +101,19 @@ describe('tokenServerSnippet', () => {
 
   it('no contiene ninguna key con pinta real', () => {
     expect(tokenServerSnippet(params)).not.toContain('sk-');
+  });
+});
+
+describe('webhookVerifySnippet', () => {
+  it('verifica con timingSafeEqual los headers firmados y lee el secreto del entorno', () => {
+    const snippet = webhookVerifySnippet();
+    expect(snippet).toContain('timingSafeEqual');
+    expect(snippet).toContain('x-ledesma-timestamp');
+    expect(snippet).toContain('x-ledesma-signature');
+    expect(snippet).toContain('process.env.LEDESMA_WEBHOOK_SECRET');
+  });
+
+  it('no contiene ningun secreto whsec_ real', () => {
+    expect(webhookVerifySnippet()).not.toContain('whsec_');
   });
 });
