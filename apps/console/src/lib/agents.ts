@@ -19,6 +19,8 @@ export interface AgentConfig {
   temperature: number | null;
   baseUrl: string | null;
   tools: StoredTool[];
+  /** Secreto de firma de webhooks (opcional: backends sin la migracion aplicada no lo mandan). */
+  webhookSecret?: string;
   ownerId: string | null;
   createdAt: string;
   updatedAt: string;

@@ -14,6 +14,7 @@ function makeRow(overrides: Record<string, unknown> = {}) {
     temperature: 0.2,
     base_url: null,
     tools: [{ name: 'cotizar', description: 'x', inputSchema: { type: 'object' } }],
+    webhook_secret: 'whsec_fila_de_prueba_001122',
     owner_id: null,
     created_at: '2026-06-07T00:00:00.000Z',
     updated_at: '2026-06-07T00:00:00.000Z',
@@ -40,6 +41,7 @@ describe('AgentRepository', () => {
       maxTokens: 1024,
       temperature: 0.2,
       tools: [{ name: 'cotizar', description: 'x', inputSchema: { type: 'object' } }],
+      webhookSecret: 'whsec_fila_de_prueba_001122',
     });
   });
 

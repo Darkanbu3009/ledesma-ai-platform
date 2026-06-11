@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { StoredTool } from '../src/agents/types.js';
 import { createWebhookExecutor, isForbiddenWebhookUrl, WEBHOOK_LIMITS } from '../src/tools/webhook-tools.js';
+import { signWebhookPayload, verifyWebhookSignature } from '../src/tools/webhook-signature.js';
+
+const TEST_SECRET = 'whsec_secreto_de_prueba_0123456789abcdef';
 
 function makeTool(overrides: Partial<StoredTool> = {}): StoredTool {
   return {
@@ -28,7 +31,7 @@ afterEach(() => {
 describe('createWebhookExecutor', () => {
   it('ejecuta una tool: POST a la url con { tool, input } y regresa el content', async () => {
     const fetchMock = vi.fn().mockResolvedValue(fakeResponse(JSON.stringify({ content: 'ok' })));
-    const execute = createWebhookExecutor([makeTool()], asFetch(fetchMock));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
 
     const result = await execute({ id: 'tu_1', name: 'cotizar', input: { piezas: 2 } });
 
@@ -37,17 +40,48 @@ describe('createWebhookExecutor', () => {
       'https://api.cliente.com/hooks/cotizar',
       expect.objectContaining({
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ tool: 'cotizar', input: { piezas: 2 } }),
       }),
     );
     expect(result).toEqual({ content: 'ok', isError: false });
   });
 
+  it('firma cada POST: timestamp numerico y firma v1 verificable con el secreto y el body exacto', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(fakeResponse(JSON.stringify({ content: 'ok' })));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
+
+    await execute({ id: 'tu_1', name: 'cotizar', input: { piezas: 2 } });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    const ts = Number(headers['x-ledesma-timestamp']);
+    expect(Number.isInteger(ts)).toBe(true);
+    expect(Math.abs(Math.floor(Date.now() / 1000) - ts)).toBeLessThanOrEqual(5);
+    expect(headers['x-ledesma-signature']).toMatch(/^v1=[0-9a-f]{64}$/);
+
+    // La firma corresponde EXACTAMENTE a la cadena enviada como body.
+    const signature = headers['x-ledesma-signature']!.replace('v1=', '');
+    expect(signature).toBe(signWebhookPayload(String(init.body), ts, TEST_SECRET));
+    expect(verifyWebhookSignature(String(init.body), ts, signature, TEST_SECRET, 300, ts)).toBe(true);
+  });
+
+  it('los headers del POST no contienen el secreto en claro', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(fakeResponse(JSON.stringify({ content: 'ok' })));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
+
+    await execute({ id: 'tu_1', name: 'cotizar', input: { piezas: 2 } });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const serialized = JSON.stringify(init.headers) + String(init.body);
+    expect(serialized).not.toContain(TEST_SECRET);
+    expect(serialized).not.toContain('whsec_');
+  });
+
   it('respuesta JSON sin content: regresa el body serializado con isError false', async () => {
     const body = JSON.stringify({ resultado: 42 });
     const fetchMock = vi.fn().mockResolvedValue(fakeResponse(body));
-    const execute = createWebhookExecutor([makeTool()], asFetch(fetchMock));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
 
     const result = await execute({ id: 'tu_1', name: 'cotizar', input: {} });
 
@@ -56,7 +90,7 @@ describe('createWebhookExecutor', () => {
 
   it('respuesta { content, isError: true }: propaga isError true', async () => {
     const fetchMock = vi.fn().mockResolvedValue(fakeResponse(JSON.stringify({ content: 'x', isError: true })));
-    const execute = createWebhookExecutor([makeTool()], asFetch(fetchMock));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
 
     const result = await execute({ id: 'tu_1', name: 'cotizar', input: {} });
 
@@ -65,7 +99,7 @@ describe('createWebhookExecutor', () => {
 
   it('status 500: isError true con el status en el mensaje, sin lanzar', async () => {
     const fetchMock = vi.fn().mockResolvedValue(fakeResponse('boom', 500));
-    const execute = createWebhookExecutor([makeTool()], asFetch(fetchMock));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
 
     const result = await execute({ id: 'tu_1', name: 'cotizar', input: {} });
 
@@ -75,7 +109,7 @@ describe('createWebhookExecutor', () => {
 
   it('fetch lanza: isError true, sin lanzar', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
-    const execute = createWebhookExecutor([makeTool()], asFetch(fetchMock));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
 
     const result = await execute({ id: 'tu_1', name: 'cotizar', input: {} });
 
@@ -96,7 +130,7 @@ describe('createWebhookExecutor', () => {
           });
         }),
     );
-    const execute = createWebhookExecutor([makeTool()], asFetch(fetchMock));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
 
     const pending = execute({ id: 'tu_1', name: 'cotizar', input: {} });
     await vi.advanceTimersByTimeAsync(WEBHOOK_LIMITS.timeoutMs);
@@ -108,7 +142,7 @@ describe('createWebhookExecutor', () => {
 
   it('tool desconocida: isError true sin llamar al webhook', async () => {
     const fetchMock = vi.fn();
-    const execute = createWebhookExecutor([makeTool()], asFetch(fetchMock));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
 
     const result = await execute({ id: 'tu_1', name: 'inexistente', input: {} });
 
@@ -120,7 +154,7 @@ describe('createWebhookExecutor', () => {
   it('respuesta mas larga que maxResponseChars se recorta', async () => {
     const long = 'a'.repeat(WEBHOOK_LIMITS.maxResponseChars + 500);
     const fetchMock = vi.fn().mockResolvedValue(fakeResponse(long));
-    const execute = createWebhookExecutor([makeTool()], asFetch(fetchMock));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
 
     const result = await execute({ id: 'tu_1', name: 'cotizar', input: {} });
 

@@ -65,7 +65,9 @@ export function runAgentByIdRoutes(config: Env) {
       const hasStoredTools = agent.tools.length > 0;
       const registry = hasStoredTools ? null : createDemoRegistry();
       const toolDefinitions = hasStoredTools ? storedToolsToDefinitions(agent.tools) : registry!.toToolDefinitions();
-      const executeTool = hasStoredTools ? createWebhookExecutor(agent.tools) : registry!.toExecutor();
+      const executeTool = hasStoredTools
+        ? createWebhookExecutor(agent.tools, agent.webhookSecret)
+        : registry!.toExecutor();
       const normalizedRequest: NormalizedRequest = {
         ...(agent.systemPrompt ? { system: agent.systemPrompt } : {}),
         messages: parsed.data.messages.map((m) => ({ role: m.role, content: [{ type: 'text', text: m.content }] })),

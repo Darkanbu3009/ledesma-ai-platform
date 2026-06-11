@@ -1,6 +1,7 @@
 import type { ToolDefinition } from '@ledesma-platform/shared';
 import type { StoredTool } from '../agents/types.js';
 import type { ToolCall, ToolExecutionResult, ToolExecutor } from '../agent/index.js';
+import { signWebhookPayload } from './webhook-signature.js';
 
 export const WEBHOOK_LIMITS = {
   timeoutMs: 10_000,
@@ -30,11 +31,13 @@ export function storedToolsToDefinitions(tools: StoredTool[]): ToolDefinition[] 
   return tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }));
 }
 
-/** Ejecutor por webhook: POST { tool, input } a la url de la tool. Respuesta esperada
- * { content: string, isError?: boolean }; si no hay content string, se serializa el body.
- * NUNCA lanza: todo fallo regresa isError: true. TODO: firma HMAC por agente. */
+/** Ejecutor por webhook: POST { tool, input } a la url de la tool, firmado con el secreto del
+ * agente (HMAC-SHA256 de "{timestamp}.{body}" en x-ledesma-timestamp / x-ledesma-signature).
+ * Respuesta esperada { content: string, isError?: boolean }; si no hay content string, se
+ * serializa el body. NUNCA lanza: todo fallo regresa isError: true. */
 export function createWebhookExecutor(
   tools: StoredTool[],
+  secret: string,
   fetchImpl: typeof fetch = fetch,
 ): ToolExecutor {
   const byName = new Map(tools.map((t) => [t.name, t]));
@@ -52,11 +55,18 @@ export function createWebhookExecutor(
     signal?.addEventListener('abort', onOuterAbort);
 
     try {
+      // El body enviado es EXACTAMENTE la cadena firmada: el cliente verifica con su raw body.
+      const body = JSON.stringify({ tool: call.name, input: call.input });
+      const ts = Math.floor(Date.now() / 1000);
       const response = await fetchImpl(tool.url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-ledesma-timestamp': String(ts),
+          'x-ledesma-signature': `v1=${signWebhookPayload(body, ts, secret)}`,
+        },
         signal: controller.signal,
-        body: JSON.stringify({ tool: call.name, input: call.input }),
+        body,
       });
       const text = await response.text();
       const clipped = text.length > WEBHOOK_LIMITS.maxResponseChars

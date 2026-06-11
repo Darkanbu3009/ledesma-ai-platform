@@ -22,6 +22,7 @@ vi.mock('../src/db/client.js', () => ({ getSql: vi.fn(() => ({})), setSqlForTest
 import { buildServer } from '../src/server.js';
 import { parseEnv } from '../src/config/env.js';
 import { createSessionToken } from '../src/auth/session-token.js';
+import { signWebhookPayload } from '../src/tools/webhook-signature.js';
 import type { FastifyInstance } from 'fastify';
 import type { ProviderStreamEvent } from '@ledesma-platform/shared';
 
@@ -62,6 +63,7 @@ const anthropicAgent = {
   temperature: 0.3,
   baseUrl: null,
   tools: [],
+  webhookSecret: 'whsec_secreto_del_agente_0123456789abcdef',
   ownerId: null,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
@@ -240,15 +242,22 @@ describe('POST /v1/run/:agentId', () => {
       { name: 'cotizar', description: 'Calcula el precio de N piezas', inputSchema: storedTool.inputSchema },
     ]);
 
-    // El webhook recibe POST { tool, input }.
+    // El webhook recibe POST { tool, input } firmado con EL secreto del agente.
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
       'https://hooks.cliente.com/cotizar',
       expect.objectContaining({
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ tool: 'cotizar', input: { piezas: 2 } }),
       }),
+    );
+    const [, webhookInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const webhookHeaders = webhookInit.headers as Record<string, string>;
+    const ts = Number(webhookHeaders['x-ledesma-timestamp']);
+    expect(Number.isInteger(ts)).toBe(true);
+    expect(webhookHeaders['x-ledesma-signature']).toBe(
+      `v1=${signWebhookPayload(String(webhookInit.body), ts, anthropicAgent.webhookSecret)}`,
     );
 
     // El tool_result reinyectado trae el content del webhook.

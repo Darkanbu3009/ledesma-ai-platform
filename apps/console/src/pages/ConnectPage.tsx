@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, RefreshCw, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, RefreshCw, ShieldAlert } from 'lucide-react';
 import { providerLabel } from '../lib/agents';
 import { readApiEnv } from '../lib/env';
 import { useAgent } from '../lib/queries';
@@ -9,6 +10,7 @@ import {
   mobileWebGuide,
   nodeSnippet,
   tokenServerSnippet,
+  webhookVerifySnippet,
   widgetDirectSnippet,
   widgetTokenSnippet,
   type SnippetParams,
@@ -22,9 +24,13 @@ const widgetThemeExample = `ledesma-agent {
   --la-accent: #2563eb; --la-radius: 16px; --la-height: 560px;
 }`;
 
+const webhookHeadersExample = `x-ledesma-timestamp: 1718000000
+x-ledesma-signature: v1=<hmac-sha256 hex de "{timestamp}.{body}">`;
+
 export function ConnectPage() {
   const { id } = useParams<{ id: string }>();
   const { data: agent, isLoading, isError, refetch } = useAgent(id);
+  const [showSecret, setShowSecret] = useState(false);
 
   if (isLoading) {
     return (
@@ -124,6 +130,58 @@ export function ConnectPage() {
           ))}
         </div>
       </section>
+
+      {agent.webhookSecret ? (
+        <section className="mt-8">
+          <h2 className="font-display text-lg font-semibold text-hueso">
+            Verificacion de webhooks
+          </h2>
+          <p className="mt-3 text-sm text-hueso-muted">
+            Cada vez que tu agente invoca una herramienta, la plataforma firma el POST a tu
+            webhook. Verifica la firma para asegurarte de que la peticion viene de Ledesma AI
+            Labs.
+          </p>
+
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-grafito-border bg-grafito p-5">
+            <p className="min-w-0 overflow-x-auto whitespace-nowrap font-mono text-sm text-hueso">
+              {showSecret ? (
+                <span className="select-all">{agent.webhookSecret}</span>
+              ) : (
+                'whsec_••••••••'
+              )}
+            </p>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowSecret((v) => !v)}
+                aria-label={showSecret ? 'Ocultar secreto' : 'Mostrar secreto'}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-grafito-border px-3 py-1.5 text-xs font-medium text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
+              >
+                {showSecret ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                {showSecret ? 'Ocultar' : 'Revelar'}
+              </button>
+              <CopyButton text={agent.webhookSecret} />
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <p className="text-xs text-hueso-muted">Headers enviados en cada POST</p>
+            <pre className={`${preClass} mt-2`}>{webhookHeadersExample}</pre>
+          </div>
+
+          <div className="mt-4">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <p className="text-xs text-hueso-muted">Verificacion en tu servidor (Node)</p>
+              <CopyButton text={webhookVerifySnippet()} />
+            </div>
+            <pre className={preClass}>{webhookVerifySnippet()}</pre>
+            <p className="mt-2 text-sm text-hueso-muted">
+              Guarda el secreto como variable de entorno (LEDESMA_WEBHOOK_SECRET) en tu servidor;
+              usa el body crudo (rawBody) para verificar.
+            </p>
+          </div>
+        </section>
+      ) : null}
 
       <section className="mt-8">
         <h2 className="font-display text-lg font-semibold text-hueso">Widget embebible</h2>

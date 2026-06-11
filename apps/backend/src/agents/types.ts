@@ -20,6 +20,8 @@ export interface AgentConfig {
   temperature: number | null;
   baseUrl: string | null;
   tools: StoredTool[];
+  /** Secreto de firma de webhooks. Lo genera la base al insertar; el update jamas lo toca. */
+  webhookSecret: string;
   ownerId: string | null;
   createdAt: string;
   updatedAt: string;
