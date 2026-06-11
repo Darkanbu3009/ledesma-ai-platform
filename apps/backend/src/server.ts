@@ -1,4 +1,6 @@
+import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
+import fastifyStatic from '@fastify/static';
 import { healthRoutes } from './routes/health.js';
 import { agentRoutes } from './routes/agent.js';
 import { adminAgentRoutes } from './routes/admin-agents.js';
@@ -19,6 +21,12 @@ export async function buildServer(config: Env): Promise<FastifyInstance> {
 
   await app.register(securityPlugin, { config });
   registerErrorHandler(app, config);
+  // El widget embebible y su demo se sirven desde public/widget. La ruta se resuelve relativa
+  // a este archivo (src/ en dev y tests, dist/ compilado): public/ es hermana de ambas.
+  await app.register(fastifyStatic, {
+    root: fileURLToPath(new URL('../public/widget', import.meta.url)),
+    prefix: '/widget/',
+  });
   await app.register(healthRoutes);
   await app.register(agentRoutes);
   await app.register(adminAgentRoutes(config));

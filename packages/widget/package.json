@@ -1,0 +1,15 @@
+{
+  "name": "@ledesma-platform/widget",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vite": "^8.0.16",
+    "vitest": "^4.1.8"
+  }
+}
