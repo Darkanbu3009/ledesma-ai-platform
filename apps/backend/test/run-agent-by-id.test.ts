@@ -21,6 +21,7 @@ vi.mock('../src/db/client.js', () => ({ getSql: vi.fn(() => ({})), setSqlForTest
 
 import { buildServer } from '../src/server.js';
 import { parseEnv } from '../src/config/env.js';
+import { createSessionToken } from '../src/auth/session-token.js';
 import type { FastifyInstance } from 'fastify';
 import type { ProviderStreamEvent } from '@ledesma-platform/shared';
 
@@ -48,6 +49,7 @@ function parseSse(raw: string): Array<{ event: string; data: unknown }> {
 }
 
 const AGENT_ID = '0b9f2c4e-5a1d-4f3b-9c8e-7d6a5b4c3f2e';
+const SESSION_SECRET = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
 const anthropicAgent = {
   id: AGENT_ID,
@@ -70,11 +72,12 @@ let app: FastifyInstance;
 beforeEach(async () => {
   runModelMock.mockReset();
   getByIdMock.mockReset();
-  app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co' }));
+  app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: SESSION_SECRET }));
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe('POST /v1/run/:agentId', () => {
@@ -300,5 +303,67 @@ describe('POST /v1/run/:agentId', () => {
     const errorEvent = events.find((e) => e.event === 'error');
     expect(errorEvent?.data).toMatchObject({ code: 'AUTHENTICATION', providerId: 'anthropic', status: 401 });
     expect(res.payload).not.toContain('sk-leak-run-by-id-123');
+  });
+
+  it('acepta x-session-token valido sin x-provider-key y corre con la key del token', async () => {
+    getByIdMock.mockResolvedValue(anthropicAgent);
+    runModelMock.mockReturnValue(
+      streamOf([
+        { type: 'text_delta', text: 'Hola' },
+        { type: 'stop', reason: 'end_turn', usage: { inputTokens: 5, outputTokens: 2 } },
+      ]),
+    );
+    const { token } = createSessionToken({ agentId: AGENT_ID, providerKey: 'sk-dentro-del-token' }, SESSION_SECRET);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/run/${AGENT_ID}`,
+      headers: { 'x-session-token': token },
+      payload: { messages: [{ role: 'user', content: 'hola' }] },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/event-stream');
+    const events = parseSse(res.payload);
+    expect(events).toContainEqual({ event: 'message', data: { type: 'text_delta', text: 'Hola' } });
+    expect(events.at(-1)).toEqual({ event: 'done', data: {} });
+    // runModel recibio la key que viajaba cifrada dentro del token.
+    expect(runModelMock.mock.calls[0]?.[0]?.credentials?.apiKey).toBe('sk-dentro-del-token');
+  });
+
+  it('rechaza con 401 AUTHENTICATION un token expirado', async () => {
+    // Token acunado en el pasado lejano: ya expirado sin necesidad de correr fastify bajo
+    // fake timers.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2000-01-01T00:00:00.000Z'));
+    const { token } = createSessionToken({ agentId: AGENT_ID, providerKey: 'sk-expirada' }, SESSION_SECRET);
+    vi.useRealTimers();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/run/${AGENT_ID}`,
+      headers: { 'x-session-token': token },
+      payload: { messages: [{ role: 'user', content: 'hola' }] },
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error.code).toBe('AUTHENTICATION');
+    expect(runModelMock).not.toHaveBeenCalled();
+  });
+
+  it('rechaza con 401 AUTHENTICATION un token manipulado', async () => {
+    const { token } = createSessionToken({ agentId: AGENT_ID, providerKey: 'sk-manipulada' }, SESSION_SECRET);
+    const tampered = (token[0] === 'A' ? 'B' : 'A') + token.slice(1);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/run/${AGENT_ID}`,
+      headers: { 'x-session-token': tampered },
+      payload: { messages: [{ role: 'user', content: 'hola' }] },
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error.code).toBe('AUTHENTICATION');
+    expect(runModelMock).not.toHaveBeenCalled();
   });
 });

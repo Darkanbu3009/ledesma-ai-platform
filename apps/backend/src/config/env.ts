@@ -13,6 +13,7 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
   ADMIN_API_TOKEN: z.string().min(16),
   SUPABASE_URL: z.string().url(),
+  SESSION_TOKEN_SECRET: z.string().min(32),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
