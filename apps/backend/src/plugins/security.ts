@@ -6,13 +6,17 @@ import type { Env } from '../config/env.js';
 import { AppError } from '../errors/app-error.js';
 
 function parseOrigins(value: string): true | string[] {
-  if (value.trim() === '*') {
-    return true;
-  }
-  return value
+  const origins = value
     .split(',')
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0);
+  // Un solo '*' => origin: true (reflejar cualquier origen). La API no usa cookies ni
+  // credenciales ambientales; reflejar el origen es seguro y necesario para el widget
+  // embebido en sitios de clientes.
+  if (origins.length === 1 && origins[0] === '*') {
+    return true;
+  }
+  return origins;
 }
 
 export interface SecurityPluginOptions {
