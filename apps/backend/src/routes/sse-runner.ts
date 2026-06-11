@@ -3,6 +3,16 @@ import type { AgentEvent } from '@ledesma-platform/shared';
 import { runAgent, type AgentRunInput, type ToolExecutor } from '../agent/index.js';
 import { ProviderError } from '../providers/index.js';
 
+/** Desenlace de una corrida: SOLO metadatos (tokens, status, duracion). Nunca contenido. */
+export interface AgentRunOutcome {
+  status: 'completed' | 'error' | 'aborted';
+  inputTokens: number;
+  outputTokens: number;
+  stopReason: string | null;
+  errorCode: string | null;
+  durationMs: number;
+}
+
 function sseWrite(reply: FastifyReply, payload: { event?: string; data: unknown }): void {
   if (payload.event !== undefined) {
     reply.raw.write(`event: ${payload.event}\n`);
@@ -15,13 +25,19 @@ function sseWrite(reply: FastifyReply, payload: { event?: string; data: unknown 
  * re-emite cada AgentEvent como SSE, cierra con un evento done y traduce ProviderError a un
  * evento error sin filtrar credenciales. Si el cliente se desconecta a mitad del stream, aborta
  * el run. Lo consumen /v1/agent/run y /v1/run/:agentId.
+ *
+ * Si se pasa onRunFinished, al cerrar reporta el desenlace de la corrida (solo metadatos) sin
+ * afectar el flujo SSE: cualquier error del callback se traga.
  */
 export async function streamAgentRun(
   request: FastifyRequest,
   reply: FastifyReply,
   input: AgentRunInput,
   executeTool: ToolExecutor,
+  onRunFinished?: (outcome: AgentRunOutcome) => void,
 ): Promise<FastifyReply> {
+  const startedAt = Date.now();
+
   // Cancelacion en desconexion del cliente.
   const controller = new AbortController();
 
@@ -62,10 +78,21 @@ export async function streamAgentRun(
     { executeTool },
   );
 
+  // Metadatos del desenlace para onRunFinished. errorCode no nulo marca que entramos al catch.
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let stopReason: string | null = null;
+  let errorCode: string | null = null;
+
   try {
     for await (const event of stream) {
       if (controller.signal.aborted) {
         break;
+      }
+      if (event.type === 'stop') {
+        stopReason = event.reason;
+        inputTokens = event.usage.inputTokens;
+        outputTokens = event.usage.outputTokens;
       }
       sseWrite(reply, { data: event });
     }
@@ -73,6 +100,7 @@ export async function streamAgentRun(
       sseWrite(reply, { event: 'done', data: {} });
     }
   } catch (error) {
+    errorCode = error instanceof ProviderError ? error.code : 'UNKNOWN';
     if (!controller.signal.aborted) {
       if (error instanceof ProviderError) {
         sseWrite(reply, {
@@ -96,6 +124,20 @@ export async function streamAgentRun(
     // Marcamos finished ANTES de end(): asi el evento close que dispara end() ve finished=true y
     // no aborta. El orden importa.
     finished = true;
+    if (onRunFinished) {
+      try {
+        onRunFinished({
+          status: controller.signal.aborted ? 'aborted' : errorCode !== null ? 'error' : 'completed',
+          inputTokens,
+          outputTokens,
+          stopReason,
+          errorCode,
+          durationMs: Date.now() - startedAt,
+        });
+      } catch {
+        // El reporte del desenlace es best-effort: jamas interrumpe el cierre del stream.
+      }
+    }
     reply.raw.end();
   }
 
