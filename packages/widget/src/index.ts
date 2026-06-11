@@ -5,5 +5,6 @@ if (!customElements.get('ledesma-agent')) {
 }
 
 export { parseSseChunks } from './sse.js';
+export { createTokenManager } from './token-manager.js';
 export * from './turns.js';
 export * from './client.js';
