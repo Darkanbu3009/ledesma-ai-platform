@@ -11,11 +11,18 @@ import { registerErrorHandler } from './errors/error-handler.js';
 import { loggerRedaction } from './logger.js';
 import type { Env } from './config/env.js';
 
-export async function buildServer(config: Env): Promise<FastifyInstance> {
+export interface BuildServerOptions {
+  /** Destino del stream de logs de pino. Inyectable en tests para capturar y auditar las lineas
+   * emitidas; si no se pasa, pino escribe a stdout como siempre. */
+  loggerDestination?: { write(msg: string): void };
+}
+
+export async function buildServer(config: Env, options: BuildServerOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
       level: config.LOG_LEVEL,
       redact: loggerRedaction,
+      ...(options.loggerDestination !== undefined ? { stream: options.loggerDestination } : {}),
     },
   });
 
