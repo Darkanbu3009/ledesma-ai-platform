@@ -12,6 +12,7 @@ interface AgentRow {
   temperature: number | null;
   base_url: string | null;
   tools: unknown;
+  webhook_secret: string;
   owner_id: string | null;
   created_at: Date | string;
   updated_at: Date | string;
@@ -29,6 +30,8 @@ function rowToConfig(row: AgentRow): AgentConfig {
     temperature: row.temperature,
     baseUrl: row.base_url,
     tools: (Array.isArray(row.tools) ? row.tools : []) as AgentConfig['tools'],
+    // webhook_secret nunca se inserta ni se actualiza desde aqui: lo genera el default de la base.
+    webhookSecret: row.webhook_secret,
     ownerId: row.owner_id,
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),

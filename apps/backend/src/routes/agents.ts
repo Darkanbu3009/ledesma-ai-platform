@@ -15,6 +15,9 @@ const StoredToolSchema = z.object({
   url: z.string().url().startsWith('https://', 'Webhook URL must use https'),
 });
 
+// webhookSecret NO es parte del input: lo genera la base al crear y el update nunca lo toca.
+// Las respuestas si lo incluyen (viene en el AgentConfig del repo) para mostrarlo en Conectar.
+// TODO: rotacion del secreto de webhooks (endpoint dedicado, etapa futura).
 const AgentInputSchema = z.object({
   name: z.string().min(1).max(120),
   description: z.string().max(2000).optional(),
