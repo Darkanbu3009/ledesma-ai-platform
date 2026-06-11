@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Play, Plug, RefreshCw } from 'lucide-react';
+import { ArrowLeft, BarChart3, Play, Plug, RefreshCw } from 'lucide-react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { AgentFormSchema, type AgentFormParsed, type AgentFormValues } from '../lib/agent-schema';
@@ -232,6 +232,13 @@ export function AgentFormPage() {
                   >
                     <Plug className="h-4 w-4" />
                     Conectar
+                  </Link>
+                  <Link
+                    to={`/agentes/${id}/uso`}
+                    className="inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2.5 text-sm font-medium text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
+                  >
+                    <BarChart3 className="h-4 w-4" />
+                    Uso
                   </Link>
                   <button
                     type="button"

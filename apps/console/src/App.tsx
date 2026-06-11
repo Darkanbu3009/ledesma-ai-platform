@@ -4,6 +4,7 @@ import { AgentsPage } from './pages/AgentsPage';
 import { AgentFormPage } from './pages/AgentFormPage';
 import { PlaygroundPage } from './pages/PlaygroundPage';
 import { ConnectPage } from './pages/ConnectPage';
+import { UsagePage } from './pages/UsagePage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AppLayout } from './components/layout/AppLayout';
 
@@ -18,6 +19,7 @@ export function App() {
           <Route path="/agentes/:id" element={<AgentFormPage />} />
           <Route path="/agentes/:id/playground" element={<PlaygroundPage />} />
           <Route path="/agentes/:id/conectar" element={<ConnectPage />} />
+          <Route path="/agentes/:id/uso" element={<UsagePage />} />
         </Route>
       </Route>
       <Route path="/" element={<Navigate to="/agentes" replace />} />
