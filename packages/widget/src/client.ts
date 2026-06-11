@@ -4,8 +4,11 @@ import type { ChatMessage } from './turns.js';
 export interface StreamParams {
   /** URL completa a la que se hace el POST (contrato publico {endpoint} con { messages }). */
   endpoint: string;
-  /** Opcional: modo directo/demo. En produccion el proxy del cliente agrega la key. */
+  /** Opcional: modo directo/demo. En produccion la key nunca viaja al navegador. */
   providerKey?: string;
+  /** Opcional: token de sesion efimero (emitido por el backend del cliente). Tiene precedencia
+   * sobre providerKey: si viene, viaja en x-session-token y la key NO se manda. */
+  sessionToken?: string;
   messages: ChatMessage[];
   signal: AbortSignal;
   onMessage: (m: SseMessage) => void;
@@ -13,15 +16,17 @@ export interface StreamParams {
 
 /**
  * Ejecuta un turno contra el contrato publico del agente: POST {endpoint} con { messages } y
- * respuesta SSE. La key del proveedor viaja en x-provider-key SOLO si viene (en produccion la
- * agrega el proxy del cliente, nunca el navegador).
+ * respuesta SSE. La credencial viaja en x-session-token si hay token de sesion; si no, en
+ * x-provider-key SOLO si la key viene (modo directo/demo).
  */
 export async function streamAgent(
   params: StreamParams,
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (params.providerKey !== undefined && params.providerKey !== '') {
+  if (params.sessionToken !== undefined && params.sessionToken !== '') {
+    headers['x-session-token'] = params.sessionToken;
+  } else if (params.providerKey !== undefined && params.providerKey !== '') {
     headers['x-provider-key'] = params.providerKey;
   }
 

@@ -4,14 +4,16 @@ import {
   curlSnippet,
   mobileWebGuide,
   nodeSnippet,
-  proxyServerSnippet,
+  sessionTokensEndpoint,
+  tokenServerSnippet,
   widgetDirectSnippet,
-  widgetProxySnippet,
   widgetScriptUrl,
+  widgetTokenSnippet,
 } from '../src/lib/snippets';
 
 const params = { apiUrl: 'https://api.example.com', agentId: 'abc-123' };
 const endpoint = 'https://api.example.com/v1/run/abc-123';
+const tokensEndpoint = 'https://api.example.com/v1/session-tokens';
 const scriptUrl = 'https://api.example.com/widget/ledesma-agent.js';
 
 describe('agentEndpoint', () => {
@@ -41,10 +43,18 @@ describe('nodeSnippet', () => {
 });
 
 describe('mobileWebGuide', () => {
-  it('contiene el endpoint y advierte que la key no va al dispositivo', () => {
+  it('contiene ambos endpoints y advierte que la key no va al dispositivo', () => {
     const guide = mobileWebGuide(params);
     expect(guide).toContain(endpoint);
+    expect(guide).toContain(tokensEndpoint);
+    expect(guide).toContain('x-session-token');
     expect(guide).toContain('la key nunca viaja al dispositivo');
+  });
+});
+
+describe('sessionTokensEndpoint', () => {
+  it('compone {apiUrl}/v1/session-tokens', () => {
+    expect(sessionTokensEndpoint(params)).toBe(tokensEndpoint);
   });
 });
 
@@ -67,23 +77,28 @@ describe('widgetDirectSnippet', () => {
   });
 });
 
-describe('widgetProxySnippet', () => {
-  it('apunta al backend del cliente, sin provider-key ni endpoint de la plataforma', () => {
-    const snippet = widgetProxySnippet(params);
+describe('widgetTokenSnippet', () => {
+  it('apunta directo a la plataforma con token-url del backend del cliente, sin provider-key', () => {
+    const snippet = widgetTokenSnippet(params);
     expect(snippet).not.toContain('provider-key');
-    expect(snippet).not.toContain(endpoint);
-    expect(snippet).toContain('endpoint="https://TU-BACKEND.com/api/agente"');
+    expect(snippet).toContain(`endpoint="${endpoint}"`);
+    expect(snippet).toContain('token-url="https://TU-BACKEND.com/api/token-agente"');
   });
 
   it('carga el script del widget desde la plataforma', () => {
-    expect(widgetProxySnippet(params)).toContain(`<script src="${scriptUrl}">`);
+    expect(widgetTokenSnippet(params)).toContain(`<script src="${scriptUrl}">`);
   });
 });
 
-describe('proxyServerSnippet', () => {
-  it('contiene el endpoint del agente y lee la key desde el entorno del servidor', () => {
-    const snippet = proxyServerSnippet(params);
-    expect(snippet).toContain(endpoint);
+describe('tokenServerSnippet', () => {
+  it('emite el token contra la plataforma con la key del entorno y el agentId', () => {
+    const snippet = tokenServerSnippet(params);
+    expect(snippet).toContain(tokensEndpoint);
     expect(snippet).toContain('process.env.PROVIDER_API_KEY');
+    expect(snippet).toContain(`agentId: '${params.agentId}'`);
+  });
+
+  it('no contiene ninguna key con pinta real', () => {
+    expect(tokenServerSnippet(params)).not.toContain('sk-');
   });
 });
