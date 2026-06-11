@@ -5,12 +5,24 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 import globals from 'globals';
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/node_modules/**', '**/coverage/**'] },
+  {
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '**/coverage/**',
+      // Artefacto de build copiado desde packages/widget/dist (gitignored).
+      'apps/backend/public/widget/ledesma-agent.js',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
     files: ['apps/backend/**/*.ts'],
     languageOptions: { globals: { ...globals.node } },
+  },
+  {
+    files: ['apps/backend/public/**/*.js'],
+    languageOptions: { globals: { ...globals.browser } },
   },
   {
     files: ['packages/shared/**/*.ts'],
