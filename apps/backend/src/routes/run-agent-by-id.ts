@@ -5,6 +5,7 @@ import type { Env } from '../config/env.js';
 import { AppError } from '../errors/app-error.js';
 import { getSql } from '../db/client.js';
 import { AgentRepository } from '../agents/agent-repository.js';
+import { AgentRunRepository } from '../agents/run-repository.js';
 import { createDemoRegistry } from '../tools/demo-registry.js';
 import { createWebhookExecutor, storedToolsToDefinitions } from '../tools/webhook-tools.js';
 import { AGENT_LIMITS } from '../agent/index.js';
@@ -30,6 +31,7 @@ const RunByIdBodySchema = z
 export function runAgentByIdRoutes(config: Env) {
   return async function (app: FastifyInstance): Promise<void> {
     const repo = new AgentRepository(getSql(config));
+    const runRepo = new AgentRunRepository(getSql(config));
 
     // Plano de ejecucion: BYOK por header; el agentId (uuid) identifica la config. La proteccion
     // por token publicable por agente se agrega en una etapa de seguridad posterior.
@@ -79,6 +81,29 @@ export function runAgentByIdRoutes(config: Env) {
           ...(parsed.data.maxIterations !== undefined ? { maxIterations: parsed.data.maxIterations } : {}),
         },
         executeTool,
+        // Registro fire-and-forget de la corrida (solo metadatos): la corrida del cliente JAMAS
+        // falla por el registro; si el insert falla solo se deja un warn.
+        (outcome) => {
+          void runRepo
+            .record({
+              agentId: agent.id,
+              ownerId: agent.ownerId,
+              providerId: agent.providerId,
+              model: agent.model,
+              inputTokens: outcome.inputTokens,
+              outputTokens: outcome.outputTokens,
+              stopReason: outcome.stopReason,
+              status: outcome.status,
+              errorCode: outcome.errorCode,
+              durationMs: outcome.durationMs,
+            })
+            .catch((error) => {
+              request.log.warn(
+                { err: { message: error instanceof Error ? error.message : 'unknown' } },
+                'run record failed',
+              );
+            });
+        },
       );
     });
   };

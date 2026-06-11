@@ -4,6 +4,7 @@ import type { Env } from '../config/env.js';
 import { AppError } from '../errors/app-error.js';
 import { getSql } from '../db/client.js';
 import { AgentRepository } from '../agents/agent-repository.js';
+import { AgentRunRepository } from '../agents/run-repository.js';
 import { createSupabaseJwtVerifier, type JwtVerifier } from '../auth/jwt-verifier.js';
 import { requireUser } from '../auth/require-user.js';
 
@@ -30,6 +31,7 @@ const AgentInputSchema = z.object({
 export function agentRoutes(config: Env, deps?: { verifier?: JwtVerifier }) {
   return async function (app: FastifyInstance): Promise<void> {
     const repo = new AgentRepository(getSql(config));
+    const runRepo = new AgentRunRepository(getSql(config));
     const verifier = deps?.verifier ?? createSupabaseJwtVerifier(config);
 
     app.get('/v1/agents', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -43,6 +45,18 @@ export function agentRoutes(config: Env, deps?: { verifier?: JwtVerifier }) {
       const agent = await repo.getByIdForOwner(request.params.id, user.id);
       if (!agent) throw new AppError('NOT_FOUND', 404, 'Agent not found');
       return reply.send({ agent });
+    });
+
+    // Uso por agente: totales acumulados y corridas recientes (solo metadatos), acotado al owner.
+    app.get('/v1/agents/:id/usage', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      const user = await requireUser(request, verifier);
+      const agent = await repo.getByIdForOwner(request.params.id, user.id);
+      if (!agent) throw new AppError('NOT_FOUND', 404, 'Agent not found');
+      const [totals, recent] = await Promise.all([
+        runRepo.totalsForAgent(agent.id),
+        runRepo.recentForAgent(agent.id),
+      ]);
+      return reply.send({ totals, recent });
     });
 
     app.post('/v1/agents', async (request: FastifyRequest, reply: FastifyReply) => {
