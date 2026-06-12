@@ -207,7 +207,7 @@ export function AgentFormPage() {
               </Field>
             )}
 
-            <ToolsEditor />
+            <ToolsEditor agentId={id} />
 
             <div className="flex items-center justify-between gap-4 pt-2">
               <button
