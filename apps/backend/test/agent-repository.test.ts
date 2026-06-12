@@ -72,7 +72,7 @@ describe('AgentRepository', () => {
     const texto = strings.join('<param>');
     expect(texto).toContain("webhook_secret = 'whsec_' || encode(gen_random_bytes(24), 'hex')");
     expect(texto).toMatch(/where id = <param> and owner_id = <param>/);
-    expect(texto).toContain('returning *');
+    expect(texto).toMatch(/returning id,[\s\S]*webhook_secret/);
     expect(values).toEqual(['11111111-1111-1111-1111-111111111111', 'user-1']);
   });
 
