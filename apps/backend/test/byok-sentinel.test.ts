@@ -34,6 +34,12 @@ vi.mock('../src/agents/agent-repository.js', () => ({
 }));
 vi.mock('../src/db/client.js', () => ({ getSql: vi.fn(() => ({})), setSqlForTesting: vi.fn() }));
 
+// DNS fijado a una IP publica: la guarda anti-SSRF (ip-guard) no depende de la red en tests
+// y los hostnames de los webhooks de prueba no existen fuera del sandbox.
+vi.mock('node:dns/promises', () => ({
+  lookup: vi.fn(async () => [{ address: '34.107.221.82', family: 4 }]),
+}));
+
 // jose mockeado para rechazar todo token: solo se prueba el camino 401.
 vi.mock('jose', () => ({
   createRemoteJWKSet: vi.fn(() => ({})),
