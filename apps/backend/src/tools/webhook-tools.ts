@@ -37,11 +37,12 @@ export function storedToolsToDefinitions(tools: StoredTool[]): ToolDefinition[] 
  * Respuesta esperada { content: string, isError?: boolean }; si no hay content string, se
  * serializa el body. No sigue redirecciones (3xx regresa isError). NUNCA lanza: todo fallo
  * regresa isError: true con el detalle (nombre y mensaje del error; el secreto y los headers
- * jamas se incluyen) y se reporta via deps.warn (console.warn por default). deps.lookupFn
- * permite inyectar la resolucion DNS en tests. */
+ * jamas se incluyen) y se reporta via deps.warn (console.warn por default). Sin secreto
+ * (undefined/null/'') ninguna ejecucion toca la red: regresa webhook secret missing.
+ * deps.lookupFn permite inyectar la resolucion DNS en tests. */
 export function createWebhookExecutor(
   tools: StoredTool[],
-  secret: string,
+  secret: string | null | undefined,
   fetchImpl: typeof fetch = fetch,
   deps: { lookupFn?: LookupFn; warn?: (message: string) => void } = {},
 ): ToolExecutor {
@@ -49,6 +50,12 @@ export function createWebhookExecutor(
   const warn = deps.warn ?? ((message: string) => console.warn(message));
 
   return async (call: ToolCall, signal?: AbortSignal): Promise<ToolExecutionResult> => {
+    // Guarda del secreto: sin el no hay firma posible. Antes un undefined (p.ej. fila de DB sin
+    // webhook_secret) llegaba hasta createHmac, que lanzaba un TypeError tragado por el catch.
+    if (secret === undefined || secret === null || secret === '') {
+      warn(`webhook tool ${call.name} cannot run: webhook secret missing`);
+      return { content: `Tool ${call.name} cannot run: webhook secret missing`, isError: true };
+    }
     const tool = byName.get(call.name);
     if (!tool) return { content: `Unknown tool: ${call.name}`, isError: true };
     if (isForbiddenWebhookUrl(tool.url)) {

@@ -61,29 +61,35 @@ function isForbiddenIpv6(ip: string): boolean {
   return false;
 }
 
-/** true si la IP cae en rangos privados/reservados; lo que no parsea como IP se rechaza. */
+/** true si la IP cae en rangos privados/reservados; lo que no parsea como IP se rechaza.
+ * NUNCA lanza: cualquier error interno de parseo se trata como prohibida (fail-closed). */
 export function isForbiddenIp(ip: string): boolean {
-  const version = isIP(ip);
-  if (version === 4) return isForbiddenIpv4(ip);
-  if (version === 6) return isForbiddenIpv6(ip);
-  return true;
+  try {
+    const version = isIP(ip);
+    if (version === 4) return isForbiddenIpv4(ip);
+    if (version === 6) return isForbiddenIpv6(ip);
+    return true;
+  } catch {
+    return true;
+  }
 }
 
 /** true si el hostname ES una IP prohibida o resuelve (DNS) a ALGUNA IP prohibida; tambien
  * true si no resuelve o resuelve a una lista vacia (se rechaza por defecto). Acepta IPv6
- * con brackets tal como la entrega new URL().hostname. */
+ * con brackets tal como la entrega new URL().hostname. NUNCA lanza: cualquier error del
+ * lookup (rechazo o lanzamiento sincrono, p.ej. opciones no soportadas por el runtime) se
+ * trata como prohibido (fail-closed). */
 export async function resolvesToForbiddenIp(
   hostname: string,
   lookupFn: LookupFn = lookup,
 ): Promise<boolean> {
-  const host = hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
-  if (isIP(host) !== 0) return isForbiddenIp(host);
-  let addresses: Array<{ address: string; family: number }>;
   try {
-    addresses = await lookupFn(host, { all: true, verbatim: true });
+    const host = hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
+    if (isIP(host) !== 0) return isForbiddenIp(host);
+    const addresses = await lookupFn(host, { all: true, verbatim: true });
+    if (addresses.length === 0) return true;
+    return addresses.some((entry) => isForbiddenIp(entry.address));
   } catch {
     return true;
   }
-  if (addresses.length === 0) return true;
-  return addresses.some((entry) => isForbiddenIp(entry.address));
 }
