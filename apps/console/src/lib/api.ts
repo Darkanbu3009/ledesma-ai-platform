@@ -27,13 +27,18 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   const { apiUrl } = readApiEnv(import.meta.env as Record<string, string | undefined>);
   const token = await getAccessToken();
 
+  // Content-Type solo con body: Fastify rechaza json vacio (FST_ERR_CTP_EMPTY_JSON_BODY).
+  const headers: Record<string, string> = {
+    ...(init?.body !== undefined && init?.body !== null
+      ? { 'Content-Type': 'application/json' }
+      : {}),
+    ...(init?.headers as Record<string, string> | undefined),
+    Authorization: `Bearer ${token}`,
+  };
+
   const response = await fetch(`${apiUrl}${path}`, {
     ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...init?.headers,
-      Authorization: `Bearer ${token}`,
-    },
+    headers,
   });
 
   if (response.status === 204) {
