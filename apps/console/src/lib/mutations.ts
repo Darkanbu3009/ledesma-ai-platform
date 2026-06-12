@@ -42,6 +42,23 @@ export function useRotateWebhookSecret(id: string) {
   });
 }
 
+export interface TestToolResult {
+  content: string;
+  isError: boolean;
+  durationMs: number;
+}
+
+/** Prueba una tool GUARDADA del agente contra su webhook real (ejecutor firmado del backend). */
+export function useTestTool(agentId: string) {
+  return useMutation({
+    mutationFn: ({ toolName, input }: { toolName: string; input: Record<string, unknown> }) =>
+      apiFetch<TestToolResult>(
+        `/v1/agents/${agentId}/tools/${encodeURIComponent(toolName)}/test`,
+        { method: 'POST', body: JSON.stringify({ input }) },
+      ),
+  });
+}
+
 export function useDeleteAgent() {
   const qc = useQueryClient();
   return useMutation({

@@ -1,15 +1,17 @@
 import { useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { Plus, Trash2 } from 'lucide-react';
+import { FlaskConical, Plus, Trash2 } from 'lucide-react';
 import type { AgentFormValues } from '../../lib/agent-schema';
 import {
   paramsToJsonSchema,
+  sampleInputFromParams,
   tryJsonSchemaToParams,
   tryParseJsonObject,
   type ParamType,
   type ToolFormValues,
 } from '../../lib/tool-schema';
 import { Field, inputClass } from '../ui/Field';
+import { TestToolDialog } from './TestToolDialog';
 
 const PARAM_TYPES: ParamType[] = ['string', 'number', 'boolean'];
 
@@ -17,8 +19,9 @@ function emptyTool(): ToolFormValues {
   return { name: '', description: '', url: '', mode: 'simple', params: [], rawSchema: '' };
 }
 
-/** Editor de la lista de tools del agente; requiere FormProvider del form padre. */
-export function ToolsEditor() {
+/** Editor de la lista de tools del agente; requiere FormProvider del form padre.
+ * agentId habilita el boton Probar (solo en edicion: la prueba usa la version guardada). */
+export function ToolsEditor({ agentId }: { agentId?: string }) {
   const {
     control,
     formState: { errors },
@@ -36,7 +39,7 @@ export function ToolsEditor() {
           </div>
         )}
         {fields.map((field, index) => (
-          <ToolCard key={field.id} index={index} onRemove={() => remove(index)} />
+          <ToolCard key={field.id} index={index} agentId={agentId} onRemove={() => remove(index)} />
         ))}
         {listError && <p className="text-sm text-brasa">{listError}</p>}
         <button
@@ -52,13 +55,21 @@ export function ToolsEditor() {
   );
 }
 
-function ToolCard({ index, onRemove }: { index: number; onRemove: () => void }) {
+function ToolCard({
+  index,
+  agentId,
+  onRemove,
+}: {
+  index: number;
+  agentId?: string;
+  onRemove: () => void;
+}) {
   const {
     control,
     register,
     getValues,
     setValue,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useFormContext<AgentFormValues>();
   const {
     fields: paramFields,
@@ -68,7 +79,17 @@ function ToolCard({ index, onRemove }: { index: number; onRemove: () => void }) 
   } = useFieldArray({ control, name: `tools.${index}.params` });
   const mode = useWatch({ control, name: `tools.${index}.mode` }) ?? 'simple';
   const [modeError, setModeError] = useState<string | null>(null);
+  const [testDialog, setTestDialog] = useState<{ toolName: string; initialInput: string } | null>(
+    null,
+  );
   const toolErrors = errors.tools?.[index];
+
+  function openTestDialog() {
+    const tool = getValues(`tools.${index}`);
+    if (!tool) return;
+    const sample = tool.mode === 'simple' ? sampleInputFromParams(tool.params ?? []) : {};
+    setTestDialog({ toolName: tool.name, initialInput: JSON.stringify(sample, null, 2) });
+  }
 
   function switchMode(next: 'simple' | 'json') {
     setModeError(null);
@@ -93,15 +114,38 @@ function ToolCard({ index, onRemove }: { index: number; onRemove: () => void }) 
     <div className="space-y-4 rounded-xl border border-grafito-border bg-grafito p-4">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-semibold text-hueso">Herramienta {index + 1}</p>
-        <button
-          type="button"
-          onClick={onRemove}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-grafito-border px-3 py-1.5 text-xs font-medium text-brasa transition hover:border-brasa"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-          Eliminar herramienta
-        </button>
+        <div className="flex items-center gap-2">
+          {agentId && (
+            <button
+              type="button"
+              onClick={openTestDialog}
+              disabled={isDirty}
+              title={isDirty ? 'Guarda primero: la prueba usa la version guardada' : undefined}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-grafito-border px-3 py-1.5 text-xs font-medium text-hueso-muted transition hover:border-hueso-muted hover:text-hueso disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-grafito-border disabled:hover:text-hueso-muted"
+            >
+              <FlaskConical className="h-3.5 w-3.5" />
+              Probar
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onRemove}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-grafito-border px-3 py-1.5 text-xs font-medium text-brasa transition hover:border-brasa"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Eliminar herramienta
+          </button>
+        </div>
       </div>
+
+      {agentId && testDialog && (
+        <TestToolDialog
+          agentId={agentId}
+          toolName={testDialog.toolName}
+          initialInput={testDialog.initialInput}
+          onClose={() => setTestDialog(null)}
+        />
+      )}
 
       <Field label="Nombre" error={toolErrors?.name?.message}>
         <input

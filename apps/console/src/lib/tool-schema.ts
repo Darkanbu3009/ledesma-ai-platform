@@ -96,6 +96,15 @@ export function tryJsonSchemaToParams(schema: Record<string, unknown>): ToolPara
   return params;
 }
 
+/** Input de ejemplo para probar una tool: un valor por parametro segun su tipo. */
+export function sampleInputFromParams(params: ToolParam[]): Record<string, unknown> {
+  const input: Record<string, unknown> = {};
+  for (const p of params) {
+    input[p.name] = p.type === 'string' ? 'texto' : p.type === 'number' ? 0 : false;
+  }
+  return input;
+}
+
 /** ToolFormValues -> StoredTool (payload del API). */
 export function toolFormToStored(tool: ToolFormValues): {
   name: string;

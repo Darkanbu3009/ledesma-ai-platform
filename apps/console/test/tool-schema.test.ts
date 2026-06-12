@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   paramsToJsonSchema,
+  sampleInputFromParams,
   storedToToolForm,
   ToolFormSchema,
   toolFormToStored,
@@ -44,6 +45,21 @@ describe('paramsToJsonSchema', () => {
     const schema = paramsToJsonSchema([]);
     expect(schema).toEqual({ type: 'object', properties: {} });
     expect('required' in schema).toBe(false);
+  });
+});
+
+describe('sampleInputFromParams', () => {
+  it('genera un valor de ejemplo por tipo: string -> "texto", number -> 0, boolean -> false', () => {
+    const sample = sampleInputFromParams([
+      { name: 'query', type: 'string', description: '', required: true },
+      { name: 'limite', type: 'number', description: '', required: false },
+      { name: 'activo', type: 'boolean', description: '', required: false },
+    ]);
+    expect(sample).toEqual({ query: 'texto', limite: 0, activo: false });
+  });
+
+  it('sin params genera objeto vacio', () => {
+    expect(sampleInputFromParams([])).toEqual({});
   });
 });
 
