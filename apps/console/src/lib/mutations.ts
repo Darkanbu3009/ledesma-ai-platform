@@ -28,6 +28,20 @@ export function useUpdateAgent(id: string) {
   });
 }
 
+export function useRotateWebhookSecret(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<{ agent: AgentConfig }>(`/v1/agents/${id}/webhook-secret/rotate`, {
+        method: 'POST',
+      }).then((r) => r.agent),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['agents', id] });
+      void qc.invalidateQueries({ queryKey: ['agents'] });
+    },
+  });
+}
+
 export function useDeleteAgent() {
   const qc = useQueryClient();
   return useMutation({

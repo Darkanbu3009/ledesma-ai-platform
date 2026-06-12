@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Eye, EyeOff, RefreshCw, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, RefreshCw, RotateCcw, ShieldAlert } from 'lucide-react';
 import { providerLabel } from '../lib/agents';
 import { readApiEnv } from '../lib/env';
 import { useAgent } from '../lib/queries';
+import { useRotateWebhookSecret } from '../lib/mutations';
 import {
   agentEndpoint,
   curlSnippet,
@@ -16,6 +17,7 @@ import {
   type SnippetParams,
 } from '../lib/snippets';
 import { CopyButton } from '../components/ui/CopyButton';
+import { RotateSecretDialog } from '../components/agents/RotateSecretDialog';
 
 const preClass =
   'overflow-x-auto rounded-xl border border-grafito-border bg-carbon p-4 font-mono text-xs leading-relaxed text-hueso';
@@ -31,6 +33,25 @@ export function ConnectPage() {
   const { id } = useParams<{ id: string }>();
   const { data: agent, isLoading, isError, refetch } = useAgent(id);
   const [showSecret, setShowSecret] = useState(false);
+  const [rotateOpen, setRotateOpen] = useState(false);
+  const [rotatedNotice, setRotatedNotice] = useState(false);
+  const noticeTimer = useRef<number | undefined>(undefined);
+  const rotateSecret = useRotateWebhookSecret(id ?? '');
+
+  useEffect(() => () => window.clearTimeout(noticeTimer.current), []);
+
+  const handleRotate = () => {
+    rotateSecret.mutate(undefined, {
+      onSuccess: () => {
+        setRotateOpen(false);
+        // Revelamos el secreto nuevo de inmediato para que se pueda copiar sin otro click.
+        setShowSecret(true);
+        setRotatedNotice(true);
+        window.clearTimeout(noticeTimer.current);
+        noticeTimer.current = window.setTimeout(() => setRotatedNotice(false), 6000);
+      },
+    });
+  };
 
   if (isLoading) {
     return (
@@ -161,8 +182,22 @@ export function ConnectPage() {
                 {showSecret ? 'Ocultar' : 'Revelar'}
               </button>
               <CopyButton text={agent.webhookSecret} />
+              <button
+                type="button"
+                onClick={() => setRotateOpen(true)}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-grafito-border px-3 py-1.5 text-xs font-medium text-brasa transition hover:border-brasa hover:text-brasa-hover"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Rotar secreto
+              </button>
             </div>
           </div>
+
+          {rotatedNotice ? (
+            <p role="status" className="mt-2 text-sm text-brasa">
+              Secreto rotado. Actualiza tus integraciones.
+            </p>
+          ) : null}
 
           <div className="mt-4">
             <p className="text-xs text-hueso-muted">Headers enviados en cada POST</p>
@@ -180,6 +215,13 @@ export function ConnectPage() {
               usa el body crudo (rawBody) para verificar.
             </p>
           </div>
+
+          <RotateSecretDialog
+            open={rotateOpen}
+            busy={rotateSecret.isPending}
+            onConfirm={handleRotate}
+            onCancel={() => setRotateOpen(false)}
+          />
         </section>
       ) : null}
 
