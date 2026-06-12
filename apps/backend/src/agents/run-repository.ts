@@ -32,9 +32,32 @@ export interface AgentRunSummary {
   createdAt: string;
 }
 
+/** Rango opcional de fechas para acotar consultas por created_at. */
+export interface AgentRunRange {
+  from?: Date;
+  to?: Date;
+}
+
+export interface AgentRunsByDay {
+  date: string;
+  runs: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
 /** Acceso a datos de corridas de agentes. Recibe el cliente sql por inyeccion (testeable). */
 export class AgentRunRepository {
   constructor(private readonly sql: Sql) {}
+
+  /** Fragmento `and created_at >= from` o vacio; compone el where de forma segura. */
+  private fromCondition(range?: AgentRunRange) {
+    return range?.from ? this.sql`and created_at >= ${range.from}` : this.sql``;
+  }
+
+  /** Fragmento `and created_at <= to` o vacio; compone el where de forma segura. */
+  private toCondition(range?: AgentRunRange) {
+    return range?.to ? this.sql`and created_at <= ${range.to}` : this.sql``;
+  }
 
   async record(run: AgentRunRecord): Promise<void> {
     await this.sql`
@@ -45,7 +68,7 @@ export class AgentRunRepository {
     `;
   }
 
-  async totalsForAgent(agentId: string): Promise<AgentUsageTotals> {
+  async totalsForAgent(agentId: string, range?: AgentRunRange): Promise<AgentUsageTotals> {
     // counts/sums de postgres llegan como string (bigint): se mapean a number aqui.
     const rows = await this.sql<{ runs: string; completed: string; errors: string; input_tokens: string; output_tokens: string }[]>`
       select count(*) as runs,
@@ -54,6 +77,7 @@ export class AgentRunRepository {
              coalesce(sum(input_tokens), 0) as input_tokens,
              coalesce(sum(output_tokens), 0) as output_tokens
       from agent_runs where agent_id = ${agentId}
+      ${this.fromCondition(range)} ${this.toCondition(range)}
     `;
     const row = rows[0];
     return {
@@ -65,10 +89,11 @@ export class AgentRunRepository {
     };
   }
 
-  async recentForAgent(agentId: string, limit = 20): Promise<AgentRunSummary[]> {
+  async recentForAgent(agentId: string, range?: AgentRunRange, limit = 20): Promise<AgentRunSummary[]> {
     const rows = await this.sql<{ id: string; status: string; error_code: string | null; input_tokens: number; output_tokens: number; duration_ms: number; created_at: Date | string }[]>`
       select id, status, error_code, input_tokens, output_tokens, duration_ms, created_at
       from agent_runs where agent_id = ${agentId}
+      ${this.fromCondition(range)} ${this.toCondition(range)}
       order by created_at desc limit ${limit}
     `;
     return rows.map((r) => ({
@@ -79,6 +104,25 @@ export class AgentRunRepository {
       outputTokens: r.output_tokens,
       durationMs: r.duration_ms,
       createdAt: new Date(r.created_at).toISOString(),
+    }));
+  }
+
+  /** Serie diaria de corridas y tokens dentro del rango, ordenada por dia ascendente. */
+  async runsByDay(agentId: string, range?: AgentRunRange): Promise<AgentRunsByDay[]> {
+    const rows = await this.sql<{ day: Date | string; runs: string; input_tokens: string; output_tokens: string }[]>`
+      select date_trunc('day', created_at) as day,
+             count(*) as runs,
+             coalesce(sum(input_tokens), 0) as input_tokens,
+             coalesce(sum(output_tokens), 0) as output_tokens
+      from agent_runs where agent_id = ${agentId}
+      ${this.fromCondition(range)} ${this.toCondition(range)}
+      group by 1 order by 1
+    `;
+    return rows.map((r) => ({
+      date: new Date(r.day).toISOString().slice(0, 10),
+      runs: Number(r.runs),
+      inputTokens: Number(r.input_tokens),
+      outputTokens: Number(r.output_tokens),
     }));
   }
 }
