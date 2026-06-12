@@ -35,8 +35,8 @@ export function storedToolsToDefinitions(tools: StoredTool[]): ToolDefinition[] 
 /** Ejecutor por webhook: POST { tool, input } a la url de la tool, firmado con el secreto del
  * agente (HMAC-SHA256 de "{timestamp}.{body}" en x-ledesma-timestamp / x-ledesma-signature).
  * Respuesta esperada { content: string, isError?: boolean }; si no hay content string, se
- * serializa el body. NUNCA lanza: todo fallo regresa isError: true. deps.lookupFn permite
- * inyectar la resolucion DNS en tests. */
+ * serializa el body. No sigue redirecciones (3xx regresa isError). NUNCA lanza: todo fallo
+ * regresa isError: true. deps.lookupFn permite inyectar la resolucion DNS en tests. */
 export function createWebhookExecutor(
   tools: StoredTool[],
   secret: string,
@@ -76,8 +76,13 @@ export function createWebhookExecutor(
           'x-ledesma-signature': `v1=${signWebhookPayload(body, ts, secret)}`,
         },
         signal: controller.signal,
+        redirect: 'manual',
         body,
       });
+      // No seguimos redirecciones: un redirect podria rebotar hacia una IP interna.
+      if (response.status >= 300 && response.status < 400) {
+        return { content: `Tool ${call.name} webhook returned a redirect, which is not allowed`, isError: true };
+      }
       const text = await response.text();
       const clipped = text.length > WEBHOOK_LIMITS.maxResponseChars
         ? text.slice(0, WEBHOOK_LIMITS.maxResponseChars)
