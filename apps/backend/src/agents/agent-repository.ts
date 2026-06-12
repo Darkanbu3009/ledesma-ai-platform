@@ -30,7 +30,7 @@ function rowToConfig(row: AgentRow): AgentConfig {
     temperature: row.temperature,
     baseUrl: row.base_url,
     tools: (Array.isArray(row.tools) ? row.tools : []) as AgentConfig['tools'],
-    // webhook_secret nunca se inserta ni se actualiza desde aqui: lo genera el default de la base.
+    // webhook_secret nunca viene del input: lo genera la base (default al crear, gen_random_bytes al rotar).
     webhookSecret: row.webhook_secret,
     ownerId: row.owner_id,
     createdAt: new Date(row.created_at).toISOString(),
@@ -133,6 +133,19 @@ export class AgentRepository {
         temperature = ${input.temperature ?? null},
         base_url = ${input.baseUrl ?? null},
         tools = ${this.sql.json((input.tools ?? []) as unknown as Parameters<Sql['json']>[0])},
+        updated_at = now()
+      where id = ${id} and owner_id = ${ownerId}
+      returning *
+    `;
+    const row = rows[0];
+    return row ? rowToConfig(row) : null;
+  }
+
+  /** Genera un secreto de webhooks nuevo en la base (mismo formato que el default de V004). */
+  async rotateWebhookSecret(id: string, ownerId: string): Promise<AgentConfig | null> {
+    const rows = await this.sql<AgentRow[]>`
+      update agents set
+        webhook_secret = 'whsec_' || encode(gen_random_bytes(24), 'hex'),
         updated_at = now()
       where id = ${id} and owner_id = ${ownerId}
       returning *

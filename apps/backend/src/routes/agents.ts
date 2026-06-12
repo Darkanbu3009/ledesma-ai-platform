@@ -17,7 +17,7 @@ const StoredToolSchema = z.object({
 
 // webhookSecret NO es parte del input: lo genera la base al crear y el update nunca lo toca.
 // Las respuestas si lo incluyen (viene en el AgentConfig del repo) para mostrarlo en Conectar.
-// TODO: rotacion del secreto de webhooks (endpoint dedicado, etapa futura).
+// La rotacion del secreto tiene endpoint dedicado: POST /v1/agents/:id/webhook-secret/rotate.
 const AgentInputSchema = z.object({
   name: z.string().min(1).max(120),
   description: z.string().max(2000).optional(),
@@ -76,6 +76,14 @@ export function agentRoutes(config: Env, deps?: { verifier?: JwtVerifier }) {
       const parsed = AgentInputSchema.safeParse(request.body);
       if (!parsed.success) throw new AppError('VALIDATION_ERROR', 400, 'Invalid agent config', parsed.error.issues);
       const agent = await repo.updateForOwner(request.params.id, user.id, parsed.data);
+      if (!agent) throw new AppError('NOT_FOUND', 404, 'Agent not found');
+      return reply.send({ agent });
+    });
+
+    // Rota el secreto de webhooks del agente (acotado al owner); la base genera el valor nuevo.
+    app.post('/v1/agents/:id/webhook-secret/rotate', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      const user = await requireUser(request, verifier);
+      const agent = await repo.rotateWebhookSecret(request.params.id, user.id);
       if (!agent) throw new AppError('NOT_FOUND', 404, 'Agent not found');
       return reply.send({ agent });
     });
