@@ -111,14 +111,14 @@ describe('createWebhookExecutor', () => {
     expect(result.content).toContain('500');
   });
 
-  it('fetch lanza: isError true, sin lanzar', async () => {
+  it('fetch lanza: isError true con el nombre y mensaje del error, sin lanzar', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
-    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPublic });
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPublic, warn: () => {} });
 
     const result = await execute({ id: 'tu_1', name: 'cotizar', input: {} });
 
     expect(result.isError).toBe(true);
-    expect(result.content).toContain('failed');
+    expect(result.content).toBe('Tool cotizar webhook failed: Error: ECONNREFUSED');
   });
 
   it('timeout: aborta a los timeoutMs y regresa isError con timed out', async () => {
@@ -134,14 +134,15 @@ describe('createWebhookExecutor', () => {
           });
         }),
     );
-    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPublic });
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPublic, warn: () => {} });
 
     const pending = execute({ id: 'tu_1', name: 'cotizar', input: {} });
     await vi.advanceTimersByTimeAsync(WEBHOOK_LIMITS.timeoutMs);
     const result = await pending;
 
     expect(result.isError).toBe(true);
-    expect(result.content).toContain('timed out');
+    // El timeout conserva su mensaje dedicado, sin el detalle generico del catch.
+    expect(result.content).toBe('Tool cotizar webhook timed out');
   });
 
   it('tool desconocida: isError true sin llamar al webhook', async () => {
@@ -212,6 +213,97 @@ describe('createWebhookExecutor', () => {
     expect(result.isError).toBe(false);
     expect(result.content).toHaveLength(WEBHOOK_LIMITS.maxResponseChars);
     expect(result.content).toBe('a'.repeat(WEBHOOK_LIMITS.maxResponseChars));
+  });
+});
+
+describe('createWebhookExecutor: ningun fallo es opaco', () => {
+  it('fetch rechaza con un TypeError: el content trae nombre y mensaje', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('fetch failed'));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPublic, warn: () => {} });
+
+    const result = await execute({ id: 'tu_1', name: 'cotizar', input: {} });
+
+    expect(result).toEqual({ content: 'Tool cotizar webhook failed: TypeError: fetch failed', isError: true });
+  });
+
+  it('fetch rechaza con algo que no es Error: unknown error en el content', async () => {
+    const fetchMock = vi.fn().mockRejectedValue('cable suelto');
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPublic, warn: () => {} });
+
+    const result = await execute({ id: 'tu_1', name: 'cotizar', input: {} });
+
+    expect(result).toEqual({ content: 'Tool cotizar webhook failed: unknown error', isError: true });
+  });
+
+  it('cada fallo se reporta via warn inyectado con el detalle, sin el secreto', async () => {
+    const warn = vi.fn();
+    const fetchMock = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPublic, warn });
+
+    await execute({ id: 'tu_1', name: 'cotizar', input: {} });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const mensaje = String(warn.mock.calls[0]?.[0]);
+    expect(mensaje).toContain('cotizar');
+    expect(mensaje).toContain('Error: ECONNREFUSED');
+    expect(mensaje).not.toContain(TEST_SECRET);
+    expect(mensaje).not.toContain('whsec_');
+  });
+
+  it.each([[undefined], [null], ['']])(
+    'secreto %o: webhook secret missing con isError true, sin lanzar, sin fetch y sin lookup',
+    async (secreto) => {
+      const fetchMock = vi.fn();
+      const lookupSpy = vi.fn(async () => [{ address: '34.107.221.82', family: 4 }]);
+      const execute = createWebhookExecutor([makeTool()], secreto, asFetch(fetchMock), {
+        lookupFn: lookupSpy as unknown as LookupFn,
+        warn: () => {},
+      });
+
+      const result = await execute({ id: 'tu_1', name: 'cotizar', input: {} });
+
+      expect(result).toEqual({ content: 'Tool cotizar cannot run: webhook secret missing', isError: true });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(lookupSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it('ningun content ni warn posible contiene el secreto centinela en todos los modos de fallo', async () => {
+    const SECRETO = 'whsec_SENTINEL-ejecutor-7f6e5d';
+    const haystacks: string[] = [];
+    const warn = (mensaje: string) => haystacks.push(mensaje);
+    const abortError = Object.assign(new Error('aborted'), { name: 'AbortError' });
+
+    const escenarios: Array<[string, ReturnType<typeof vi.fn>, StoredTool]> = [
+      ['exito con content', vi.fn().mockResolvedValue(fakeResponse(JSON.stringify({ content: 'ok' }))), makeTool()],
+      ['exito sin content', vi.fn().mockResolvedValue(fakeResponse(JSON.stringify({ resultado: 1 }))), makeTool()],
+      ['status 500', vi.fn().mockResolvedValue(fakeResponse('boom', 500)), makeTool()],
+      ['redirect 302', vi.fn().mockResolvedValue(fakeResponse('', 302)), makeTool()],
+      ['fetch lanza Error', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')), makeTool()],
+      ['fetch lanza no-Error', vi.fn().mockRejectedValue('zas'), makeTool()],
+      ['abort por timeout', vi.fn().mockRejectedValue(abortError), makeTool()],
+      ['url prohibida', vi.fn(), makeTool({ url: 'http://api.cliente.com/hook' })],
+    ];
+    for (const [, fetchMock, tool] of escenarios) {
+      const execute = createWebhookExecutor([tool], SECRETO, asFetch(fetchMock), { lookupFn: lookupPublic, warn });
+      haystacks.push(String((await execute({ id: 'tu_1', name: 'cotizar', input: {} })).content));
+      haystacks.push(String((await execute({ id: 'tu_1', name: 'inexistente', input: {} })).content));
+    }
+    const lookupPrivada: LookupFn = async () => [{ address: '10.0.0.5', family: 4 }];
+    const lookupFalla: LookupFn = async () => {
+      throw new Error('ENOTFOUND');
+    };
+    for (const lookupFn of [lookupPrivada, lookupFalla]) {
+      const execute = createWebhookExecutor([makeTool()], SECRETO, asFetch(vi.fn()), { lookupFn, warn });
+      haystacks.push(String((await execute({ id: 'tu_1', name: 'cotizar', input: {} })).content));
+    }
+
+    expect(haystacks.length).toBeGreaterThanOrEqual(18);
+    for (const haystack of haystacks) {
+      expect(haystack).not.toContain(SECRETO);
+      expect(haystack).not.toContain('SENTINEL');
+      expect(haystack).not.toContain('whsec_');
+    }
   });
 });
 

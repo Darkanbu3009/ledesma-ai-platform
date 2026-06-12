@@ -127,3 +127,44 @@ describe('resolvesToForbiddenIp', () => {
     expect(lookupFn).not.toHaveBeenCalled();
   });
 });
+
+// Blindaje del guard: estas funciones corren en la ruta critica del ejecutor de webhooks y
+// JAMAS deben lanzar; cualquier error interno se resuelve como prohibido (fail-closed).
+describe('la guarda nunca lanza', () => {
+  it('isForbiddenIp con IPv6 publica real no lanza y regresa false', () => {
+    expect(() => isForbiddenIp('2606:4700::1111')).not.toThrow();
+    expect(isForbiddenIp('2606:4700::1111')).toBe(false);
+  });
+
+  it('isForbiddenIp con basura no lanza y rechaza', () => {
+    expect(() => isForbiddenIp('basura')).not.toThrow();
+    expect(isForbiddenIp('basura')).toBe(true);
+  });
+
+  it('isForbiddenIp no lanza ni con entradas que violan el tipo', () => {
+    expect(() => isForbiddenIp(null as unknown as string)).not.toThrow();
+    expect(isForbiddenIp(null as unknown as string)).toBe(true);
+    expect(() => isForbiddenIp(undefined as unknown as string)).not.toThrow();
+    expect(isForbiddenIp(undefined as unknown as string)).toBe(true);
+  });
+
+  it('resolvesToForbiddenIp con lookup que rechaza: true sin lanzar', async () => {
+    const lookupFn = vi.fn().mockRejectedValue(new Error('ENOTFOUND'));
+
+    await expect(resolvesToForbiddenIp('falla.example.com', asLookup(lookupFn))).resolves.toBe(true);
+  });
+
+  it('resolvesToForbiddenIp con lookup que LANZA sincronicamente (p.ej. opciones no soportadas por el runtime): true sin lanzar', async () => {
+    const lookupFn = (() => {
+      throw new TypeError('invalid options');
+    }) as unknown as LookupFn;
+
+    await expect(resolvesToForbiddenIp('opciones.example.com', lookupFn)).resolves.toBe(true);
+  });
+
+  it('resolvesToForbiddenIp con lookup que resuelve a una IPv6 publica: false', async () => {
+    const lookupFn = vi.fn().mockResolvedValue([{ address: '2606:4700::1111', family: 6 }]);
+
+    await expect(resolvesToForbiddenIp('ipv6.cliente.com', asLookup(lookupFn))).resolves.toBe(false);
+  });
+});

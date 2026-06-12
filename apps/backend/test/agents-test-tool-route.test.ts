@@ -29,7 +29,7 @@ vi.mock('node:dns/promises', () => ({
 
 import { buildServer } from '../src/server.js';
 import { parseEnv } from '../src/config/env.js';
-import { signWebhookPayload } from '../src/tools/webhook-signature.js';
+import { signWebhookPayload, verifyWebhookSignature } from '../src/tools/webhook-signature.js';
 import type { FastifyInstance } from 'fastify';
 
 const ENV = { NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' };
@@ -144,5 +144,48 @@ describe('POST /v1/agents/:id/tools/:toolName/test', () => {
     expect(headers['x-ledesma-signature']).toBe(
       `v1=${signWebhookPayload(String(init.body), ts, agent.webhookSecret)}`,
     );
+    // La firma recibida por el webhook es verificable con el secreto del agente.
+    const signature = headers['x-ledesma-signature']!.replace('v1=', '');
+    expect(verifyWebhookSignature(String(init.body), ts, signature, agent.webhookSecret, 300, ts)).toBe(true);
+  });
+
+  it('200 con isError true y el DETALLE del error cuando el webhook falla en red', async () => {
+    getByIdForOwnerMock.mockResolvedValue(agent);
+    const fetchMock = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agents/a1/tools/cotizar/test',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { input: {} },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.isError).toBe(true);
+    expect(body.content).toBe('Tool cotizar webhook failed: Error: ECONNREFUSED');
+  });
+
+  it('200 con webhook secret missing si el agente carga sin webhookSecret (fila de DB sin la columna), sin tocar la red', async () => {
+    // Lo que produce una base sin la migracion V004 con un select *: la columna no viene y el
+    // agente sale con webhookSecret undefined. El ejecutor debe reportarlo claro, sin lanzar.
+    getByIdForOwnerMock.mockResolvedValue({ ...agent, webhookSecret: undefined });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agents/a1/tools/cotizar/test',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { input: {} },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.isError).toBe(true);
+    expect(body.content).toBe('Tool cotizar cannot run: webhook secret missing');
+    expect(typeof body.durationMs).toBe('number');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
