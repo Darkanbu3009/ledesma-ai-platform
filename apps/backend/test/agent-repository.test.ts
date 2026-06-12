@@ -67,7 +67,8 @@ describe('AgentRepository', () => {
     const agent = await repo.rotateWebhookSecret('11111111-1111-1111-1111-111111111111', 'user-1');
     expect(agent?.webhookSecret).toBe('whsec_rotado_998877');
 
-    const [strings, ...values] = (sql as unknown as { mock: { calls: [string[], ...unknown[]][] } }).mock.calls[0];
+    const sqlMock = sql as unknown as { mock: { calls: unknown[][] } };
+    const [strings, ...values] = sqlMock.mock.calls[0] as [string[], ...unknown[]];
     const texto = strings.join('<param>');
     expect(texto).toContain("webhook_secret = 'whsec_' || encode(gen_random_bytes(24), 'hex')");
     expect(texto).toMatch(/where id = <param> and owner_id = <param>/);
