@@ -13,6 +13,7 @@ import {
   tokenServerSnippet,
   webhookVerifySnippet,
   widgetDirectSnippet,
+  widgetReactSnippet,
   widgetTokenSnippet,
   type SnippetParams,
 } from '../lib/snippets';
@@ -272,6 +273,23 @@ export function ConnectPage() {
                 <CopyButton text={widgetDirectSnippet(params)} />
               </div>
               <pre className={preClass}>{widgetDirectSnippet(params)}</pre>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-medium text-hueso">Uso en React</h3>
+            <p className="mt-1 text-sm text-hueso-muted">
+              El custom element funciona en React hoy cargando el script de la plataforma. Muy
+              pronto: wrapper npm (
+              <span className="font-mono">@ledesma-platform/widget-react</span>) con props
+              tipadas.
+            </p>
+            <div className="mt-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <p className="text-xs text-hueso-muted">Componente de ejemplo</p>
+                <CopyButton text={widgetReactSnippet(params)} />
+              </div>
+              <pre className={preClass}>{widgetReactSnippet(params)}</pre>
             </div>
           </div>
 
