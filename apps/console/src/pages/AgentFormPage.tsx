@@ -242,7 +242,10 @@ export function AgentFormPage() {
                   </Link>
                   <button
                     type="button"
-                    onClick={() => setConfirmOpen(true)}
+                    onClick={() => {
+                      deleteAgent.reset();
+                      setConfirmOpen(true);
+                    }}
                     className="rounded-lg border border-grafito-border px-4 py-2.5 text-sm font-medium text-brasa transition hover:border-brasa"
                   >
                     Eliminar agente
@@ -258,6 +261,7 @@ export function AgentFormPage() {
         open={confirmOpen}
         agentName={agent?.name ?? ''}
         busy={deleteAgent.isPending}
+        error={deleteAgent.isError ? 'No pudimos eliminar el agente. Intenta de nuevo.' : undefined}
         onConfirm={handleDelete}
         onCancel={() => setConfirmOpen(false)}
       />

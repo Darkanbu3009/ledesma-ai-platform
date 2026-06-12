@@ -2,12 +2,14 @@ export function DeleteAgentDialog({
   open,
   agentName,
   busy,
+  error,
   onConfirm,
   onCancel,
 }: {
   open: boolean;
   agentName: string;
   busy: boolean;
+  error?: string;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -27,6 +29,11 @@ export function DeleteAgentDialog({
           Vas a eliminar <span className="text-hueso">{agentName}</span>. Esta accion no se puede
           deshacer.
         </p>
+        {error && (
+          <div className="mt-4 rounded-lg border border-brasa/40 bg-brasa/10 px-4 py-3 text-sm text-brasa">
+            {error}
+          </div>
+        )}
         <div className="mt-6 flex justify-end gap-3">
           <button
             type="button"
