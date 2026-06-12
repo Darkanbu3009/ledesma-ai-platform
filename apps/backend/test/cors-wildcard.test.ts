@@ -30,6 +30,24 @@ describe('cors comodin', () => {
     await app.close();
   });
 
+  it('el preflight del widget en modo token permite el header x-session-token', async () => {
+    const app = await buildServer(parseEnv({ ...BASE_ENV, CORS_ORIGINS: '*' }));
+    const res = await app.inject({
+      method: 'OPTIONS',
+      url: '/v1/run/abc',
+      headers: {
+        origin: 'https://cliente-ejemplo.com',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'content-type,x-session-token',
+      },
+    });
+    expect(res.statusCode).toBeGreaterThanOrEqual(200);
+    expect(res.statusCode).toBeLessThan(300);
+    const allowHeaders = String(res.headers['access-control-allow-headers']).toLowerCase();
+    expect(allowHeaders).toContain('x-session-token');
+    await app.close();
+  });
+
   it('sin comodin un origen no listado no recibe access-control-allow-origin', async () => {
     const app = await buildServer(
       parseEnv({ ...BASE_ENV, CORS_ORIGINS: 'https://app.ledesma-ai-labs.com' }),
