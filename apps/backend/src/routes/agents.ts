@@ -23,6 +23,11 @@ const TestToolBodySchema = z.object({
   input: z.record(z.string(), z.unknown()).default({}),
 });
 
+const UsageQuerySchema = z.object({
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+});
+
 const AgentInputSchema = z.object({
   name: z.string().min(1).max(120),
   description: z.string().max(2000).optional(),
@@ -55,16 +60,24 @@ export function agentRoutes(config: Env, deps?: { verifier?: JwtVerifier }) {
       return reply.send({ agent });
     });
 
-    // Uso por agente: totales acumulados y corridas recientes (solo metadatos), acotado al owner.
-    app.get('/v1/agents/:id/usage', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    // Uso por agente: totales, corridas recientes y serie diaria (solo metadatos), acotado al
+    // owner y opcionalmente a un rango de fechas ISO via ?from= y ?to=.
+    app.get('/v1/agents/:id/usage', async (request: FastifyRequest<{ Params: { id: string }; Querystring: { from?: string; to?: string } }>, reply: FastifyReply) => {
       const user = await requireUser(request, verifier);
+      const parsed = UsageQuerySchema.safeParse(request.query);
+      if (!parsed.success) throw new AppError('VALIDATION_ERROR', 400, 'Invalid usage range', parsed.error.issues);
       const agent = await repo.getByIdForOwner(request.params.id, user.id);
       if (!agent) throw new AppError('NOT_FOUND', 404, 'Agent not found');
-      const [totals, recent] = await Promise.all([
-        runRepo.totalsForAgent(agent.id),
-        runRepo.recentForAgent(agent.id),
+      const range = {
+        from: parsed.data.from ? new Date(parsed.data.from) : undefined,
+        to: parsed.data.to ? new Date(parsed.data.to) : undefined,
+      };
+      const [totals, recent, runsByDay] = await Promise.all([
+        runRepo.totalsForAgent(agent.id, range),
+        runRepo.recentForAgent(agent.id, range),
+        runRepo.runsByDay(agent.id, range),
       ]);
-      return reply.send({ totals, recent });
+      return reply.send({ totals, recent, runsByDay });
     });
 
     app.post('/v1/agents', async (request: FastifyRequest, reply: FastifyReply) => {

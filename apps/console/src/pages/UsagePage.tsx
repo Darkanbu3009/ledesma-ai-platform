@@ -1,8 +1,16 @@
+import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Play, RefreshCw } from 'lucide-react';
 import { providerLabel } from '../lib/agents';
 import { useAgent, useAgentUsage } from '../lib/queries';
-import { formatDurationMs, formatRunDate, formatTokens, statusLabel } from '../lib/usage';
+import {
+  formatDurationMs,
+  formatRunDate,
+  formatTokens,
+  rangeFromPreset,
+  statusLabel,
+  type UsageRangePreset,
+} from '../lib/usage';
 
 const badgeBaseClass = 'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs';
 
@@ -12,10 +20,19 @@ const badgeToneClass = {
   muted: 'text-hueso-muted',
 } as const;
 
+const rangePresets: Array<{ value: UsageRangePreset; label: string }> = [
+  { value: '7d', label: '7 dias' },
+  { value: '30d', label: '30 dias' },
+  { value: 'all', label: 'Todo' },
+];
+
 export function UsagePage() {
   const { id } = useParams<{ id: string }>();
   const { data: agent, isLoading, isError, refetch } = useAgent(id);
-  const usage = useAgentUsage(id);
+  const [preset, setPreset] = useState<UsageRangePreset>('30d');
+  // Memoizado por preset: evita que cada render genere un from distinto (y refetches en cadena).
+  const range = useMemo(() => rangeFromPreset(preset), [preset]);
+  const usage = useAgentUsage(id, range);
 
   if (isLoading) {
     return (
@@ -57,6 +74,9 @@ export function UsagePage() {
       ]
     : [];
 
+  const runsByDay = usage.data?.runsByDay ?? [];
+  const maxRunsByDay = Math.max(1, ...runsByDay.map((day) => day.runs));
+
   return (
     <div className="mx-auto max-w-3xl">
       <div className="flex items-center justify-between gap-4">
@@ -87,6 +107,27 @@ export function UsagePage() {
         </div>
       </div>
 
+      <div
+        role="group"
+        aria-label="Rango de fechas"
+        className="mt-6 inline-flex rounded-lg border border-grafito-border bg-grafito p-1"
+      >
+        {rangePresets.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => setPreset(option.value)}
+            className={`rounded-md px-3 py-1.5 text-xs transition ${
+              preset === option.value
+                ? 'bg-grafito-border text-hueso'
+                : 'text-hueso-muted hover:text-hueso'
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
       {usage.isLoading ? (
         <div className="mt-6 space-y-5">
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
@@ -112,7 +153,7 @@ export function UsagePage() {
             Reintentar
           </button>
         </div>
-      ) : usage.data.totals.runs === 0 ? (
+      ) : usage.data.totals.runs === 0 && preset === 'all' ? (
         <div className="mt-10 rounded-xl border border-dashed border-grafito-border py-16 text-center">
           <p className="text-sm text-hueso-muted">
             Aun no hay corridas registradas. Prueba tu agente en el Playground.
@@ -144,47 +185,77 @@ export function UsagePage() {
           </div>
 
           <section className="mt-8">
-            <h2 className="font-display text-lg font-semibold text-hueso">Corridas recientes</h2>
-            <div className="mt-3 overflow-x-auto rounded-xl border border-grafito-border bg-grafito">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-grafito-border text-xs text-hueso-muted">
-                    <th className="px-4 py-3 font-medium">Fecha</th>
-                    <th className="px-4 py-3 font-medium">Estado</th>
-                    <th className="px-4 py-3 font-medium">Codigo</th>
-                    <th className="px-4 py-3 font-medium">Tokens</th>
-                    <th className="px-4 py-3 font-medium">Duracion</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {usage.data.recent.map((run) => {
-                    const status = statusLabel(run.status);
-                    return (
-                      <tr key={run.id} className="border-b border-grafito-border last:border-b-0">
-                        <td className="whitespace-nowrap px-4 py-3 text-hueso">
-                          {formatRunDate(run.createdAt)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`${badgeBaseClass} ${badgeToneClass[status.tone]}`}>
-                            {status.label}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 font-mono text-xs text-hueso-muted">
-                          {run.errorCode ?? '—'}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-hueso">
-                          {formatTokens(run.inputTokens)} in · {formatTokens(run.outputTokens)} out
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-hueso-muted">
-                          {formatDurationMs(run.durationMs)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <h2 className="font-display text-lg font-semibold text-hueso">Corridas por dia</h2>
+            <div className="mt-3 rounded-xl border border-grafito-border bg-grafito p-4">
+              {runsByDay.length === 0 ? (
+                <p className="text-sm text-hueso-muted">Sin corridas en este rango.</p>
+              ) : (
+                <>
+                  <div className="flex h-32 items-end gap-1">
+                    {runsByDay.map((day) => (
+                      <div
+                        key={day.date}
+                        title={`${day.date}: ${day.runs} corridas, ${formatTokens(day.inputTokens)} in / ${formatTokens(day.outputTokens)} out`}
+                        className="flex-1 rounded-t-sm bg-brasa"
+                        style={{
+                          height: `${(day.runs / maxRunsByDay) * 100}%`,
+                          minHeight: day.runs > 0 ? '2px' : undefined,
+                        }}
+                      />
+                    ))}
+                  </div>
+                  {/* eje base */}
+                  <div className="border-t border-grafito-border" />
+                </>
+              )}
             </div>
           </section>
+
+          {usage.data.recent.length > 0 && (
+            <section className="mt-8">
+              <h2 className="font-display text-lg font-semibold text-hueso">Corridas recientes</h2>
+              <div className="mt-3 overflow-x-auto rounded-xl border border-grafito-border bg-grafito">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-grafito-border text-xs text-hueso-muted">
+                      <th className="px-4 py-3 font-medium">Fecha</th>
+                      <th className="px-4 py-3 font-medium">Estado</th>
+                      <th className="px-4 py-3 font-medium">Codigo</th>
+                      <th className="px-4 py-3 font-medium">Tokens</th>
+                      <th className="px-4 py-3 font-medium">Duracion</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usage.data.recent.map((run) => {
+                      const status = statusLabel(run.status);
+                      return (
+                        <tr key={run.id} className="border-b border-grafito-border last:border-b-0">
+                          <td className="whitespace-nowrap px-4 py-3 text-hueso">
+                            {formatRunDate(run.createdAt)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`${badgeBaseClass} ${badgeToneClass[status.tone]}`}>
+                              {status.label}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 font-mono text-xs text-hueso-muted">
+                            {run.errorCode ?? '—'}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-hueso">
+                            {formatTokens(run.inputTokens)} in · {formatTokens(run.outputTokens)}{' '}
+                            out
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-hueso-muted">
+                            {formatDurationMs(run.durationMs)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
         </>
       )}
 

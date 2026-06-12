@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { formatDurationMs, formatRunDate, formatTokens, statusLabel } from '../src/lib/usage';
+import {
+  formatDurationMs,
+  formatRunDate,
+  formatTokens,
+  rangeFromPreset,
+  statusLabel,
+} from '../src/lib/usage';
 
 describe('formatTokens', () => {
   it('deja los valores menores a mil tal cual', () => {
@@ -44,6 +50,29 @@ describe('formatRunDate', () => {
 
   it('devuelve la entrada tal cual si no es una fecha valida', () => {
     expect(formatRunDate('basura')).toBe('basura');
+  });
+});
+
+describe('rangeFromPreset', () => {
+  const now = new Date('2026-06-12T10:00:00.000Z');
+
+  it("'7d' devuelve from siete dias atras en ISO y sin to", () => {
+    expect(rangeFromPreset('7d', now)).toEqual({ from: '2026-06-05T10:00:00.000Z' });
+  });
+
+  it("'30d' devuelve from treinta dias atras en ISO y sin to", () => {
+    expect(rangeFromPreset('30d', now)).toEqual({ from: '2026-05-13T10:00:00.000Z' });
+  });
+
+  it("'all' devuelve un rango vacio", () => {
+    expect(rangeFromPreset('all', now)).toEqual({});
+  });
+
+  it('usa la fecha actual por defecto y produce un ISO valido', () => {
+    const range = rangeFromPreset('7d');
+    expect(range.to).toBeUndefined();
+    expect(range.from).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(Number.isNaN(new Date(range.from ?? '').getTime())).toBe(false);
   });
 });
 
