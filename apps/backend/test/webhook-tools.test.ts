@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { StoredTool } from '../src/agents/types.js';
+import type { LookupFn } from '../src/tools/ip-guard.js';
 import { createWebhookExecutor, isForbiddenWebhookUrl, WEBHOOK_LIMITS } from '../src/tools/webhook-tools.js';
 import { signWebhookPayload, verifyWebhookSignature } from '../src/tools/webhook-signature.js';
 
 const TEST_SECRET = 'whsec_secreto_de_prueba_0123456789abcdef';
+
+/** lookup inyectado que resuelve a una IP publica: los tests nunca tocan la red. */
+const lookupPublic: LookupFn = async () => [{ address: '34.107.221.82', family: 4 }];
 
 function makeTool(overrides: Partial<StoredTool> = {}): StoredTool {
   return {
@@ -31,7 +35,7 @@ afterEach(() => {
 describe('createWebhookExecutor', () => {
   it('ejecuta una tool: POST a la url con { tool, input } y regresa el content', async () => {
     const fetchMock = vi.fn().mockResolvedValue(fakeResponse(JSON.stringify({ content: 'ok' })));
-    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPublic });
 
     const result = await execute({ id: 'tu_1', name: 'cotizar', input: { piezas: 2 } });
 
@@ -49,7 +53,7 @@ describe('createWebhookExecutor', () => {
 
   it('firma cada POST: timestamp numerico y firma v1 verificable con el secreto y el body exacto', async () => {
     const fetchMock = vi.fn().mockResolvedValue(fakeResponse(JSON.stringify({ content: 'ok' })));
-    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPublic });
 
     await execute({ id: 'tu_1', name: 'cotizar', input: { piezas: 2 } });
 
@@ -68,7 +72,7 @@ describe('createWebhookExecutor', () => {
 
   it('los headers del POST no contienen el secreto en claro', async () => {
     const fetchMock = vi.fn().mockResolvedValue(fakeResponse(JSON.stringify({ content: 'ok' })));
-    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPublic });
 
     await execute({ id: 'tu_1', name: 'cotizar', input: { piezas: 2 } });
 
@@ -81,7 +85,7 @@ describe('createWebhookExecutor', () => {
   it('respuesta JSON sin content: regresa el body serializado con isError false', async () => {
     const body = JSON.stringify({ resultado: 42 });
     const fetchMock = vi.fn().mockResolvedValue(fakeResponse(body));
-    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPublic });
 
     const result = await execute({ id: 'tu_1', name: 'cotizar', input: {} });
 
@@ -90,7 +94,7 @@ describe('createWebhookExecutor', () => {
 
   it('respuesta { content, isError: true }: propaga isError true', async () => {
     const fetchMock = vi.fn().mockResolvedValue(fakeResponse(JSON.stringify({ content: 'x', isError: true })));
-    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPublic });
 
     const result = await execute({ id: 'tu_1', name: 'cotizar', input: {} });
 
@@ -99,7 +103,7 @@ describe('createWebhookExecutor', () => {
 
   it('status 500: isError true con el status en el mensaje, sin lanzar', async () => {
     const fetchMock = vi.fn().mockResolvedValue(fakeResponse('boom', 500));
-    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPublic });
 
     const result = await execute({ id: 'tu_1', name: 'cotizar', input: {} });
 
@@ -109,7 +113,7 @@ describe('createWebhookExecutor', () => {
 
   it('fetch lanza: isError true, sin lanzar', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
-    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPublic });
 
     const result = await execute({ id: 'tu_1', name: 'cotizar', input: {} });
 
@@ -130,7 +134,7 @@ describe('createWebhookExecutor', () => {
           });
         }),
     );
-    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPublic });
 
     const pending = execute({ id: 'tu_1', name: 'cotizar', input: {} });
     await vi.advanceTimersByTimeAsync(WEBHOOK_LIMITS.timeoutMs);
@@ -142,7 +146,7 @@ describe('createWebhookExecutor', () => {
 
   it('tool desconocida: isError true sin llamar al webhook', async () => {
     const fetchMock = vi.fn();
-    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPublic });
 
     const result = await execute({ id: 'tu_1', name: 'inexistente', input: {} });
 
@@ -151,10 +155,57 @@ describe('createWebhookExecutor', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('hostname que resuelve a IP privada: isError true y fetch NUNCA llamado', async () => {
+    const fetchMock = vi.fn();
+    const lookupPrivada: LookupFn = async () => [{ address: '10.0.0.5', family: 4 }];
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPrivada });
+
+    const result = await execute({ id: 'tu_1', name: 'cotizar', input: {} });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toBe('Tool cotizar has a forbidden webhook URL');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('hostname que no resuelve (lookup lanza): isError true y fetch NUNCA llamado', async () => {
+    const fetchMock = vi.fn();
+    const lookupFalla: LookupFn = async () => {
+      throw new Error('ENOTFOUND');
+    };
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupFalla });
+
+    const result = await execute({ id: 'tu_1', name: 'cotizar', input: {} });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toBe('Tool cotizar has a forbidden webhook URL');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('el POST se hace con redirect manual', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(fakeResponse(JSON.stringify({ content: 'ok' })));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPublic });
+
+    await execute({ id: 'tu_1', name: 'cotizar', input: {} });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.redirect).toBe('manual');
+  });
+
+  it('respuesta 302: isError true con mensaje de redirect, sin seguirla', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(fakeResponse('', 302));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPublic });
+
+    const result = await execute({ id: 'tu_1', name: 'cotizar', input: {} });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('redirect');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('respuesta mas larga que maxResponseChars se recorta', async () => {
     const long = 'a'.repeat(WEBHOOK_LIMITS.maxResponseChars + 500);
     const fetchMock = vi.fn().mockResolvedValue(fakeResponse(long));
-    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock));
+    const execute = createWebhookExecutor([makeTool()], TEST_SECRET, asFetch(fetchMock), { lookupFn: lookupPublic });
 
     const result = await execute({ id: 'tu_1', name: 'cotizar', input: {} });
 
