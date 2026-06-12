@@ -61,6 +61,25 @@ describe('AgentRepository', () => {
     expect(await new AgentRepository(makeSqlReturning([])).remove('x')).toBe(false);
   });
 
+  it('rotateWebhookSecret incluye owner_id en el where y mapea el returning', async () => {
+    const sql = makeSqlReturning([makeRow({ webhook_secret: 'whsec_rotado_998877' })]);
+    const repo = new AgentRepository(sql);
+    const agent = await repo.rotateWebhookSecret('11111111-1111-1111-1111-111111111111', 'user-1');
+    expect(agent?.webhookSecret).toBe('whsec_rotado_998877');
+
+    const [strings, ...values] = (sql as unknown as { mock: { calls: [string[], ...unknown[]][] } }).mock.calls[0];
+    const texto = strings.join('<param>');
+    expect(texto).toContain("webhook_secret = 'whsec_' || encode(gen_random_bytes(24), 'hex')");
+    expect(texto).toMatch(/where id = <param> and owner_id = <param>/);
+    expect(texto).toContain('returning *');
+    expect(values).toEqual(['11111111-1111-1111-1111-111111111111', 'user-1']);
+  });
+
+  it('rotateWebhookSecret devuelve null si no hay fila (agente ajeno o inexistente)', async () => {
+    const repo = new AgentRepository(makeSqlReturning([]));
+    expect(await repo.rotateWebhookSecret('no-existe', 'user-2')).toBeNull();
+  });
+
   it('NUNCA expone un campo de api key en el AgentConfig', async () => {
     const repo = new AgentRepository(makeSqlReturning([makeRow()]));
     const agent = await repo.getById('11111111-1111-1111-1111-111111111111');

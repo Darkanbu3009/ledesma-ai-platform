@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { listByOwnerMock, getByIdForOwnerMock, createMock, updateForOwnerMock, removeForOwnerMock } = vi.hoisted(() => ({
+const { listByOwnerMock, getByIdForOwnerMock, createMock, updateForOwnerMock, removeForOwnerMock, rotateWebhookSecretMock } = vi.hoisted(() => ({
   listByOwnerMock: vi.fn(),
   getByIdForOwnerMock: vi.fn(),
   createMock: vi.fn(),
   updateForOwnerMock: vi.fn(),
   removeForOwnerMock: vi.fn(),
+  rotateWebhookSecretMock: vi.fn(),
 }));
 
 vi.mock('../src/agents/agent-repository.js', () => ({
@@ -15,6 +16,7 @@ vi.mock('../src/agents/agent-repository.js', () => ({
     create = createMock;
     updateForOwner = updateForOwnerMock;
     removeForOwner = removeForOwnerMock;
+    rotateWebhookSecret = rotateWebhookSecretMock;
   },
 }));
 vi.mock('../src/db/client.js', () => ({ getSql: vi.fn(() => ({})), setSqlForTesting: vi.fn() }));
@@ -39,7 +41,7 @@ const ENV = { NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: '
 let app: FastifyInstance;
 beforeEach(async () => {
   listByOwnerMock.mockReset(); getByIdForOwnerMock.mockReset(); createMock.mockReset();
-  updateForOwnerMock.mockReset(); removeForOwnerMock.mockReset();
+  updateForOwnerMock.mockReset(); removeForOwnerMock.mockReset(); rotateWebhookSecretMock.mockReset();
   app = await buildServer(parseEnv(ENV));
 });
 
@@ -84,5 +86,29 @@ describe('rutas por-usuario /v1/agents', () => {
     const res = await app.inject({ method: 'DELETE', url: '/v1/agents/a1', headers: { authorization: 'Bearer valid-user-1' } });
     expect(res.statusCode).toBe(204);
     expect(removeForOwnerMock).toHaveBeenCalledWith('a1', 'user-1');
+  });
+});
+
+describe('POST /v1/agents/:id/webhook-secret/rotate', () => {
+  it('401 sin token', async () => {
+    const res = await app.inject({ method: 'POST', url: '/v1/agents/a1/webhook-secret/rotate' });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error.code).toBe('UNAUTHORIZED');
+    expect(rotateWebhookSecretMock).not.toHaveBeenCalled();
+  });
+  it('404 si el agente es de otro owner', async () => {
+    rotateWebhookSecretMock.mockResolvedValue(null);
+    const res = await app.inject({ method: 'POST', url: '/v1/agents/aX/webhook-secret/rotate', headers: { authorization: 'Bearer valid-user-2' } });
+    expect(res.statusCode).toBe(404);
+    expect(rotateWebhookSecretMock).toHaveBeenCalledWith('aX', 'user-2');
+  });
+  it('200 devuelve el agente con un webhookSecret distinto al anterior', async () => {
+    const secretoAnterior = 'whsec_anterior_aaa111';
+    rotateWebhookSecretMock.mockResolvedValue({ id: 'a1', name: 'Cotizador', webhookSecret: 'whsec_nuevo_bbb222' });
+    const res = await app.inject({ method: 'POST', url: '/v1/agents/a1/webhook-secret/rotate', headers: { authorization: 'Bearer valid-user-1' } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().agent.webhookSecret).toBe('whsec_nuevo_bbb222');
+    expect(res.json().agent.webhookSecret).not.toBe(secretoAnterior);
+    expect(rotateWebhookSecretMock).toHaveBeenCalledWith('a1', 'user-1');
   });
 });
