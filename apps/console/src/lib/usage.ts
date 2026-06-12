@@ -16,9 +16,31 @@ export interface AgentRunSummary {
   createdAt: string;
 }
 
+export interface AgentRunsByDay {
+  date: string;
+  runs: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export interface AgentUsage {
   totals: AgentUsageTotals;
   recent: AgentRunSummary[];
+  runsByDay: AgentRunsByDay[];
+}
+
+export type UsageRangePreset = '7d' | '30d' | 'all';
+
+export interface UsageRange {
+  from?: string;
+  to?: string;
+}
+
+/** Rango ISO hacia atras desde `now` segun el preset; 'all' no acota ({}). */
+export function rangeFromPreset(preset: UsageRangePreset, now: Date = new Date()): UsageRange {
+  if (preset === 'all') return {};
+  const days = preset === '7d' ? 7 : 30;
+  return { from: new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString() };
 }
 
 /** 950 -> '950'; 12400 -> '12,4k'; 3200000 -> '3,2M' (es-MX usa coma decimal). */
