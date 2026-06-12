@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { getByIdForOwnerMock, totalsForAgentMock, recentForAgentMock } = vi.hoisted(() => ({
+const { getByIdForOwnerMock, totalsForAgentMock, recentForAgentMock, runsByDayMock } = vi.hoisted(() => ({
   getByIdForOwnerMock: vi.fn(),
   totalsForAgentMock: vi.fn(),
   recentForAgentMock: vi.fn(),
+  runsByDayMock: vi.fn(),
 }));
 
 vi.mock('../src/agents/agent-repository.js', () => ({
@@ -15,6 +16,7 @@ vi.mock('../src/agents/run-repository.js', () => ({
   AgentRunRepository: class {
     totalsForAgent = totalsForAgentMock;
     recentForAgent = recentForAgentMock;
+    runsByDay = runsByDayMock;
   },
 }));
 vi.mock('../src/db/client.js', () => ({ getSql: vi.fn(() => ({})), setSqlForTesting: vi.fn() }));
@@ -40,6 +42,7 @@ beforeEach(async () => {
   getByIdForOwnerMock.mockReset();
   totalsForAgentMock.mockReset();
   recentForAgentMock.mockReset();
+  runsByDayMock.mockReset();
   app = await buildServer(parseEnv(ENV));
 });
 
@@ -65,7 +68,7 @@ describe('GET /v1/agents/:id/usage', () => {
     expect(recentForAgentMock).not.toHaveBeenCalled();
   });
 
-  it('200 con token valido: devuelve totals y recent consultados con el id del agente', async () => {
+  it('200 con token valido: devuelve totals, recent y runsByDay consultados con el id del agente', async () => {
     getByIdForOwnerMock.mockResolvedValue({ id: AGENT_ID, name: 'Cotizador', ownerId: 'user-1' });
     const totals = { runs: 7, completed: 5, errors: 2, inputTokens: 120, outputTokens: 45 };
     const recent = [
@@ -79,8 +82,10 @@ describe('GET /v1/agents/:id/usage', () => {
         createdAt: '2026-06-10T12:00:00.000Z',
       },
     ];
+    const runsByDay = [{ date: '2026-06-10', runs: 7, inputTokens: 120, outputTokens: 45 }];
     totalsForAgentMock.mockResolvedValue(totals);
     recentForAgentMock.mockResolvedValue(recent);
+    runsByDayMock.mockResolvedValue(runsByDay);
 
     const res = await app.inject({
       method: 'GET',
@@ -89,8 +94,48 @@ describe('GET /v1/agents/:id/usage', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ totals, recent });
-    expect(totalsForAgentMock).toHaveBeenCalledWith(AGENT_ID);
-    expect(recentForAgentMock).toHaveBeenCalledWith(AGENT_ID);
+    expect(res.json()).toEqual({ totals, recent, runsByDay });
+    // Sin query params el rango va vacio (sin acotar).
+    expect(totalsForAgentMock).toHaveBeenCalledWith(AGENT_ID, { from: undefined, to: undefined });
+    expect(recentForAgentMock).toHaveBeenCalledWith(AGENT_ID, { from: undefined, to: undefined });
+    expect(runsByDayMock).toHaveBeenCalledWith(AGENT_ID, { from: undefined, to: undefined });
+  });
+
+  it('400 VALIDATION_ERROR si from no es un datetime ISO', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/agents/${AGENT_ID}/usage?from=ayer`,
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('VALIDATION_ERROR');
+    expect(getByIdForOwnerMock).not.toHaveBeenCalled();
+    expect(totalsForAgentMock).not.toHaveBeenCalled();
+    expect(recentForAgentMock).not.toHaveBeenCalled();
+    expect(runsByDayMock).not.toHaveBeenCalled();
+  });
+
+  it('200 con from/to validos: pasa el rango como Date a los repos y responde runsByDay', async () => {
+    getByIdForOwnerMock.mockResolvedValue({ id: AGENT_ID, name: 'Cotizador', ownerId: 'user-1' });
+    const totals = { runs: 1, completed: 1, errors: 0, inputTokens: 5, outputTokens: 3 };
+    const runsByDay = [{ date: '2026-06-10', runs: 1, inputTokens: 5, outputTokens: 3 }];
+    totalsForAgentMock.mockResolvedValue(totals);
+    recentForAgentMock.mockResolvedValue([]);
+    runsByDayMock.mockResolvedValue(runsByDay);
+
+    const from = '2026-06-01T00:00:00.000Z';
+    const to = '2026-06-10T23:59:59.000Z';
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/agents/${AGENT_ID}/usage?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().runsByDay).toEqual(runsByDay);
+    const range = { from: new Date(from), to: new Date(to) };
+    expect(totalsForAgentMock).toHaveBeenCalledWith(AGENT_ID, range);
+    expect(recentForAgentMock).toHaveBeenCalledWith(AGENT_ID, range);
+    expect(runsByDayMock).toHaveBeenCalledWith(AGENT_ID, range);
   });
 });
