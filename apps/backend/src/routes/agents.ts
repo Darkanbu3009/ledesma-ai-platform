@@ -116,7 +116,11 @@ export function agentRoutes(config: Env, deps?: { verifier?: JwtVerifier }) {
       if (!tool) throw new AppError('NOT_FOUND', 404, 'Tool not found');
       const parsed = TestToolBodySchema.safeParse(request.body ?? {});
       if (!parsed.success) throw new AppError('VALIDATION_ERROR', 400, 'Invalid test input', parsed.error.issues);
-      const executor = createWebhookExecutor([tool], agent.webhookSecret);
+      // Los fallos del ejecutor se reportan al log del request (pino, con redaccion) en vez
+      // del console.warn por default.
+      const executor = createWebhookExecutor([tool], agent.webhookSecret, undefined, {
+        warn: (message) => request.log.warn(message),
+      });
       const startedAt = Date.now();
       const result = await executor({ id: 'test', name: tool.name, input: parsed.data.input });
       return reply.send({

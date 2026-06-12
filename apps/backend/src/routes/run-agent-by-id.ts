@@ -66,7 +66,9 @@ export function runAgentByIdRoutes(config: Env) {
       const registry = hasStoredTools ? null : createDemoRegistry();
       const toolDefinitions = hasStoredTools ? storedToolsToDefinitions(agent.tools) : registry!.toToolDefinitions();
       const executeTool = hasStoredTools
-        ? createWebhookExecutor(agent.tools, agent.webhookSecret)
+        ? createWebhookExecutor(agent.tools, agent.webhookSecret, undefined, {
+            warn: (message) => request.log.warn(message),
+          })
         : registry!.toExecutor();
       const normalizedRequest: NormalizedRequest = {
         ...(agent.systemPrompt ? { system: agent.systemPrompt } : {}),

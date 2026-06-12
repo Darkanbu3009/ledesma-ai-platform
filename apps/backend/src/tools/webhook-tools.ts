@@ -36,14 +36,17 @@ export function storedToolsToDefinitions(tools: StoredTool[]): ToolDefinition[] 
  * agente (HMAC-SHA256 de "{timestamp}.{body}" en x-ledesma-timestamp / x-ledesma-signature).
  * Respuesta esperada { content: string, isError?: boolean }; si no hay content string, se
  * serializa el body. No sigue redirecciones (3xx regresa isError). NUNCA lanza: todo fallo
- * regresa isError: true. deps.lookupFn permite inyectar la resolucion DNS en tests. */
+ * regresa isError: true con el detalle (nombre y mensaje del error; el secreto y los headers
+ * jamas se incluyen) y se reporta via deps.warn (console.warn por default). deps.lookupFn
+ * permite inyectar la resolucion DNS en tests. */
 export function createWebhookExecutor(
   tools: StoredTool[],
   secret: string,
   fetchImpl: typeof fetch = fetch,
-  deps: { lookupFn?: LookupFn } = {},
+  deps: { lookupFn?: LookupFn; warn?: (message: string) => void } = {},
 ): ToolExecutor {
   const byName = new Map(tools.map((t) => [t.name, t]));
+  const warn = deps.warn ?? ((message: string) => console.warn(message));
 
   return async (call: ToolCall, signal?: AbortSignal): Promise<ToolExecutionResult> => {
     const tool = byName.get(call.name);
@@ -100,9 +103,15 @@ export function createWebhookExecutor(
         return { content: clipped, isError: false };
       }
     } catch (error) {
+      // Nada de fallos opacos: el content y el log llevan el nombre y mensaje del error (nunca
+      // el secreto, headers o body; un TypeError de crypto/fetch no contiene esos valores).
       const aborted = error instanceof Error && error.name === 'AbortError';
+      const detail = error instanceof Error ? `${error.name}: ${error.message}` : 'unknown error';
+      warn(`webhook tool ${call.name} ${aborted ? 'timed out' : `failed: ${detail}`}`);
       return {
-        content: aborted ? `Tool ${call.name} webhook timed out` : `Tool ${call.name} webhook failed`,
+        content: aborted
+          ? `Tool ${call.name} webhook timed out`
+          : `Tool ${call.name} webhook failed: ${detail}`,
         isError: true,
       };
     } finally {
