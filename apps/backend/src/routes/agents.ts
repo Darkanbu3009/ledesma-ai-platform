@@ -7,6 +7,7 @@ import { AgentRepository } from '../agents/agent-repository.js';
 import { AgentRunRepository } from '../agents/run-repository.js';
 import { createSupabaseJwtVerifier, type JwtVerifier } from '../auth/jwt-verifier.js';
 import { requireUser } from '../auth/require-user.js';
+import { createWebhookExecutor } from '../tools/webhook-tools.js';
 
 const StoredToolSchema = z.object({
   name: z.string().min(1),
@@ -18,6 +19,10 @@ const StoredToolSchema = z.object({
 // webhookSecret NO es parte del input: lo genera la base al crear y el update nunca lo toca.
 // Las respuestas si lo incluyen (viene en el AgentConfig del repo) para mostrarlo en Conectar.
 // La rotacion del secreto tiene endpoint dedicado: POST /v1/agents/:id/webhook-secret/rotate.
+const TestToolBodySchema = z.object({
+  input: z.record(z.string(), z.unknown()).default({}),
+});
+
 const AgentInputSchema = z.object({
   name: z.string().min(1).max(120),
   description: z.string().max(2000).optional(),
@@ -86,6 +91,26 @@ export function agentRoutes(config: Env, deps?: { verifier?: JwtVerifier }) {
       const agent = await repo.rotateWebhookSecret(request.params.id, user.id);
       if (!agent) throw new AppError('NOT_FOUND', 404, 'Agent not found');
       return reply.send({ agent });
+    });
+
+    // Prueba una tool GUARDADA con un input dado, usando el MISMO ejecutor firmado de produccion
+    // (firma HMAC, guardas anti-SSRF y timeout incluidos). Acotado al owner.
+    app.post('/v1/agents/:id/tools/:toolName/test', async (request: FastifyRequest<{ Params: { id: string; toolName: string } }>, reply: FastifyReply) => {
+      const user = await requireUser(request, verifier);
+      const agent = await repo.getByIdForOwner(request.params.id, user.id);
+      if (!agent) throw new AppError('NOT_FOUND', 404, 'Agent not found');
+      const tool = agent.tools.find((t) => t.name === request.params.toolName);
+      if (!tool) throw new AppError('NOT_FOUND', 404, 'Tool not found');
+      const parsed = TestToolBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) throw new AppError('VALIDATION_ERROR', 400, 'Invalid test input', parsed.error.issues);
+      const executor = createWebhookExecutor([tool], agent.webhookSecret);
+      const startedAt = Date.now();
+      const result = await executor({ id: 'test', name: tool.name, input: parsed.data.input });
+      return reply.send({
+        content: result.content,
+        isError: result.isError === true,
+        durationMs: Date.now() - startedAt,
+      });
     });
 
     app.delete('/v1/agents/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
