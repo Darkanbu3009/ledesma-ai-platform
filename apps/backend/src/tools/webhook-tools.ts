@@ -1,6 +1,7 @@
 import type { ToolDefinition } from '@ledesma-platform/shared';
 import type { StoredTool } from '../agents/types.js';
 import type { ToolCall, ToolExecutionResult, ToolExecutor } from '../agent/index.js';
+import { resolvesToForbiddenIp, type LookupFn } from './ip-guard.js';
 import { signWebhookPayload } from './webhook-signature.js';
 
 export const WEBHOOK_LIMITS = {
@@ -8,8 +9,8 @@ export const WEBHOOK_LIMITS = {
   maxResponseChars: 100_000,
 } as const;
 
-/** Hostnames privados/locales rechazados (guarda basica anti-SSRF; no es exhaustiva: la
- * proteccion completa requiere resolver DNS y filtrar rangos IP, TODO etapa de seguridad). */
+/** Hostnames privados/locales rechazados (guarda rapida por nombre; se complementa con la
+ * validacion de IPs resueltas por DNS de ip-guard.ts, ver createWebhookExecutor). */
 export function isForbiddenWebhookUrl(rawUrl: string): boolean {
   let parsed: URL;
   try {
@@ -34,11 +35,13 @@ export function storedToolsToDefinitions(tools: StoredTool[]): ToolDefinition[] 
 /** Ejecutor por webhook: POST { tool, input } a la url de la tool, firmado con el secreto del
  * agente (HMAC-SHA256 de "{timestamp}.{body}" en x-ledesma-timestamp / x-ledesma-signature).
  * Respuesta esperada { content: string, isError?: boolean }; si no hay content string, se
- * serializa el body. NUNCA lanza: todo fallo regresa isError: true. */
+ * serializa el body. NUNCA lanza: todo fallo regresa isError: true. deps.lookupFn permite
+ * inyectar la resolucion DNS en tests. */
 export function createWebhookExecutor(
   tools: StoredTool[],
   secret: string,
   fetchImpl: typeof fetch = fetch,
+  deps: { lookupFn?: LookupFn } = {},
 ): ToolExecutor {
   const byName = new Map(tools.map((t) => [t.name, t]));
 
@@ -46,6 +49,13 @@ export function createWebhookExecutor(
     const tool = byName.get(call.name);
     if (!tool) return { content: `Unknown tool: ${call.name}`, isError: true };
     if (isForbiddenWebhookUrl(tool.url)) {
+      return { content: `Tool ${call.name} has a forbidden webhook URL`, isError: true };
+    }
+    // Anti-SSRF: rechazar si el hostname resuelve a IPs privadas/reservadas. Mismo mensaje
+    // generico que la guarda por hostname para no filtrar detalles de red. Riesgo residual
+    // TOCTOU: el DNS puede re-resolverse a otra IP entre este check y el fetch; mitigarlo
+    // por completo requeriria fijar la conexion a la IP ya validada (futuro).
+    if (await resolvesToForbiddenIp(new URL(tool.url).hostname, deps.lookupFn)) {
       return { content: `Tool ${call.name} has a forbidden webhook URL`, isError: true };
     }
 
