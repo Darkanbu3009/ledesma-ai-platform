@@ -8,6 +8,7 @@ import {
   tokenServerSnippet,
   webhookVerifySnippet,
   widgetDirectSnippet,
+  widgetReactSnippet,
   widgetScriptUrl,
   widgetTokenSnippet,
 } from '../src/lib/snippets';
@@ -88,6 +89,25 @@ describe('widgetTokenSnippet', () => {
 
   it('carga el script del widget desde la plataforma', () => {
     expect(widgetTokenSnippet(params)).toContain(`<script src="${scriptUrl}">`);
+  });
+});
+
+describe('widgetReactSnippet', () => {
+  it('renderiza el custom element con token-url y sin provider-key', () => {
+    const snippet = widgetReactSnippet(params);
+    expect(snippet).toContain('ledesma-agent');
+    expect(snippet).toContain('token-url');
+    expect(snippet).not.toContain('provider-key');
+  });
+
+  it('inyecta el script del widget desde la plataforma con el endpoint del agente', () => {
+    const snippet = widgetReactSnippet(params);
+    expect(snippet).toContain(scriptUrl);
+    expect(snippet).toContain(`endpoint="${endpoint}"`);
+  });
+
+  it('no contiene ninguna key con pinta real', () => {
+    expect(widgetReactSnippet(params)).not.toContain('sk-');
   });
 });
 

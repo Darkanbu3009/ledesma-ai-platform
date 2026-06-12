@@ -80,6 +80,34 @@ export function widgetTokenSnippet(p: SnippetParams): string {
 ></ledesma-agent>`;
 }
 
+/** Uso en React HOY: el script de la plataforma define el custom element (wrapper npm en camino). */
+export function widgetReactSnippet(p: SnippetParams): string {
+  return `// Muy pronto: npm install @ledesma-platform/widget-react (wrapper con props tipadas).
+// Mientras tanto, el custom element funciona en React cargando el script de la plataforma:
+import { useEffect } from 'react';
+
+const WIDGET_SRC = '${widgetScriptUrl(p)}';
+
+export function AgenteLedesma() {
+  useEffect(() => {
+    // Inyecta el script del widget una sola vez (define <ledesma-agent>).
+    if (!document.querySelector(\`script[src="\${WIDGET_SRC}"]\`)) {
+      const script = document.createElement('script');
+      script.src = WIDGET_SRC;
+      document.head.append(script);
+    }
+  }, []);
+
+  return (
+    <ledesma-agent
+      endpoint="${agentEndpoint(p)}"
+      token-url="https://TU-BACKEND.com/api/token-agente"
+      title="Asistente"
+    />
+  );
+}`;
+}
+
 /** Servidor del cliente: emite tokens efimeros (la key vive en su entorno). */
 export function tokenServerSnippet(p: SnippetParams): string {
   return `// POST /api/token-agente — emite un token efimero para el widget

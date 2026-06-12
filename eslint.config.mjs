@@ -33,6 +33,12 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.browser } },
   },
   {
+    files: ['packages/widget-react/**/*.{ts,tsx}'],
+    languageOptions: { globals: { ...globals.browser } },
+    plugins: { 'react-hooks': reactHooks },
+    rules: { ...reactHooks.configs.recommended.rules },
+  },
+  {
     files: ['apps/console/**/*.{ts,tsx}'],
     languageOptions: { globals: { ...globals.browser } },
     plugins: { 'react-hooks': reactHooks, 'react-refresh': reactRefresh },
