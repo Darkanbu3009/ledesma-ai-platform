@@ -18,6 +18,12 @@ interface AgentRow {
   updated_at: Date | string;
 }
 
+// Columnas SIEMPRE explicitas (nunca select * / returning *): si a la base le falta una columna
+// (p.ej. webhook_secret sin la migracion V004 aplicada), un select * la omite EN SILENCIO y el
+// agente sale con webhookSecret undefined; eso rompia la firma de webhooks de forma opaca
+// (createHmac lanzaba dentro del ejecutor). Con la lista explicita Postgres falla ruidosamente
+// con "column does not exist" y el problema se ve de inmediato.
+
 function rowToConfig(row: AgentRow): AgentConfig {
   return {
     id: row.id,
@@ -44,14 +50,18 @@ export class AgentRepository {
 
   async list(): Promise<AgentConfig[]> {
     const rows = await this.sql<AgentRow[]>`
-      select * from agents order by created_at desc
+      select id, name, description, provider_id, model, system_prompt, max_tokens,
+        temperature, base_url, tools, webhook_secret, owner_id, created_at, updated_at
+      from agents order by created_at desc
     `;
     return rows.map(rowToConfig);
   }
 
   async getById(id: string): Promise<AgentConfig | null> {
     const rows = await this.sql<AgentRow[]>`
-      select * from agents where id = ${id}
+      select id, name, description, provider_id, model, system_prompt, max_tokens,
+        temperature, base_url, tools, webhook_secret, owner_id, created_at, updated_at
+      from agents where id = ${id}
     `;
     const row = rows[0];
     return row ? rowToConfig(row) : null;
@@ -73,7 +83,8 @@ export class AgentRepository {
         ${this.sql.json((input.tools ?? []) as unknown as Parameters<Sql['json']>[0])},
         ${input.ownerId ?? null}
       )
-      returning *
+      returning id, name, description, provider_id, model, system_prompt, max_tokens,
+        temperature, base_url, tools, webhook_secret, owner_id, created_at, updated_at
     `;
     return rowToConfig(rows[0] as AgentRow);
   }
@@ -93,7 +104,8 @@ export class AgentRepository {
         owner_id = ${input.ownerId ?? null},
         updated_at = now()
       where id = ${id}
-      returning *
+      returning id, name, description, provider_id, model, system_prompt, max_tokens,
+        temperature, base_url, tools, webhook_secret, owner_id, created_at, updated_at
     `;
     const row = rows[0];
     return row ? rowToConfig(row) : null;
@@ -108,14 +120,18 @@ export class AgentRepository {
 
   async listByOwner(ownerId: string): Promise<AgentConfig[]> {
     const rows = await this.sql<AgentRow[]>`
-      select * from agents where owner_id = ${ownerId} order by created_at desc
+      select id, name, description, provider_id, model, system_prompt, max_tokens,
+        temperature, base_url, tools, webhook_secret, owner_id, created_at, updated_at
+      from agents where owner_id = ${ownerId} order by created_at desc
     `;
     return rows.map(rowToConfig);
   }
 
   async getByIdForOwner(id: string, ownerId: string): Promise<AgentConfig | null> {
     const rows = await this.sql<AgentRow[]>`
-      select * from agents where id = ${id} and owner_id = ${ownerId}
+      select id, name, description, provider_id, model, system_prompt, max_tokens,
+        temperature, base_url, tools, webhook_secret, owner_id, created_at, updated_at
+      from agents where id = ${id} and owner_id = ${ownerId}
     `;
     const row = rows[0];
     return row ? rowToConfig(row) : null;
@@ -135,7 +151,8 @@ export class AgentRepository {
         tools = ${this.sql.json((input.tools ?? []) as unknown as Parameters<Sql['json']>[0])},
         updated_at = now()
       where id = ${id} and owner_id = ${ownerId}
-      returning *
+      returning id, name, description, provider_id, model, system_prompt, max_tokens,
+        temperature, base_url, tools, webhook_secret, owner_id, created_at, updated_at
     `;
     const row = rows[0];
     return row ? rowToConfig(row) : null;
@@ -148,7 +165,8 @@ export class AgentRepository {
         webhook_secret = 'whsec_' || encode(gen_random_bytes(24), 'hex'),
         updated_at = now()
       where id = ${id} and owner_id = ${ownerId}
-      returning *
+      returning id, name, description, provider_id, model, system_prompt, max_tokens,
+        temperature, base_url, tools, webhook_secret, owner_id, created_at, updated_at
     `;
     const row = rows[0];
     return row ? rowToConfig(row) : null;

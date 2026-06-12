@@ -29,6 +29,12 @@ function makeSqlReturning(result: unknown[]): Sql {
   return fn;
 }
 
+/** Texto del template SQL de la primera llamada al mock, con <param> en cada hueco. */
+function sqlTemplateText(sql: Sql): string {
+  const calls = (sql as unknown as { mock: { calls: Array<[readonly string[], ...unknown[]]> } }).mock.calls;
+  return (calls[0]?.[0] ?? []).join('<param>');
+}
+
 describe('AgentRepository', () => {
   it('mapea una fila de DB a AgentConfig (snake_case -> camelCase)', async () => {
     const repo = new AgentRepository(makeSqlReturning([makeRow()]));
@@ -72,13 +78,46 @@ describe('AgentRepository', () => {
     const texto = strings.join('<param>');
     expect(texto).toContain("webhook_secret = 'whsec_' || encode(gen_random_bytes(24), 'hex')");
     expect(texto).toMatch(/where id = <param> and owner_id = <param>/);
-    expect(texto).toContain('returning *');
+    expect(texto).toMatch(/returning id,[\s\S]*webhook_secret/);
     expect(values).toEqual(['11111111-1111-1111-1111-111111111111', 'user-1']);
   });
 
   it('rotateWebhookSecret devuelve null si no hay fila (agente ajeno o inexistente)', async () => {
     const repo = new AgentRepository(makeSqlReturning([]));
     expect(await repo.rotateWebhookSecret('no-existe', 'user-2')).toBeNull();
+  });
+
+  it('getByIdForOwner mapea webhook_secret a webhookSecret (la ruta de probar tool depende de el)', async () => {
+    const repo = new AgentRepository(makeSqlReturning([makeRow()]));
+    const agent = await repo.getByIdForOwner('11111111-1111-1111-1111-111111111111', 'user-1');
+    expect(agent?.webhookSecret).toBe('whsec_fila_de_prueba_001122');
+  });
+
+  // Aserciones sobre el SQL REAL generado (no solo sobre el mapeo): la causa raiz del fallo
+  // opaco del ejecutor fue un agente cargado sin webhook_secret. Cada query debe pedir la
+  // columna explicitamente; select * / returning * omiten EN SILENCIO una columna que falte
+  // en la base (p.ej. migracion V004 sin aplicar) y producen webhookSecret undefined.
+  describe('el SQL de cada query pide webhook_secret explicitamente', () => {
+    const input = { name: 'Cotizador', providerId: 'anthropic' as const, model: 'claude-sonnet-4-6' };
+    const casos: Array<[string, (repo: AgentRepository) => Promise<unknown>]> = [
+      ['list', (repo) => repo.list()],
+      ['getById', (repo) => repo.getById('a1')],
+      ['listByOwner', (repo) => repo.listByOwner('user-1')],
+      ['getByIdForOwner', (repo) => repo.getByIdForOwner('a1', 'user-1')],
+      ['create', (repo) => repo.create(input)],
+      ['update', (repo) => repo.update('a1', input)],
+      ['updateForOwner', (repo) => repo.updateForOwner('a1', 'user-1', input)],
+      ['rotateWebhookSecret', (repo) => repo.rotateWebhookSecret('a1', 'user-1')],
+    ];
+
+    it.each(casos)('%s', async (_metodo, ejecutar) => {
+      const sql = makeSqlReturning([makeRow()]);
+      await ejecutar(new AgentRepository(sql));
+      const texto = sqlTemplateText(sql);
+      expect(texto).toContain('webhook_secret');
+      expect(texto).not.toContain('select *');
+      expect(texto).not.toContain('returning *');
+    });
   });
 
   it('NUNCA expone un campo de api key en el AgentConfig', async () => {
