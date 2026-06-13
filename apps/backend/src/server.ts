@@ -31,9 +31,24 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
   registerErrorHandler(app, config);
   // El widget embebible y su demo se sirven desde public/widget. La ruta se resuelve relativa
   // a este archivo (src/ en dev y tests, dist/ compilado): public/ es hermana de ambas.
-  await app.register(fastifyStatic, {
-    root: fileURLToPath(new URL('../public/widget', import.meta.url)),
-    prefix: '/widget/',
+  //
+  // El widget es embebible cross-origin POR DISENO: se inyecta como <script> desde
+  // app.ledesma-ai-labs.com y desde los sitios de clientes. El helmet global (plugins/security.ts)
+  // aplica Cross-Origin-Resource-Policy: same-origin a TODAS las respuestas, lo que hace que el
+  // navegador BLOQUEE el asset al cargarlo desde otro origen (ERR_BLOCKED_BY_RESPONSE.NotSameOrigin).
+  // Registramos el static en un contexto encapsulado y, con un hook onSend (que corre DESPUES del
+  // onRequest de helmet y por tanto sobreescribe su cabecera), relajamos CORP a cross-origin SOLO
+  // en estas rutas y reflejamos Access-Control-Allow-Origin: * (es JS publico, sin credenciales).
+  // El resto de la app conserva el CORP same-origin del helmet.
+  await app.register(async (widgetAssets) => {
+    widgetAssets.addHook('onSend', async (_request, reply) => {
+      reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
+      reply.header('Access-Control-Allow-Origin', '*');
+    });
+    await widgetAssets.register(fastifyStatic, {
+      root: fileURLToPath(new URL('../public/widget', import.meta.url)),
+      prefix: '/widget/',
+    });
   });
   await app.register(healthRoutes);
   await app.register(agentRoutes);
