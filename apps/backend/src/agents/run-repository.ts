@@ -45,6 +45,31 @@ export interface AgentRunsByDay {
   outputTokens: number;
 }
 
+/** ISO de epoch: fallback no-lanzante para timestamps ausentes o invalidos. */
+const EPOCH_ISO = new Date(0).toISOString();
+
+/**
+ * Normaliza counts/sums de Postgres a un number FINITO. Postgres devuelve bigint (count/sum)
+ * como string, las sumas sobre conjuntos vacios o los tokens de corridas de error pueden llegar
+ * como null, y un campo ausente llega como undefined (-> NaN). En todos esos casos devuelve 0:
+ * las metricas NUNCA propagan null ni NaN.
+ */
+function toCount(value: unknown): number {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Convierte un timestamp de Postgres (Date o string) a ISO 8601 de forma tolerante: si el valor
+ * es nulo o no parseable devuelve null en vez de lanzar `RangeError: Invalid time value`. Asi una
+ * fila con created_at incompleto degrada en vez de tumbar todo el endpoint de uso con un 500.
+ */
+function toIso(value: Date | string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 /** Acceso a datos de corridas de agentes. Recibe el cliente sql por inyeccion (testeable). */
 export class AgentRunRepository {
   constructor(private readonly sql: Sql) {}
@@ -81,17 +106,23 @@ export class AgentRunRepository {
     `;
     const row = rows[0];
     return {
-      runs: Number(row?.runs ?? 0),
-      completed: Number(row?.completed ?? 0),
-      errors: Number(row?.errors ?? 0),
-      inputTokens: Number(row?.input_tokens ?? 0),
-      outputTokens: Number(row?.output_tokens ?? 0),
+      runs: toCount(row?.runs),
+      completed: toCount(row?.completed),
+      errors: toCount(row?.errors),
+      inputTokens: toCount(row?.input_tokens),
+      outputTokens: toCount(row?.output_tokens),
     };
   }
 
   async recentForAgent(agentId: string, range?: AgentRunRange, limit = 20): Promise<AgentRunSummary[]> {
-    const rows = await this.sql<{ id: string; status: string; error_code: string | null; input_tokens: number; output_tokens: number; duration_ms: number; created_at: Date | string }[]>`
-      select id, status, error_code, input_tokens, output_tokens, duration_ms, created_at
+    // coalesce a 0 en los tokens: las corridas de error pueden haber guardado NULL y el contrato
+    // (AgentRunSummary) promete numbers. Defensa en SQL + normalizacion en el mapeo (toCount).
+    const rows = await this.sql<{ id: string; status: string; error_code: string | null; input_tokens: number | null; output_tokens: number | null; duration_ms: number | null; created_at: Date | string | null }[]>`
+      select id, status, error_code,
+             coalesce(input_tokens, 0) as input_tokens,
+             coalesce(output_tokens, 0) as output_tokens,
+             coalesce(duration_ms, 0) as duration_ms,
+             created_at
       from agent_runs where agent_id = ${agentId}
       ${this.fromCondition(range)} ${this.toCondition(range)}
       order by created_at desc limit ${limit}
@@ -100,16 +131,18 @@ export class AgentRunRepository {
       id: r.id,
       status: r.status,
       errorCode: r.error_code,
-      inputTokens: r.input_tokens,
-      outputTokens: r.output_tokens,
-      durationMs: r.duration_ms,
-      createdAt: new Date(r.created_at).toISOString(),
+      inputTokens: toCount(r.input_tokens),
+      outputTokens: toCount(r.output_tokens),
+      durationMs: toCount(r.duration_ms),
+      // created_at es not-null en el esquema; el fallback a epoch evita un 500 si una fila vieja o
+      // incompleta trae el timestamp ausente/invalido (sin descartar la corrida de la lista).
+      createdAt: toIso(r.created_at) ?? EPOCH_ISO,
     }));
   }
 
   /** Serie diaria de corridas y tokens dentro del rango, ordenada por dia ascendente. */
   async runsByDay(agentId: string, range?: AgentRunRange): Promise<AgentRunsByDay[]> {
-    const rows = await this.sql<{ day: Date | string; runs: string; input_tokens: string; output_tokens: string }[]>`
+    const rows = await this.sql<{ day: Date | string | null; runs: string; input_tokens: string | null; output_tokens: string | null }[]>`
       select date_trunc('day', created_at) as day,
              count(*) as runs,
              coalesce(sum(input_tokens), 0) as input_tokens,
@@ -118,11 +151,19 @@ export class AgentRunRepository {
       ${this.fromCondition(range)} ${this.toCondition(range)}
       group by 1 order by 1
     `;
-    return rows.map((r) => ({
-      date: new Date(r.day).toISOString().slice(0, 10),
-      runs: Number(r.runs),
-      inputTokens: Number(r.input_tokens),
-      outputTokens: Number(r.output_tokens),
-    }));
+    // Un bucket con fecha no parseable se OMITE (no rompe la serie): los tokens ya vienen
+    // coalesce'ados en SQL y toCount blinda contra null/NaN en el mapeo.
+    const series: AgentRunsByDay[] = [];
+    for (const r of rows) {
+      const day = toIso(r.day);
+      if (day === null) continue;
+      series.push({
+        date: day.slice(0, 10),
+        runs: toCount(r.runs),
+        inputTokens: toCount(r.input_tokens),
+        outputTokens: toCount(r.output_tokens),
+      });
+    }
+    return series;
   }
 }
