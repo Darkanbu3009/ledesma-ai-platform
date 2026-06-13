@@ -135,3 +135,87 @@ describe('AgentRunRepository', () => {
     ]);
   });
 });
+
+describe('AgentRunRepository robustez ante tokens nulos y multiples proveedores', () => {
+  /** Captura los textos SQL de cada llamada al tagged template (strings unidos por ?). */
+  function sqlTexts(sql: Sql): string[] {
+    return (sql as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => (c[0] as readonly string[]).join('?'));
+  }
+
+  it('totalsForAgent: sums null (todas corridas de error sin tokens) -> 0, sin NaN; runs cuentan', async () => {
+    const repo = new AgentRunRepository(
+      makeSqlReturning([{ runs: '3', completed: '0', errors: '3', input_tokens: null, output_tokens: null }]),
+    );
+    const totals = await repo.totalsForAgent('a1');
+    expect(totals).toEqual({ runs: 3, completed: 0, errors: 3, inputTokens: 0, outputTokens: 0 });
+    expect(Number.isNaN(totals.inputTokens)).toBe(false);
+    expect(Number.isNaN(totals.outputTokens)).toBe(false);
+  });
+
+  it('totalsForAgent: usa COALESCE en las sumas de tokens', async () => {
+    const sql = makeSqlReturning([{ runs: '0', completed: '0', errors: '0', input_tokens: '0', output_tokens: '0' }]);
+    await new AgentRunRepository(sql).totalsForAgent('a1');
+    const texts = sqlTexts(sql);
+    expect(texts.some((t) => t.includes('coalesce(sum(input_tokens), 0)'))).toBe(true);
+    expect(texts.some((t) => t.includes('coalesce(sum(output_tokens), 0)'))).toBe(true);
+  });
+
+  it('recentForAgent: filas mixtas con output_tokens null -> 0 (number, no null, no NaN); la corrida de error SI cuenta', async () => {
+    const repo = new AgentRunRepository(
+      makeSqlReturning([
+        // corrida de error de un proveedor que no registro tokens
+        { id: 'r1', status: 'error', error_code: 'UPSTREAM_TIMEOUT', input_tokens: null, output_tokens: null, duration_ms: 5000, created_at: '2026-06-13T10:00:00.000Z' },
+        // corrida de otro proveedor con input pero output null
+        { id: 'r2', status: 'error', error_code: 'RATE_LIMIT', input_tokens: 120, output_tokens: null, duration_ms: 90, created_at: '2026-06-13T09:00:00.000Z' },
+        // corrida completada normal
+        { id: 'r3', status: 'completed', error_code: null, input_tokens: 80, output_tokens: 30, duration_ms: 300, created_at: '2026-06-12T10:00:00.000Z' },
+      ]),
+    );
+    const recent = await repo.recentForAgent('a1');
+    expect(recent).toHaveLength(3); // las corridas de error cuentan como corrida
+    expect(recent[0]).toEqual({ id: 'r1', status: 'error', errorCode: 'UPSTREAM_TIMEOUT', inputTokens: 0, outputTokens: 0, durationMs: 5000, createdAt: '2026-06-13T10:00:00.000Z' });
+    expect(recent[1]).toMatchObject({ id: 'r2', inputTokens: 120, outputTokens: 0 });
+    for (const r of recent) {
+      expect(typeof r.inputTokens).toBe('number');
+      expect(typeof r.outputTokens).toBe('number');
+      expect(Number.isNaN(r.inputTokens)).toBe(false);
+      expect(Number.isNaN(r.outputTokens)).toBe(false);
+    }
+  });
+
+  it('recentForAgent: usa COALESCE(input_tokens, 0)/COALESCE(output_tokens, 0) en el SQL', async () => {
+    const sql = makeSqlReturning([]);
+    await new AgentRunRepository(sql).recentForAgent('a1');
+    const texts = sqlTexts(sql);
+    expect(texts.some((t) => t.includes('coalesce(input_tokens, 0)'))).toBe(true);
+    expect(texts.some((t) => t.includes('coalesce(output_tokens, 0)'))).toBe(true);
+  });
+
+  it('recentForAgent: created_at nulo no lanza, degrada a epoch (no 500)', async () => {
+    const repo = new AgentRunRepository(
+      makeSqlReturning([
+        { id: 'r1', status: 'error', error_code: 'X', input_tokens: 0, output_tokens: 0, duration_ms: 0, created_at: null },
+      ]),
+    );
+    const recent = await repo.recentForAgent('a1');
+    expect(recent).toHaveLength(1);
+    expect(recent[0]?.createdAt).toBe('1970-01-01T00:00:00.000Z');
+  });
+
+  it('runsByDay: sums null -> 0 manteniendo el conteo de corridas del dia', async () => {
+    const repo = new AgentRunRepository(
+      makeSqlReturning([{ day: '2026-06-13T00:00:00.000Z', runs: '3', input_tokens: null, output_tokens: null }]),
+    );
+    expect(await repo.runsByDay('a1')).toEqual([{ date: '2026-06-13', runs: 3, inputTokens: 0, outputTokens: 0 }]);
+  });
+
+  it('runsByDay: un bucket con fecha no parseable se omite sin lanzar', async () => {
+    const repo = new AgentRunRepository(
+      makeSqlReturning([
+        { day: null, runs: '1', input_tokens: '5', output_tokens: '2' },
+        { day: '2026-06-13T00:00:00.000Z', runs: '3', input_tokens: '10', output_tokens: '4' },
+      ]),
+    );
+    expect(await repo.runsByDay('a1')).toEqual([{ date: '2026-06-13', runs: 3, inputTokens: 10, outputTokens: 4 }]);
+  });
+});

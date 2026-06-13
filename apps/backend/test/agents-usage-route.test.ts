@@ -138,4 +138,46 @@ describe('GET /v1/agents/:id/usage', () => {
     expect(recentForAgentMock).toHaveBeenCalledWith(AGENT_ID, range);
     expect(runsByDayMock).toHaveBeenCalledWith(AGENT_ID, range);
   });
+
+  it('200 con ceros cuando el agente no tiene corridas (no 500)', async () => {
+    getByIdForOwnerMock.mockResolvedValue({ id: AGENT_ID, name: 'Cotizador', ownerId: 'user-1' });
+    const totals = { runs: 0, completed: 0, errors: 0, inputTokens: 0, outputTokens: 0 };
+    totalsForAgentMock.mockResolvedValue(totals);
+    recentForAgentMock.mockResolvedValue([]);
+    runsByDayMock.mockResolvedValue([]);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/agents/${AGENT_ID}/usage`,
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ totals, recent: [], runsByDay: [] });
+  });
+
+  it('200 (no 500) con corridas de error de varios proveedores y tokens normalizados a 0', async () => {
+    getByIdForOwnerMock.mockResolvedValue({ id: AGENT_ID, name: 'Cotizador', ownerId: 'user-1' });
+    const totals = { runs: 6, completed: 2, errors: 3, inputTokens: 300, outputTokens: 80 };
+    const recent = [
+      { id: 'r1', status: 'error', errorCode: 'UPSTREAM_TIMEOUT', inputTokens: 0, outputTokens: 0, durationMs: 5000, createdAt: '2026-06-13T10:00:00.000Z' },
+      { id: 'r2', status: 'completed', errorCode: null, inputTokens: 80, outputTokens: 30, durationMs: 300, createdAt: '2026-06-12T10:00:00.000Z' },
+    ];
+    const runsByDay = [{ date: '2026-06-13', runs: 3, inputTokens: 120, outputTokens: 0 }];
+    totalsForAgentMock.mockResolvedValue(totals);
+    recentForAgentMock.mockResolvedValue(recent);
+    runsByDayMock.mockResolvedValue(runsByDay);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/agents/${AGENT_ID}/usage`,
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.totals.runs).toBe(6);
+    expect(body.recent[0]).toMatchObject({ status: 'error', inputTokens: 0, outputTokens: 0 });
+    expect(body.runsByDay).toEqual(runsByDay);
+  });
 });
