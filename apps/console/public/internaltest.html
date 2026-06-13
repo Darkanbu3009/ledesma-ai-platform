@@ -8,26 +8,13 @@
 </head>
 <body style="font-family: system-ui; padding: 40px; max-width: 760px; margin: 0 auto; background: #0E1620; color: #fff;">
   <h1>Prueba interna del widget</h1>
-  <p style="color:#9aa;">Pagina de demostracion del web component ledesma-agent embebido en el
-  dominio propio. El Agent ID y el session token se pasan por query string para no hardcodear
-  credenciales en el repo.</p>
-  <div id="contenedor" style="height: 520px; margin-top: 24px;"></div>
-  <script>
-    // Lee agentId y token de la URL: /internaltest.html?agent=AGENT_ID&token=SESSION_TOKEN
-    const params = new URLSearchParams(window.location.search);
-    const agent = params.get('agent');
-    const token = params.get('token');
-    const cont = document.getElementById('contenedor');
-    if (!agent || !token) {
-      cont.innerHTML = '<p style="color:#f87171;">Falta agent o token en la URL. Usa: ' +
-        '/internaltest.html?agent=TU_AGENT_ID&token=TU_SESSION_TOKEN</p>';
-    } else {
-      const el = document.createElement('ledesma-agent');
-      el.setAttribute('endpoint', 'https://api-plataforma.ledesma-ai-labs.com/v1/run/' + agent);
-      el.setAttribute('session-token', token);
-      el.setAttribute('title', 'Asistente de prueba');
-      cont.appendChild(el);
-    }
-  </script>
+  <p style="color:#9aa;">Demostracion del web component ledesma-agent embebido en el dominio propio.</p>
+  <div style="height: 520px; margin-top: 24px;">
+    <ledesma-agent
+      endpoint="https://api-plataforma.ledesma-ai-labs.com/v1/run/ae423c72-903a-4023-b432-9fd7f2e064c4"
+      session-token="REEMPLAZAR_TOKEN_AQUI"
+      title="Asistente de prueba"
+    ></ledesma-agent>
+  </div>
 </body>
 </html>
