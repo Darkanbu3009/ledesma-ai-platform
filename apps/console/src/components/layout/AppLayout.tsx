@@ -22,13 +22,13 @@ export function AppLayout() {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-3 border-b border-grafito-border px-4 py-3 md:hidden">
-          <button onClick={() => setMobileOpen(true)} className="text-hueso-muted transition hover:text-hueso" aria-label="Abrir menu">
+        <header className="flex items-center gap-3 border-b border-line bg-sidebar px-4 py-3 md:hidden">
+          <button onClick={() => setMobileOpen(true)} className="text-muted transition hover:text-ink" aria-label="Abrir menú">
             <Menu className="h-5 w-5" />
           </button>
-          <span className="font-display font-semibold text-hueso">Ledesma AI Labs</span>
+          <span className="font-display font-semibold text-ink">Ledesma AI Labs</span>
         </header>
-        <main className="flex-1 px-6 py-8">
+        <main className="flex-1 px-6 py-8 sm:px-8 lg:px-10">
           <Outlet />
         </main>
       </div>
