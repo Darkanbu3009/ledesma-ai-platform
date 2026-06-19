@@ -14,13 +14,13 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   }
 
   return (
-    <aside className="flex h-full w-64 flex-col border-r border-grafito-border bg-grafito">
-      <div className="flex items-center gap-3 px-5 py-5">
+    <aside className="flex h-full w-64 flex-col border-r border-line bg-sidebar px-4 py-5">
+      <div className="flex items-center gap-3 px-2 py-1">
         <BrandMark className="h-9 w-9" />
-        <span className="font-display font-semibold text-hueso">Ledesma AI Labs</span>
+        <span className="font-display text-[15px] font-bold text-ink">Ledesma AI Labs</span>
       </div>
 
-      <nav className="flex-1 space-y-1 px-3 py-2">
+      <nav className="mt-7 flex-1 space-y-1">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
@@ -28,25 +28,27 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             onClick={onNavigate}
             className={({ isActive }) =>
               [
-                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition',
-                isActive ? 'bg-brasa/10 text-brasa' : 'text-hueso-muted hover:bg-carbon hover:text-hueso',
+                'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition',
+                isActive
+                  ? 'bg-brasa-soft font-semibold text-brasa'
+                  : 'font-medium text-ink-soft hover:bg-line-soft',
               ].join(' ')
             }
           >
-            <item.icon className="h-4 w-4" />
+            <item.icon className="h-[18px] w-[18px]" />
             {item.label}
           </NavLink>
         ))}
       </nav>
 
-      <div className="border-t border-grafito-border px-3 py-4">
-        <p className="truncate px-2 pb-3 text-xs text-hueso-muted">{user?.email}</p>
+      <div className="border-t border-line pt-4">
+        <p className="truncate px-2 pb-2.5 text-xs text-muted-soft">{user?.email}</p>
         <button
           onClick={handleLogout}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-hueso-muted transition hover:bg-carbon hover:text-hueso"
+          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted transition hover:bg-line-soft hover:text-ink"
         >
-          <LogOut className="h-4 w-4" />
-          Cerrar sesion
+          <LogOut className="h-[17px] w-[17px]" />
+          Cerrar sesión
         </button>
       </div>
     </aside>

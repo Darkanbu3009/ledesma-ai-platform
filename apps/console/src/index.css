@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 html,
@@ -14,8 +14,8 @@ body,
 
 body {
   margin: 0;
-  background-color: #0f0f11;
-  color: #f2efe9;
+  background-color: #f5f4ef;
+  color: #1f1e1c;
   font-family: 'Hanken Grotesk', sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;

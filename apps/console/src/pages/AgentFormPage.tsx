@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, BarChart3, Play, Plug, RefreshCw } from 'lucide-react';
 import { FormProvider, useForm } from 'react-hook-form';
@@ -15,6 +15,9 @@ import { ToolsEditor } from '../components/agents/ToolsEditor';
 
 const PROVIDER_IDS: ProviderId[] = ['anthropic', 'openai', 'openai-compatible'];
 
+const secondaryActionClass =
+  'inline-flex items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2.5 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink';
+
 const defaultValues: AgentFormValues = {
   name: '',
   description: '',
@@ -26,6 +29,26 @@ const defaultValues: AgentFormValues = {
   baseUrl: '',
   tools: [],
 };
+
+function Section({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl border border-line bg-surface p-6 shadow-card">
+      <div className="mb-5">
+        <h2 className="font-display text-base font-bold text-ink">{title}</h2>
+        {description && <p className="mt-1 text-sm text-muted">{description}</p>}
+      </div>
+      <div className="space-y-5">{children}</div>
+    </section>
+  );
+}
 
 export function AgentFormPage() {
   const { id } = useParams<{ id: string }>();
@@ -83,14 +106,14 @@ export function AgentFormPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl">
+    <div className="mx-auto max-w-3xl">
       <div className="flex items-center justify-between gap-4">
-        <h1 className="font-display text-2xl font-bold text-hueso">
+        <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">
           {isEdit ? 'Editar agente' : 'Crear agente'}
         </h1>
         <Link
           to="/agentes"
-          className="inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2 text-sm text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
+          className="inline-flex items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
         >
           <ArrowLeft className="h-4 w-4" />
           Volver
@@ -98,22 +121,19 @@ export function AgentFormPage() {
       </div>
 
       {isEdit && isLoading ? (
-        <div className="mt-6 space-y-5">
+        <div className="mt-8 space-y-5">
           {[0, 1, 2, 3].map((i) => (
-            <div
-              key={i}
-              className="h-16 animate-pulse rounded-xl border border-grafito-border bg-grafito"
-            />
+            <div key={i} className="h-28 animate-pulse rounded-2xl border border-line bg-surface" />
           ))}
         </div>
       ) : isEdit && isError ? (
-        <div className="mt-10 rounded-xl border border-grafito-border bg-grafito p-8 text-center">
-          <p className="font-display text-lg text-hueso">No pudimos cargar el agente</p>
-          <p className="mt-2 text-sm text-hueso-muted">Revisa tu conexion e intenta de nuevo.</p>
+        <div className="mt-10 rounded-2xl border border-line bg-surface p-8 text-center shadow-card">
+          <p className="font-display text-lg font-bold text-ink">No pudimos cargar el agente</p>
+          <p className="mt-2 text-sm text-muted">Revisa tu conexión e intenta de nuevo.</p>
           <button
             type="button"
             onClick={() => void refetch()}
-            className="mt-5 inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2 text-sm text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
+            className="mt-5 inline-flex items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
           >
             <RefreshCw className="h-4 w-4" />
             Reintentar
@@ -121,137 +141,151 @@ export function AgentFormPage() {
         </div>
       ) : (
         <FormProvider {...form}>
-          <form onSubmit={(e) => void onSubmit(e)} className="mt-6 space-y-5" noValidate>
+          <form onSubmit={(e) => void onSubmit(e)} className="mt-8 space-y-6" noValidate>
             {saveFailed && (
-              <div className="rounded-lg border border-brasa/40 bg-brasa/10 px-4 py-3 text-sm text-brasa">
+              <div className="rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa">
                 No pudimos guardar el agente. Intenta de nuevo.
               </div>
             )}
 
-            <Field label="Nombre" error={errors.name?.message}>
-              <input {...register('name')} className={inputClass} placeholder="Mi agente" />
-            </Field>
-
-            <Field label="Descripcion" error={errors.description?.message}>
-              <textarea
-                {...register('description')}
-                rows={3}
-                className={inputClass}
-                placeholder="Que hace este agente"
-              />
-            </Field>
-
-            <Field label="Proveedor" error={errors.providerId?.message}>
-              <select
-                {...register('providerId', { onChange: () => setValue('model', '') })}
-                className={inputClass}
-              >
-                {PROVIDER_IDS.map((pid) => (
-                  <option key={pid} value={pid}>
-                    {providerLabel(pid)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <Field
-              label="Modelo"
-              error={errors.model?.message}
-              hint="Sugerencias segun el proveedor; puedes escribir cualquier identificador valido."
-            >
-              <input
-                {...register('model')}
-                className={inputClass}
-                list="model-suggestions"
-                placeholder={modelPlaceholder(providerId)}
-              />
-              <datalist id="model-suggestions">
-                {modelSuggestions(providerId).map((m) => (
-                  <option key={m} value={m} />
-                ))}
-              </datalist>
-            </Field>
-
-            <Field label="System prompt" error={errors.systemPrompt?.message}>
-              <textarea
-                {...register('systemPrompt')}
-                rows={6}
-                className={inputClass}
-                placeholder="Instrucciones para el agente"
-              />
-            </Field>
-
-            <Field label="Max tokens" error={errors.maxTokens?.message}>
-              <input type="number" {...register('maxTokens')} className={inputClass} />
-            </Field>
-
-            <Field
-              label="Temperature"
-              error={errors.temperature?.message}
-              hint="Vacio = por defecto del proveedor"
-            >
-              <input type="number" step="0.1" {...register('temperature')} className={inputClass} />
-            </Field>
-
-            {providerId === 'openai-compatible' && (
-              <Field
-                label="Base URL"
-                error={errors.baseUrl?.message}
-                hint="URL base del endpoint compatible con OpenAI"
-              >
-                <input
-                  {...register('baseUrl')}
-                  className={inputClass}
-                  placeholder="https://api.miproveedor.com/v1"
-                />
-              </Field>
+            {isEdit && (
+              <div className="flex flex-wrap gap-2.5">
+                <Link to={`/agentes/${id}/playground`} className={secondaryActionClass}>
+                  <Play className="h-4 w-4" />
+                  Probar agente
+                </Link>
+                <Link to={`/agentes/${id}/conectar`} className={secondaryActionClass}>
+                  <Plug className="h-4 w-4" />
+                  Conectar
+                </Link>
+                <Link to={`/agentes/${id}/uso`} className={secondaryActionClass}>
+                  <BarChart3 className="h-4 w-4" />
+                  Uso
+                </Link>
+              </div>
             )}
 
-            <ToolsEditor agentId={id} />
+            <Section title="Identidad" description="Cómo se identifica este agente en la consola.">
+              <Field label="Nombre" error={errors.name?.message}>
+                <input {...register('name')} className={inputClass} placeholder="Mi agente" />
+              </Field>
 
-            <div className="flex items-center justify-between gap-4 pt-2">
-              <button
-                type="submit"
-                disabled={isSaving}
-                className="rounded-lg bg-brasa px-4 py-2.5 text-sm font-semibold text-carbon transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
+              <Field label="Descripción" error={errors.description?.message}>
+                <textarea
+                  {...register('description')}
+                  rows={3}
+                  className={inputClass}
+                  placeholder="Qué hace este agente"
+                />
+              </Field>
+            </Section>
+
+            <Section title="Modelo" description="El cerebro que mueve al agente. Es intercambiable.">
+              <Field label="Proveedor" error={errors.providerId?.message}>
+                <select
+                  {...register('providerId', { onChange: () => setValue('model', '') })}
+                  className={inputClass}
+                >
+                  {PROVIDER_IDS.map((pid) => (
+                    <option key={pid} value={pid}>
+                      {providerLabel(pid)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field
+                label="Modelo"
+                error={errors.model?.message}
+                hint="Sugerencias según el proveedor; puedes escribir cualquier identificador válido."
               >
-                {isSaving ? 'Guardando...' : 'Guardar agente'}
-              </button>
-              {isEdit && (
-                <div className="flex items-center gap-3">
-                  <Link
-                    to={`/agentes/${id}/playground`}
-                    className="inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2.5 text-sm font-medium text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
-                  >
-                    <Play className="h-4 w-4" />
-                    Probar agente
-                  </Link>
-                  <Link
-                    to={`/agentes/${id}/conectar`}
-                    className="inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2.5 text-sm font-medium text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
-                  >
-                    <Plug className="h-4 w-4" />
-                    Conectar
-                  </Link>
-                  <Link
-                    to={`/agentes/${id}/uso`}
-                    className="inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2.5 text-sm font-medium text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
-                  >
-                    <BarChart3 className="h-4 w-4" />
-                    Uso
-                  </Link>
+                <input
+                  {...register('model')}
+                  className={inputClass}
+                  list="model-suggestions"
+                  placeholder={modelPlaceholder(providerId)}
+                />
+                <datalist id="model-suggestions">
+                  {modelSuggestions(providerId).map((m) => (
+                    <option key={m} value={m} />
+                  ))}
+                </datalist>
+              </Field>
+
+              <div className="grid gap-5 sm:grid-cols-2">
+                <Field label="Max tokens" error={errors.maxTokens?.message}>
+                  <input type="number" {...register('maxTokens')} className={inputClass} />
+                </Field>
+
+                <Field
+                  label="Temperature"
+                  error={errors.temperature?.message}
+                  hint="Vacío = por defecto del proveedor"
+                >
+                  <input
+                    type="number"
+                    step="0.1"
+                    {...register('temperature')}
+                    className={inputClass}
+                  />
+                </Field>
+              </div>
+
+              {providerId === 'openai-compatible' && (
+                <Field
+                  label="Base URL"
+                  error={errors.baseUrl?.message}
+                  hint="URL base del endpoint compatible con OpenAI"
+                >
+                  <input
+                    {...register('baseUrl')}
+                    className={inputClass}
+                    placeholder="https://api.miproveedor.com/v1"
+                  />
+                </Field>
+              )}
+            </Section>
+
+            <Section
+              title="Comportamiento"
+              description="Las instrucciones base que guían cada respuesta del agente."
+            >
+              <Field label="System prompt" error={errors.systemPrompt?.message}>
+                <textarea
+                  {...register('systemPrompt')}
+                  rows={6}
+                  className={inputClass}
+                  placeholder="Instrucciones para el agente"
+                />
+              </Field>
+            </Section>
+
+            <section className="rounded-2xl border border-line bg-surface p-6 shadow-card">
+              <ToolsEditor agentId={id} />
+            </section>
+
+            <div className="sticky bottom-0 z-10 mt-2 flex items-center justify-between gap-4 rounded-2xl border border-line bg-cream/85 px-4 py-3 shadow-card backdrop-blur supports-[backdrop-filter]:bg-cream/70">
+              <div>
+                {isEdit && (
                   <button
                     type="button"
                     onClick={() => {
                       deleteAgent.reset();
                       setConfirmOpen(true);
                     }}
-                    className="rounded-lg border border-grafito-border px-4 py-2.5 text-sm font-medium text-brasa transition hover:border-brasa"
+                    className="rounded-xl border border-line bg-surface px-4 py-2.5 text-sm font-medium text-brasa transition hover:border-brasa-line hover:bg-brasa/[0.04]"
                   >
                     Eliminar agente
                   </button>
-                </div>
-              )}
+                )}
+              </div>
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="rounded-xl bg-brasa px-5 py-2.5 text-sm font-semibold text-white shadow-brasa transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSaving ? 'Guardando...' : 'Guardar agente'}
+              </button>
             </div>
           </form>
         </FormProvider>
