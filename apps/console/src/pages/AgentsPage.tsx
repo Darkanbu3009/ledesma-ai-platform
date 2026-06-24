@@ -10,7 +10,7 @@ function CreateAgentButton() {
   return (
     <Link
       to="/agentes/nuevo"
-      className="inline-flex items-center gap-2 rounded-xl bg-brasa px-[18px] py-3 text-sm font-semibold text-white shadow-brasa transition hover:bg-brasa-hover"
+      className="inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:-translate-y-px hover:bg-[#C8460F] hover:shadow-[0_2px_6px_rgba(31,30,28,0.14)]"
     >
       <Plus className="h-[17px] w-[17px]" />
       Crear agente
