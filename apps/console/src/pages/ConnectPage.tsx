@@ -21,7 +21,7 @@ import { CopyButton } from '../components/ui/CopyButton';
 import { RotateSecretDialog } from '../components/agents/RotateSecretDialog';
 
 const preClass =
-  'overflow-x-auto rounded-xl border border-grafito-border bg-carbon p-4 font-mono text-xs leading-relaxed text-hueso';
+  'overflow-x-auto rounded-xl border border-grafito-border bg-grafito p-4 font-mono text-xs leading-relaxed text-hueso';
 
 const widgetThemeExample = `ledesma-agent {
   --la-accent: #2563eb; --la-radius: 16px; --la-height: 560px;
