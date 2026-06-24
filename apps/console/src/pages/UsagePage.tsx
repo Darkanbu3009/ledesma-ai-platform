@@ -96,7 +96,7 @@ export function UsagePage() {
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
           <h1 className="truncate font-display text-2xl font-bold text-hueso">
-            Uso — {agent.name}
+            Uso: {agent.name}
           </h1>
           <p className="mt-1 text-sm text-hueso-muted">
             {providerLabel(agent.providerId)} · <span className="font-mono">{agent.model}</span>
@@ -283,7 +283,7 @@ export function UsagePage() {
                             </span>
                           </td>
                           <td className="px-4 py-3 font-mono text-xs text-hueso-muted">
-                            {run.errorCode ?? '—'}
+                            {run.errorCode ?? '-'}
                           </td>
                           <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-hueso">
                             {formatTokens(run.inputTokens)} in · {formatTokens(run.outputTokens)}{' '}

@@ -110,7 +110,7 @@ export function AgenteLedesma() {
 
 /** Servidor del cliente: emite tokens efimeros (la key vive en su entorno). */
 export function tokenServerSnippet(p: SnippetParams): string {
-  return `// POST /api/token-agente — emite un token efimero para el widget
+  return `// POST /api/token-agente: emite un token efimero para el widget
 app.post('/api/token-agente', async (req, res) => {
   // Aqui va TU autenticacion (sesion de usuario, rate limit, etc.).
   const upstream = await fetch('${sessionTokensEndpoint(p)}', {

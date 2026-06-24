@@ -98,7 +98,7 @@ export function ConnectPage() {
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
           <h1 className="truncate font-display text-2xl font-bold text-hueso">
-            Conectar — {agent.name}
+            Conectar: {agent.name}
           </h1>
           <p className="mt-1 text-sm text-hueso-muted">
             {providerLabel(agent.providerId)} · <span className="font-mono">{agent.model}</span>
