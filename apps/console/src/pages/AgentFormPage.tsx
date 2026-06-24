@@ -273,7 +273,7 @@ export function AgentFormPage() {
                       deleteAgent.reset();
                       setConfirmOpen(true);
                     }}
-                    className="rounded-xl border border-line bg-surface px-4 py-2.5 text-sm font-medium text-brasa transition hover:border-brasa-line hover:bg-brasa/[0.04]"
+                    className="rounded-[10px] border border-line bg-transparent px-[22px] py-[11px] text-sm font-medium text-muted transition hover:border-[rgba(192,73,43,0.35)] hover:bg-[rgba(192,73,43,0.05)] hover:text-[#C0492B]"
                   >
                     Eliminar agente
                   </button>
@@ -282,7 +282,7 @@ export function AgentFormPage() {
               <button
                 type="submit"
                 disabled={isSaving}
-                className="rounded-xl bg-brasa px-5 py-2.5 text-sm font-semibold text-white shadow-brasa transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:-translate-y-px hover:bg-[#C8460F] hover:shadow-[0_2px_6px_rgba(31,30,28,0.14)] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isSaving ? 'Guardando...' : 'Guardar agente'}
               </button>

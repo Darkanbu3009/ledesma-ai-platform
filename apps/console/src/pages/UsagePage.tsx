@@ -26,6 +26,17 @@ const rangePresets: Array<{ value: UsageRangePreset; label: string }> = [
   { value: 'all', label: 'Todo' },
 ];
 
+// 'YYYY-MM-DD' -> '10 jun' (es-MX). Se interpreta en UTC para no desfasar el dia.
+function formatDayLabel(isoDate: string): string {
+  const [year, month, day] = isoDate.split('-').map(Number);
+  if (!year || !month || !day) return isoDate;
+  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString('es-MX', {
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'UTC',
+  });
+}
+
 export function UsagePage() {
   const { id } = useParams<{ id: string }>();
   const { data: agent, isLoading, isError, refetch } = useAgent(id);
@@ -75,7 +86,10 @@ export function UsagePage() {
     : [];
 
   const runsByDay = usage.data?.runsByDay ?? [];
-  const maxRunsByDay = Math.max(1, ...runsByDay.map((day) => day.runs));
+  // Tope del eje con un minimo sensato: una sola corrida se ve como barra corta, no como bloque.
+  const maxRunsByDay = Math.max(4, ...runsByDay.map((day) => day.runs));
+  // Mostrar solo algunas etiquetas de fecha (aprox. una de cada seis) para no saturar el eje.
+  const dateLabelStep = Math.max(1, Math.ceil(runsByDay.length / 6));
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -188,25 +202,55 @@ export function UsagePage() {
             <h2 className="font-display text-lg font-semibold text-hueso">Corridas por dia</h2>
             <div className="mt-3 rounded-xl border border-grafito-border bg-grafito p-4">
               {runsByDay.length === 0 ? (
-                <p className="text-sm text-hueso-muted">Sin corridas en este rango.</p>
-              ) : (
-                <>
-                  <div className="flex h-32 items-end gap-1">
-                    {runsByDay.map((day) => (
-                      <div
-                        key={day.date}
-                        title={`${day.date}: ${day.runs} corridas, ${formatTokens(day.inputTokens)} in / ${formatTokens(day.outputTokens)} out`}
-                        className="flex-1 rounded-t-sm bg-brasa"
-                        style={{
-                          height: `${(day.runs / maxRunsByDay) * 100}%`,
-                          minHeight: day.runs > 0 ? '2px' : undefined,
-                        }}
-                      />
-                    ))}
+                // Estado vacio: eje base y un texto tenue, sin bloque ni area en blanco.
+                <div className="flex h-40 flex-col">
+                  <div className="flex flex-1 items-center justify-center">
+                    <p className="text-sm text-hueso-muted">Sin corridas en este periodo.</p>
                   </div>
-                  {/* eje base */}
                   <div className="border-t border-grafito-border" />
-                </>
+                </div>
+              ) : (
+                <div className="flex gap-3">
+                  {/* Eje vertical: maximo, mitad y cero */}
+                  <div className="flex h-40 w-8 shrink-0 flex-col justify-between py-px text-right font-mono text-[10px] leading-none text-hueso-muted">
+                    <span>{maxRunsByDay}</span>
+                    <span>{Math.round(maxRunsByDay / 2)}</span>
+                    <span>0</span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    {/* Area de barras con lineas guia horizontales */}
+                    <div className="relative h-40">
+                      <div className="pointer-events-none absolute inset-x-0 top-0 border-t border-grafito-border/60" />
+                      <div className="pointer-events-none absolute inset-x-0 top-1/2 border-t border-dashed border-grafito-border/50" />
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 border-t border-grafito-border" />
+                      <div className="absolute inset-0 flex items-end gap-1.5">
+                        {runsByDay.map((day) => (
+                          <div
+                            key={day.date}
+                            title={`${formatDayLabel(day.date)}: ${day.runs} ${day.runs === 1 ? 'corrida' : 'corridas'}`}
+                            className="max-w-[22px] flex-1 rounded-t-[3px] bg-brasa transition-colors hover:bg-[#C8460F]"
+                            style={{
+                              height: `${(day.runs / maxRunsByDay) * 100}%`,
+                              minHeight: day.runs > 0 ? '3px' : undefined,
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    {/* Etiquetas de fecha (solo algunas para no saturar) */}
+                    <div className="mt-2 flex gap-1.5">
+                      {runsByDay.map((day, i) => (
+                        <div key={day.date} className="max-w-[22px] flex-1 text-center">
+                          {i % dateLabelStep === 0 && (
+                            <span className="whitespace-nowrap font-mono text-[10px] leading-none text-hueso-muted">
+                              {formatDayLabel(day.date)}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           </section>
