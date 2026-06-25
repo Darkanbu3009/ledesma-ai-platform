@@ -14,6 +14,11 @@ const EnvSchema = z.object({
   ADMIN_API_TOKEN: z.string().min(16),
   SUPABASE_URL: z.string().url(),
   SESSION_TOKEN_SECRET: z.string().min(32),
+  // Tools nativas de plataforma (web worker propio). Opcionales a proposito: si falta cualquiera
+  // de las dos, la feature se desactiva (no se inyectan nativas) y el comportamiento es identico
+  // al actual. WEB_WORKER_SECRET firma los POST al worker (no es el whsec_ por agente).
+  WEB_WORKER_URL: z.string().url().optional(),
+  WEB_WORKER_SECRET: z.string().min(32).optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

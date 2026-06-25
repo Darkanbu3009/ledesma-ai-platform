@@ -8,9 +8,17 @@ import { AgentRunRepository } from '../agents/run-repository.js';
 import { createSupabaseJwtVerifier, type JwtVerifier } from '../auth/jwt-verifier.js';
 import { requireUser } from '../auth/require-user.js';
 import { createWebhookExecutor } from '../tools/webhook-tools.js';
+import { NATIVE_TOOL_PREFIX } from '../tools/native-tools.js';
 
 const StoredToolSchema = z.object({
-  name: z.string().min(1),
+  // El prefijo platform_ esta reservado para las tools nativas de la plataforma: el cliente no
+  // puede crear/actualizar tools con el (aplica en POST y PUT, ambos via AgentInputSchema).
+  name: z
+    .string()
+    .min(1)
+    .refine((n) => !n.startsWith(NATIVE_TOOL_PREFIX), {
+      message: 'El prefijo platform_ esta reservado para herramientas nativas de la plataforma',
+    }),
   description: z.string(),
   inputSchema: z.record(z.string(), z.unknown()),
   url: z.string().url().startsWith('https://', 'Webhook URL must use https'),

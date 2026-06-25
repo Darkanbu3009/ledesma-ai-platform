@@ -9,7 +9,8 @@ import { AgentRepository } from '../agents/agent-repository.js';
 import { AgentRunRepository } from '../agents/run-repository.js';
 import { createDemoRegistry } from '../tools/demo-registry.js';
 import { createWebhookExecutor, storedToolsToDefinitions } from '../tools/webhook-tools.js';
-import { AGENT_LIMITS } from '../agent/index.js';
+import { createNativeExecutor, nativeToolsToDefinitions, NATIVE_TOOL_NAMES } from '../tools/native-tools.js';
+import { AGENT_LIMITS, type ToolExecutor } from '../agent/index.js';
 import { streamAgentRun } from './sse-runner.js';
 
 const RunByIdBodySchema = z
@@ -60,16 +61,54 @@ export function runAgentByIdRoutes(config: Env) {
         throw new AppError('VALIDATION_ERROR', 400, 'Invalid request body', parsed.error.issues);
       }
 
-      // Si el agente tiene tools guardadas se ejecutan por webhook; si no, se mantiene el
-      // registro demo (mismo comportamiento que /v1/agent/run).
+      // Tools nativas de plataforma: se inyectan en TODOS los agentes cuando el worker esta
+      // configurado (ambas env vars). Las tools de cliente se ejecutan por webhook (firmadas con el
+      // secreto del agente); si no hay ni nativas ni stored tools, se mantiene el registro demo
+      // (mismo comportamiento que /v1/agent/run).
+      const workerUrl = config.WEB_WORKER_URL;
+      const workerSecret = config.WEB_WORKER_SECRET;
+      const nativasActivas = Boolean(workerUrl && workerSecret);
       const hasStoredTools = agent.tools.length > 0;
-      const registry = hasStoredTools ? null : createDemoRegistry();
-      const toolDefinitions = hasStoredTools ? storedToolsToDefinitions(agent.tools) : registry!.toToolDefinitions();
-      const executeTool = hasStoredTools
+
+      // Defs del modelo: nativas (si activas) + las del cliente. El demo solo cuando no hay ninguna.
+      const nativeDefs = nativasActivas ? nativeToolsToDefinitions() : [];
+      const clientDefs = hasStoredTools ? storedToolsToDefinitions(agent.tools) : [];
+      const registry = !nativasActivas && !hasStoredTools ? createDemoRegistry() : null;
+
+      // Dedupe defensivo: las nativas tienen precedencia; el modelo nunca recibe dos tools con el
+      // mismo name (el prefijo reservado platform_ ya lo evita al crear, esto es cinturon y tirantes).
+      const nativeNames = new Set(nativeDefs.map((d) => d.name));
+      const clientDefsSinColision = clientDefs.filter((d) => {
+        if (nativeNames.has(d.name)) {
+          request.log.warn(`tool de cliente '${d.name}' descartada por colision con una tool nativa de la plataforma`);
+          return false;
+        }
+        return true;
+      });
+      const toolDefinitions = registry
+        ? registry.toToolDefinitions()
+        : [...nativeDefs, ...clientDefsSinColision];
+
+      // Ejecutor con dispatch por nombre: las nativas van primero (defensa anti-colision), el resto
+      // al ejecutor de cliente (webhook o demo). El flujo de cliente queda intacto.
+      const clientExec = hasStoredTools
         ? createWebhookExecutor(agent.tools, agent.webhookSecret, undefined, {
             warn: (message) => request.log.warn(message),
           })
-        : registry!.toExecutor();
+        : registry
+          ? registry.toExecutor()
+          : null;
+      const nativeExec =
+        workerUrl && workerSecret
+          ? createNativeExecutor(workerUrl, workerSecret, undefined, {
+              warn: (message) => request.log.warn(message),
+            })
+          : null;
+      const executeTool: ToolExecutor = (call, abortSignal) => {
+        if (nativeExec && NATIVE_TOOL_NAMES.has(call.name)) return nativeExec(call, abortSignal);
+        if (clientExec) return clientExec(call, abortSignal);
+        return Promise.resolve({ content: `Tool desconocida: ${call.name}`, isError: true });
+      };
       const normalizedRequest: NormalizedRequest = {
         ...(agent.systemPrompt ? { system: agent.systemPrompt } : {}),
         messages: parsed.data.messages.map((m) => ({ role: m.role, content: [{ type: 'text', text: m.content }] })),
