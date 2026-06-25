@@ -2,12 +2,10 @@ import type { ToolDefinition } from '@ledesma-platform/shared';
 import type { StoredTool } from '../agents/types.js';
 import type { ToolCall, ToolExecutionResult, ToolExecutor } from '../agent/index.js';
 import { resolvesToForbiddenIp, type LookupFn } from './ip-guard.js';
-import { signWebhookPayload } from './webhook-signature.js';
+import { performSignedToolPost, SIGNED_POST_LIMITS } from './signed-tool-fetch.js';
 
-export const WEBHOOK_LIMITS = {
-  timeoutMs: 10_000,
-  maxResponseChars: 100_000,
-} as const;
+/** Misma cota que el POST firmado compartido (una sola fuente de verdad). */
+export const WEBHOOK_LIMITS = SIGNED_POST_LIMITS;
 
 /** Hostnames privados/locales rechazados (guarda rapida por nombre; se complementa con la
  * validacion de IPs resueltas por DNS de ip-guard.ts, ver createWebhookExecutor). */
@@ -69,61 +67,13 @@ export function createWebhookExecutor(
       return { content: `Tool ${call.name} has a forbidden webhook URL`, isError: true };
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), WEBHOOK_LIMITS.timeoutMs);
-    const onOuterAbort = () => controller.abort();
-    signal?.addEventListener('abort', onOuterAbort);
-
-    try {
-      // El body enviado es EXACTAMENTE la cadena firmada: el cliente verifica con su raw body.
-      const body = JSON.stringify({ tool: call.name, input: call.input });
-      const ts = Math.floor(Date.now() / 1000);
-      const response = await fetchImpl(tool.url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-ledesma-timestamp': String(ts),
-          'x-ledesma-signature': `v1=${signWebhookPayload(body, ts, secret)}`,
-        },
-        signal: controller.signal,
-        redirect: 'manual',
-        body,
-      });
-      // No seguimos redirecciones: un redirect podria rebotar hacia una IP interna.
-      if (response.status >= 300 && response.status < 400) {
-        return { content: `Tool ${call.name} webhook returned a redirect, which is not allowed`, isError: true };
-      }
-      const text = await response.text();
-      const clipped = text.length > WEBHOOK_LIMITS.maxResponseChars
-        ? text.slice(0, WEBHOOK_LIMITS.maxResponseChars)
-        : text;
-      if (!response.ok) {
-        return { content: `Tool ${call.name} webhook returned ${response.status}`, isError: true };
-      }
-      try {
-        const body = JSON.parse(clipped) as { content?: unknown; isError?: unknown };
-        if (typeof body.content === 'string') {
-          return { content: body.content, isError: body.isError === true };
-        }
-        return { content: clipped, isError: body.isError === true };
-      } catch {
-        return { content: clipped, isError: false };
-      }
-    } catch (error) {
-      // Nada de fallos opacos: el content y el log llevan el nombre y mensaje del error (nunca
-      // el secreto, headers o body; un TypeError de crypto/fetch no contiene esos valores).
-      const aborted = error instanceof Error && error.name === 'AbortError';
-      const detail = error instanceof Error ? `${error.name}: ${error.message}` : 'unknown error';
-      warn(`webhook tool ${call.name} ${aborted ? 'timed out' : `failed: ${detail}`}`);
-      return {
-        content: aborted
-          ? `Tool ${call.name} webhook timed out`
-          : `Tool ${call.name} webhook failed: ${detail}`,
-        isError: true,
-      };
-    } finally {
-      clearTimeout(timeout);
-      signal?.removeEventListener('abort', onOuterAbort);
-    }
+    // Mecanica firma/fetch compartida con las tools nativas (channel 'webhook' conserva los
+    // mensajes del flujo de cliente). El secreto del agente solo viaja como firma derivada.
+    return performSignedToolPost(tool.url, secret, call, {
+      channel: 'webhook',
+      warn,
+      fetchImpl,
+      signal,
+    });
   };
 }

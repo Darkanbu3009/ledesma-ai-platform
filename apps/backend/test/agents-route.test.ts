@@ -112,3 +112,48 @@ describe('POST /v1/agents/:id/webhook-secret/rotate', () => {
     expect(rotateWebhookSecretMock).toHaveBeenCalledWith('a1', 'user-1');
   });
 });
+
+describe('prefijo reservado platform_ en tools de cliente', () => {
+  const toolValida = {
+    name: 'cotizar',
+    description: 'Calcula el precio',
+    inputSchema: { type: 'object' },
+    url: 'https://hooks.cliente.com/cotizar',
+  };
+
+  it('POST rechaza con 400 una tool cuyo nombre empieza con platform_', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agents',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { ...validBody, tools: [{ ...toolValida, name: 'platform_iniciar_tarea_web' }] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('VALIDATION_ERROR');
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it('POST acepta nombres de tool normales', async () => {
+    createMock.mockResolvedValue({ id: 'a1', ...validBody, tools: [toolValida], ownerId: 'user-1' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agents',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { ...validBody, tools: [toolValida] },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(createMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('PUT tambien rechaza con 400 el prefijo reservado platform_', async () => {
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/v1/agents/a1',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { ...validBody, tools: [{ ...toolValida, name: 'platform_x' }] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('VALIDATION_ERROR');
+    expect(updateForOwnerMock).not.toHaveBeenCalled();
+  });
+});

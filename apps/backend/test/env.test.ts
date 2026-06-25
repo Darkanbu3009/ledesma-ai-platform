@@ -22,4 +22,24 @@ describe('parseEnv', () => {
   it('falla con PORT no numerico', () => {
     expect(() => parseEnv({ PORT: 'abc' })).toThrow();
   });
+
+  it('WEB_WORKER_URL y WEB_WORKER_SECRET son opcionales (ausentes = undefined)', () => {
+    const env = parseEnv({ DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' });
+    expect(env.WEB_WORKER_URL).toBeUndefined();
+    expect(env.WEB_WORKER_SECRET).toBeUndefined();
+  });
+
+  it('acepta WEB_WORKER_URL/SECRET validos', () => {
+    const env = parseEnv({ DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', WEB_WORKER_URL: 'https://web-worker.example.com', WEB_WORKER_SECRET: 'worker-secret-de-32-chars-o-mas-aaaa' });
+    expect(env.WEB_WORKER_URL).toBe('https://web-worker.example.com');
+    expect(env.WEB_WORKER_SECRET).toBe('worker-secret-de-32-chars-o-mas-aaaa');
+  });
+
+  it('falla con WEB_WORKER_URL no-url', () => {
+    expect(() => parseEnv({ DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', WEB_WORKER_URL: 'no-es-url' })).toThrow();
+  });
+
+  it('falla con WEB_WORKER_SECRET demasiado corto', () => {
+    expect(() => parseEnv({ DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', WEB_WORKER_SECRET: 'corto' })).toThrow();
+  });
 });
