@@ -55,6 +55,34 @@ describe('nativeToolsToDefinitions', () => {
     });
   });
 
+  it('iniciar_tarea_web expone los dos flujos y los params opcionales (credenciales, max_pasos)', () => {
+    const def = nativeToolsToDefinitions().find((d) => d.name === 'platform_iniciar_tarea_web');
+    expect(def?.inputSchema).toMatchObject({
+      type: 'object',
+      properties: {
+        flujo: { type: 'string', enum: ['extraer_datos_web', 'ejecutar_tarea_web'] },
+        params: {
+          type: 'object',
+          properties: {
+            url: { type: 'string' },
+            instruccion: { type: 'string' },
+            credenciales: { type: 'object', additionalProperties: { type: 'string' } },
+            max_pasos: { type: 'number' },
+          },
+          required: ['url', 'instruccion'],
+        },
+      },
+      required: ['flujo', 'params'],
+    });
+    // credenciales y max_pasos son OPCIONALES: no estan en required.
+    const params = (def?.inputSchema as { properties: { params: { required: string[] } } }).properties.params;
+    expect(params.required).not.toContain('credenciales');
+    expect(params.required).not.toContain('max_pasos');
+    // La descripcion menciona ambos flujos.
+    expect(def?.description).toContain('extraer_datos_web');
+    expect(def?.description).toContain('ejecutar_tarea_web');
+  });
+
   it('revisar_tarea_web declara job_id requerido', () => {
     const def = nativeToolsToDefinitions().find((d) => d.name === 'platform_revisar_tarea_web');
     expect(def?.inputSchema).toMatchObject({

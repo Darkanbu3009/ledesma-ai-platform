@@ -12,14 +12,29 @@ export const NATIVE_TOOL_PREFIX = 'platform_';
 const iniciarTareaWebSchema: JsonSchema = {
   type: 'object',
   properties: {
-    flujo: { type: 'string', description: 'Nombre del flujo. Disponible: extraer_datos_web' },
+    flujo: {
+      type: 'string',
+      enum: ['extraer_datos_web', 'ejecutar_tarea_web'],
+      description: 'extraer_datos_web para leer; ejecutar_tarea_web para tareas de varios pasos.',
+    },
     params: {
       type: 'object',
       properties: {
-        url: { type: 'string', description: 'URL de la pagina a visitar' },
+        url: { type: 'string', description: 'URL de la pagina inicial' },
         instruccion: {
           type: 'string',
-          description: 'Que extraer o hacer en la pagina, en lenguaje natural',
+          description:
+            'Para extraer_datos_web: que extraer. Para ejecutar_tarea_web: la tarea completa de varios pasos, con criterio claro de cuando termina.',
+        },
+        credenciales: {
+          type: 'object',
+          description:
+            'Opcional. Solo para ejecutar_tarea_web. Datos sensibles para iniciar sesion (ej. usuario, contrasena). Se pasan de forma segura.',
+          additionalProperties: { type: 'string' },
+        },
+        max_pasos: {
+          type: 'number',
+          description: 'Opcional. Solo para ejecutar_tarea_web. Limite de pasos del agente (default 25).',
         },
       },
       required: ['url', 'instruccion'],
@@ -45,7 +60,7 @@ export const NATIVE_TOOLS: readonly ToolDefinition[] = [
   {
     name: 'platform_iniciar_tarea_web',
     description:
-      'Inicia una tarea de automatizacion web en segundo plano (navegar una pagina y extraer datos). Devuelve un job_id. La tarea NO es inmediata: usa platform_revisar_tarea_web con ese job_id para obtener el resultado.',
+      'Inicia una tarea de automatizacion web en segundo plano y devuelve un job_id. La tarea NO es inmediata: usa platform_revisar_tarea_web con ese job_id para obtener el resultado. Hay dos flujos: extraer_datos_web es una LECTURA simple (navega a una URL y extrae datos), rapido y barato, usalo cuando solo necesitas leer informacion; ejecutar_tarea_web es una tarea de VARIOS PASOS en lenguaje natural (navegar, hacer clic, llenar formularios, iniciar sesion, descargar), mas potente, usalo cuando hay que ACTUAR, no solo leer.',
     inputSchema: iniciarTareaWebSchema,
   },
   {
