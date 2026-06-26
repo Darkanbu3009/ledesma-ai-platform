@@ -18,6 +18,10 @@ function mapContentBlock(block: ContentBlock): Anthropic.ContentBlockParam {
         content: block.content,
         ...(block.isError ? { is_error: true } : {}),
       };
+    case 'image':
+      // Anthropic acepta imagenes por referencia con source tipo 'url' (URLImageSource no lleva
+      // media_type: la URL basta). La vision es nativa del modelo.
+      return { type: 'image', source: { type: 'url', url: block.source.url } };
   }
 }
 

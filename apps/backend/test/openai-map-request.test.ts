@@ -35,6 +35,41 @@ describe('mapMessagesToOpenAI', () => {
     });
   });
 
+  it('mapea un ImageBlock a content image_url, con el texto como parte previa', () => {
+    const msgs = mapMessagesToOpenAI({
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'describe la imagen' },
+            {
+              type: 'image',
+              source: { kind: 'url', url: 'https://cdn.example.com/f.jpg', mimeType: 'image/jpeg' },
+            },
+          ],
+        },
+      ],
+      modelConfig: { model: 'gpt-x', maxTokens: 100 },
+    });
+    expect(msgs).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'describe la imagen' },
+          { type: 'image_url', image_url: { url: 'https://cdn.example.com/f.jpg' } },
+        ],
+      },
+    ]);
+  });
+
+  it('un mensaje user solo-texto sigue usando content string plano (sin arreglo)', () => {
+    const msgs = mapMessagesToOpenAI({
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hola' }] }],
+      modelConfig: { model: 'gpt-x', maxTokens: 100 },
+    });
+    expect(msgs[0]).toEqual({ role: 'user', content: 'hola' });
+  });
+
   it('mapea un mensaje user con tool_result a mensajes role tool separados', () => {
     const msgs = mapMessagesToOpenAI({
       messages: [

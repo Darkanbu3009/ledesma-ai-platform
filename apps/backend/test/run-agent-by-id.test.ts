@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mockeamos la capa de modelo para no llamar APIs reales: el endpoint usa runModel internamente
 // a traves de runAgent. Interceptamos en el punto de la capa de modelo.
-const { runModelMock, getByIdMock } = vi.hoisted(() => ({
+const { runModelMock, getByIdMock, extractDocMock } = vi.hoisted(() => ({
   runModelMock: vi.fn(),
   getByIdMock: vi.fn(),
+  extractDocMock: vi.fn(),
 }));
 
 vi.mock('../src/providers/index.js', async (importOriginal) => {
@@ -25,7 +26,15 @@ vi.mock('node:dns/promises', () => ({
   lookup: vi.fn(async () => [{ address: '34.107.221.82', family: 4 }]),
 }));
 
+// Mockeamos SOLO la extraccion de documentos (no la red ni truncateText): el endpoint sigue
+// usando truncateText real, asi probamos la truncacion defensiva del lado del endpoint.
+vi.mock('../src/attachments/extract.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/attachments/extract.js')>();
+  return { ...actual, extractDocumentText: extractDocMock };
+});
+
 import { buildServer } from '../src/server.js';
+import { AGENT_LIMITS } from '../src/agent/index.js';
 import { parseEnv } from '../src/config/env.js';
 import { createSessionToken } from '../src/auth/session-token.js';
 import { signWebhookPayload } from '../src/tools/webhook-signature.js';
@@ -80,6 +89,7 @@ let app: FastifyInstance;
 beforeEach(async () => {
   runModelMock.mockReset();
   getByIdMock.mockReset();
+  extractDocMock.mockReset();
   app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: SESSION_SECRET }));
 });
 
@@ -380,5 +390,211 @@ describe('POST /v1/run/:agentId', () => {
     expect(res.statusCode).toBe(401);
     expect(res.json().error.code).toBe('AUTHENTICATION');
     expect(runModelMock).not.toHaveBeenCalled();
+  });
+
+  it('attachments: 1 imagen + 1 documento producen ImageBlock y TextBlock con el texto extraido', async () => {
+    getByIdMock.mockResolvedValue(anthropicAgent);
+    extractDocMock.mockResolvedValue('CONTENIDO EXTRAIDO DEL PDF');
+    runModelMock.mockReturnValue(
+      streamOf([{ type: 'stop', reason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } }]),
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/run/${AGENT_ID}`,
+      headers: { 'x-provider-key': 'sk-A' },
+      payload: {
+        messages: [{ role: 'user', content: 'analiza estos adjuntos' }],
+        attachments: [
+          { kind: 'image', url: 'https://cdn.example.com/foto.png', mimeType: 'image/png', name: 'foto.png' },
+          { kind: 'pdf', url: 'https://cdn.example.com/doc.pdf', mimeType: 'application/pdf', name: 'doc.pdf' },
+        ],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    // Solo el documento pasa por el extractor; la imagen va por referencia.
+    expect(extractDocMock).toHaveBeenCalledTimes(1);
+    expect(extractDocMock.mock.calls[0]?.[0]).toMatchObject({ kind: 'pdf', name: 'doc.pdf' });
+
+    const call = runModelMock.mock.calls[0]?.[0];
+    const userMsg = call?.request?.messages?.[0];
+    expect(userMsg?.role).toBe('user');
+    // Orden: documento (prepended con encabezado) -> texto original -> imagen (ImageBlock).
+    expect(userMsg?.content).toEqual([
+      { type: 'text', text: '[Adjunto: doc.pdf]\nCONTENIDO EXTRAIDO DEL PDF' },
+      { type: 'text', text: 'analiza estos adjuntos' },
+      {
+        type: 'image',
+        source: { kind: 'url', url: 'https://cdn.example.com/foto.png', mimeType: 'image/png' },
+      },
+    ]);
+  });
+
+  it('attachments: el texto extraido de un documento se trunca para respetar el limite total', async () => {
+    getByIdMock.mockResolvedValue(anthropicAgent);
+    // El extractor (mockeado) ignora maxChars y devuelve texto enorme: el endpoint debe truncar.
+    extractDocMock.mockResolvedValue('Z'.repeat(AGENT_LIMITS.maxTotalContentChars + 5000));
+    runModelMock.mockReturnValue(
+      streamOf([{ type: 'stop', reason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } }]),
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/run/${AGENT_ID}`,
+      headers: { 'x-provider-key': 'sk-A' },
+      payload: {
+        messages: [{ role: 'user', content: 'resume el documento' }],
+        attachments: [
+          { kind: 'pdf', url: 'https://cdn.example.com/big.pdf', mimeType: 'application/pdf', name: 'big.pdf' },
+        ],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const call = runModelMock.mock.calls[0]?.[0];
+    const docBlock = call?.request?.messages?.[0]?.content?.[0];
+    expect(docBlock?.type).toBe('text');
+    expect(docBlock?.text?.startsWith('[Adjunto: big.pdf]')).toBe(true);
+    expect(docBlock?.text?.endsWith('[contenido truncado]')).toBe(true);
+
+    // El total de caracteres de texto del request no excede el limite de la plataforma.
+    const totalChars = (call?.request?.messages ?? []).reduce(
+      (sum: number, m: { content: Array<{ type: string; text?: string }> }) =>
+        sum + m.content.reduce((t, b) => t + (b.type === 'text' ? (b.text?.length ?? 0) : 0), 0),
+      0,
+    );
+    expect(totalChars).toBeLessThanOrEqual(AGENT_LIMITS.maxTotalContentChars);
+  });
+
+  it('rechaza con 400 si se superan los maxAttachments adjuntos', async () => {
+    getByIdMock.mockResolvedValue(anthropicAgent);
+    const img = (i: number) => ({
+      kind: 'image' as const,
+      url: `https://cdn.example.com/${i}.png`,
+      mimeType: 'image/png',
+      name: `${i}.png`,
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/run/${AGENT_ID}`,
+      headers: { 'x-provider-key': 'sk-A' },
+      payload: {
+        messages: [{ role: 'user', content: 'hola' }],
+        attachments: Array.from({ length: AGENT_LIMITS.maxAttachments + 1 }, (_, i) => img(i)),
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('VALIDATION_ERROR');
+    expect(runModelMock).not.toHaveBeenCalled();
+  });
+
+  it('rechaza con 400 si la url de un adjunto es invalida', async () => {
+    getByIdMock.mockResolvedValue(anthropicAgent);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/run/${AGENT_ID}`,
+      headers: { 'x-provider-key': 'sk-A' },
+      payload: {
+        messages: [{ role: 'user', content: 'hola' }],
+        attachments: [{ kind: 'image', url: 'no-es-una-url', mimeType: 'image/png', name: 'x.png' }],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('attachments: un documento que falla la extraccion se degrada a nota y el run NO se cae', async () => {
+    getByIdMock.mockResolvedValue(anthropicAgent);
+    extractDocMock.mockRejectedValue(new Error('archivo corrupto'));
+    runModelMock.mockReturnValue(
+      streamOf([{ type: 'stop', reason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } }]),
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/run/${AGENT_ID}`,
+      headers: { 'x-provider-key': 'sk-A' },
+      payload: {
+        messages: [{ role: 'user', content: 'lee esto' }],
+        attachments: [
+          { kind: 'pdf', url: 'https://cdn.example.com/roto.pdf', mimeType: 'application/pdf', name: 'roto.pdf' },
+        ],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    // El run siguio (se llamo al modelo) pese al fallo del adjunto.
+    expect(runModelMock).toHaveBeenCalled();
+    const docBlock = runModelMock.mock.calls[0]?.[0]?.request?.messages?.[0]?.content?.[0];
+    expect(docBlock?.text?.startsWith('[Adjunto: roto.pdf]')).toBe(true);
+    expect(docBlock?.text).toContain('(no se pudo procesar el adjunto: archivo corrupto)');
+  });
+
+  it('attachments: con varios documentos el presupuesto se reparte y el total respeta el limite', async () => {
+    getByIdMock.mockResolvedValue(anthropicAgent);
+    // El extractor (mockeado) ignora maxChars y devuelve mas de lo permitido: el endpoint debe
+    // repartir el presupuesto entre los bloques y mantener el total bajo el limite.
+    extractDocMock.mockImplementation(async (_att: unknown, opts?: { maxChars?: number }) =>
+      'Y'.repeat((opts?.maxChars ?? 0) + 50_000),
+    );
+    runModelMock.mockReturnValue(
+      streamOf([{ type: 'stop', reason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } }]),
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/run/${AGENT_ID}`,
+      headers: { 'x-provider-key': 'sk-A' },
+      payload: {
+        messages: [{ role: 'user', content: 'resume todo' }],
+        attachments: [
+          { kind: 'pdf', url: 'https://cdn.example.com/a.pdf', mimeType: 'application/pdf', name: 'a.pdf' },
+          { kind: 'pdf', url: 'https://cdn.example.com/b.pdf', mimeType: 'application/pdf', name: 'b.pdf' },
+          {
+            kind: 'word',
+            url: 'https://cdn.example.com/c.docx',
+            mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            name: 'c.docx',
+          },
+        ],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(extractDocMock).toHaveBeenCalledTimes(3);
+    const msgs = runModelMock.mock.calls[0]?.[0]?.request?.messages ?? [];
+    const totalChars = msgs.reduce(
+      (sum: number, m: { content: Array<{ type: string; text?: string }> }) =>
+        sum + m.content.reduce((t, b) => t + (b.type === 'text' ? (b.text?.length ?? 0) : 0), 0),
+      0,
+    );
+    expect(totalChars).toBeLessThanOrEqual(AGENT_LIMITS.maxTotalContentChars);
+  });
+
+  it('attachments: si no hay mensaje de rol user, se ignoran y el run sigue', async () => {
+    getByIdMock.mockResolvedValue(anthropicAgent);
+    runModelMock.mockReturnValue(
+      streamOf([{ type: 'stop', reason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } }]),
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/run/${AGENT_ID}`,
+      headers: { 'x-provider-key': 'sk-A' },
+      payload: {
+        messages: [{ role: 'assistant', content: 'hola, soy el agente' }],
+        attachments: [
+          { kind: 'pdf', url: 'https://cdn.example.com/x.pdf', mimeType: 'application/pdf', name: 'x.pdf' },
+        ],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    // Sin mensaje user el adjunto se ignora: ni se extrae el documento ni se altera el contenido.
+    expect(extractDocMock).not.toHaveBeenCalled();
+    const msgs = runModelMock.mock.calls[0]?.[0]?.request?.messages ?? [];
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]?.content).toEqual([{ type: 'text', text: 'hola, soy el agente' }]);
   });
 });

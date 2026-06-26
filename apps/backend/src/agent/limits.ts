@@ -13,6 +13,8 @@ export const AGENT_LIMITS = {
   maxBodyBytes: 1_048_576,
   /** Cota dura de iteraciones del loop agentico. */
   maxIterationsCap: 20,
+  /** Maximo de adjuntos (imagenes + documentos) por peticion. */
+  maxAttachments: 5,
 } as const;
 
 /** Error de validacion de entrada del cuerpo. Distinto de los errores de proveedor (P1.6). */

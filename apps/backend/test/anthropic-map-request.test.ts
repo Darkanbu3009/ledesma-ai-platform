@@ -74,6 +74,31 @@ describe('mapRequestToAnthropic', () => {
     expect(params).not.toHaveProperty('tools');
   });
 
+  it('mapea un ImageBlock a la forma de imagen del SDK con source url', () => {
+    const request: NormalizedRequest = {
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'que dice esta factura' },
+            {
+              type: 'image',
+              source: { kind: 'url', url: 'https://cdn.example.com/f.png', mimeType: 'image/png' },
+            },
+          ],
+        },
+      ],
+      modelConfig: { model: 'claude-x', maxTokens: 256 },
+    };
+
+    const params = mapRequestToAnthropic(request);
+
+    expect(params.messages[0]?.content).toEqual([
+      { type: 'text', text: 'que dice esta factura' },
+      { type: 'image', source: { type: 'url', url: 'https://cdn.example.com/f.png' } },
+    ]);
+  });
+
   it('marca is_error en tool_result cuando isError es true', () => {
     const request: NormalizedRequest = {
       messages: [
