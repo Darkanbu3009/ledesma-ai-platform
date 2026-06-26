@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type {
+  ContentBlock,
+  ImageBlock,
   NormalizedMessage,
   NormalizedRequest,
   ProviderStreamEvent,
@@ -43,6 +45,24 @@ describe('contrato normalizado', () => {
     expect(request.messages).toHaveLength(3);
     expect(request.tools?.[0]?.name).toBe('cotizar');
     expect(request.messages[1]?.content[1]).toMatchObject({ type: 'tool_use', name: 'cotizar' });
+  });
+
+  it('ImageBlock es parte de ContentBlock y modela una imagen por URL', () => {
+    const image: ImageBlock = {
+      type: 'image',
+      source: { kind: 'url', url: 'https://cdn.example.com/factura.png', mimeType: 'image/png' },
+    };
+    // Asignable a ContentBlock sin cast: el union lo incluye.
+    const block: ContentBlock = image;
+    const message: NormalizedMessage = {
+      role: 'user',
+      content: [{ type: 'text', text: 'analiza esta imagen' }, block],
+    };
+
+    expect(message.content[1]).toMatchObject({
+      type: 'image',
+      source: { kind: 'url', mimeType: 'image/png' },
+    });
   });
 
   it('cubre todas las razones de parada normalizadas', () => {

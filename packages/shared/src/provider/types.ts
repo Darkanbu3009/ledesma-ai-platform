@@ -32,7 +32,21 @@ export interface ToolResultBlock {
   isError?: boolean;
 }
 
-export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock;
+/**
+ * Bloque de imagen referenciada por URL (no inline). El adaptador de cada proveedor lo traduce
+ * a su forma nativa de vision: Anthropic image source url, OpenAI image_url. mimeType viaja por si
+ * algun proveedor lo requiere; Anthropic (source url) no lo usa.
+ */
+export interface ImageBlock {
+  type: 'image';
+  source: {
+    kind: 'url';
+    url: string;
+    mimeType: string;
+  };
+}
+
+export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ImageBlock;
 
 export type MessageRole = 'user' | 'assistant';
 
