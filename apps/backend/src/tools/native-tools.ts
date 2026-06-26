@@ -14,8 +14,9 @@ const iniciarTareaWebSchema: JsonSchema = {
   properties: {
     flujo: {
       type: 'string',
-      enum: ['extraer_datos_web', 'ejecutar_tarea_web'],
-      description: 'extraer_datos_web para leer; ejecutar_tarea_web para tareas de varios pasos.',
+      enum: ['extraer_datos_web', 'ejecutar_tarea_web', 'leer_pagina_visual'],
+      description:
+        'extraer_datos_web para leer HTML; ejecutar_tarea_web para tareas de varios pasos; leer_pagina_visual para leer texto dentro de imagenes (vision).',
     },
     params: {
       type: 'object',
@@ -24,7 +25,7 @@ const iniciarTareaWebSchema: JsonSchema = {
         instruccion: {
           type: 'string',
           description:
-            'Para extraer_datos_web: que extraer. Para ejecutar_tarea_web: la tarea completa de varios pasos, con criterio claro de cuando termina.',
+            'Para extraer_datos_web: que extraer. Para ejecutar_tarea_web: la tarea completa de varios pasos, con criterio claro de cuando termina. Para leer_pagina_visual: que texto/datos extraer de la imagen.',
         },
         credenciales: {
           type: 'object',
@@ -60,7 +61,7 @@ export const NATIVE_TOOLS: readonly ToolDefinition[] = [
   {
     name: 'platform_iniciar_tarea_web',
     description:
-      'Inicia una tarea de automatizacion web en segundo plano y devuelve un job_id. La tarea NO es inmediata: usa platform_revisar_tarea_web con ese job_id para obtener el resultado. Hay dos flujos: extraer_datos_web es una LECTURA simple (navega a una URL y extrae datos), rapido y barato, usalo cuando solo necesitas leer informacion; ejecutar_tarea_web es una tarea de VARIOS PASOS en lenguaje natural (navegar, hacer clic, llenar formularios, iniciar sesion, descargar), mas potente, usalo cuando hay que ACTUAR, no solo leer.',
+      'Inicia una tarea de automatizacion web en segundo plano y devuelve un job_id. La tarea NO es inmediata: usa platform_revisar_tarea_web con ese job_id para obtener el resultado. Hay tres flujos: extraer_datos_web es una LECTURA simple (navega a una URL y extrae datos del HTML), rapido y barato, usalo cuando solo necesitas leer informacion; ejecutar_tarea_web es una tarea de VARIOS PASOS en lenguaje natural (navegar, hacer clic, llenar formularios, iniciar sesion, descargar), mas potente, usalo cuando hay que ACTUAR, no solo leer; leer_pagina_visual lee texto que esta DENTRO de una imagen (paginas hechas de imagen, documentos escaneados, capturas, facturas en imagen) mediante extraccion visual (la pagina se captura y el modelo LEE la imagen), usalo cuando el texto NO es seleccionable/extraible como HTML y hay que verlo; para texto normal de una pagina web usa extraer_datos_web que es mas barato.',
     inputSchema: iniciarTareaWebSchema,
   },
   {
