@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { AttachmentRef } from '../src/lib/attachments';
 import { runAgentStream } from '../src/lib/run-agent';
 import type { SseMessage } from '../src/lib/sse';
 
@@ -81,5 +82,46 @@ describe('runAgentStream', () => {
       { kind: 'event', event: { type: 'text_delta', text: 'hola' } },
       { kind: 'done' },
     ]);
+  });
+
+  it('incluye attachments en el body cuando hay adjuntos', async () => {
+    vi.stubEnv('VITE_API_URL', API_URL);
+    const fetchMock = stubFetch(['event: done\ndata: {}\n\n']);
+    const attachments: AttachmentRef[] = [
+      { kind: 'pdf', url: 'https://signed.test/factura', mimeType: 'application/pdf', name: 'factura.pdf' },
+      { kind: 'image', url: 'https://signed.test/logo', mimeType: 'image/png', name: 'logo.png' },
+    ];
+
+    await runAgentStream({
+      agentId: 'agente-1',
+      providerKey: 'sk-test',
+      messages: [{ role: 'user', content: 'hola' }],
+      attachments,
+      signal: new AbortController().signal,
+      onMessage: () => {},
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      messages: [{ role: 'user', content: 'hola' }],
+      attachments,
+    });
+  });
+
+  it('NO agrega la clave attachments cuando la lista esta vacia (envio solo-texto intacto)', async () => {
+    vi.stubEnv('VITE_API_URL', API_URL);
+    const fetchMock = stubFetch(['event: done\ndata: {}\n\n']);
+
+    await runAgentStream({
+      agentId: 'agente-1',
+      providerKey: 'sk-test',
+      messages: [{ role: 'user', content: 'hola' }],
+      attachments: [],
+      signal: new AbortController().signal,
+      onMessage: () => {},
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      messages: [{ role: 'user', content: 'hola' }],
+    });
   });
 });
