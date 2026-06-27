@@ -1,3 +1,4 @@
+import type { AttachmentRef } from './attachments';
 import { readApiEnv } from './env';
 import { flushSseRest, parseSseChunks, type SseMessage } from './sse';
 
@@ -10,6 +11,8 @@ export interface RunAgentByIdParams {
   agentId: string;
   providerKey: string;
   messages: ChatMessage[];
+  /** Adjuntos del turno actual. El backend los incorpora al ultimo mensaje user. */
+  attachments?: AttachmentRef[];
   signal: AbortSignal;
   onMessage: (message: SseMessage) => void;
 }
@@ -27,7 +30,12 @@ export async function runAgentStream(params: RunAgentByIdParams): Promise<void> 
       'x-provider-key': params.providerKey,
     },
     signal: params.signal,
-    body: JSON.stringify({ messages: params.messages }),
+    // attachments solo viaja cuando hay adjuntos: asi el envio solo-texto manda el mismo body de siempre.
+    body: JSON.stringify(
+      params.attachments && params.attachments.length > 0
+        ? { messages: params.messages, attachments: params.attachments }
+        : { messages: params.messages },
+    ),
   });
 
   if (!response.ok || !response.body) {

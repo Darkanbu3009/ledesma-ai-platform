@@ -1,15 +1,39 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, RefreshCw, Send, Square, Wrench } from 'lucide-react';
+import {
+  ArrowLeft,
+  FileSpreadsheet,
+  FileText,
+  ImageIcon,
+  LoaderCircle,
+  Paperclip,
+  RefreshCw,
+  Send,
+  Square,
+  Wrench,
+  X,
+} from 'lucide-react';
 import { providerLabel } from '../lib/agents';
+import type { AttachmentRef } from '../lib/attachments';
+import { MAX_ADJUNTOS, planificarEnvio, subirArchivos } from '../lib/attachment-upload';
 import { buildRequestChat, commitTurn } from '../lib/chat-turn';
 import { useAgent } from '../lib/queries';
 import { runAgentStream, type ChatMessage } from '../lib/run-agent';
 import type { SseMessage } from '../lib/sse';
 import { Field, inputClass } from '../components/ui/Field';
 
+/** Tipos que el file picker sugiere. La validacion real (por mimeType) la hace subirAdjunto. */
+const ACEPTA_ADJUNTOS = 'image/png,image/jpeg,image/webp,application/pdf,.xlsx,.docx';
+
+/** Icono de la miniatura segun la categoria del adjunto. */
+function iconoAdjunto(kind: AttachmentRef['kind']) {
+  if (kind === 'image') return ImageIcon;
+  if (kind === 'excel') return FileSpreadsheet;
+  return FileText; // pdf y word
+}
+
 type ViewItem =
-  | { kind: 'user'; text: string }
+  | { kind: 'user'; text: string; attachments?: AttachmentRef[] }
   | { kind: 'assistant'; text: string }
   | { kind: 'tool'; id: string; name: string; isError: boolean }
   | { kind: 'usage'; inputTokens: number; outputTokens: number }
@@ -25,10 +49,15 @@ export function PlaygroundPage() {
   const [vista, setVista] = useState<ViewItem[]>([]);
   const [draft, setDraft] = useState('');
   const [running, setRunning] = useState(false);
+  // Adjuntos ya subidos para el turno actual + estado de subida en curso y su error.
+  const [adjuntos, setAdjuntos] = useState<AttachmentRef[]>([]);
+  const [subiendo, setSubiendo] = useState(false);
+  const [adjuntoError, setAdjuntoError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const assistantTextRef = useRef('');
   const turnClosedRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const keyMissing = providerKey.trim() === '';
 
@@ -107,12 +136,15 @@ export function PlaygroundPage() {
   }
 
   /** Ejecuta un turno con el texto dado. Si ya hay un turno corriendo, retorna (doble envio). */
-  async function sendText(content: string) {
+  async function sendText(content: string, attachments: AttachmentRef[] = []) {
     if (!id || !agent || running || keyMissing || content === '') return;
 
     // El request usa el historial confirmado mas este user; chat NO se actualiza todavia.
     const requestChat: ChatMessage[] = buildRequestChat(chat, content);
-    setVista((items) => [...items, { kind: 'user', text: content }]);
+    setVista((items) => [
+      ...items,
+      { kind: 'user', text: content, attachments: attachments.length > 0 ? attachments : undefined },
+    ]);
     setRunning(true);
     assistantTextRef.current = '';
     turnClosedRef.current = false;
@@ -124,6 +156,7 @@ export function PlaygroundPage() {
         agentId: id,
         providerKey,
         messages: requestChat,
+        attachments,
         signal: controller.signal,
         onMessage: (message) => handleMessage(message, content),
       });
@@ -144,10 +177,34 @@ export function PlaygroundPage() {
   }
 
   function send() {
-    const content = draft.trim();
-    if (!agent || running || keyMissing || content === '') return;
-    setDraft('');
-    void sendText(content);
+    if (!agent || running || keyMissing || subiendo) return;
+    // Se puede enviar solo-texto, texto + adjuntos, o adjuntos solos (con un texto por defecto).
+    const plan = planificarEnvio({ draft, adjuntos });
+    if (!plan) return;
+    setDraft(plan.siguiente.draft);
+    setAdjuntos(plan.siguiente.adjuntos);
+    setAdjuntoError(null);
+    void sendText(plan.envio.texto, plan.envio.attachments);
+  }
+
+  /** Sube los archivos elegidos y los agrega a los pendientes del turno. */
+  async function handleArchivos(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    // Limpiar el value permite volver a elegir el mismo archivo despues de quitarlo.
+    event.target.value = '';
+    if (files.length === 0) return;
+
+    setAdjuntoError(null);
+    setSubiendo(true);
+    await subirArchivos(files, adjuntos.length, {
+      onSubido: (ref) => setAdjuntos((prev) => [...prev, ref]),
+      onError: (mensaje) => setAdjuntoError(mensaje),
+    });
+    setSubiendo(false);
+  }
+
+  function quitarAdjunto(index: number) {
+    setAdjuntos((prev) => prev.filter((_, i) => i !== index));
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -233,8 +290,24 @@ export function PlaygroundPage() {
                     case 'user':
                       return (
                         <div key={i} className="flex justify-end">
-                          <div className="max-w-[80%] whitespace-pre-wrap rounded-xl border border-brasa/30 bg-brasa/10 px-4 py-2.5 text-sm text-hueso">
-                            {item.text}
+                          <div className="max-w-[80%] rounded-xl border border-brasa/30 bg-brasa/10 px-4 py-2.5 text-sm text-hueso">
+                            <p className="whitespace-pre-wrap">{item.text}</p>
+                            {item.attachments && item.attachments.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-1.5 border-t border-brasa/20 pt-2">
+                                {item.attachments.map((a, j) => {
+                                  const Icono = iconoAdjunto(a.kind);
+                                  return (
+                                    <span
+                                      key={j}
+                                      className="inline-flex items-center gap-1 rounded-full border border-brasa/30 px-2 py-0.5 text-xs text-hueso-muted"
+                                    >
+                                      <Icono className="h-3 w-3 shrink-0" />
+                                      <span className="max-w-[10rem] truncate">{a.name}</span>
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -293,36 +366,93 @@ export function PlaygroundPage() {
             )}
           </div>
 
-          <div className="mt-4 flex items-end gap-3">
-            <textarea
-              rows={2}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={keyMissing}
-              className={`${inputClass} resize-none disabled:cursor-not-allowed disabled:opacity-60`}
-              placeholder="Escribe un mensaje..."
-            />
-            {running ? (
-              <button
-                type="button"
-                onClick={() => abortRef.current?.abort()}
-                className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-grafito-border px-4 py-2.5 text-sm font-medium text-brasa transition hover:border-brasa"
-              >
-                <Square className="h-4 w-4" />
-                Detener
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => send()}
-                disabled={keyMissing || draft.trim() === ''}
-                className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-brasa px-4 py-2.5 text-sm font-semibold text-carbon transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <Send className="h-4 w-4" />
-                Enviar
-              </button>
+          <div className="mt-4 space-y-2">
+            {(adjuntos.length > 0 || subiendo) && (
+              <div className="flex flex-wrap items-center gap-2">
+                {adjuntos.map((a, i) => {
+                  const Icono = iconoAdjunto(a.kind);
+                  return (
+                    <span
+                      key={i}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-grafito-border bg-grafito px-3 py-1 text-xs text-hueso-muted"
+                    >
+                      <Icono className="h-3.5 w-3.5 shrink-0" />
+                      <span className="max-w-[12rem] truncate">{a.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => quitarAdjunto(i)}
+                        aria-label={`Quitar ${a.name}`}
+                        className="text-hueso-muted transition hover:text-brasa"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  );
+                })}
+                {subiendo && (
+                  <span className="inline-flex items-center gap-1.5 text-xs text-hueso-muted">
+                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                    Subiendo...
+                  </span>
+                )}
+              </div>
             )}
+
+            {adjuntoError && <p className="text-xs text-brasa">{adjuntoError}</p>}
+
+            <div className="flex items-end gap-3">
+              <input
+                ref={fileInputRef}
+                type="file"
+                hidden
+                multiple
+                accept={ACEPTA_ADJUNTOS}
+                onChange={(e) => void handleArchivos(e)}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={keyMissing || subiendo || adjuntos.length >= MAX_ADJUNTOS}
+                aria-label="Adjuntar archivo"
+                title={
+                  adjuntos.length >= MAX_ADJUNTOS
+                    ? `Maximo ${MAX_ADJUNTOS} archivos`
+                    : 'Adjuntar archivo'
+                }
+                className="inline-flex shrink-0 items-center justify-center rounded-lg border border-grafito-border px-3 py-2.5 text-hueso-muted transition hover:border-hueso-muted hover:text-hueso disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Paperclip className="h-4 w-4" />
+              </button>
+              <textarea
+                rows={2}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={keyMissing}
+                className={`${inputClass} resize-none disabled:cursor-not-allowed disabled:opacity-60`}
+                placeholder="Escribe un mensaje..."
+              />
+              {running ? (
+                <button
+                  type="button"
+                  onClick={() => abortRef.current?.abort()}
+                  className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-grafito-border px-4 py-2.5 text-sm font-medium text-brasa transition hover:border-brasa"
+                >
+                  <Square className="h-4 w-4" />
+                  Detener
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => send()}
+                  disabled={keyMissing || subiendo || (draft.trim() === '' && adjuntos.length === 0)}
+                  className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-brasa px-4 py-2.5 text-sm font-semibold text-carbon transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Send className="h-4 w-4" />
+                  Enviar
+                </button>
+              )}
+            </div>
           </div>
         </>
       )}
