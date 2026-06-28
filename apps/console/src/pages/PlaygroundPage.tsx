@@ -500,7 +500,7 @@ export function PlaygroundPage() {
 
             {adjuntoError && <p className="text-xs text-brasa">{adjuntoError}</p>}
 
-            <div className="flex items-end gap-3">
+            <div className="flex items-center gap-3">
               <input
                 ref={fileInputRef}
                 type="file"
