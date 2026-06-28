@@ -94,7 +94,7 @@ function MenuAdjuntar({
         aria-expanded={abierto}
         aria-label="Adjuntar archivo"
         title={titulo}
-        className="inline-flex items-center justify-center rounded-lg border border-grafito-border px-3 py-2.5 text-hueso-muted transition hover:border-hueso-muted hover:text-hueso disabled:cursor-not-allowed disabled:opacity-60"
+        className="inline-flex items-center justify-center rounded-lg p-1.5 text-hueso-muted transition hover:bg-line-soft hover:text-hueso disabled:cursor-not-allowed disabled:opacity-60"
       >
         <Plus className="h-4 w-4" />
       </button>
@@ -149,6 +149,13 @@ export function PlaygroundPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const keyMissing = providerKey.trim() === '';
+  // Heuristica de formato (NO es validacion real ni llama a ninguna API): la key "parece"
+  // presente si, tras recortar espacios, no esta vacia y empieza con "sk-". Solo decide el
+  // color de fondo; toda la logica de habilitar/enviar sigue usando keyMissing.
+  const keyPresente = providerKey.trim().startsWith('sk-');
+  // Fondo condicional del panel de chat y de la caja del input: hueso cuando hay key,
+  // gris apagado cuando no. La transicion suave la agrega cada elemento con transition.
+  const fondoSegunKey = keyPresente ? 'bg-[#FAF9F5]' : 'bg-[#E7E4DD]';
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -373,7 +380,7 @@ export function PlaygroundPage() {
 
           <div
             ref={scrollRef}
-            className="mt-4 h-[26rem] overflow-y-auto rounded-xl border border-grafito-border bg-carbon p-4"
+            className={`mt-4 h-[26rem] overflow-y-auto rounded-xl border border-grafito-border ${fondoSegunKey} p-4 transition-colors duration-300`}
           >
             {keyMissing ? (
               <div className="flex h-full items-center justify-center">
@@ -500,7 +507,7 @@ export function PlaygroundPage() {
 
             {adjuntoError && <p className="text-xs text-brasa">{adjuntoError}</p>}
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-end gap-3">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -508,24 +515,31 @@ export function PlaygroundPage() {
                 multiple
                 onChange={(e) => void handleArchivos(e)}
               />
-              <MenuAdjuntar
-                disabled={keyMissing || subiendo || adjuntos.length >= MAX_ADJUNTOS}
-                titulo={
-                  adjuntos.length >= MAX_ADJUNTOS
-                    ? `Maximo ${MAX_ADJUNTOS} archivos`
-                    : 'Adjuntar archivo'
-                }
-                onElegir={abrirSelector}
-              />
-              <textarea
-                rows={2}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={handleKeyDown}
-                disabled={keyMissing}
-                className={`${inputClass} resize-none disabled:cursor-not-allowed disabled:opacity-60`}
-                placeholder="Escribe un mensaje..."
-              />
+              {/* La caja del input contiene el textarea arriba y, en su fila inferior, el "+". */}
+              <div
+                className={`flex min-w-0 flex-1 flex-col rounded-xl border border-line ${fondoSegunKey} transition duration-300 focus-within:border-brasa focus-within:ring-2 focus-within:ring-brasa/20`}
+              >
+                <textarea
+                  rows={2}
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  disabled={keyMissing}
+                  className="w-full resize-none bg-transparent px-3.5 pt-2.5 text-sm text-ink outline-none transition placeholder:text-muted-soft disabled:cursor-not-allowed disabled:opacity-60"
+                  placeholder="Escribe un mensaje..."
+                />
+                <div className="flex items-center px-2 pb-2">
+                  <MenuAdjuntar
+                    disabled={keyMissing || subiendo || adjuntos.length >= MAX_ADJUNTOS}
+                    titulo={
+                      adjuntos.length >= MAX_ADJUNTOS
+                        ? `Maximo ${MAX_ADJUNTOS} archivos`
+                        : 'Adjuntar archivo'
+                    }
+                    onElegir={abrirSelector}
+                  />
+                </div>
+              </div>
               {running ? (
                 <button
                   type="button"
