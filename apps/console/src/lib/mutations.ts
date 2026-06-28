@@ -3,6 +3,43 @@ import { apiFetch } from './api';
 import type { AgentConfig } from './agents';
 import type { AgentFormParsed } from './agent-schema';
 import { toApiInput } from './agent-schema';
+import type {
+  IndividualInput,
+  OrganizationInput,
+  RegistrationResult,
+  RegistrationState,
+} from './registration';
+
+/** Registra al usuario actual como individuo: queda activo de inmediato. */
+export function useRegisterIndividual() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: IndividualInput) =>
+      apiFetch<RegistrationResult>('/v1/register/individual', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    onSuccess: (result) => {
+      // El endpoint devuelve el estado consolidado: refrescamos la cache de /v1/me sin otra llamada.
+      qc.setQueryData<RegistrationState>(['me'], result);
+    },
+  });
+}
+
+/** Registra una empresa: crea la organizacion en 'pending'; el usuario queda org_admin a la espera. */
+export function useRegisterOrganization() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: OrganizationInput) =>
+      apiFetch<RegistrationResult>('/v1/register/organization', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    onSuccess: (result) => {
+      qc.setQueryData<RegistrationState>(['me'], result);
+    },
+  });
+}
 
 export function useCreateAgent() {
   const qc = useQueryClient();
