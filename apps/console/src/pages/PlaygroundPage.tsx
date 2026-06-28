@@ -6,7 +6,7 @@ import {
   FileText,
   ImageIcon,
   LoaderCircle,
-  Paperclip,
+  Plus,
   RefreshCw,
   Send,
   Square,
@@ -22,14 +22,103 @@ import { runAgentStream, type ChatMessage } from '../lib/run-agent';
 import type { SseMessage } from '../lib/sse';
 import { Field, inputClass } from '../components/ui/Field';
 
-/** Tipos que el file picker sugiere. La validacion real (por mimeType) la hace subirAdjunto. */
-const ACEPTA_ADJUNTOS = 'image/png,image/jpeg,image/webp,application/pdf,.xlsx,.docx';
+/**
+ * Filtros del dialogo del SO por categoria de adjunto. Son SOLO una sugerencia para el picker;
+ * la validacion real (mimeType, tamano, etc.) la sigue haciendo subirAdjunto, no el menu.
+ */
+const ACEPTA_IMAGENES = 'image/png,image/jpeg,image/webp,image/gif';
+const ACEPTA_DOCUMENTOS = '.pdf,.docx,.xlsx,.xls';
+
+/** Opciones del menu "+": etiqueta, icono y el accept que cada una pasa al file picker. */
+const OPCIONES_ADJUNTO = [
+  { label: 'Imagen', Icono: ImageIcon, accept: ACEPTA_IMAGENES },
+  { label: 'Documento', Icono: FileText, accept: ACEPTA_DOCUMENTOS },
+] as const;
 
 /** Icono de la miniatura segun la categoria del adjunto. */
 function iconoAdjunto(kind: AttachmentRef['kind']) {
   if (kind === 'image') return ImageIcon;
   if (kind === 'excel') return FileSpreadsheet;
   return FileText; // pdf y word
+}
+
+/**
+ * Boton "+" que abre un menu en lista con las opciones para adjuntar (Imagen / Documento).
+ * Es solo UI: al elegir una opcion delega en `onElegir` con el accept de esa categoria; la subida
+ * y su validacion siguen viviendo en subirAdjunto. Maneja su propio estado abierto/cerrado, el
+ * cierre al hacer clic fuera, el cierre con Escape y es navegable por teclado.
+ */
+function MenuAdjuntar({
+  disabled,
+  titulo,
+  onElegir,
+}: {
+  disabled: boolean;
+  titulo: string;
+  onElegir: (accept: string) => void;
+}) {
+  const [abierto, setAbierto] = useState(false);
+  const contenedorRef = useRef<HTMLDivElement | null>(null);
+
+  // Cerrar el menu al hacer clic fuera o al presionar Escape, solo mientras esta abierto.
+  useEffect(() => {
+    if (!abierto) return;
+    const alClicFuera = (event: MouseEvent) => {
+      if (contenedorRef.current && !contenedorRef.current.contains(event.target as Node)) {
+        setAbierto(false);
+      }
+    };
+    const alEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setAbierto(false);
+    };
+    document.addEventListener('mousedown', alClicFuera);
+    document.addEventListener('keydown', alEscape);
+    return () => {
+      document.removeEventListener('mousedown', alClicFuera);
+      document.removeEventListener('keydown', alEscape);
+    };
+  }, [abierto]);
+
+  function elegir(accept: string) {
+    setAbierto(false);
+    onElegir(accept);
+  }
+
+  return (
+    <div ref={contenedorRef} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setAbierto((v) => !v)}
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={abierto}
+        aria-label="Adjuntar archivo"
+        title={titulo}
+        className="inline-flex items-center justify-center rounded-lg border border-grafito-border px-3 py-2.5 text-hueso-muted transition hover:border-hueso-muted hover:text-hueso disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <Plus className="h-4 w-4" />
+      </button>
+      {abierto && (
+        <div
+          role="menu"
+          className="absolute bottom-full left-0 z-10 mb-2 min-w-[11rem] overflow-hidden rounded-lg border border-grafito-border bg-grafito py-1 shadow-lg"
+        >
+          {OPCIONES_ADJUNTO.map(({ label, Icono, accept }) => (
+            <button
+              key={label}
+              type="button"
+              role="menuitem"
+              onClick={() => elegir(accept)}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-hueso-muted transition hover:bg-carbon hover:text-hueso"
+            >
+              <Icono className="h-4 w-4 shrink-0" />
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 type ViewItem =
@@ -185,6 +274,17 @@ export function PlaygroundPage() {
     setAdjuntos(plan.siguiente.adjuntos);
     setAdjuntoError(null);
     void sendText(plan.envio.texto, plan.envio.attachments);
+  }
+
+  /**
+   * Aplica el filtro de tipo elegido en el menu y abre el selector del SO. Solo cambia el accept
+   * (sugerencia del dialogo); el archivo elegido sigue pasando por handleArchivos -> subirAdjunto.
+   */
+  function abrirSelector(accept: string) {
+    const input = fileInputRef.current;
+    if (!input) return;
+    input.accept = accept;
+    input.click();
   }
 
   /** Sube los archivos elegidos y los agrega a los pendientes del turno. */
@@ -406,23 +506,17 @@ export function PlaygroundPage() {
                 type="file"
                 hidden
                 multiple
-                accept={ACEPTA_ADJUNTOS}
                 onChange={(e) => void handleArchivos(e)}
               />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
+              <MenuAdjuntar
                 disabled={keyMissing || subiendo || adjuntos.length >= MAX_ADJUNTOS}
-                aria-label="Adjuntar archivo"
-                title={
+                titulo={
                   adjuntos.length >= MAX_ADJUNTOS
                     ? `Maximo ${MAX_ADJUNTOS} archivos`
                     : 'Adjuntar archivo'
                 }
-                className="inline-flex shrink-0 items-center justify-center rounded-lg border border-grafito-border px-3 py-2.5 text-hueso-muted transition hover:border-hueso-muted hover:text-hueso disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <Paperclip className="h-4 w-4" />
-              </button>
+                onElegir={abrirSelector}
+              />
               <textarea
                 rows={2}
                 value={draft}
