@@ -2,13 +2,13 @@ import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } fro
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
+  ArrowUp,
   FileSpreadsheet,
   FileText,
   ImageIcon,
   LoaderCircle,
   Plus,
   RefreshCw,
-  Send,
   Square,
   Wrench,
   X,
@@ -541,23 +541,27 @@ export function PlaygroundPage() {
                 </div>
               </div>
               {running ? (
+                // ENVIANDO: squircle coral clickeable; conserva la opcion de abortar el stream.
                 <button
                   type="button"
                   onClick={() => abortRef.current?.abort()}
-                  className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-grafito-border px-4 py-2.5 text-sm font-medium text-brasa transition hover:border-brasa"
+                  aria-label="Detener"
+                  title="Detener"
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brasa text-carbon transition-colors duration-300 hover:bg-brasa-hover"
                 >
                   <Square className="h-4 w-4" />
-                  Detener
                 </button>
               ) : (
+                // VACIO (gris, deshabilitado) -> ACTIVO (coral) segun haya texto o adjuntos.
                 <button
                   type="button"
                   onClick={() => send()}
                   disabled={keyMissing || subiendo || (draft.trim() === '' && adjuntos.length === 0)}
-                  className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-brasa px-4 py-2.5 text-sm font-semibold text-carbon transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
+                  aria-label="Enviar"
+                  title="Enviar"
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brasa text-carbon transition-colors duration-300 hover:bg-brasa-hover disabled:cursor-not-allowed disabled:bg-line disabled:text-muted"
                 >
-                  <Send className="h-4 w-4" />
-                  Enviar
+                  <ArrowUp className="h-5 w-5" />
                 </button>
               )}
             </div>
