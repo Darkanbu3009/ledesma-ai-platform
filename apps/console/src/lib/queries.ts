@@ -2,6 +2,15 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from './api';
 import type { AgentConfig } from './agents';
 import type { AgentUsage, UsageRange } from './usage';
+import type { RegistrationState } from './registration';
+
+/** Estado de registro del usuario actual (perfil, organizacion, plan y uso). */
+export function useMe() {
+  return useQuery({
+    queryKey: ['me'],
+    queryFn: () => apiFetch<RegistrationState>('/v1/me'),
+  });
+}
 
 export function useAgents() {
   return useQuery({
