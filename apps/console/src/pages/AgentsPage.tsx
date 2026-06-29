@@ -51,9 +51,35 @@ function AgentsEmptyState() {
           <CreateAgentPill />
         </div>
       </div>
+      {/* Lado derecho: maqueta decorativa de "asi se vera tu agente". No es
+          interactiva (sin texto real, solo barras/chips placeholder); da peso
+          visual al split y anticipa el resultado. Oculta en movil para no
+          romper el layout en pantallas chicas. */}
       <div className="hidden justify-self-center md:block">
-        <div className="flex h-[130px] w-[130px] items-center justify-center rounded-[18px] border border-line-soft bg-surface shadow-card">
-          <Bot className="h-14 w-14 text-brasa" strokeWidth={1.5} />
+        <div
+          aria-hidden="true"
+          className="w-[230px] rounded-2xl border border-line-soft bg-surface p-[18px] shadow-card"
+        >
+          {/* Encabezado: icono de agente + nombre y subtitulo (placeholder). */}
+          <div className="flex items-center gap-3">
+            <span className="flex h-[38px] w-[38px] flex-none items-center justify-center rounded-[10px] bg-brasa-soft text-brasa">
+              <Bot className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex-1 space-y-2">
+              <span className="block h-2.5 w-[90px] rounded-full bg-line" />
+              <span className="block h-2 w-[60px] rounded-full bg-line-soft" />
+            </div>
+          </div>
+          {/* Cuerpo: dos lineas de descripcion (placeholder). */}
+          <div className="mt-[18px] space-y-2">
+            <span className="block h-[7px] w-full rounded-full bg-line-soft" />
+            <span className="block h-[7px] w-4/5 rounded-full bg-line-soft" />
+          </div>
+          {/* Pie: chips de tags/acciones (placeholder). */}
+          <div className="mt-[18px] flex items-center gap-2">
+            <span className="block h-[22px] w-[54px] rounded-full bg-brasa-soft" />
+            <span className="block h-[22px] w-[40px] rounded-full bg-line-soft" />
+          </div>
         </div>
       </div>
     </div>
