@@ -1,39 +1,13 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Navigate } from 'react-router-dom';
-import { RefreshCw } from 'lucide-react';
+import { Clock, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { BrandMark } from '../components/BrandMark';
+import { AuthScreen, SubmitButton, authInputClass, authLabelClass } from '../components/AuthScreen';
 import { useMe } from '../lib/queries';
 import { useRegisterIndividual, useRegisterOrganization } from '../lib/mutations';
 import { classifyRegistration, validateName } from '../lib/registration';
 
-const inputClass =
-  'w-full rounded-lg border border-grafito-border bg-carbon px-3.5 py-2.5 text-sm text-hueso outline-none transition placeholder:text-hueso-muted/60 focus:border-brasa focus:ring-2 focus:ring-brasa/30';
-
 type Mode = 'empresa' | 'individual';
-
-/** Marco centrado con la marca, identico al de LoginPage, para todas las pantallas de registro. */
-function Shell({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
-  return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-10">
-      <div className="pointer-events-none absolute inset-0" aria-hidden="true">
-        <div className="absolute left-1/2 top-1/3 h-[40rem] w-[40rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-brasa/10 blur-[120px]" />
-      </div>
-
-      <div className="relative w-full max-w-sm">
-        <div className="mb-8 flex flex-col items-center text-center">
-          <BrandMark className="h-12 w-12" />
-          <h1 className="mt-5 font-display text-2xl font-bold tracking-tight text-hueso">{title}</h1>
-          <p className="mt-2 text-sm text-hueso-muted">{subtitle}</p>
-        </div>
-
-        <div className="rounded-2xl border border-grafito-border bg-grafito p-7 shadow-2xl shadow-black/40">
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /** Salir de la cuenta actual. AuthProvider detecta el cambio y ProtectedRoute redirige a /login. */
 function SignOutLink() {
@@ -41,7 +15,7 @@ function SignOutLink() {
     <button
       type="button"
       onClick={() => void supabase.auth.signOut()}
-      className="block w-full text-center text-xs text-hueso-muted transition hover:text-hueso"
+      className="text-xs text-muted-soft transition hover:text-ink"
     >
       Cerrar sesion
     </button>
@@ -86,7 +60,13 @@ function RegistrationForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5" noValidate>
-      <div className="grid grid-cols-2 gap-1.5 rounded-lg border border-grafito-border bg-carbon p-1">
+      <div>
+        <h1 className="font-display text-lg font-semibold text-ink">Completar registro</h1>
+        <p className="mt-1 text-sm text-muted">Necesitamos algunos datos para activar tu cuenta.</p>
+      </div>
+
+      {/* Toggle Empresa/Persona: segmento limpio, seleccionado en brasa, el otro neutro. */}
+      <div className="grid grid-cols-2 gap-1 rounded-lg border border-line bg-field p-1">
         {(['empresa', 'individual'] as const).map((value) => (
           <button
             key={value}
@@ -95,8 +75,8 @@ function RegistrationForm() {
             aria-pressed={mode === value}
             className={
               mode === value
-                ? 'rounded-md bg-brasa px-3 py-2 text-sm font-semibold text-carbon'
-                : 'rounded-md px-3 py-2 text-sm font-medium text-hueso-muted transition hover:text-hueso'
+                ? 'rounded-md bg-brasa px-3 py-2 text-sm font-medium text-white shadow-sm'
+                : 'rounded-md px-3 py-2 text-sm font-medium text-muted transition hover:text-ink'
             }
           >
             {value === 'empresa' ? 'Empresa' : 'Persona'}
@@ -106,7 +86,7 @@ function RegistrationForm() {
 
       {mode === 'empresa' && (
         <div>
-          <label htmlFor="org-name" className="mb-2 block text-sm font-medium text-hueso">
+          <label htmlFor="org-name" className={authLabelClass}>
             Nombre de la empresa
           </label>
           <input
@@ -114,14 +94,18 @@ function RegistrationForm() {
             value={orgName}
             onChange={(e) => setOrgName(e.target.value)}
             placeholder="Acme S.A."
-            className={inputClass}
+            className={authInputClass}
           />
-          {errors.orgName && <p className="mt-1.5 text-sm text-brasa">{errors.orgName}</p>}
+          {errors.orgName && (
+            <p className="mt-1.5 text-sm text-brasa" role="alert">
+              {errors.orgName}
+            </p>
+          )}
         </div>
       )}
 
       <div>
-        <label htmlFor="full-name" className="mb-2 block text-sm font-medium text-hueso">
+        <label htmlFor="full-name" className={authLabelClass}>
           {mode === 'empresa' ? 'Tu nombre (administrador)' : 'Nombre completo'}
         </label>
         <input
@@ -130,30 +114,30 @@ function RegistrationForm() {
           value={fullName}
           onChange={(e) => setFullName(e.target.value)}
           placeholder="Ada Lovelace"
-          className={inputClass}
+          className={authInputClass}
         />
-        {errors.fullName && <p className="mt-1.5 text-sm text-brasa">{errors.fullName}</p>}
+        {errors.fullName && (
+          <p className="mt-1.5 text-sm text-brasa" role="alert">
+            {errors.fullName}
+          </p>
+        )}
       </div>
 
       {failed && (
-        <p className="text-sm text-brasa">No pudimos completar el registro. Intenta de nuevo.</p>
+        <p className="text-sm text-brasa" role="alert">
+          No pudimos completar el registro. Intenta de nuevo.
+        </p>
       )}
 
-      <button
-        type="submit"
-        disabled={submitting}
-        className="w-full rounded-lg bg-brasa px-4 py-2.5 text-sm font-semibold text-carbon transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {submitting ? 'Enviando...' : mode === 'empresa' ? 'Registrar empresa' : 'Crear mi cuenta'}
-      </button>
+      <SubmitButton pending={submitting} pendingLabel="Enviando...">
+        {mode === 'empresa' ? 'Registrar empresa' : 'Crear mi cuenta'}
+      </SubmitButton>
 
-      <p className="text-center text-xs text-hueso-muted">
+      <p className="text-center text-xs text-muted-soft">
         {mode === 'empresa'
           ? 'Tu empresa quedara en revision hasta ser aprobada.'
           : 'Tu cuenta queda activa de inmediato.'}
       </p>
-
-      <SignOutLink />
     </form>
   );
 }
@@ -169,28 +153,28 @@ export function RegistrationPage() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <span className="text-sm text-hueso-muted">Cargando...</span>
+      <div className="flex min-h-screen items-center justify-center bg-cream">
+        <span className="text-sm text-muted">Cargando...</span>
       </div>
     );
   }
 
   if (isError || !data) {
     return (
-      <Shell title="Completar registro" subtitle="Necesitamos algunos datos para activar tu cuenta.">
+      <AuthScreen>
         <div className="text-center">
-          <p className="font-display text-lg font-semibold text-hueso">No pudimos cargar tu cuenta</p>
-          <p className="mt-2 text-sm text-hueso-muted">Revisa tu conexion e intenta de nuevo.</p>
+          <p className="font-display text-lg font-semibold text-ink">No pudimos cargar tu cuenta</p>
+          <p className="mt-2 text-sm text-muted">Revisa tu conexion e intenta de nuevo.</p>
           <button
             type="button"
             onClick={() => void refetch()}
-            className="mt-5 inline-flex items-center gap-2 rounded-lg border border-grafito-border bg-carbon px-4 py-2 text-sm font-medium text-hueso transition hover:border-brasa"
+            className="mt-5 inline-flex items-center gap-2 rounded-lg border border-line bg-field px-4 py-2 text-sm font-medium text-ink transition hover:border-brasa"
           >
             <RefreshCw className="h-4 w-4" />
             Reintentar
           </button>
         </div>
-      </Shell>
+      </AuthScreen>
     );
   }
 
@@ -203,32 +187,32 @@ export function RegistrationPage() {
   if (access === 'pending') {
     const orgName = data.organization?.name;
     return (
-      <Shell title="Registro en revision" subtitle="Estamos verificando tu empresa.">
-        <div className="space-y-6 text-center">
-          <div>
-            <p className="font-display text-lg font-semibold text-hueso">
-              Tu registro de empresa esta en revision
-            </p>
-            <p className="mt-2 text-sm text-hueso-muted">
-              {orgName ? (
-                <>
-                  Estamos revisando <span className="text-hueso">{orgName}</span>. Te avisaremos en
-                  cuanto sea aprobada para que puedas entrar.
-                </>
-              ) : (
-                'Estamos revisando tu empresa. Te avisaremos en cuanto sea aprobada para que puedas entrar.'
-              )}
-            </p>
-          </div>
-          <SignOutLink />
+      <AuthScreen footer={<SignOutLink />}>
+        <div className="flex flex-col items-center text-center">
+          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-brasa-soft text-brasa">
+            <Clock className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <p className="mt-4 font-display text-lg font-semibold text-ink">
+            Tu registro de empresa esta en revision
+          </p>
+          <p className="mt-2 text-sm leading-relaxed text-muted">
+            {orgName ? (
+              <>
+                Estamos revisando <span className="font-medium text-ink">{orgName}</span>. Te
+                avisaremos en cuanto sea aprobada para que puedas entrar.
+              </>
+            ) : (
+              'Estamos revisando tu empresa. Te avisaremos en cuanto sea aprobada para que puedas entrar.'
+            )}
+          </p>
         </div>
-      </Shell>
+      </AuthScreen>
     );
   }
 
   return (
-    <Shell title="Completar registro" subtitle="Necesitamos algunos datos para activar tu cuenta.">
+    <AuthScreen footer={<SignOutLink />}>
       <RegistrationForm />
-    </Shell>
+    </AuthScreen>
   );
 }
