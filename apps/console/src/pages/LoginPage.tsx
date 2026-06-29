@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useSearchParams } from 'react-router-dom';
 import { Mail } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/useAuth';
@@ -7,11 +7,40 @@ import { AuthScreen, SubmitButton, authInputClass, authLabelClass } from '../com
 
 type Status = 'idle' | 'submitting' | 'sent' | 'error';
 
+/**
+ * Modo desde el que se llega a la pantalla, leido del query param `modo`:
+ * - `registro`: el usuario viene de "Crear cuenta".
+ * - `acceso`: el usuario viene de "Iniciar sesion" (default si el parametro falta o es desconocido).
+ *
+ * El mecanismo de acceso es IDENTICO en ambos modos (magic link via signInWithOtp); lo unico que
+ * cambia es el texto de la pantalla inicial (titulo, subtitulo y boton).
+ */
+type Modo = 'registro' | 'acceso';
+
+const COPY: Record<Modo, { title: string; subtitle: string; submit: string }> = {
+  registro: {
+    title: 'Crear tu cuenta',
+    subtitle: 'Te enviamos un enlace para empezar.',
+    submit: 'Crear cuenta',
+  },
+  acceso: {
+    title: 'Iniciar sesion',
+    subtitle: 'Te enviamos un enlace de acceso.',
+    submit: 'Enviar enlace de acceso',
+  },
+};
+
 export function LoginPage() {
   const { session, loading } = useAuth();
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState('');
   const [status, setStatus] = useState<Status>('idle');
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Default razonable: cualquier valor distinto de `registro` (ausente o desconocido) se trata
+  // como acceso, de modo que `/login` a secas siga funcionando igual que hoy.
+  const modo: Modo = searchParams.get('modo') === 'registro' ? 'registro' : 'acceso';
+  const copy = COPY[modo];
 
   if (loading) return null;
   // Con `/` ahora publica (landing de marketing), un usuario ya autenticado va directo al
@@ -55,30 +84,37 @@ export function LoginPage() {
           </p>
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="email" className={authLabelClass}>
-              Correo
-            </label>
-            <input
-              id="email"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="tu@empresa.com"
-              className={authInputClass}
-            />
+        <>
+          {/* Titulo + subtitulo segun el modo; el formulario de abajo es identico en ambos. */}
+          <div className="mb-6">
+            <h1 className="font-display text-lg font-semibold text-ink">{copy.title}</h1>
+            <p className="mt-1.5 text-sm leading-relaxed text-muted">{copy.subtitle}</p>
           </div>
-          {status === 'error' && (
-            <p className="text-sm text-brasa" role="alert">
-              {errorMsg}
-            </p>
-          )}
-          <SubmitButton pending={status === 'submitting'} pendingLabel="Enviando...">
-            Enviar enlace de acceso
-          </SubmitButton>
-        </form>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label htmlFor="email" className={authLabelClass}>
+                Correo
+              </label>
+              <input
+                id="email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="tu@empresa.com"
+                className={authInputClass}
+              />
+            </div>
+            {status === 'error' && (
+              <p className="text-sm text-brasa" role="alert">
+                {errorMsg}
+              </p>
+            )}
+            <SubmitButton pending={status === 'submitting'} pendingLabel="Enviando...">
+              {copy.submit}
+            </SubmitButton>
+          </form>
+        </>
       )}
     </AuthScreen>
   );

@@ -39,10 +39,10 @@ export function LandingNav(): JSX.Element {
 
         <div className="flex items-center gap-2 sm:gap-3">
           <Button asChild variant="ghost" size="sm">
-            <Link to="/login">Iniciar sesión</Link>
+            <Link to="/login?modo=acceso">Iniciar sesión</Link>
           </Button>
           <Button asChild size="sm">
-            <Link to="/login">Crear cuenta</Link>
+            <Link to="/login?modo=registro">Crear cuenta</Link>
           </Button>
         </div>
       </div>
