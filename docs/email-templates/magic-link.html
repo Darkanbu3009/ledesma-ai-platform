@@ -1,0 +1,171 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<!--
+  ============================================================================
+  Ledesma AI Labs - Plantilla de correo "Magic Link" (Supabase Auth)
+  ----------------------------------------------------------------------------
+  Pegar este HTML en: Supabase > Authentication > Emails > plantilla
+  "Magic Link" (enlace de acceso). El boton y el enlace de respaldo usan la
+  variable {{ .ConfirmationURL }} que Supabase reemplaza por el enlace real.
+
+  Robustez en clientes de correo (Gmail, Outlook, Apple Mail):
+    - Maquetacion con <table> (sin flexbox/grid).
+    - Estilos en linea en cada elemento (lo critico no depende de <style>).
+    - Ancho fijo ~600px con max-width.
+    - Fuentes web-safe del sistema (Archivo/Hanken no cargan en email).
+    - Boton "a prueba de balas" con VML para Outlook de escritorio (motor Word).
+
+  Variables de Supabase disponibles: {{ .ConfirmationURL }} (enlace de acceso),
+  {{ .SiteURL }}, {{ .Email }}, {{ .Token }}. Aqui solo usamos ConfirmationURL.
+  ============================================================================
+-->
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" lang="es">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="color-scheme" content="light only" />
+    <meta name="supported-color-schemes" content="light only" />
+    <title>Tu enlace de acceso</title>
+    <!--[if mso]>
+      <noscript>
+        <xml>
+          <o:OfficeDocumentSettings>
+            <o:PixelsPerInch>96</o:PixelsPerInch>
+          </o:OfficeDocumentSettings>
+        </xml>
+      </noscript>
+    <![endif]-->
+    <style>
+      /* Mejoras progresivas. Todo lo critico esta en linea; este bloque solo
+         cubre lo que no se puede inlinear (reset y responsive movil). */
+      html,
+      body {
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+      }
+      a {
+        text-decoration: none;
+      }
+      /* Evita que iOS Mail/algunos clientes autolinken y recoloreen texto. */
+      a[x-apple-data-detectors] {
+        color: inherit !important;
+        text-decoration: none !important;
+      }
+      @media only screen and (max-width: 600px) {
+        .ll-container {
+          width: 100% !important;
+        }
+        .ll-px {
+          padding-left: 24px !important;
+          padding-right: 24px !important;
+        }
+      }
+    </style>
+  </head>
+  <body style="margin: 0; padding: 0; background-color: #f5f4ef; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;">
+    <!-- Texto de vista previa (preheader): se muestra en la bandeja, oculto en el cuerpo. -->
+    <div style="display: none; max-height: 0; overflow: hidden; mso-hide: all; font-size: 1px; line-height: 1px; color: #f5f4ef; opacity: 0;">
+      Tu enlace de acceso a la consola de Ledesma AI Labs. Es de un solo uso y expira pronto.
+      &#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;
+    </div>
+
+    <!-- Envoltura exterior: fondo hueso a todo el ancho. -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f5f4ef;">
+      <tr>
+        <td align="center" style="padding: 40px 16px;">
+          <!--[if mso]>
+          <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td>
+          <![endif]-->
+
+          <!-- Contenedor central blanco (~600px). -->
+          <table role="presentation" class="ll-container" width="600" cellpadding="0" cellspacing="0" border="0" style="width: 600px; max-width: 600px; background-color: #ffffff; border: 1px solid #e4e2db; border-radius: 16px;">
+            <!-- Cabecera: wordmark editorial + acento brasa. -->
+            <tr>
+              <td class="ll-px" align="center" style="padding: 44px 48px 0 48px;">
+                <!-- Opcion con logo en imagen: descomentar y usar una URL ABSOLUTA y publica.
+                <img src="https://app.ledesma.ai/email/ledesma-logo.png" width="46" height="46" alt="Ledesma AI Labs" style="display: block; margin: 0 auto 18px auto; border: 0; outline: none; text-decoration: none;" />
+                -->
+                <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 27px; line-height: 1.1; font-weight: 600; letter-spacing: -0.02em; color: #1f1e1c;">Ledesma</div>
+                <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 11px; line-height: 1.2; font-weight: 600; letter-spacing: 4px; color: #6b6a66; padding-top: 7px;">AI&nbsp;LABS</div>
+                <!-- Pequena regla de acento brasa (firma editorial). -->
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin: 22px auto 0 auto;">
+                  <tr>
+                    <td style="width: 40px; height: 3px; background-color: #e5511e; font-size: 0; line-height: 0; border-radius: 2px;">&nbsp;</td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Titulo + texto. -->
+            <tr>
+              <td class="ll-px" align="left" style="padding: 28px 48px 0 48px;">
+                <h1 style="margin: 0 0 16px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 22px; line-height: 1.3; font-weight: 600; letter-spacing: -0.01em; color: #1f1e1c;">Tu enlace de acceso</h1>
+                <p style="margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.65; color: #46443f;">
+                  Este es tu enlace para entrar a la consola de Ledesma AI Labs. Es de un solo uso y expira pronto, asi que conviene usarlo cuanto antes.
+                </p>
+              </td>
+            </tr>
+
+            <!-- Boton "a prueba de balas". -->
+            <tr>
+              <td class="ll-px" align="center" style="padding: 28px 48px 4px 48px;">
+                <!--[if mso]>
+                <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{ .ConfirmationURL }}" style="height: 48px; v-text-anchor: middle; width: 240px;" arcsize="17%" strokecolor="#E5511E" fillcolor="#E5511E">
+                  <w:anchorlock/>
+                  <center style="color: #ffffff; font-family: Arial, sans-serif; font-size: 15px; font-weight: bold;">Entrar a la consola</center>
+                </v:roundrect>
+                <![endif]-->
+                <!--[if !mso]><!-- -->
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 0 auto;">
+                  <tr>
+                    <td align="center" bgcolor="#E5511E" style="background-color: #e5511e; border-radius: 8px;">
+                      <a href="{{ .ConfirmationURL }}" target="_blank" style="display: inline-block; padding: 14px 30px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; line-height: 20px; font-weight: 600; color: #ffffff; text-decoration: none; border-radius: 8px;">Entrar a la consola</a>
+                    </td>
+                  </tr>
+                </table>
+                <!--<![endif]-->
+              </td>
+            </tr>
+
+            <!-- Enlace de respaldo en texto plano. -->
+            <tr>
+              <td class="ll-px" align="left" style="padding: 24px 48px 0 48px;">
+                <p style="margin: 0 0 8px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13px; line-height: 1.6; color: #6b6a66;">
+                  Si el boton no funciona, copia y pega este enlace en tu navegador:
+                </p>
+                <p style="margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13px; line-height: 1.6; word-break: break-all; overflow-wrap: break-word;">
+                  <a href="{{ .ConfirmationURL }}" target="_blank" style="color: #e5511e; text-decoration: underline; word-break: break-all; overflow-wrap: break-word;">{{ .ConfirmationURL }}</a>
+                </p>
+              </td>
+            </tr>
+
+            <!-- Separador sutil. -->
+            <tr>
+              <td class="ll-px" style="padding: 32px 48px 0 48px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td style="border-top: 1px solid #efeee8; font-size: 0; line-height: 0;">&nbsp;</td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Pie de pagina. -->
+            <tr>
+              <td class="ll-px" align="left" style="padding: 20px 48px 44px 48px;">
+                <p style="margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; line-height: 1.6; color: #8a8984;">
+                  Recibiste este correo porque solicitaste acceso a Ledesma AI Labs. Si no fuiste tu, puedes ignorarlo.
+                </p>
+              </td>
+            </tr>
+          </table>
+
+          <!--[if mso]>
+          </td></tr></table>
+          <![endif]-->
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
