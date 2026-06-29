@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
 import { RegistrationPage } from './pages/RegistrationPage';
 import { AgentsPage } from './pages/AgentsPage';
@@ -13,6 +14,9 @@ import { AppLayout } from './components/layout/AppLayout';
 export function App() {
   return (
     <Routes>
+      {/* Landing publica de marketing: unica vista sin sesion requerida. Si hay sesion activa,
+          HomePage redirige a /agentes (incluido el retorno del magic-link OTP al origen). */}
+      <Route path="/" element={<HomePage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route element={<ProtectedRoute />}>
         {/* Onboarding: requiere sesion pero no un registro completo. */}
@@ -29,7 +33,6 @@ export function App() {
           </Route>
         </Route>
       </Route>
-      <Route path="/" element={<Navigate to="/agentes" replace />} />
       <Route path="*" element={<Navigate to="/agentes" replace />} />
     </Routes>
   );
