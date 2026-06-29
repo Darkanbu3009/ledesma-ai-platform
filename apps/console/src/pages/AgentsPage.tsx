@@ -36,26 +36,13 @@ function CreateAgentPill() {
 
 function AgentsEmptyState() {
   return (
-    <div className="mt-12 grid items-center gap-10 md:grid-cols-[1fr_auto]">
-      <div className="max-w-md">
-        <span className="inline-flex items-center rounded-md bg-brasa-soft px-2.5 py-1 text-[11px] font-semibold tracking-wide text-[#993C1D]">
-          EMPIEZA AQUI
-        </span>
-        <h2 className="mt-4 font-display text-[22px] font-bold leading-[1.2] text-ink">
-          El trabajo repetitivo, en piloto automático
-        </h2>
-        <p className="mt-3 text-[13px] leading-[1.5] text-muted">
-          Configura un agente una vez y deja que ejecute tus procesos en tus propios sistemas.
-        </p>
-        <div className="mt-7">
-          <CreateAgentPill />
-        </div>
-      </div>
-      {/* Lado derecho: maqueta decorativa de "asi se vera tu agente". No es
-          interactiva (sin texto real, solo barras/chips placeholder); da peso
-          visual al split y anticipa el resultado. Oculta en movil para no
-          romper el layout en pantallas chicas. */}
-      <div className="hidden justify-self-center md:block">
+    <div className="flex flex-1 flex-col items-center justify-center text-center">
+      {/* Hero (arriba): maqueta decorativa de "asi se vera tu agente". No es
+          interactiva (sin texto real, solo barras/chips placeholder); ancla el
+          bloque centrado y anticipa el resultado. Conserva su ancho (no se
+          estira) y se separa del texto con el margen inferior. Oculta en movil
+          para no recargar pantallas chicas. */}
+      <div className="mb-10 hidden md:block">
         <div
           aria-hidden="true"
           className="w-[230px] rounded-2xl border border-line-soft bg-surface p-[18px] shadow-card"
@@ -82,6 +69,18 @@ function AgentsEmptyState() {
           </div>
         </div>
       </div>
+      <span className="inline-flex items-center rounded-md bg-brasa-soft px-2.5 py-1 text-[11px] font-semibold tracking-wide text-[#993C1D]">
+        EMPIEZA AQUI
+      </span>
+      <h2 className="mt-4 max-w-md font-display text-[22px] font-bold leading-[1.2] text-ink">
+        El trabajo repetitivo, en piloto automático
+      </h2>
+      <p className="mt-3 max-w-md text-[13px] leading-[1.5] text-muted">
+        Configura un agente una vez y deja que ejecute tus procesos en tus propios sistemas.
+      </p>
+      <div className="mt-7">
+        <CreateAgentPill />
+      </div>
     </div>
   );
 }
@@ -91,7 +90,7 @@ export function AgentsPage() {
   const hasAgents = Array.isArray(agents) && agents.length > 0;
 
   return (
-    <div className="mx-auto max-w-6xl">
+    <div className="mx-auto flex min-h-full max-w-6xl flex-col">
       <div className="flex items-start justify-between gap-5">
         <div>
           <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">Agentes</h1>
