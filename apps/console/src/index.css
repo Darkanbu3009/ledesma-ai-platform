@@ -4,12 +4,36 @@
 
 :root {
   color-scheme: light;
+
+  /* Tokens de la landing publica (portada del showroom) como canales RGB, para que
+     tailwind.config los consuma con `rgb(var(--x) / <alpha-value>)` conservando el
+     modificador de opacidad. La consola es light-only: aqui van SOLO los valores del
+     tema claro (sin el mecanismo `theme-light` ni el toggle del showroom). */
+  --ll-bg: 245 244 239; /* #F5F4EF hueso calido (fondo de pagina) */
+  --ll-bg-secondary: 252 251 248; /* #FCFBF8 superficie casi blanca (tarjetas) */
+  --ll-bg-tertiary: 241 239 234; /* #F1EFEA relleno anidado sutil (burbujas, inputs) */
+  --ll-border: 229 227 220; /* #E5E3DC linea/borde claro sutil */
+  --ll-fg: 31 30 28; /* #1F1E1C casi-negro calido (texto principal) */
+  --ll-fg-secondary: 107 106 102; /* #6B6A66 gris calido medio (texto secundario) */
+  --ll-accent: 232 81 31; /* #E8511F brasa (acento de marca) */
+  --ll-accent-hover: 211 71 26; /* #D3471A brasa hover */
+  --ll-success: 4 120 87; /* #047857 verde profundo legible sobre crema */
+
+  /* Alto del header fijo de la landing (LandingNav) y base del offset de los anchors. */
+  --header-height: 4rem;
 }
 
 html,
 body,
 #root {
   height: 100%;
+}
+
+/* Offset de los anchors de la landing (#integracion, #plataforma, #ejemplos, #como-funciona)
+   para que al saltar a una seccion su eyebrow no quede tapado por el header fijo. Las demas
+   vistas no tienen anchors, asi que el efecto es nulo fuera de la landing. */
+html {
+  scroll-padding-top: calc(var(--header-height) - 5rem + 1.5rem);
 }
 
 body {

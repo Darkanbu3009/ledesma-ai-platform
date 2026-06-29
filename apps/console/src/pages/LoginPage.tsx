@@ -13,7 +13,9 @@ export function LoginPage() {
   const [errorMsg, setErrorMsg] = useState('');
 
   if (loading) return null;
-  if (session) return <Navigate to="/" replace />;
+  // Con `/` ahora publica (landing de marketing), un usuario ya autenticado va directo al
+  // dashboard en vez de caer en marketing.
+  if (session) return <Navigate to="/agentes" replace />;
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();

@@ -30,11 +30,37 @@ export default {
         carbon: '#F5F4EF',
         grafito: { DEFAULT: '#FFFFFF', border: '#E4E2DB' },
         hueso: { DEFAULT: '#1F1E1C', muted: '#6B6A66' },
+
+        // Tokens de la landing publica (portada del showroom). Expuestos como canales RGB en
+        // custom properties (ver src/index.css) para que `rgb(var(--x) / <alpha-value>)`
+        // conserve el modificador de opacidad de Tailwind (bg-accent/10, etc.). La consola es
+        // light-only: las --ll-* solo tienen el valor del tema claro. Aditivo: no toca los
+        // tokens de arriba (cream, brasa, ink, etc.) que usa el resto de la consola.
+        background: {
+          DEFAULT: 'rgb(var(--ll-bg) / <alpha-value>)',
+          secondary: 'rgb(var(--ll-bg-secondary) / <alpha-value>)',
+          tertiary: 'rgb(var(--ll-bg-tertiary) / <alpha-value>)',
+        },
+        foreground: {
+          DEFAULT: 'rgb(var(--ll-fg) / <alpha-value>)',
+          secondary: 'rgb(var(--ll-fg-secondary) / <alpha-value>)',
+        },
+        border: 'rgb(var(--ll-border) / <alpha-value>)',
+        accent: {
+          DEFAULT: 'rgb(var(--ll-accent) / <alpha-value>)',
+          hover: 'rgb(var(--ll-accent-hover) / <alpha-value>)',
+        },
+        success: 'rgb(var(--ll-success) / <alpha-value>)',
+        ring: 'rgb(var(--ll-accent) / <alpha-value>)',
       },
       fontFamily: {
         display: ['Archivo', 'sans-serif'],
         sans: ['"Hanken Grotesk"', 'sans-serif'],
         mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+        // Alias de fuente de la landing (aditivos): cuerpo en Hanken Grotesk y
+        // eyebrows/codigo en JetBrains Mono. Los headings reusan `display` (Archivo).
+        grotesk: ['"Hanken Grotesk"', 'system-ui', 'sans-serif'],
+        jetbrains: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
       },
       boxShadow: {
         card: '0 1px 2px rgba(31,30,28,0.04)',
