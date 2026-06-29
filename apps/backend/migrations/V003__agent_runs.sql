@@ -18,6 +18,8 @@ create index if not exists agent_runs_agent_created_idx on agent_runs (agent_id,
 
 alter table agent_runs enable row level security;
 
+-- CREATE POLICY no admite IF NOT EXISTS; el drop-if-exists previo lo hace idempotente sin tocar datos.
+drop policy if exists "agent_runs_select_own" on agent_runs;
 create policy "agent_runs_select_own"
   on agent_runs for select
   to authenticated
