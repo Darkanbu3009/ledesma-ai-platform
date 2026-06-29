@@ -106,7 +106,7 @@ export function Examples(): JSX.Element {
                   {copy.description}
                 </p>
                 <Link
-                  to="/login"
+                  to="/login?modo=registro"
                   className="mt-6 inline-flex items-center gap-1.5 rounded-sm font-medium text-accent transition-colors hover:text-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                   Crear cuenta
@@ -146,7 +146,7 @@ export function Examples(): JSX.Element {
               </div>
             </div>
             <Button asChild className="shrink-0">
-              <Link to="/login">
+              <Link to="/login?modo=registro">
                 Cuéntanos tu caso
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </Link>
