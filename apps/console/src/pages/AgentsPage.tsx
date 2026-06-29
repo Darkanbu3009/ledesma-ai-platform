@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Bot, Plus, RefreshCw } from 'lucide-react';
+import { ArrowRight, Bot, Plus, RefreshCw } from 'lucide-react';
 import { useAgents } from '../lib/queries';
 import { AgentCard } from '../components/agents/AgentCard';
 
@@ -18,8 +18,51 @@ function CreateAgentButton() {
   );
 }
 
+// Boton pildora con flecha, usado en el estado vacio. Dispara la misma accion
+// que CreateAgentButton (navegar a /agentes/nuevo).
+function CreateAgentPill() {
+  return (
+    <Link
+      to="/agentes/nuevo"
+      className="group inline-flex h-11 items-center gap-3 rounded-full bg-brasa pl-6 pr-[7px] text-sm font-medium text-white transition hover:bg-brasa-hover"
+    >
+      Crear agente
+      <span className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-white text-brasa transition group-hover:translate-x-0.5">
+        <ArrowRight className="h-[18px] w-[18px]" />
+      </span>
+    </Link>
+  );
+}
+
+function AgentsEmptyState() {
+  return (
+    <div className="mt-12 grid items-center gap-10 md:grid-cols-[1fr_auto]">
+      <div className="max-w-md">
+        <span className="inline-flex items-center rounded-md bg-brasa-soft px-2.5 py-1 text-[11px] font-semibold tracking-wide text-[#993C1D]">
+          EMPIEZA AQUI
+        </span>
+        <h2 className="mt-4 font-display text-[22px] font-bold leading-[1.2] text-ink">
+          El trabajo repetitivo, en piloto automático
+        </h2>
+        <p className="mt-3 text-[13px] leading-[1.5] text-muted">
+          Configura un agente una vez y deja que ejecute tus procesos en tus propios sistemas.
+        </p>
+        <div className="mt-7">
+          <CreateAgentPill />
+        </div>
+      </div>
+      <div className="hidden justify-self-center md:block">
+        <div className="flex h-[130px] w-[130px] items-center justify-center rounded-[18px] border border-line-soft bg-surface shadow-card">
+          <Bot className="h-14 w-14 text-brasa" strokeWidth={1.5} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AgentsPage() {
   const { data: agents, isLoading, isError, refetch } = useAgents();
+  const hasAgents = Array.isArray(agents) && agents.length > 0;
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -28,7 +71,7 @@ export function AgentsPage() {
           <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">Agentes</h1>
           <p className="mt-1.5 text-[15px] text-muted">Configura y administra tus agentes de IA.</p>
         </div>
-        <CreateAgentButton />
+        {hasAgents && <CreateAgentButton />}
       </div>
 
       {isLoading ? (
@@ -51,19 +94,7 @@ export function AgentsPage() {
           </button>
         </div>
       ) : !agents || agents.length === 0 ? (
-        <div className="mt-10 flex flex-col items-center rounded-2xl border border-line bg-surface px-6 py-16 text-center shadow-card">
-          <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brasa-soft text-brasa">
-            <Bot className="h-7 w-7" />
-          </span>
-          <h2 className="mt-5 font-display text-xl font-bold text-ink">Aún no tienes agentes</h2>
-          <p className="mt-2 max-w-sm text-sm text-muted">
-            Crea tu primer agente para automatizar trabajo dentro de las plataformas que tu empresa
-            ya usa.
-          </p>
-          <div className="mt-6">
-            <CreateAgentButton />
-          </div>
-        </div>
+        <AgentsEmptyState />
       ) : (
         <div className={`mt-8 ${gridClass}`}>
           {agents.map((agent) => (
