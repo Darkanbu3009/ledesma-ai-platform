@@ -10,7 +10,10 @@ import { requireUser } from '../auth/require-user.js';
 import { createWebhookExecutor } from '../tools/webhook-tools.js';
 import { NATIVE_TOOL_PREFIX } from '../tools/native-tools.js';
 
-const StoredToolSchema = z.object({
+// Exportado (sin cambiar sus reglas) para que el validador del agent-spec (agents/agent-spec.ts)
+// REUSE el mismo schema de webhook tools en vez de redefinirlo. La compuerta del Configurador y el
+// endpoint comparten asi una unica fuente de verdad.
+export const StoredToolSchema = z.object({
   // El prefijo platform_ esta reservado para las tools nativas de la plataforma: el cliente no
   // puede crear/actualizar tools con el (aplica en POST y PUT, ambos via AgentInputSchema).
   name: z
@@ -36,7 +39,10 @@ const UsageQuerySchema = z.object({
   to: z.string().datetime().optional(),
 });
 
-const AgentInputSchema = z.object({
+// Exportado (sin cambiar sus reglas) para que el validador del agent-spec reuse el MISMO schema de
+// creacion como compuerta final: garantiza que el `value` que produce sea input directo de POST
+// /v1/agents sin duplicar las reglas de validacion del endpoint.
+export const AgentInputSchema = z.object({
   name: z.string().min(1).max(120),
   description: z.string().max(2000).optional(),
   providerId: z.enum(['anthropic', 'openai', 'openai-compatible']),
@@ -47,6 +53,9 @@ const AgentInputSchema = z.object({
   baseUrl: z.string().url().nullable().optional(),
   tools: z.array(StoredToolSchema).max(50).optional(),
 });
+
+/** Input EXACTO que acepta POST /v1/agents (lo que el handler pasa a repo.create, sin ownerId). */
+export type AgentCreateInput = z.infer<typeof AgentInputSchema>;
 
 /** Permite inyectar el verifier en tests. */
 export function agentRoutes(config: Env, deps?: { verifier?: JwtVerifier }) {
