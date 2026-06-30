@@ -3,6 +3,9 @@ import { apiFetch } from './api';
 import type { AgentConfig } from './agents';
 import type { AgentFormParsed } from './agent-schema';
 import { toApiInput } from './agent-schema';
+import type { ProviderCredential } from './credentials';
+import type { CredentialFormParsed } from './credential-schema';
+import { toCredentialApiInput } from './credential-schema';
 import type {
   IndividualInput,
   OrganizationInput,
@@ -101,5 +104,26 @@ export function useDeleteAgent() {
   return useMutation({
     mutationFn: (id: string) => apiFetch<void>(`/v1/agents/${id}`, { method: 'DELETE' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['agents'] }),
+  });
+}
+
+/** Guarda una credencial nueva. El backend responde solo con metadata (nunca la key). */
+export function useCreateCredential() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (values: CredentialFormParsed) =>
+      apiFetch<{ credential: ProviderCredential }>('/v1/credentials', {
+        method: 'POST',
+        body: JSON.stringify(toCredentialApiInput(values)),
+      }).then((r) => r.credential),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['credentials'] }),
+  });
+}
+
+export function useDeleteCredential() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/v1/credentials/${id}`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['credentials'] }),
   });
 }
