@@ -15,6 +15,7 @@ const individualProfile: Profile = {
   role: 'individual',
   fullName: 'Ada',
   identityVerified: false,
+  tier: 'free',
   createdAt: 'x',
   updatedAt: 'x',
 };
@@ -26,6 +27,7 @@ const empresaProfile: Profile = {
   role: 'org_admin',
   fullName: 'Ada',
   identityVerified: false,
+  tier: 'free',
   createdAt: 'x',
   updatedAt: 'x',
 };

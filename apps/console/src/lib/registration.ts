@@ -5,6 +5,13 @@
 export type AccountType = 'individual' | 'empresa_member';
 export type ProfileRole = 'individual' | 'org_admin';
 
+/**
+ * Tier del usuario (columna profiles.tier del backend). Hoy lo unico que desbloquea es el MODO
+ * AUTONOMO del Configurador ('autonomous'). El acceso real lo decide el backend; aca solo se lee
+ * para mostrar/ocultar la opcion en la UI. Default 'free'.
+ */
+export type ProfileTier = 'free' | 'pro' | 'autonomous';
+
 /** Perfil del usuario, ligado 1:1 al sub del JWT de Supabase. */
 export interface Profile {
   id: string;
@@ -13,6 +20,8 @@ export interface Profile {
   role: ProfileRole;
   fullName: string;
   identityVerified: boolean;
+  /** Plan del usuario. 'autonomous' habilita el modo autonomo del Configurador. */
+  tier: ProfileTier;
   createdAt: string;
   updatedAt: string;
 }

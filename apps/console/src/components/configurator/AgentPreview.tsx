@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from 'react';
-import { AlertCircle, Bot, CheckCircle2, Loader2, Plug, Wrench } from 'lucide-react';
+import { AlertCircle, Bot, CheckCircle2, Loader2, Plug, Wrench, Zap } from 'lucide-react';
 import { providerLabel, type ProviderId } from '../../lib/agents';
 import type {
   AgentSpecDraft,
@@ -18,9 +18,14 @@ const PROMPT_PREVIEW_CHARS = 220;
 
 /**
  * Preview EN VIVO del agente que el Configurador va armando. Lee el AgentSpec parcial/completo y la
- * validacion del backend (no revalida en cliente). Cuando validation.ok es true habilita "Crear
- * agente" (modo asistente: el humano confirma); mientras sea false, lista que falta y el boton queda
- * deshabilitado.
+ * validacion del backend (no revalida en cliente).
+ *
+ * MODO ASISTENTE (autonomous=false): cuando validation.ok es true habilita "Crear agente" (el humano
+ * confirma); mientras sea false, lista que falta y el boton queda deshabilitado.
+ *
+ * MODO AUTONOMO (autonomous=true): NO hay boton de confirmacion (el backend crea el agente solo
+ * cuando pasa la validacion ESTRICTA). El footer muestra el estado estricto: que falta para que el
+ * agente se cree automaticamente.
  */
 export function AgentPreview({
   spec,
@@ -28,12 +33,16 @@ export function AgentPreview({
   creating,
   createError,
   onCreate,
+  autonomous = false,
+  autonomousValidation = null,
 }: {
   spec: AgentSpecDraft | null;
   validation: ConfiguratorValidation | null;
   creating: boolean;
   createError: string | null;
   onCreate: () => void;
+  autonomous?: boolean;
+  autonomousValidation?: ConfiguratorValidation | null;
 }) {
   const ready = validation?.ok === true;
   const hasSpec = spec !== null && Object.keys(spec).length > 0;
@@ -79,24 +88,71 @@ export function AgentPreview({
       </div>
 
       <div className="border-t border-line px-5 py-4">
-        <ValidationSummary validation={validation} hasSpec={hasSpec} />
+        {autonomous ? (
+          <AutonomousFooter validation={autonomousValidation} hasSpec={hasSpec} />
+        ) : (
+          <>
+            <ValidationSummary validation={validation} hasSpec={hasSpec} />
 
-        {createError && (
-          <p className="mt-3 rounded-lg border border-brasa-line bg-brasa-soft px-3 py-2 text-sm text-brasa">
-            {createError}
-          </p>
+            {createError && (
+              <p className="mt-3 rounded-lg border border-brasa-line bg-brasa-soft px-3 py-2 text-sm text-brasa">
+                {createError}
+              </p>
+            )}
+
+            <button
+              type="button"
+              onClick={onCreate}
+              disabled={!ready || creating}
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:bg-line disabled:text-muted disabled:shadow-none"
+            >
+              {creating && <Loader2 className="h-4 w-4 animate-spin" />}
+              {creating ? 'Creando agente...' : 'Crear agente'}
+            </button>
+          </>
         )}
-
-        <button
-          type="button"
-          onClick={onCreate}
-          disabled={!ready || creating}
-          className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:bg-line disabled:text-muted disabled:shadow-none"
-        >
-          {creating && <Loader2 className="h-4 w-4 animate-spin" />}
-          {creating ? 'Creando agente...' : 'Crear agente'}
-        </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Footer del MODO AUTONOMO: no hay boton (el backend crea el agente solo cuando pasa la validacion
+ * estricta). Comunica que el agente se creara automaticamente y, si la estricta no paso aun, lista
+ * lo que falta. Si esta listo, indica que se esta creando (el turno que validó ya dispara la creacion
+ * y la redireccion).
+ */
+function AutonomousFooter({
+  validation,
+  hasSpec,
+}: {
+  validation: ConfiguratorValidation | null;
+  hasSpec: boolean;
+}) {
+  if (validation?.ok) {
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-ok/30 bg-ok/10 px-3.5 py-2.5 text-sm font-medium text-ok">
+        <Loader2 className="h-4 w-4 flex-none animate-spin" />
+        Listo y valido: creando el agente...
+      </div>
+    );
+  }
+  const errors = validation && !validation.ok ? validation.errors : [];
+  return (
+    <div className="rounded-xl border border-line bg-field px-3.5 py-2.5">
+      <div className="flex items-center gap-2 text-sm font-medium text-ink">
+        <Zap className="h-4 w-4 flex-none text-brasa" />
+        Modo automatico: el agente se creara solo apenas este completo y valido.
+      </div>
+      {errors.length > 0 ? (
+        <ErrorList errors={errors} />
+      ) : (
+        <p className="mt-1 pl-7 text-xs text-muted">
+          {hasSpec
+            ? 'Segui conversando para completar el agente.'
+            : 'Empeza describiendo para que queres el agente.'}
+        </p>
+      )}
     </div>
   );
 }
@@ -206,17 +262,24 @@ function ValidationSummary({
         Falta para poder crear:
       </div>
       {errors.length > 0 ? (
-        <ul className="mt-2 list-disc space-y-1 pl-7 text-xs text-muted">
-          {errors.map((error, i) => (
-            <li key={i}>{error}</li>
-          ))}
-        </ul>
+        <ErrorList errors={errors} />
       ) : (
         <p className="mt-1 pl-7 text-xs text-muted">
           Completa el nombre, el proveedor y el modelo del agente.
         </p>
       )}
     </div>
+  );
+}
+
+/** Lista de errores de validacion (compartida por el modo asistente y el autonomo). */
+function ErrorList({ errors }: { errors: string[] }) {
+  return (
+    <ul className="mt-2 list-disc space-y-1 pl-7 text-xs text-muted">
+      {errors.map((error, i) => (
+        <li key={i}>{error}</li>
+      ))}
+    </ul>
   );
 }
 

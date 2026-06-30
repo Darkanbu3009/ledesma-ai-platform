@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { registerIndividualMock, registerOrganizationMock, getStateMock, approveOrganizationMock } = vi.hoisted(() => ({
+const { registerIndividualMock, registerOrganizationMock, getStateMock, approveOrganizationMock, updateProfileTierMock } = vi.hoisted(() => ({
   registerIndividualMock: vi.fn(),
   registerOrganizationMock: vi.fn(),
   getStateMock: vi.fn(),
   approveOrganizationMock: vi.fn(),
+  updateProfileTierMock: vi.fn(),
 }));
 
 vi.mock('../src/registration/registration-repository.js', () => ({
@@ -13,6 +14,7 @@ vi.mock('../src/registration/registration-repository.js', () => ({
     registerOrganization = registerOrganizationMock;
     getState = getStateMock;
     approveOrganization = approveOrganizationMock;
+    updateProfileTier = updateProfileTierMock;
   },
 }));
 vi.mock('../src/db/client.js', () => ({ getSql: vi.fn(() => ({})), setSqlForTesting: vi.fn() }));
@@ -42,7 +44,7 @@ const ENV = {
 const individualState = {
   created: true,
   needsRegistration: false,
-  profile: { id: 'user-1', orgId: null, accountType: 'individual', role: 'individual', fullName: 'Ada', identityVerified: false, createdAt: 'x', updatedAt: 'x' },
+  profile: { id: 'user-1', orgId: null, accountType: 'individual', role: 'individual', fullName: 'Ada', identityVerified: false, tier: 'free', createdAt: 'x', updatedAt: 'x' },
   organization: null,
   subscription: { id: 's1', profileId: 'user-1', plan: 'free', status: 'active', createdAt: 'x' },
   usageCounter: { id: 'u1', profileId: 'user-1', runsUsed: 0, runsLimit: 10, periodKind: 'lifetime', createdAt: 'x' },
@@ -54,6 +56,7 @@ beforeEach(async () => {
   registerOrganizationMock.mockReset();
   getStateMock.mockReset();
   approveOrganizationMock.mockReset();
+  updateProfileTierMock.mockReset();
   app = await buildServer(parseEnv(ENV));
 });
 
@@ -163,12 +166,67 @@ describe('GET /v1/me', () => {
     expect(getStateMock).toHaveBeenCalledWith('user-1');
   });
 
-  it('devuelve el estado consolidado del perfil', async () => {
+  it('devuelve el estado consolidado del perfil, incluyendo el tier', async () => {
     getStateMock.mockResolvedValue({ ...individualState, created: undefined });
     const res = await app.inject({ method: 'GET', url: '/v1/me', headers: { authorization: 'Bearer valid-user-1' } });
     expect(res.statusCode).toBe(200);
     expect(res.json().profile.id).toBe('user-1');
+    expect(res.json().profile.tier).toBe('free');
     expect(res.json().usageCounter.periodKind).toBe('lifetime');
+  });
+});
+
+describe('POST /v1/admin/profiles/:id/tier', () => {
+  const autonomousProfile = {
+    id: 'user-1', orgId: null, accountType: 'individual', role: 'individual',
+    fullName: 'Ada', identityVerified: false, tier: 'autonomous', createdAt: 'x', updatedAt: 'x',
+  };
+
+  it('401 sin token admin (NO usa requireUser)', async () => {
+    const res = await app.inject({ method: 'POST', url: '/v1/admin/profiles/user-1/tier', payload: { tier: 'autonomous' } });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error.code).toBe('UNAUTHORIZED');
+    expect(updateProfileTierMock).not.toHaveBeenCalled();
+  });
+
+  it('401 con token admin incorrecto', async () => {
+    const res = await app.inject({ method: 'POST', url: '/v1/admin/profiles/user-1/tier', headers: { 'x-admin-token': 'malo' }, payload: { tier: 'autonomous' } });
+    expect(res.statusCode).toBe(401);
+    expect(updateProfileTierMock).not.toHaveBeenCalled();
+  });
+
+  it('un Bearer de usuario normal NO sirve para cambiar el tier (401)', async () => {
+    const res = await app.inject({ method: 'POST', url: '/v1/admin/profiles/user-1/tier', headers: { authorization: 'Bearer valid-user-1' }, payload: { tier: 'autonomous' } });
+    expect(res.statusCode).toBe(401);
+    expect(updateProfileTierMock).not.toHaveBeenCalled();
+  });
+
+  it('400 con tier invalido en el body', async () => {
+    const res = await app.inject({ method: 'POST', url: '/v1/admin/profiles/user-1/tier', headers: { 'x-admin-token': ADMIN_TOKEN }, payload: { tier: 'enterprise' } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('VALIDATION_ERROR');
+    expect(updateProfileTierMock).not.toHaveBeenCalled();
+  });
+
+  it('400 sin tier en el body', async () => {
+    const res = await app.inject({ method: 'POST', url: '/v1/admin/profiles/user-1/tier', headers: { 'x-admin-token': ADMIN_TOKEN }, payload: {} });
+    expect(res.statusCode).toBe(400);
+    expect(updateProfileTierMock).not.toHaveBeenCalled();
+  });
+
+  it('404 si el perfil no existe', async () => {
+    updateProfileTierMock.mockResolvedValue(null);
+    const res = await app.inject({ method: 'POST', url: '/v1/admin/profiles/no-existe/tier', headers: { 'x-admin-token': ADMIN_TOKEN }, payload: { tier: 'autonomous' } });
+    expect(res.statusCode).toBe(404);
+    expect(updateProfileTierMock).toHaveBeenCalledWith('no-existe', 'autonomous');
+  });
+
+  it('200 actualiza el tier y devuelve el perfil', async () => {
+    updateProfileTierMock.mockResolvedValue(autonomousProfile);
+    const res = await app.inject({ method: 'POST', url: '/v1/admin/profiles/user-1/tier', headers: { 'x-admin-token': ADMIN_TOKEN }, payload: { tier: 'autonomous' } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().profile.tier).toBe('autonomous');
+    expect(updateProfileTierMock).toHaveBeenCalledWith('user-1', 'autonomous');
   });
 });
 

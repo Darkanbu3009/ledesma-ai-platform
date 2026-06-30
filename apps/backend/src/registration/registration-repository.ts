@@ -2,6 +2,7 @@ import type { Sql } from '../db/client.js';
 import type {
   Organization,
   Profile,
+  ProfileTier,
   RegistrationResult,
   RegistrationState,
   Subscription,
@@ -19,6 +20,7 @@ interface ProfileRow {
   role: string;
   full_name: string;
   identity_verified: boolean;
+  tier: string;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -75,6 +77,7 @@ function rowToProfile(row: ProfileRow): Profile {
     role: row.role as Profile['role'],
     fullName: row.full_name,
     identityVerified: row.identity_verified,
+    tier: row.tier as ProfileTier,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };
@@ -131,7 +134,7 @@ export class RegistrationRepository {
    */
   private async loadState(sql: Sql, sub: string): Promise<RegistrationState> {
     const profileRows = await sql<ProfileRow[]>`
-      select id, org_id, account_type, role, full_name, identity_verified, created_at, updated_at
+      select id, org_id, account_type, role, full_name, identity_verified, tier, created_at, updated_at
       from profiles where id = ${sub}
     `;
     const profileRow = profileRows[0];
@@ -278,5 +281,34 @@ export class RegistrationRepository {
     `;
     const row = rows[0];
     return row ? rowToOrganization(row) : null;
+  }
+
+  /**
+   * Lee SOLO el tier de un sub (profiles.id = sub). Lectura liviana para el gate server-side del
+   * modo autonomo del Configurador: nunca se confia en lo que diga el cliente. Devuelve null si el
+   * perfil no existe (usuario sin registro completo): el llamador lo trata como sin acceso.
+   */
+  async getProfileTier(sub: string): Promise<ProfileTier | null> {
+    const rows = await this.sql<{ tier: string }[]>`
+      select tier from profiles where id = ${sub}
+    `;
+    const row = rows[0];
+    return row ? (row.tier as ProfileTier) : null;
+  }
+
+  /**
+   * Actualiza el tier de un perfil (solo super-admin, via POST /v1/admin/profiles/:id/tier). Es la
+   * palanca manual para subir/bajar el plan de un usuario hasta que exista facturacion. Devuelve el
+   * perfil actualizado (sin datos sensibles: Profile no contiene secretos) o null si no existe.
+   */
+  async updateProfileTier(profileId: string, tier: ProfileTier): Promise<Profile | null> {
+    const rows = await this.sql<ProfileRow[]>`
+      update profiles
+      set tier = ${tier}, updated_at = now()
+      where id = ${profileId}
+      returning id, org_id, account_type, role, full_name, identity_verified, tier, created_at, updated_at
+    `;
+    const row = rows[0];
+    return row ? rowToProfile(row) : null;
   }
 }
