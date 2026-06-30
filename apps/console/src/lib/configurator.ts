@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { ProviderId } from './agents';
+import type { AgentConfig, ProviderId } from './agents';
 
 /**
  * Contrato de cliente del Configurador. Espeja, sin Zod en los tipos, lo que el backend EMITE
@@ -52,12 +52,32 @@ export interface AgentSpecDraft {
 /** Resultado de validateAgentSpec tal como lo expone el endpoint: ok, o la lista de errores. */
 export type ConfiguratorValidation = { ok: true } | { ok: false; errors: string[] };
 
+/**
+ * Modo del turno del Configurador:
+ *  - 'assistant': comportamiento de siempre (arma+valida; el humano confirma y crea con el boton).
+ *  - 'autonomous': el backend crea el agente solo si pasa la validacion ESTRICTA. Gated por tier
+ *    server-side: un usuario sin plan recibe 403 (el cliente no puede forzarlo).
+ */
+export type ConfiguratorMode = 'assistant' | 'autonomous';
+
+/**
+ * Resultado del modo autonomo (presente SOLO cuando el turno se envio con mode 'autonomous'). Si
+ * created es true el agente ya quedo creado (agent trae la config). Si es false, la validacion
+ * estricta no paso y el usuario sigue conversando (validation lista lo que falta).
+ */
+export interface AutonomousResult {
+  created: boolean;
+  agent: AgentConfig | null;
+  validation: ConfiguratorValidation;
+}
+
 /** Cuerpo de la respuesta de POST /v1/configurator/message. spec es null si la salida del modelo no
- * fue interpretable (en ese caso validation.ok es false). */
+ * fue interpretable (en ese caso validation.ok es false). autonomous solo viene en modo autonomo. */
 export interface ConfiguratorResponse {
   reply: string;
   spec: AgentSpecDraft | null;
   validation: ConfiguratorValidation;
+  autonomous?: AutonomousResult;
 }
 
 /**
@@ -102,22 +122,26 @@ export function configuratorHeaders(session: CredentialSession): Record<string, 
 }
 
 /** Cuerpo de POST /v1/configurator/message. baseUrl solo viaja para openai-compatible (asi el body
- * satisface el schema del backend tanto al momento como con credencial guardada). */
+ * satisface el schema del backend tanto al momento como con credencial guardada). mode elige
+ * asistente (default) o autonomo. */
 export interface ConfiguratorRequestBody {
   messages: ConfiguratorMessage[];
   providerId: ProviderId;
   model: string;
   baseUrl?: string;
+  mode: ConfiguratorMode;
 }
 
 export function configuratorBody(
   session: CredentialSession,
   messages: ConfiguratorMessage[],
+  mode: ConfiguratorMode = 'assistant',
 ): ConfiguratorRequestBody {
   const body: ConfiguratorRequestBody = {
     messages,
     providerId: session.providerId,
     model: session.model,
+    mode,
   };
   if (providerNeedsBaseUrl(session.providerId) && session.baseUrl) {
     body.baseUrl = session.baseUrl;

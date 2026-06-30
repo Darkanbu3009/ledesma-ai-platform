@@ -80,6 +80,14 @@ describe('configuratorBody', () => {
     };
     expect(configuratorBody(session, messages).baseUrl).toBe('https://api.miproveedor.com/v1');
   });
+
+  it('mode default es assistant (clientes que no lo pasan no cambian de comportamiento)', () => {
+    expect(configuratorBody(pasteSession, messages).mode).toBe('assistant');
+  });
+
+  it('reenvia el mode autonomo cuando se pide explicitamente', () => {
+    expect(configuratorBody(pasteSession, messages, 'autonomous').mode).toBe('autonomous');
+  });
 });
 
 describe('specToAgentInput', () => {

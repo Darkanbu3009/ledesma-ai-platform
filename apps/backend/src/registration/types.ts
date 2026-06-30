@@ -8,6 +8,13 @@ export type AccountType = 'individual' | 'empresa_member';
 /** Rol del perfil dentro de la plataforma / su organizacion. */
 export type ProfileRole = 'individual' | 'org_admin';
 
+/**
+ * Tier del perfil (columna profiles.tier, V007). Controla el acceso a features por plan; hoy lo
+ * unico que desbloquea es el MODO AUTONOMO del Configurador ('autonomous'). Es un flag manual
+ * (admin endpoint) hasta integrar facturacion. Arranca en 'free'.
+ */
+export type ProfileTier = 'free' | 'pro' | 'autonomous';
+
 /** Perfil del usuario, ligado 1:1 al sub del JWT de Supabase (profiles.id = sub). */
 export interface Profile {
   /** = auth.users.id = sub del JWT. */
@@ -19,6 +26,8 @@ export interface Profile {
   fullName: string;
   /** Verificacion de identidad ligera, no bloqueante. Se crea en false. */
   identityVerified: boolean;
+  /** Plan del usuario. 'autonomous' habilita el modo autonomo del Configurador. Default 'free'. */
+  tier: ProfileTier;
   createdAt: string;
   updatedAt: string;
 }

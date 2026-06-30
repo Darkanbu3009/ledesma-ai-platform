@@ -46,11 +46,11 @@ function makeSql(results: Array<unknown[] | Error>): MockSql {
 const TS = '2026-06-28T00:00:00.000Z';
 const individualProfileRow = {
   id: 'user-1', org_id: null, account_type: 'individual', role: 'individual',
-  full_name: 'Ada', identity_verified: false, created_at: TS, updated_at: TS,
+  full_name: 'Ada', identity_verified: false, tier: 'free', created_at: TS, updated_at: TS,
 };
 const orgProfileRow = {
   id: 'user-1', org_id: 'org-1', account_type: 'empresa_member', role: 'org_admin',
-  full_name: 'Ada', identity_verified: false, created_at: TS, updated_at: TS,
+  full_name: 'Ada', identity_verified: false, tier: 'free', created_at: TS, updated_at: TS,
 };
 const subRow = { id: 's1', profile_id: 'user-1', plan: 'free', status: 'active', created_at: TS };
 const usageRow = { id: 'u1', profile_id: 'user-1', runs_used: 0, runs_limit: 10, period_kind: 'lifetime', created_at: TS };
@@ -240,5 +240,42 @@ describe('RegistrationRepository.approveOrganization', () => {
     const sql = makeSql([[]]);
     const repo = new RegistrationRepository(sql as unknown as Sql);
     expect(await repo.approveOrganization('no-existe')).toBeNull();
+  });
+});
+
+describe('RegistrationRepository.getProfileTier', () => {
+  it('devuelve el tier del perfil (lectura liviana por sub)', async () => {
+    const sql = makeSql([[{ tier: 'autonomous' }]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    expect(await repo.getProfileTier('user-1')).toBe('autonomous');
+
+    const select = findCall(sql, 'select tier from profiles');
+    expect(select?.values).toEqual(['user-1']);
+  });
+
+  it('devuelve null si el perfil no existe (sin registro completo)', async () => {
+    const sql = makeSql([[]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    expect(await repo.getProfileTier('desconocido')).toBeNull();
+  });
+});
+
+describe('RegistrationRepository.updateProfileTier', () => {
+  it('actualiza el tier, toca updated_at y mapea el perfil del returning', async () => {
+    const sql = makeSql([[{ ...individualProfileRow, tier: 'autonomous' }]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    const profile = await repo.updateProfileTier('user-1', 'autonomous');
+    expect(profile).toMatchObject({ id: 'user-1', tier: 'autonomous' });
+
+    const update = findCall(sql, 'update profiles');
+    expect(update?.text).toContain('set tier =');
+    expect(update?.text).toContain('updated_at = now()');
+    expect(update?.values).toEqual(['autonomous', 'user-1']);
+  });
+
+  it('devuelve null si el perfil no existe', async () => {
+    const sql = makeSql([[]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    expect(await repo.updateProfileTier('no-existe', 'pro')).toBeNull();
   });
 });

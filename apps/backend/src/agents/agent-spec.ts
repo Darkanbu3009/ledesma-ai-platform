@@ -221,3 +221,53 @@ export function validateAgentSpec(
   }
   return { ok: false, errors };
 }
+
+/**
+ * VALIDACION ESTRICTA: la compuerta EXCLUSIVA del MODO AUTONOMO del Configurador (crear el agente
+ * sin confirmacion humana). Es ADITIVA: REUSA validateAgentSpec tal cual (no cambia su firma ni su
+ * comportamiento; el modo asistente sigue gateado por validateAgentSpec.ok) y exige, ENCIMA, que el
+ * spec este COMPLETO y sin ambiguedad.
+ *
+ * validateAgentSpec ya garantiza lo "creable": name/providerId/model presentes y validos, toda tool
+ * nativa existe + available + embed-safe, toda webhook cumple StoredToolSchema, sin tools duplicadas
+ * ni campos desconocidos, y el gate final de AgentInputSchema. Como ese validador NO distingue
+ * warnings, el criterio mas estricto disponible es exigir que el spec este COMPLETO: ademas de los
+ * requeridos, un agente que se crea sin que un humano lo revise DEBE traer su proposito
+ * (description) y sus instrucciones (systemPrompt) no vacios; sin ellos su comportamiento queda
+ * indefinido. Asi un spec con validateAgentSpec.ok === true pero incompleto (p.ej. sin systemPrompt)
+ * NO pasa la estricta y el modo autonomo cae de vuelta a la conversacion en vez de crear un agente
+ * pobre.
+ *
+ * Devuelve el MISMO resultado discriminado que validateAgentSpec: { ok:true, value } listo para
+ * crear, o { ok:false, errors } con TODO lo que falta (errores de la base + los estrictos).
+ */
+export function validateAgentSpecStrict(
+  spec: AgentSpec,
+  resolvedCatalog: ResolvedToolCatalogEntry[],
+): AgentSpecValidationResult {
+  const base = validateAgentSpec(spec, resolvedCatalog);
+  // Si ni siquiera pasa la base, no hay nada mas que chequear: propaga sus errores tal cual.
+  if (!base.ok) {
+    return base;
+  }
+
+  // base.ok === true => spec es un objeto plano con los requeridos validos. Chequeos de COMPLETITUD.
+  const raw = spec as unknown as Record<string, unknown>;
+  const errors: string[] = [];
+  if (typeof raw.systemPrompt !== 'string' || raw.systemPrompt.trim() === '') {
+    errors.push(
+      'El modo autonomo requiere systemPrompt: las instrucciones del agente deben estar definidas',
+    );
+  }
+  if (typeof raw.description !== 'string' || raw.description.trim() === '') {
+    errors.push(
+      'El modo autonomo requiere description: el proposito del agente debe estar definido',
+    );
+  }
+
+  if (errors.length > 0) {
+    return { ok: false, errors };
+  }
+  // Pasa la base Y la estricta: el value de la base ya es el input EXACTO de creacion.
+  return base;
+}

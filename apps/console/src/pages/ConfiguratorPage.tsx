@@ -1,17 +1,20 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Pencil, Sparkles } from 'lucide-react';
+import { ArrowLeft, Lock, Pencil, Sparkles, Zap } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../lib/api';
 import { providerLabel } from '../lib/agents';
 import { cn } from '../lib/utils';
 import {
   type AgentSpecDraft,
   type ConfiguratorMessage,
+  type ConfiguratorMode,
   type ConfiguratorValidation,
   type CredentialSession,
 } from '../lib/configurator';
 import { sendConfiguratorMessage } from '../lib/configurator-client';
 import { useCreateAgentFromSpec } from '../lib/mutations';
+import { useMe } from '../lib/queries';
 import { CredentialSessionForm } from '../components/configurator/CredentialSessionForm';
 import { ConfiguratorChat } from '../components/configurator/ConfiguratorChat';
 import { AgentPreview } from '../components/configurator/AgentPreview';
@@ -20,6 +23,8 @@ import { AgentPreview } from '../components/configurator/AgentPreview';
 function turnErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 401) return 'Tu sesion expiro. Volve a iniciar sesion.';
+    if (error.status === 403)
+      return 'El modo autonomo requiere el plan correspondiente. Volve al modo asistente para continuar.';
     if (error.status === 404)
       return 'La credencial guardada no esta disponible. Elegi otra o pega una al momento.';
     if (error.status === 400) return 'El Configurador rechazo la peticion. Revisa la credencial y el modelo.';
@@ -40,20 +45,34 @@ type MobileTab = 'chat' | 'preview';
 
 /**
  * Pantalla CONVERSACIONAL del Configurador: un chat donde el usuario describe el agente y, en
- * paralelo, un preview EN VIVO del AgentSpec que el backend va construyendo. Cuando validation.ok es
- * true, el usuario confirma y se crea el agente via POST /v1/agents (modo asistente). Todo el estado
- * (sesion de credencial, historial, spec) vive en React; nada se persiste en el cliente.
+ * paralelo, un preview EN VIVO del AgentSpec que el backend va construyendo.
+ *
+ * Tiene dos modos:
+ *  - ASISTENTE (default, para todos): cuando validation.ok es true el usuario confirma con el boton
+ *    "Crear agente" (POST /v1/agents). Sin cambios respecto del comportamiento previo.
+ *  - AUTONOMO (solo tier 'autonomous'): el backend crea el agente automaticamente apenas el spec
+ *    pasa la validacion ESTRICTA, sin boton de confirmacion. El gate es server-side; aca solo se
+ *    ofrece elegir el modo a quien lo tiene habilitado.
+ *
+ * Todo el estado (sesion de credencial, historial, spec) vive en React; nada se persiste en el cliente.
  */
 export function ConfiguratorPage() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const createAgent = useCreateAgentFromSpec();
+  const me = useMe();
+  const canUseAutonomous = me.data?.profile?.tier === 'autonomous';
 
   const [session, setSession] = useState<CredentialSession | null>(null);
   const [editingSession, setEditingSession] = useState(true);
 
+  const [mode, setMode] = useState<ConfiguratorMode>('assistant');
+
   const [messages, setMessages] = useState<ConfiguratorMessage[]>([]);
   const [spec, setSpec] = useState<AgentSpecDraft | null>(null);
   const [validation, setValidation] = useState<ConfiguratorValidation | null>(null);
+  // Validacion ESTRICTA del ultimo turno autonomo: lista lo que falta para que el agente se cree solo.
+  const [autonomousValidation, setAutonomousValidation] = useState<ConfiguratorValidation | null>(null);
 
   const [pending, setPending] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -64,6 +83,11 @@ export function ConfiguratorPage() {
   const abortRef = useRef<AbortController | null>(null);
   // Si el usuario navega fuera con un turno en vuelo, lo cortamos.
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  // El modo autonomo solo se ENVIA si el usuario lo tiene habilitado (el gate real es server-side;
+  // esto evita mandar un mode que el backend rechazaria con 403 si el tier cambio).
+  const effectiveMode: ConfiguratorMode = canUseAutonomous ? mode : 'assistant';
+  const autonomousActive = effectiveMode === 'autonomous';
 
   async function send(text: string) {
     if (!session || loading) return;
@@ -78,7 +102,7 @@ export function ConfiguratorPage() {
     setLoading(true);
 
     try {
-      const response = await sendConfiguratorMessage(session, history, controller.signal);
+      const response = await sendConfiguratorMessage(session, history, controller.signal, effectiveMode);
       // El historial enviable es transaccional: el par (user, assistant) solo se confirma cuando el
       // turno termina bien, asi el siguiente envio nunca produce dos user seguidos.
       setMessages([...history, { role: 'assistant', content: response.reply }]);
@@ -88,6 +112,21 @@ export function ConfiguratorPage() {
         setSpec(response.spec);
         setValidation(response.validation);
       }
+
+      // MODO AUTONOMO: el backend pudo haber creado el agente en este mismo turno.
+      if (response.autonomous) {
+        setAutonomousValidation(response.autonomous.validation);
+        if (response.autonomous.created) {
+          // Creado server-side: refrescamos la lista de agentes y redirigimos (feedback = llegar a
+          // /agentes con el agente nuevo, igual que el modo asistente tras crear).
+          void qc.invalidateQueries({ queryKey: ['agents'] });
+          setPending(null);
+          setLoading(false);
+          navigate('/agentes');
+          return;
+        }
+      }
+
       setPending(null);
       setLoading(false);
     } catch (error) {
@@ -127,7 +166,9 @@ export function ConfiguratorPage() {
             Configurador
           </h1>
           <p className="mt-1.5 text-[15px] text-muted">
-            Describi el agente que queres y armalo conversando. Vos confirmas antes de crearlo.
+            {autonomousActive
+              ? 'Describi el agente que queres y se crea solo cuando esta listo y valido.'
+              : 'Describi el agente que queres y armalo conversando. Vos confirmas antes de crearlo.'}
           </p>
         </div>
         <Link
@@ -164,6 +205,16 @@ export function ConfiguratorPage() {
               Cambiar
             </button>
           </div>
+
+          {/* Selector de modo: solo para tier autonomous. El resto ve una nota discreta (no un paywall). */}
+          {canUseAutonomous ? (
+            <ModeSelector mode={mode} onChange={setMode} disabled={loading} />
+          ) : (
+            <p className="mt-4 inline-flex items-center gap-1.5 text-xs text-muted-soft">
+              <Lock className="h-3.5 w-3.5" />
+              El modo autonomo, que crea el agente sin confirmacion, es parte del plan superior.
+            </p>
+          )}
 
           {/* Tabs en pantallas chicas: chat y preview se apilan detras de una pestana cada uno. */}
           <div className="mt-6 flex gap-2 lg:hidden" role="tablist" aria-label="Vistas del configurador">
@@ -212,12 +263,87 @@ export function ConfiguratorPage() {
                 creating={createAgent.isPending}
                 createError={createAgent.isError ? createErrorMessage(createAgent.error) : null}
                 onCreate={handleCreate}
+                autonomous={autonomousActive}
+                autonomousValidation={autonomousValidation}
               />
             </section>
           </div>
         </>
       )}
     </div>
+  );
+}
+
+/** Selector segmentado Asistente / Autonomo (solo visible para tier autonomous). */
+function ModeSelector({
+  mode,
+  onChange,
+  disabled,
+}: {
+  mode: ConfiguratorMode;
+  onChange: (mode: ConfiguratorMode) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="mt-4">
+      <div
+        className="inline-flex rounded-xl border border-line bg-field p-1"
+        role="radiogroup"
+        aria-label="Modo del configurador"
+      >
+        <ModeButton
+          active={mode === 'assistant'}
+          onClick={() => onChange('assistant')}
+          disabled={disabled}
+          icon={<Pencil className="h-3.5 w-3.5" />}
+          title="Asistente"
+          hint="reviso y confirmo"
+        />
+        <ModeButton
+          active={mode === 'autonomous'}
+          onClick={() => onChange('autonomous')}
+          disabled={disabled}
+          icon={<Zap className="h-3.5 w-3.5" />}
+          title="Autonomo"
+          hint="crear automaticamente"
+        />
+      </div>
+    </div>
+  );
+}
+
+function ModeButton({
+  active,
+  onClick,
+  disabled,
+  icon,
+  title,
+  hint,
+}: {
+  active: boolean;
+  onClick: () => void;
+  disabled: boolean;
+  icon: ReactNode;
+  title: string;
+  hint: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        'inline-flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60',
+        active ? 'bg-surface text-ink shadow-card' : 'text-muted hover:text-ink',
+      )}
+    >
+      {icon}
+      <span>
+        {title} <span className="font-normal text-muted-soft">({hint})</span>
+      </span>
+    </button>
   );
 }
 

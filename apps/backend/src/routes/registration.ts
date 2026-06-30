@@ -19,6 +19,12 @@ const OrganizationBodySchema = z.object({
   full_name: z.string().trim().min(1).max(200),
 });
 
+// Body del cambio de tier (super-admin): el plan al que se mueve el perfil. Mismo set de valores que
+// el CHECK de profiles.tier (V007). Es la palanca manual hasta que exista facturacion.
+const TierBodySchema = z.object({
+  tier: z.enum(['free', 'pro', 'autonomous']),
+});
+
 /**
  * Guard de super-admin: MISMO mecanismo que admin-agents.ts (header x-admin-token contra
  * ADMIN_API_TOKEN). Se replica aqui en vez de importarlo para no tocar las rutas de agents.
@@ -86,6 +92,26 @@ export function registrationRoutes(config: Env, deps?: { verifier?: JwtVerifier 
           throw new AppError('NOT_FOUND', 404, 'Organization not found');
         }
         return reply.send({ organization });
+      },
+    );
+
+    // Cambio de tier de un perfil: SOLO super-admin (x-admin-token), MISMO patron que la aprobacion
+    // de empresas. Es la palanca manual para subir/bajar el plan de un usuario (p.ej. desbloquear el
+    // modo autonomo del Configurador con tier 'autonomous') hasta que exista facturacion. Devuelve
+    // el perfil actualizado (sin datos sensibles).
+    app.post(
+      '/v1/admin/profiles/:id/tier',
+      async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+        requireAdmin(request, config);
+        const parsed = TierBodySchema.safeParse(request.body);
+        if (!parsed.success) {
+          throw new AppError('VALIDATION_ERROR', 400, 'Invalid tier body', parsed.error.issues);
+        }
+        const profile = await repo.updateProfileTier(request.params.id, parsed.data.tier);
+        if (!profile) {
+          throw new AppError('NOT_FOUND', 404, 'Profile not found');
+        }
+        return reply.send({ profile });
       },
     );
   };
