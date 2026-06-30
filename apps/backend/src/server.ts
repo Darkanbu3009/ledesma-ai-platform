@@ -7,6 +7,7 @@ import { adminAgentRoutes } from './routes/admin-agents.js';
 import { agentRoutes as userAgentRoutes } from './routes/agents.js';
 import { runAgentByIdRoutes } from './routes/run-agent-by-id.js';
 import { toolCatalogRoutes } from './routes/tools.js';
+import { configuratorRoutes } from './routes/configurator.js';
 import { sessionTokenRoutes } from './routes/session-tokens.js';
 import { registrationRoutes } from './routes/registration.js';
 import { securityPlugin } from './plugins/security.js';
@@ -58,6 +59,7 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
   await app.register(userAgentRoutes(config));
   await app.register(runAgentByIdRoutes(config));
   await app.register(toolCatalogRoutes(config));
+  await app.register(configuratorRoutes(config));
   await app.register(sessionTokenRoutes(config));
   await app.register(registrationRoutes(config));
 
