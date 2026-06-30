@@ -168,4 +168,28 @@ describe('ProviderCredentialRepository', () => {
       expect(await repo.deleteForOwner('user-2', CRED_ID)).toBe(false);
     });
   });
+
+  describe('existsForOwner', () => {
+    it('true si la credencial es del owner; acota por id + owner_id y NO lee encrypted_key', async () => {
+      const sql = makeSqlReturning([{ id: CRED_ID }]);
+      const repo = new ProviderCredentialRepository(sql);
+      expect(await repo.existsForOwner('user-1', CRED_ID)).toBe(true);
+
+      const text = sqlTemplateText(sql);
+      expect(text).toMatch(/where id = <param> and owner_id = <param>/);
+      expect(text).not.toContain('encrypted_key');
+      expect(sqlValues(sql)).toEqual([CRED_ID, 'user-1']);
+    });
+
+    it('AISLAMIENTO: el owner equivocado no encuentra la credencial (-> false)', async () => {
+      const repo = new ProviderCredentialRepository(makeOwnerScopedSql('user-A', { id: CRED_ID }));
+      expect(await repo.existsForOwner('user-A', CRED_ID)).toBe(true);
+      expect(await repo.existsForOwner('user-B', CRED_ID)).toBe(false);
+    });
+
+    it('false si la credencial no existe', async () => {
+      const repo = new ProviderCredentialRepository(makeSqlReturning([]));
+      expect(await repo.existsForOwner('user-1', CRED_ID)).toBe(false);
+    });
+  });
 });

@@ -132,4 +132,18 @@ export class ProviderCredentialRepository {
     `;
     return rows.length > 0;
   }
+
+  /**
+   * Comprueba SOLO la PERTENENCIA de una credencial al owner, sin leer ni descifrar la key. Lo usa la
+   * creacion de tareas programadas para validar que el credential_id sea del usuario (no se puede
+   * programar con una credencial ajena) sin el costo ni el riesgo de descifrar. El where id + owner_id
+   * es el aislamiento: una credencial ajena o inexistente -> false.
+   */
+  async existsForOwner(ownerId: string, credentialId: string): Promise<boolean> {
+    const rows = await this.sql<Array<{ id: string }>>`
+      select id from provider_credentials
+      where id = ${credentialId} and owner_id = ${ownerId}
+    `;
+    return rows.length > 0;
+  }
 }
