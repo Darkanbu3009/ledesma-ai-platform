@@ -4,10 +4,7 @@ export type ErrorCode =
   | 'VALIDATION_ERROR'
   | 'RATE_LIMIT_EXCEEDED'
   | 'UNAUTHORIZED'
-  | 'AUTHENTICATION'
-  // Una dependencia opcional de la plataforma no esta configurada (p.ej. el modelo de plataforma
-  // del Configurador). Se mapea a 503: la peticion es valida pero la feature no esta disponible.
-  | 'SERVICE_UNAVAILABLE';
+  | 'AUTHENTICATION';
 
 export class AppError extends Error {
   public readonly code: ErrorCode;

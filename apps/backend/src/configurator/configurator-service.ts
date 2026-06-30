@@ -5,9 +5,10 @@
  *  - un AgentSpec PARCIAL en construccion (lo capturado hasta ahora) o COMPLETO cuando ya tiene
  *    todo, validado con validateAgentSpec contra el catalogo de tools resuelto.
  *
- * Corre sobre el modelo de PLATAFORMA (NO BYOK): es una funcion de la plataforma costeada por
- * nosotros, no por la key del cliente. Es ADITIVO: reusa el contrato AgentSpec, el validador y el
- * catalogo existentes; no toca el runtime de ejecucion ni la creacion real del agente (eso es 3.5).
+ * Corre con credenciales BYOK PROVISTAS POR REQUEST (la key, el proveedor y el modelo del cliente),
+ * el mismo modelo de credenciales por llamada que usa el runtime de ejecucion de agentes: la
+ * plataforma no persiste ni loguea la key. Es ADITIVO: reusa el contrato AgentSpec, el validador y
+ * el catalogo existentes; no toca el runtime de ejecucion ni la creacion real del agente (eso es 3.5).
  *
  * El cerebro NO crea el agente: solo conversa, construye el spec y lo valida.
  */
@@ -17,6 +18,7 @@ import type {
   ModelConfig,
   NormalizedMessage,
   NormalizedRequest,
+  ProviderCredentials,
   ProviderId,
   ProviderStreamEvent,
   ResolvedToolCatalogEntry,
@@ -24,8 +26,6 @@ import type {
 } from '@ledesma-platform/shared';
 import { runModel, type ModelCallInput } from '../providers/index.js';
 import { validateAgentSpec } from '../agents/agent-spec.js';
-import { AppError } from '../errors/app-error.js';
-import type { Env } from '../config/env.js';
 
 /** Mensaje del historial de conversacion (viaja en el request; el servidor es stateless). */
 export interface ConversationMessage {
@@ -47,37 +47,17 @@ const MODEL_ERROR_REPLY =
   'Tuve un problema para procesar tu pedido. ¿Podrias reformularlo o intentarlo de nuevo?';
 
 /**
- * Configuracion del modelo de PLATAFORMA con el que corre el Configurador. apiKey es la key PROPIA
- * de la plataforma (NO la del cliente). Hoy el unico proveedor de plataforma es Anthropic.
+ * Credenciales BYOK del Configurador, provistas POR REQUEST (NO de plataforma): el proveedor, la
+ * key, el modelo y, solo para openai-compatible, el baseUrl que provee el cliente. Es el mismo
+ * modelo de credenciales por llamada que usa el runtime de ejecucion de agentes; la key viaja por
+ * request y nunca se persiste ni se loguea.
  */
-export interface PlatformModelConfig {
+export interface ConfiguratorCredentials {
+  providerId: ProviderId;
   apiKey: string;
   model: string;
-  providerId: ProviderId;
-  maxTokens: number;
-}
-
-/**
- * Resuelve la config del modelo de plataforma desde el env. Si la key de plataforma no esta
- * configurada, lanza un AppError CLARO (503) en vez de un 500 opaco: la peticion es valida pero la
- * feature no esta disponible. Mismo patron de degradacion opcional que las tools nativas.
- */
-export function getPlatformModelConfig(config: Env): PlatformModelConfig {
-  const apiKey = config.PLATFORM_ANTHROPIC_API_KEY;
-  if (apiKey === undefined || apiKey.trim() === '') {
-    throw new AppError(
-      'SERVICE_UNAVAILABLE',
-      503,
-      'El modelo de plataforma del Configurador no esta configurado. ' +
-        'Falta la variable de entorno PLATFORM_ANTHROPIC_API_KEY.',
-    );
-  }
-  return {
-    apiKey,
-    model: config.PLATFORM_MODEL,
-    providerId: 'anthropic',
-    maxTokens: CONFIGURATOR_MAX_OUTPUT_TOKENS,
-  };
+  /** Endpoint del adaptador openai-compatible. Requerido solo si providerId === 'openai-compatible'. */
+  baseUrl?: string;
 }
 
 /** Entrada de un turno del Configurador. El historial viaja en el request (servidor stateless). */
@@ -87,13 +67,14 @@ export interface ConfiguratorTurnInput {
   catalog: ResolvedToolCatalogEntry[];
   /** Capacidad de webhook tools custom (para guiar al modelo y describir el contrato). */
   webhookCapability: WebhookToolCapability;
+  /** Credenciales BYOK por request (proveedor, key, modelo, baseUrl) con que se llama al modelo. */
+  credentials: ConfiguratorCredentials;
   /** Cancelacion (desconexion del cliente, timeout). */
   signal?: AbortSignal;
 }
 
 /** Dependencias inyectables del cerebro (para tests: se mockea la llamada al modelo). */
 export interface ConfiguratorDeps {
-  platform: PlatformModelConfig;
   /** Capa de modelo. Inyectable para tests; por defecto la real (providers/run-model). */
   runModel?: (input: ModelCallInput) => AsyncIterable<ProviderStreamEvent>;
 }
@@ -117,38 +98,44 @@ export interface ConfiguratorTurnResult {
 }
 
 /**
- * Ejecuta UN turno del Configurador: arma la peticion al modelo de plataforma (system prompt del
- * Configurador con el catalogo inyectado + el historial), parsea de forma SEGURA la salida JSON,
- * valida el spec resultante con validateAgentSpec y devuelve el shape estable. Nunca crashea por
- * salida malformada del modelo ni por fallos del proveedor: devuelve un estado de error manejable.
+ * Ejecuta UN turno del Configurador: arma la peticion al modelo con las credenciales BYOK del
+ * request (system prompt del Configurador con el catalogo inyectado + el historial), parsea de forma
+ * SEGURA la salida JSON, valida el spec resultante con validateAgentSpec y devuelve el shape estable.
+ * Nunca crashea por salida malformada del modelo ni por fallos del proveedor: estado manejable.
  */
 export async function runConfiguratorTurn(
   input: ConfiguratorTurnInput,
-  deps: ConfiguratorDeps,
+  deps: ConfiguratorDeps = {},
 ): Promise<ConfiguratorTurnResult> {
   const runModelFn = deps.runModel ?? runModel;
-  const modelConfig: ModelConfig = { model: deps.platform.model, maxTokens: deps.platform.maxTokens };
+  const { providerId, apiKey, model, baseUrl } = input.credentials;
+  // El modelo lo elige el cliente por request; maxTokens es la cota de salida del Configurador.
+  const modelConfig: ModelConfig = { model, maxTokens: CONFIGURATOR_MAX_OUTPUT_TOKENS };
   const request: NormalizedRequest = {
     system: buildConfiguratorSystemPrompt(input.catalog, input.webhookCapability),
     messages: toNormalizedMessages(input.messages),
     modelConfig,
+  };
+  // Credenciales BYOK por request: mismo patron que el runtime (run-agent-by-id). baseUrl solo
+  // viaja para openai-compatible; el resto de proveedores no lo usa.
+  const credentials: ProviderCredentials = {
+    apiKey,
+    ...(providerId === 'openai-compatible' && baseUrl ? { baseUrl } : {}),
   };
 
   let rawText: string;
   try {
     rawText = await collectText(
       runModelFn({
-        providerId: deps.platform.providerId,
-        credentials: { apiKey: deps.platform.apiKey },
+        providerId,
+        credentials,
         request,
         ...(input.signal ? { signal: input.signal } : {}),
       }),
     );
   } catch (error) {
     // El proveedor fallo (red, auth, rate limit). Estado manejable: el endpoint no devuelve 500.
-    return modelErrorResult(
-      `No se pudo contactar el modelo de plataforma: ${errorMessage(error)}`,
-    );
+    return modelErrorResult(`No se pudo contactar el modelo: ${errorMessage(error)}`);
   }
 
   const parsed = parseModelOutput(rawText);

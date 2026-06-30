@@ -42,16 +42,4 @@ describe('parseEnv', () => {
   it('falla con WEB_WORKER_SECRET demasiado corto', () => {
     expect(() => parseEnv({ DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', WEB_WORKER_SECRET: 'corto' })).toThrow();
   });
-
-  it('PLATFORM_ANTHROPIC_API_KEY es opcional (ausente = undefined) y PLATFORM_MODEL tiene default', () => {
-    const env = parseEnv({ DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' });
-    expect(env.PLATFORM_ANTHROPIC_API_KEY).toBeUndefined();
-    expect(env.PLATFORM_MODEL).toBe('claude-sonnet-4-6');
-  });
-
-  it('acepta PLATFORM_ANTHROPIC_API_KEY y PLATFORM_MODEL configurados', () => {
-    const env = parseEnv({ DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', PLATFORM_ANTHROPIC_API_KEY: 'sk-plat-123', PLATFORM_MODEL: 'claude-opus-4-8' });
-    expect(env.PLATFORM_ANTHROPIC_API_KEY).toBe('sk-plat-123');
-    expect(env.PLATFORM_MODEL).toBe('claude-opus-4-8');
-  });
 });
