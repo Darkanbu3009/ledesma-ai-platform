@@ -7,6 +7,7 @@ import type {
   ProviderCredentials,
   ProviderId,
 } from '@ledesma-platform/shared';
+import type { Env } from '../config/env.js';
 import { AppError } from '../errors/app-error.js';
 import { AGENT_LIMITS } from '../agent/index.js';
 import { createDemoRegistry } from '../tools/demo-registry.js';
@@ -57,8 +58,9 @@ function buildNormalizedRequest(body: RunBody, tools: NormalizedRequest['tools']
   };
 }
 
-export async function agentRoutes(app: FastifyInstance): Promise<void> {
-  app.post('/v1/agent/run', { bodyLimit: AGENT_LIMITS.maxBodyBytes }, async (request: FastifyRequest, reply: FastifyReply) => {
+export function agentRoutes(config: Env) {
+  return async function (app: FastifyInstance): Promise<void> {
+    app.post('/v1/agent/run', { bodyLimit: AGENT_LIMITS.maxBodyBytes }, async (request: FastifyRequest, reply: FastifyReply) => {
     const apiKey = request.headers['x-provider-key'];
     if (typeof apiKey !== 'string' || apiKey.trim() === '') {
       throw new AppError('VALIDATION_ERROR', 400, 'Missing x-provider-key header');
@@ -78,16 +80,19 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
     const registry = createDemoRegistry();
     const normalizedRequest = buildNormalizedRequest(body, registry.toToolDefinitions());
 
-    return streamAgentRun(
-      request,
-      reply,
-      {
-        providerId,
-        credentials,
-        request: normalizedRequest,
-        ...(body.maxIterations !== undefined ? { maxIterations: body.maxIterations } : {}),
-      },
-      registry.toExecutor(),
-    );
-  });
+      return streamAgentRun(
+        request,
+        reply,
+        {
+          providerId,
+          credentials,
+          request: normalizedRequest,
+          maxTokens: config.RUN_MAX_TOKENS,
+          runTimeoutMs: config.RUN_TIMEOUT_SECONDS * 1000,
+          ...(body.maxIterations !== undefined ? { maxIterations: body.maxIterations } : {}),
+        },
+        registry.toExecutor(),
+      );
+    });
+  };
 }

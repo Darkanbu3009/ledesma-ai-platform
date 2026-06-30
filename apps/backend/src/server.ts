@@ -55,7 +55,7 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
     });
   });
   await app.register(healthRoutes);
-  await app.register(agentRoutes);
+  await app.register(agentRoutes(config));
   await app.register(adminAgentRoutes(config));
   await app.register(userAgentRoutes(config));
   await app.register(runAgentByIdRoutes(config));

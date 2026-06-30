@@ -11,7 +11,7 @@ import type {
 } from '@ledesma-platform/shared';
 import { runModel, type ModelCallInput } from '../providers/index.js';
 import type { ToolCall, ToolExecutor } from './tool-executor.js';
-import { validateAgentRun } from './limits.js';
+import { validateAgentRun, DEFAULT_RUN_MAX_TOKENS } from './limits.js';
 
 export const DEFAULT_MAX_ITERATIONS = 10;
 
@@ -22,6 +22,17 @@ export interface AgentRunInput {
   signal?: AbortSignal;
   /** Cota de iteraciones del loop (llamadas al modelo). Por defecto DEFAULT_MAX_ITERATIONS. */
   maxIterations?: number;
+  /**
+   * Cap de tokens ACUMULADOS (input + output) a traves de las iteraciones del run. Al alcanzarlo, el
+   * loop corta limpio con stop reason 'token_cap'. Por defecto DEFAULT_RUN_MAX_TOKENS.
+   */
+  maxTokens?: number;
+  /**
+   * Timeout global de pared del run, en milisegundos. NO lo consume runAgent (el loop): lo aplica la
+   * capa de transporte (sse-runner) sobre el AbortController de la peticion completa. Vive aca para
+   * co-ubicar los tres limites del run (iteraciones, tokens, tiempo) en un solo contrato de entrada.
+   */
+  runTimeoutMs?: number;
 }
 
 export interface AgentDeps {
@@ -39,10 +50,15 @@ export interface AgentDeps {
  * No persiste ni loguea credenciales: solo las pasa por parametro a la capa de modelo.
  */
 export async function* runAgent(input: AgentRunInput, deps: AgentDeps): AsyncIterable<AgentEvent> {
-  validateAgentRun({ request: input.request, maxIterations: input.maxIterations });
+  validateAgentRun({
+    request: input.request,
+    maxIterations: input.maxIterations,
+    maxTokens: input.maxTokens,
+  });
 
   const runModelFn = deps.runModel ?? runModel;
   const maxIterations = input.maxIterations ?? DEFAULT_MAX_ITERATIONS;
+  const maxTokens = input.maxTokens ?? DEFAULT_RUN_MAX_TOKENS;
 
   const messages: NormalizedMessage[] = [...input.request.messages];
   let totalInputTokens = 0;
@@ -91,6 +107,14 @@ export async function* runAgent(input: AgentRunInput, deps: AgentDeps): AsyncIte
 
     if (stopReason !== 'tool_use' || toolCalls.length === 0) {
       yield { type: 'stop', reason: stopReason, usage };
+      return;
+    }
+
+    // Cap de tokens del run: se evalua ENTRE iteraciones, con el uso acumulado de los turnos ya
+    // recibidos (no a media respuesta). Si el modelo todavia quiere tools pero ya superamos el cap,
+    // cortamos limpio sin ejecutar la ronda excedente, igual que max_iterations.
+    if (totalInputTokens + totalOutputTokens >= maxTokens) {
+      yield { type: 'stop', reason: 'token_cap', usage };
       return;
     }
 
