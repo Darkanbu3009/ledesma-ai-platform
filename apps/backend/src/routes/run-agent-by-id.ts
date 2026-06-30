@@ -1,12 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type {
-  ContentBlock,
-  NormalizedMessage,
-  NormalizedRequest,
-  ProviderCredentials,
-  ProviderId,
-} from '@ledesma-platform/shared';
+import type { ContentBlock, NormalizedMessage, ProviderId } from '@ledesma-platform/shared';
 import type { Env } from '../config/env.js';
 import { extractDocumentText, truncateText } from '../attachments/extract.js';
 import { AppError } from '../errors/app-error.js';
@@ -18,10 +12,8 @@ import { createSupabaseJwtVerifier, type JwtVerifier } from '../auth/jwt-verifie
 import { requireUser } from '../auth/require-user.js';
 import { ProviderCredentialRepository } from '../credentials/provider-credential-repository.js';
 import { resolveStoredCredential } from '../credentials/resolve-stored-credential.js';
-import { createDemoRegistry } from '../tools/demo-registry.js';
-import { createWebhookExecutor, storedToolsToDefinitions } from '../tools/webhook-tools.js';
-import { createNativeExecutor, nativeToolsToDefinitions, NATIVE_TOOL_NAMES } from '../tools/native-tools.js';
-import { AGENT_LIMITS, type ToolExecutor } from '../agent/index.js';
+import { AGENT_LIMITS } from '../agent/index.js';
+import { assembleAgentRun } from '../execution/assemble-agent-run.js';
 import { streamAgentRun } from './sse-runner.js';
 
 // Adjuntos por referencia (URL): imagenes a vision nativa, documentos a texto extraido.
@@ -209,94 +201,32 @@ export function runAgentByIdRoutes(
         throw new AppError('VALIDATION_ERROR', 400, 'Invalid request body', parsed.error.issues);
       }
 
-      // Tools nativas de plataforma: se inyectan en TODOS los agentes cuando el worker esta
-      // configurado (ambas env vars). Las tools de cliente se ejecutan por webhook (firmadas con el
-      // secreto del agente); si no hay ni nativas ni stored tools, se mantiene el registro demo
-      // (mismo comportamiento que /v1/agent/run).
-      const workerUrl = config.WEB_WORKER_URL;
-      const workerSecret = config.WEB_WORKER_SECRET;
-      const nativasActivas = Boolean(workerUrl && workerSecret);
-      const hasStoredTools = agent.tools.length > 0;
-
-      // Defs del modelo: nativas (si activas) + las del cliente. El demo solo cuando no hay ninguna.
-      const nativeDefs = nativasActivas ? nativeToolsToDefinitions() : [];
-      const clientDefs = hasStoredTools ? storedToolsToDefinitions(agent.tools) : [];
-      const registry = !nativasActivas && !hasStoredTools ? createDemoRegistry() : null;
-
-      // Dedupe defensivo: las nativas tienen precedencia; el modelo nunca recibe dos tools con el
-      // mismo name (el prefijo reservado platform_ ya lo evita al crear, esto es cinturon y tirantes).
-      const nativeNames = new Set(nativeDefs.map((d) => d.name));
-      const clientDefsSinColision = clientDefs.filter((d) => {
-        if (nativeNames.has(d.name)) {
-          request.log.warn(`tool de cliente '${d.name}' descartada por colision con una tool nativa de la plataforma`);
-          return false;
-        }
-        return true;
-      });
-      const toolDefinitions = registry
-        ? registry.toToolDefinitions()
-        : [...nativeDefs, ...clientDefsSinColision];
-
-      // Ejecutor con dispatch por nombre: las nativas van primero (defensa anti-colision), el resto
-      // al ejecutor de cliente (webhook o demo). El flujo de cliente queda intacto.
-      const clientExec = hasStoredTools
-        ? createWebhookExecutor(agent.tools, agent.webhookSecret, undefined, {
-            warn: (message) => request.log.warn(message),
-          })
-        : registry
-          ? registry.toExecutor()
-          : null;
-      const nativeExec =
-        workerUrl && workerSecret
-          ? createNativeExecutor(workerUrl, workerSecret, undefined, {
-              warn: (message) => request.log.warn(message),
-            })
-          : null;
-      const executeTool: ToolExecutor = (call, abortSignal) => {
-        if (nativeExec && NATIVE_TOOL_NAMES.has(call.name)) return nativeExec(call, abortSignal);
-        if (clientExec) return clientExec(call, abortSignal);
-        return Promise.resolve({ content: `Tool desconocida: ${call.name}`, isError: true });
-      };
+      // El ENSAMBLADO (executeTool con nativas+webhooks+demo+dedupe y el NormalizedRequest desde la
+      // config del agente) vive ahora en la capa REUTILIZABLE assembleAgentRun, SIN dependencia de HTTP.
+      // El route sigue siendo el responsable de RESOLVER la credencial (sus tres ramas, arriba) y de
+      // transportarla por SSE; solo delega el ensamblado. Cero cambios de comportamiento observable.
       const messages = await buildMessagesWithAttachments({
         messages: parsed.data.messages,
         attachments: parsed.data.attachments ?? [],
         systemChars: agent.systemPrompt?.length ?? 0,
         warn: (message) => request.log.warn(message),
       });
-      const normalizedRequest: NormalizedRequest = {
-        ...(agent.systemPrompt ? { system: agent.systemPrompt } : {}),
+      const { input, executeTool } = assembleAgentRun({
+        agent,
+        // storedCredential solo existe en el camino de la boveda; su baseUrl manda en openai-compatible.
+        // En los caminos de key al momento / sesion es null y el baseUrl sale del agente (intacto).
+        credential: { apiKey, baseUrl: storedCredential?.baseUrl },
         messages,
-        tools: toolDefinitions,
-        modelConfig: {
-          model: agent.model,
-          maxTokens: agent.maxTokens,
-          ...(agent.temperature !== null ? { temperature: agent.temperature } : {}),
-        },
-      };
-      // baseUrl para openai-compatible: con credencial GUARDADA, el baseUrl de la credencial es el
-      // endpoint atado a esa key y MANDA sobre el del agente (misma autoridad que el Configurador:
-      // en modo guardada la credencial define providerId/baseUrl). Si la credencial no trae baseUrl,
-      // cae al del agente. Con key al momento / sesion (storedCredential null) sale del agente, intacto.
-      const resolvedBaseUrl =
-        agent.providerId === 'openai-compatible'
-          ? (storedCredential?.baseUrl ?? agent.baseUrl ?? null)
-          : null;
-      const credentials: ProviderCredentials = {
-        apiKey,
-        ...(resolvedBaseUrl ? { baseUrl: resolvedBaseUrl } : {}),
-      };
+        nativeTools: { workerUrl: config.WEB_WORKER_URL, workerSecret: config.WEB_WORKER_SECRET },
+        limits: { maxTokens: config.RUN_MAX_TOKENS, runTimeoutMs: config.RUN_TIMEOUT_SECONDS * 1000 },
+        ...(parsed.data.maxIterations !== undefined ? { maxIterations: parsed.data.maxIterations } : {}),
+        warn: (message) => request.log.warn(message),
+      });
 
       return streamAgentRun(
         request,
         reply,
-        {
-          providerId: agent.providerId,
-          credentials,
-          request: normalizedRequest,
-          maxTokens: config.RUN_MAX_TOKENS,
-          runTimeoutMs: config.RUN_TIMEOUT_SECONDS * 1000,
-          ...(parsed.data.maxIterations !== undefined ? { maxIterations: parsed.data.maxIterations } : {}),
-        },
+        input,
         executeTool,
         // Registro fire-and-forget de la corrida (solo metadatos): la corrida del cliente JAMAS
         // falla por el registro; si el insert falla solo se deja un warn.
