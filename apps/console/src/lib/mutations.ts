@@ -6,6 +6,7 @@ import { toApiInput } from './agent-schema';
 import type { ProviderCredential } from './credentials';
 import type { CredentialFormParsed } from './credential-schema';
 import { toCredentialApiInput } from './credential-schema';
+import { specToAgentInput, type AgentSpecDraft } from './configurator';
 import type {
   IndividualInput,
   OrganizationInput,
@@ -52,6 +53,29 @@ export function useCreateAgent() {
         method: 'POST',
         body: JSON.stringify(toApiInput(values)),
       }).then((r) => r.agent),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['agents'] }),
+  });
+}
+
+/**
+ * Crea un agente a partir del AgentSpec final del Configurador. REUSA el mismo flujo que el alta
+ * manual: POST /v1/agents con el JWT (apiFetch) y la misma invalidacion de la cache de agentes. El
+ * spec se mapea al body con specToAgentInput (solo deberia llamarse con validation.ok === true; si el
+ * spec estuviera incompleto, la mutacion falla de forma manejable en vez de mandar un body invalido).
+ */
+export function useCreateAgentFromSpec() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (spec: AgentSpecDraft) => {
+      const body = specToAgentInput(spec);
+      if (!body) {
+        return Promise.reject(new Error('El spec no esta completo para crear el agente'));
+      }
+      return apiFetch<{ agent: AgentConfig }>('/v1/agents', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }).then((r) => r.agent);
+    },
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['agents'] }),
   });
 }

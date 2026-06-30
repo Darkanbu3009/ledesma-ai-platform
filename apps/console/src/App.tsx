@@ -4,6 +4,7 @@ import { LoginPage } from './pages/LoginPage';
 import { RegistrationPage } from './pages/RegistrationPage';
 import { AgentsPage } from './pages/AgentsPage';
 import { AgentFormPage } from './pages/AgentFormPage';
+import { ConfiguratorPage } from './pages/ConfiguratorPage';
 import { CredentialsPage } from './pages/CredentialsPage';
 import { PlaygroundPage } from './pages/PlaygroundPage';
 import { ConnectPage } from './pages/ConnectPage';
@@ -26,6 +27,8 @@ export function App() {
         <Route element={<RegistrationGate />}>
           <Route element={<AppLayout />}>
             <Route path="/agentes" element={<AgentsPage />} />
+            {/* Alta conversacional (Configurador). Aditiva: el alta manual sigue en /agentes/nuevo. */}
+            <Route path="/configurador" element={<ConfiguratorPage />} />
             <Route path="/agentes/nuevo" element={<AgentFormPage />} />
             <Route path="/agentes/:id" element={<AgentFormPage />} />
             <Route path="/agentes/:id/playground" element={<PlaygroundPage />} />
