@@ -150,9 +150,7 @@ export function AgentsPage() {
       ) : (
         <div className={`mt-8 ${gridClass}`}>
           {agents.map((agent) => (
-            <Link key={agent.id} to={`/agentes/${agent.id}`} className="block h-full">
-              <AgentCard agent={agent} />
-            </Link>
+            <AgentCard key={agent.id} agent={agent} />
           ))}
           <Link
             to="/agentes/nuevo"

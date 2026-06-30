@@ -4,7 +4,7 @@ import { ArrowLeft, BarChart3, Play, Plug, RefreshCw } from 'lucide-react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { AgentFormSchema, type AgentFormParsed, type AgentFormValues } from '../lib/agent-schema';
-import { providerLabel, type ProviderId } from '../lib/agents';
+import { playgroundPath, providerLabel, type ProviderId } from '../lib/agents';
 import { modelPlaceholder, modelSuggestions } from '../lib/model-catalog';
 import { storedToToolForm } from '../lib/tool-schema';
 import { useAgent } from '../lib/queries';
@@ -96,8 +96,14 @@ export function AgentFormPage() {
   const saveFailed = isEdit ? updateAgent.isError : createAgent.isError;
 
   const onSubmit = handleSubmit((values) => {
-    const mutation = isEdit ? updateAgent : createAgent;
-    mutation.mutate(values, { onSuccess: () => navigate('/agentes') });
+    if (isEdit) {
+      // Editar conserva el destino de siempre: volver a la lista de agentes.
+      updateAgent.mutate(values, { onSuccess: () => navigate('/agentes') });
+      return;
+    }
+    // Crear lleva DIRECTO a conversar con el agente recien creado (su Playground), igual que el
+    // Configurador. La mutacion resuelve al AgentConfig creado, de donde tomamos su id real.
+    createAgent.mutate(values, { onSuccess: (agent) => navigate(playgroundPath(agent.id)) });
   });
 
   function handleDelete() {

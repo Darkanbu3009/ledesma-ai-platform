@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Lock, Pencil, Sparkles, Zap } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../lib/api';
-import { providerLabel } from '../lib/agents';
+import { playgroundPath, providerLabel } from '../lib/agents';
 import { cn } from '../lib/utils';
 import {
   type AgentSpecDraft,
@@ -117,12 +117,15 @@ export function ConfiguratorPage() {
       if (response.autonomous) {
         setAutonomousValidation(response.autonomous.validation);
         if (response.autonomous.created) {
-          // Creado server-side: refrescamos la lista de agentes y redirigimos (feedback = llegar a
-          // /agentes con el agente nuevo, igual que el modo asistente tras crear).
+          // Creado server-side: refrescamos la lista de agentes y vamos DIRECTO a conversar con el
+          // agente recien creado (su Playground), igual que el modo asistente tras crear. El backend
+          // devuelve el agente en autonomous.agent; si por algun motivo no llegara su id, caemos a la
+          // lista como antes para no dejar al usuario sin destino.
           void qc.invalidateQueries({ queryKey: ['agents'] });
           setPending(null);
           setLoading(false);
-          navigate('/agentes');
+          const createdId = response.autonomous.agent?.id;
+          navigate(createdId ? playgroundPath(createdId) : '/agentes');
           return;
         }
       }
@@ -146,7 +149,9 @@ export function ConfiguratorPage() {
 
   function handleCreate() {
     if (!spec || validation?.ok !== true) return;
-    createAgent.mutate(spec, { onSuccess: () => navigate('/agentes') });
+    // Al confirmar y crear con exito vamos DIRECTO a conversar con el agente recien creado (su
+    // Playground), sin pasar por la lista. La mutacion resuelve al AgentConfig creado (con su id).
+    createAgent.mutate(spec, { onSuccess: (agent) => navigate(playgroundPath(agent.id)) });
   }
 
   const sessionLabel =

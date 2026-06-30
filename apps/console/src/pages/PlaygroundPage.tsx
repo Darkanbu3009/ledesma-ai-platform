@@ -7,6 +7,7 @@ import {
   FileText,
   ImageIcon,
   LoaderCircle,
+  Pencil,
   Plus,
   RefreshCw,
   Square,
@@ -362,7 +363,17 @@ export function PlaygroundPage() {
         </div>
       ) : (
         <>
-          <div className="flex items-center justify-between gap-4">
+          {/* Salida clara de un clic hacia la lista de agentes: el usuario llega aca directo tras crear
+              (sin pasar por la lista), asi que necesita una via obvia de regreso a "Mis agentes". */}
+          <Link
+            to="/agentes"
+            className="inline-flex items-center gap-1.5 text-sm text-hueso-muted transition hover:text-hueso"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Mis agentes
+          </Link>
+
+          <div className="mt-3 flex items-center justify-between gap-4">
             <div className="min-w-0">
               <h1 className="truncate font-display text-2xl font-bold text-hueso">
                 Playground: {agent.name}
@@ -371,12 +382,13 @@ export function PlaygroundPage() {
                 {providerLabel(agent.providerId)} · <span className="font-mono">{agent.model}</span>
               </p>
             </div>
+            {/* Atajo a la configuracion de ESTE agente (distinto del breadcrumb a la lista). */}
             <Link
               to={`/agentes/${agent.id}`}
               className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-grafito-border px-4 py-2 text-sm text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
             >
-              <ArrowLeft className="h-4 w-4" />
-              Volver
+              <Pencil className="h-4 w-4" />
+              Editar
             </Link>
           </div>
 

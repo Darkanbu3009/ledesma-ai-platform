@@ -1,6 +1,7 @@
-import { ArrowRight, Bot, Wrench } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Bot, MessageCircle, Pencil, Wrench } from 'lucide-react';
 import type { AgentConfig, ProviderId } from '../../lib/agents';
-import { providerLabel } from '../../lib/agents';
+import { playgroundPath, providerLabel } from '../../lib/agents';
 
 type Accent = {
   bar: string;
@@ -45,7 +46,7 @@ export function AgentCard({ agent }: { agent: AgentConfig }) {
 
   return (
     <div
-      className={`group relative h-full overflow-hidden rounded-2xl border border-line bg-surface p-[22px] shadow-card transition duration-200 hover:-translate-y-[3px] hover:shadow-card-hover ${accent.hoverBorder}`}
+      className={`relative flex h-full flex-col overflow-hidden rounded-2xl border border-line bg-surface p-[22px] shadow-card transition duration-200 hover:-translate-y-[3px] hover:shadow-card-hover ${accent.hoverBorder}`}
     >
       <span className={`absolute inset-y-0 left-0 w-[3px] ${accent.bar}`} aria-hidden="true" />
 
@@ -69,12 +70,14 @@ export function AgentCard({ agent }: { agent: AgentConfig }) {
         {agent.model}
       </span>
 
-      <p className="mb-[18px] mt-3 line-clamp-2 text-sm leading-relaxed text-muted">
+      <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-muted">
         {agent.description || 'Sin descripción'}
       </p>
 
-      <div className="flex items-center justify-between border-t border-line-soft pt-3.5">
-        <div className="flex items-center gap-3.5 text-[12.5px] text-muted-soft">
+      {/* Pie anclado al fondo (mt-auto) para que las acciones queden alineadas entre tarjetas, sin
+          importar cuanto ocupe la descripcion. */}
+      <div className="mt-auto pt-[18px]">
+        <div className="flex items-center gap-3.5 border-t border-line-soft pt-3.5 text-[12.5px] text-muted-soft">
           <span className="inline-flex items-center gap-1.5">
             <Wrench className="h-3.5 w-3.5" />
             {toolsCount} {toolsCount === 1 ? 'herramienta' : 'herramientas'}
@@ -84,10 +87,28 @@ export function AgentCard({ agent }: { agent: AgentConfig }) {
             Activo
           </span>
         </div>
-        <span className="inline-flex items-center gap-1 text-[13px] font-semibold text-brasa opacity-0 transition group-hover:opacity-100">
-          Editar
-          <ArrowRight className="h-3.5 w-3.5" />
-        </span>
+
+        {/* Acciones de primera clase por agente: "Conversar" (ir a su Playground) junto a "Editar".
+            Antes solo se llegaba al Playground desde el form o la pagina de uso; ahora es un clic
+            directo desde la tarjeta. */}
+        <div className="mt-3.5 grid grid-cols-2 gap-2">
+          <Link
+            to={`/agentes/${agent.id}`}
+            aria-label={`Editar ${agent.name}`}
+            className="inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-line bg-surface px-3 py-2 text-[13px] font-semibold text-muted transition hover:border-ink-soft hover:text-ink"
+          >
+            <Pencil className="h-[15px] w-[15px]" />
+            Editar
+          </Link>
+          <Link
+            to={playgroundPath(agent.id)}
+            aria-label={`Conversar con ${agent.name}`}
+            className="inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-brasa-line bg-brasa-soft px-3 py-2 text-[13px] font-semibold text-brasa transition hover:bg-brasa hover:text-white"
+          >
+            <MessageCircle className="h-[15px] w-[15px]" />
+            Conversar
+          </Link>
+        </div>
       </div>
     </div>
   );
