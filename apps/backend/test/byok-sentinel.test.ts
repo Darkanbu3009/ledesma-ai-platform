@@ -118,7 +118,7 @@ beforeEach(async () => {
   // El ADMIN centinela es el token real del server: si la config completa se filtrara a un log
   // en cualquier request, cualquiera de estos tests lo detectaria via el fragmento SENTINEL.
   app = await buildServer(
-    parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: ADMIN, SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: SESSION_SECRET }),
+    parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: ADMIN, SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: SESSION_SECRET, VAULT_SECRET: SESSION_SECRET }),
     { loggerDestination: { write: (m: string) => logs.push(m) } },
   );
 });

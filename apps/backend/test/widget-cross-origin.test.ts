@@ -12,7 +12,7 @@ const BASE_ENV = {
   DATABASE_URL: 'postgres://x',
   ADMIN_API_TOKEN: 'test-admin-token-1234567890',
   SUPABASE_URL: 'https://x.supabase.co',
-  SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+  SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', VAULT_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
 };
 
 // public/widget/ledesma-agent.js es un artefacto de build (gitignored; lo genera copy-widget.mjs

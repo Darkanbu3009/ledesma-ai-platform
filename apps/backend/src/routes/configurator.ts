@@ -1,9 +1,13 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import type { ProviderId } from '@ledesma-platform/shared';
 import type { Env } from '../config/env.js';
 import { AppError } from '../errors/app-error.js';
+import { getSql } from '../db/client.js';
 import { createSupabaseJwtVerifier, type JwtVerifier } from '../auth/jwt-verifier.js';
 import { requireUser } from '../auth/require-user.js';
+import { ProviderCredentialRepository } from '../credentials/provider-credential-repository.js';
+import { resolveStoredCredential } from '../credentials/resolve-stored-credential.js';
 import { resolveToolCatalog, WEBHOOK_TOOL_CAPABILITY } from '../tools/catalog.js';
 import { AGENT_LIMITS } from '../agent/index.js';
 import {
@@ -40,10 +44,15 @@ const ConfiguratorBodySchema = z
  */
 export function configuratorRoutes(
   config: Env,
-  deps?: { verifier?: JwtVerifier; runModel?: ConfiguratorDeps['runModel'] },
+  deps?: {
+    verifier?: JwtVerifier;
+    runModel?: ConfiguratorDeps['runModel'];
+    credentialRepo?: ProviderCredentialRepository;
+  },
 ) {
   return async function (app: FastifyInstance): Promise<void> {
     const verifier = deps?.verifier ?? createSupabaseJwtVerifier(config);
+    const credentialRepo = deps?.credentialRepo ?? new ProviderCredentialRepository(getSql(config));
 
     // Cerebro del Configurador: conversa con credenciales BYOK del cliente (key por header, resto
     // por body), construye un AgentSpec estructurado y lo valida contra el catalogo resuelto.
@@ -53,18 +62,41 @@ export function configuratorRoutes(
       '/v1/configurator/message',
       { bodyLimit: AGENT_LIMITS.maxBodyBytes },
       async (request: FastifyRequest, reply: FastifyReply) => {
-        await requireUser(request, verifier);
+        const user = await requireUser(request, verifier);
 
         const parsed = ConfiguratorBodySchema.safeParse(request.body);
         if (!parsed.success) {
           throw new AppError('VALIDATION_ERROR', 400, 'Cuerpo de la peticion invalido', parsed.error.issues);
         }
 
-        // BYOK: la provider key viaja por header (mismo patron que /v1/run/:agentId). Si falta,
-        // 400 claro, no un 503 de plataforma: la feature ya no depende de una key propia.
+        // Fuente de la key, con PRECEDENCIA explicita:
+        //  1) x-provider-key (key BYOK al momento) GANA si esta presente: providerId/model/baseUrl
+        //     vienen del body, comportamiento existente sin cambios.
+        //  2) si no hay key al momento, x-credential-id resuelve una credencial GUARDADA del usuario
+        //     (la plataforma tiene identidad de usuario aqui via requireUser): su providerId y baseUrl
+        //     son autoritativos y la key sale descifrada de la boveda; el model sigue viniendo del body.
+        //  3) si no hay ninguna -> 400 claro (no un 503 de plataforma).
         const headerKey = request.headers['x-provider-key'];
-        if (typeof headerKey !== 'string' || headerKey.trim() === '') {
-          throw new AppError('VALIDATION_ERROR', 400, 'Falta el header x-provider-key');
+        const credentialIdHeader = request.headers['x-credential-id'];
+
+        let providerId: ProviderId = parsed.data.providerId;
+        let apiKey: string;
+        let baseUrl: string | undefined = parsed.data.baseUrl;
+
+        if (typeof headerKey === 'string' && headerKey.trim() !== '') {
+          apiKey = headerKey;
+        } else if (typeof credentialIdHeader === 'string' && credentialIdHeader.trim() !== '') {
+          const credential = await resolveStoredCredential(
+            credentialRepo,
+            user.id,
+            credentialIdHeader,
+            config.VAULT_SECRET,
+          );
+          apiKey = credential.apiKey;
+          providerId = credential.providerId;
+          baseUrl = credential.baseUrl ?? undefined;
+        } else {
+          throw new AppError('VALIDATION_ERROR', 400, 'Falta el header x-provider-key o x-credential-id');
         }
 
         const result = await runConfiguratorTurn(
@@ -73,10 +105,10 @@ export function configuratorRoutes(
             catalog: resolveToolCatalog(config),
             webhookCapability: WEBHOOK_TOOL_CAPABILITY,
             credentials: {
-              providerId: parsed.data.providerId,
-              apiKey: headerKey,
+              providerId,
+              apiKey,
               model: parsed.data.model,
-              ...(parsed.data.baseUrl !== undefined ? { baseUrl: parsed.data.baseUrl } : {}),
+              ...(baseUrl !== undefined ? { baseUrl } : {}),
             },
           },
           { ...(deps?.runModel ? { runModel: deps.runModel } : {}) },

@@ -88,7 +88,7 @@ const WORKER_ENV = {
   DATABASE_URL: 'postgres://x',
   ADMIN_API_TOKEN: 'test-admin-token-1234567890',
   SUPABASE_URL: 'https://x.supabase.co',
-  SESSION_TOKEN_SECRET: SESSION_SECRET,
+  SESSION_TOKEN_SECRET: SESSION_SECRET, VAULT_SECRET: SESSION_SECRET,
   WEB_WORKER_URL: WORKER_URL,
   WEB_WORKER_SECRET: WORKER_SECRET,
 };
@@ -267,7 +267,7 @@ describe('sin worker configurado: comportamiento identico al actual', () => {
       DATABASE_URL: 'postgres://x',
       ADMIN_API_TOKEN: 'test-admin-token-1234567890',
       SUPABASE_URL: 'https://x.supabase.co',
-      SESSION_TOKEN_SECRET: SESSION_SECRET,
+      SESSION_TOKEN_SECRET: SESSION_SECRET, VAULT_SECRET: SESSION_SECRET,
     };
     app = await buildServer(parseEnv(ENV_SIN_WORKER));
     getByIdMock.mockResolvedValue({ ...baseAgent, tools: [] });
@@ -292,7 +292,7 @@ describe('sin worker configurado: comportamiento identico al actual', () => {
       DATABASE_URL: 'postgres://x',
       ADMIN_API_TOKEN: 'test-admin-token-1234567890',
       SUPABASE_URL: 'https://x.supabase.co',
-      SESSION_TOKEN_SECRET: SESSION_SECRET,
+      SESSION_TOKEN_SECRET: SESSION_SECRET, VAULT_SECRET: SESSION_SECRET,
       WEB_WORKER_URL: WORKER_URL,
     };
     app = await buildServer(parseEnv(ENV_SOLO_URL));
