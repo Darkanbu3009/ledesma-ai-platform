@@ -19,6 +19,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
   },
+  "dependencies": {
+    "postgres": "3.4.9"
+  },
   "devDependencies": {
     "@types/node": "^25.9.1",
     "vitest": "^4.1.8"
