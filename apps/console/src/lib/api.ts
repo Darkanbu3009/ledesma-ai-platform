@@ -13,7 +13,7 @@ export class ApiError extends Error {
 }
 
 /** Devuelve el access token de la sesion actual o lanza si no hay sesion. */
-async function getAccessToken(): Promise<string> {
+export async function getAccessToken(): Promise<string> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) {

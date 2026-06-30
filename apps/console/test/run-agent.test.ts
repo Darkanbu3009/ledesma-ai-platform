@@ -3,6 +3,18 @@ import type { AttachmentRef } from '../src/lib/attachments';
 import { runAgentStream } from '../src/lib/run-agent';
 import type { SseMessage } from '../src/lib/sse';
 
+// La rama de credencial GUARDADA agrega el JWT del usuario via getAccessToken (lee la sesion de
+// Supabase). Mockeamos el cliente para que devuelva un token estable y testeable.
+vi.mock('../src/lib/supabase', () => ({
+  supabase: {
+    auth: {
+      getSession: vi.fn(async () => ({
+        data: { session: { access_token: 'jwt-de-prueba' } },
+      })),
+    },
+  },
+}));
+
 const API_URL = 'https://api.test';
 
 /** Body SSE como el del backend: bloques de texto convertidos a bytes en un stream legible. */
@@ -25,7 +37,7 @@ function stubFetch(blocks: string[]) {
 async function runTurno(onMessage: (message: SseMessage) => void): Promise<void> {
   await runAgentStream({
     agentId: 'agente-1',
-    providerKey: 'sk-test',
+    credential: { mode: 'paste', apiKey: 'sk-test' },
     messages: [{ role: 'user', content: 'hola' }],
     signal: new AbortController().signal,
     onMessage,
@@ -49,7 +61,7 @@ describe('runAgentStream', () => {
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('POST');
   });
 
-  it('manda la key BYOK en x-provider-key y NO manda x-provider-base-url', async () => {
+  it('key al momento: manda x-provider-key, sin Authorization ni x-credential-id', async () => {
     vi.stubEnv('VITE_API_URL', API_URL);
     const fetchMock = stubFetch(['event: done\ndata: {}\n\n']);
 
@@ -58,6 +70,28 @@ describe('runAgentStream', () => {
     const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
     expect(headers['x-provider-key']).toBe('sk-test');
     expect(headers).not.toHaveProperty('x-provider-base-url');
+    // El camino al momento es el contrato publico: NO lleva identidad de usuario ni id de credencial.
+    expect(headers).not.toHaveProperty('Authorization');
+    expect(headers).not.toHaveProperty('x-credential-id');
+  });
+
+  it('credencial guardada: manda x-credential-id + Authorization, sin x-provider-key', async () => {
+    vi.stubEnv('VITE_API_URL', API_URL);
+    const fetchMock = stubFetch(['event: done\ndata: {}\n\n']);
+
+    await runAgentStream({
+      agentId: 'agente-1',
+      credential: { mode: 'saved', credentialId: 'cred-123' },
+      messages: [{ role: 'user', content: 'hola' }],
+      signal: new AbortController().signal,
+      onMessage: () => {},
+    });
+
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(headers['x-credential-id']).toBe('cred-123');
+    expect(headers.Authorization).toBe('Bearer jwt-de-prueba');
+    // La boveda resuelve la key server-side: la key nunca viaja desde el cliente.
+    expect(headers).not.toHaveProperty('x-provider-key');
   });
 
   it('manda exactamente { messages } en el body, sin config del agente', async () => {
@@ -94,7 +128,7 @@ describe('runAgentStream', () => {
 
     await runAgentStream({
       agentId: 'agente-1',
-      providerKey: 'sk-test',
+      credential: { mode: 'paste', apiKey: 'sk-test' },
       messages: [{ role: 'user', content: 'hola' }],
       attachments,
       signal: new AbortController().signal,
@@ -113,7 +147,7 @@ describe('runAgentStream', () => {
 
     await runAgentStream({
       agentId: 'agente-1',
-      providerKey: 'sk-test',
+      credential: { mode: 'paste', apiKey: 'sk-test' },
       messages: [{ role: 'user', content: 'hola' }],
       attachments: [],
       signal: new AbortController().signal,

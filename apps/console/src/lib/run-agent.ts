@@ -1,4 +1,5 @@
 import type { AttachmentRef } from './attachments';
+import { getAccessToken } from './api';
 import { readApiEnv } from './env';
 import { flushSseRest, parseSseChunks, type SseMessage } from './sse';
 
@@ -7,9 +8,23 @@ export interface ChatMessage {
   content: string;
 }
 
+/**
+ * Fuente de la credencial para ejecutar el agente. Aditivo sobre el flujo BYOK original; las dos
+ * variantes son mutuamente excluyentes:
+ *  - 'paste': una key pegada AL MOMENTO -> viaja en x-provider-key (contrato publico, sin identidad
+ *    de usuario). Camino intacto de siempre.
+ *  - 'saved': una credencial GUARDADA de la boveda -> viaja x-credential-id + el JWT del usuario; el
+ *    backend resuelve key/providerId/baseUrl server-side y valida que el proveedor coincida con el
+ *    del agente. Una credencial guardada solo es usable por su owner, de ahi el JWT.
+ * La key al momento vive SOLO en memoria: nunca se persiste ni se loguea.
+ */
+export type RunCredential =
+  | { mode: 'paste'; apiKey: string }
+  | { mode: 'saved'; credentialId: string };
+
 export interface RunAgentByIdParams {
   agentId: string;
-  providerKey: string;
+  credential: RunCredential;
   messages: ChatMessage[];
   /** Adjuntos del turno actual. El backend los incorpora al ultimo mensaje user. */
   attachments?: AttachmentRef[];
@@ -17,9 +32,24 @@ export interface RunAgentByIdParams {
   onMessage: (message: SseMessage) => void;
 }
 
+/**
+ * Headers de la fuente de la key del turno. La key al momento usa x-provider-key SIN Authorization
+ * (igual que el contrato publico de integraciones). La credencial guardada exige identidad: manda
+ * x-credential-id + Authorization Bearer, porque el backend (requireUser) solo resuelve la
+ * credencial para su owner.
+ */
+async function credentialHeaders(credential: RunCredential): Promise<Record<string, string>> {
+  if (credential.mode === 'saved') {
+    const token = await getAccessToken();
+    return { 'x-credential-id': credential.credentialId, Authorization: `Bearer ${token}` };
+  }
+  return { 'x-provider-key': credential.apiKey };
+}
+
 /** Ejecuta un agente via el contrato publico POST /v1/run/:agentId. La config (cerebro, system
- * prompt, parametros) vive en la plataforma; aqui solo viajan los mensajes y la key BYOK (header,
- * en memoria). Es el MISMO contrato que usan las integraciones de clientes. */
+ * prompt, parametros) vive en la plataforma; aqui solo viajan los mensajes y la fuente de la key
+ * (key al momento en header, o el id de una credencial guardada + el JWT del usuario). Es el MISMO
+ * contrato que usan las integraciones de clientes. */
 export async function runAgentStream(params: RunAgentByIdParams): Promise<void> {
   const { apiUrl } = readApiEnv(import.meta.env as Record<string, string | undefined>);
 
@@ -27,7 +57,7 @@ export async function runAgentStream(params: RunAgentByIdParams): Promise<void> 
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-provider-key': params.providerKey,
+      ...(await credentialHeaders(params.credential)),
     },
     signal: params.signal,
     // attachments solo viaja cuando hay adjuntos: asi el envio solo-texto manda el mismo body de siempre.

@@ -69,6 +69,15 @@ const anthropicAgent = {
   updatedAt: '2026-01-01T00:00:00.000Z',
 };
 
+// Agente openai-compatible: tiene su PROPIO baseUrl. Sirve para verificar que el baseUrl de una
+// credencial guardada (su endpoint atado a la key) manda sobre el del agente.
+const compatAgent = {
+  ...anthropicAgent,
+  providerId: 'openai-compatible',
+  model: 'modelo-compat',
+  baseUrl: 'https://endpoint-del-agente.test/v1',
+};
+
 const ENV = {
   NODE_ENV: 'test',
   DATABASE_URL: 'postgres://x',
@@ -163,5 +172,82 @@ describe('POST /v1/run/:agentId + credencial guardada', () => {
     const res = await app.inject({ method: 'POST', url: `/v1/run/${AGENT_ID}`, payload: body });
     expect(res.statusCode).toBe(400);
     expect(res.json().error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('MISMATCH: credencial de otro proveedor que el agente -> 400 claro, NO ejecuta', async () => {
+    // Agente anthropic (default) + credencial openai: la key NUNCA debe mandarse al endpoint del agente.
+    getDecryptedKeyForOwnerMock.mockResolvedValue({
+      apiKey: 'sk-openai-de-otro-proveedor',
+      providerId: 'openai',
+      baseUrl: null,
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/run/${AGENT_ID}`,
+      headers: { authorization: 'Bearer valid-user-1', 'x-credential-id': CRED_ID },
+      payload: body,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('VALIDATION_ERROR');
+    expect(res.json().error.message).toContain('openai');
+    expect(res.json().error.message).toContain('anthropic');
+    expect(runModelMock).not.toHaveBeenCalled();
+  });
+
+  it('MATCH openai-compatible: el baseUrl de la credencial guardada manda sobre el del agente', async () => {
+    getByIdMock.mockResolvedValue(compatAgent);
+    getDecryptedKeyForOwnerMock.mockResolvedValue({
+      apiKey: 'sk-compat-guardada',
+      providerId: 'openai-compatible',
+      baseUrl: 'https://endpoint-de-la-credencial.test/v1',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/run/${AGENT_ID}`,
+      headers: { authorization: 'Bearer valid-user-1', 'x-credential-id': CRED_ID },
+      payload: body,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(runModelMock.mock.calls[0]?.[0]?.providerId).toBe('openai-compatible');
+    expect(runModelMock.mock.calls[0]?.[0]?.credentials?.apiKey).toBe('sk-compat-guardada');
+    expect(runModelMock.mock.calls[0]?.[0]?.credentials?.baseUrl).toBe(
+      'https://endpoint-de-la-credencial.test/v1',
+    );
+  });
+
+  it('MATCH openai-compatible: si la credencial no trae baseUrl, cae al del agente', async () => {
+    getByIdMock.mockResolvedValue(compatAgent);
+    getDecryptedKeyForOwnerMock.mockResolvedValue({
+      apiKey: 'sk-compat-sin-baseurl',
+      providerId: 'openai-compatible',
+      baseUrl: null,
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/run/${AGENT_ID}`,
+      headers: { authorization: 'Bearer valid-user-1', 'x-credential-id': CRED_ID },
+      payload: body,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(runModelMock.mock.calls[0]?.[0]?.credentials?.baseUrl).toBe(
+      'https://endpoint-del-agente.test/v1',
+    );
+  });
+
+  it('KEY AL MOMENTO en agente openai-compatible: usa el baseUrl del agente (camino intacto)', async () => {
+    // x-provider-key no trae providerId/baseUrl: el agente sigue siendo autoritativo, sin validacion.
+    getByIdMock.mockResolvedValue(compatAgent);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/run/${AGENT_ID}`,
+      headers: { 'x-provider-key': 'sk-al-momento' },
+      payload: body,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(getDecryptedKeyForOwnerMock).not.toHaveBeenCalled();
+    expect(runModelMock.mock.calls[0]?.[0]?.credentials?.apiKey).toBe('sk-al-momento');
+    expect(runModelMock.mock.calls[0]?.[0]?.credentials?.baseUrl).toBe(
+      'https://endpoint-del-agente.test/v1',
+    );
   });
 });
