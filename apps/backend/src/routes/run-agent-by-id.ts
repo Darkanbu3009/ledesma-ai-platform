@@ -5,6 +5,7 @@ import type {
   NormalizedMessage,
   NormalizedRequest,
   ProviderCredentials,
+  ProviderId,
 } from '@ledesma-platform/shared';
 import type { Env } from '../config/env.js';
 import { extractDocumentText, truncateText } from '../attachments/extract.js';
@@ -161,6 +162,11 @@ export function runAgentByIdRoutes(
       const sessionToken = request.headers['x-session-token'];
       const credentialIdHeader = request.headers['x-credential-id'];
       let apiKey: string;
+      // Solo el camino de credencial GUARDADA conoce el proveedor/baseUrl de la key. El widget
+      // (x-session-token) y la key al momento (x-provider-key) no traen esa metadata, asi que el
+      // proveedor/baseUrl los define el agente (comportamiento intacto). storedCredential queda en
+      // null salvo en el camino de la boveda, y eso habilita la validacion de proveedor de mas abajo.
+      let storedCredential: { providerId: ProviderId; baseUrl: string | null } | null = null;
       if (typeof sessionToken === 'string' && sessionToken !== '') {
         apiKey = verifySessionToken(sessionToken, agentId, config.SESSION_TOKEN_SECRET).providerKey;
       } else {
@@ -176,6 +182,7 @@ export function runAgentByIdRoutes(
             config.VAULT_SECRET,
           );
           apiKey = credential.apiKey;
+          storedCredential = { providerId: credential.providerId, baseUrl: credential.baseUrl };
         } else {
           throw new AppError('VALIDATION_ERROR', 400, 'Missing x-provider-key header');
         }
@@ -184,6 +191,19 @@ export function runAgentByIdRoutes(
       if (!agent) {
         throw new AppError('NOT_FOUND', 404, 'Agent not found');
       }
+
+      // Fix del mismatch de proveedor: una credencial GUARDADA solo puede ejecutarse contra un agente
+      // del MISMO proveedor. Sin esto, la key de un proveedor (p. ej. openai) podria mandarse al
+      // endpoint de otro (el del agente, p. ej. anthropic). El camino de key al momento / sesion no
+      // trae providerId y por diseno sigue confiando en el proveedor del agente, asi que no aplica.
+      if (storedCredential && storedCredential.providerId !== agent.providerId) {
+        throw new AppError(
+          'VALIDATION_ERROR',
+          400,
+          `La credencial seleccionada es de ${storedCredential.providerId} pero el agente usa ${agent.providerId}. Elegi una credencial de ${agent.providerId} o pega una key al momento.`,
+        );
+      }
+
       const parsed = RunByIdBodySchema.safeParse(request.body);
       if (!parsed.success) {
         throw new AppError('VALIDATION_ERROR', 400, 'Invalid request body', parsed.error.issues);
@@ -253,9 +273,17 @@ export function runAgentByIdRoutes(
           ...(agent.temperature !== null ? { temperature: agent.temperature } : {}),
         },
       };
+      // baseUrl para openai-compatible: con credencial GUARDADA, el baseUrl de la credencial es el
+      // endpoint atado a esa key y MANDA sobre el del agente (misma autoridad que el Configurador:
+      // en modo guardada la credencial define providerId/baseUrl). Si la credencial no trae baseUrl,
+      // cae al del agente. Con key al momento / sesion (storedCredential null) sale del agente, intacto.
+      const resolvedBaseUrl =
+        agent.providerId === 'openai-compatible'
+          ? (storedCredential?.baseUrl ?? agent.baseUrl ?? null)
+          : null;
       const credentials: ProviderCredentials = {
         apiKey,
-        ...(agent.providerId === 'openai-compatible' && agent.baseUrl ? { baseUrl: agent.baseUrl } : {}),
+        ...(resolvedBaseUrl ? { baseUrl: resolvedBaseUrl } : {}),
       };
 
       return streamAgentRun(

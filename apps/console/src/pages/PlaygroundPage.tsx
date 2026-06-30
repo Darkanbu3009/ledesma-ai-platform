@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -17,10 +17,11 @@ import { providerLabel } from '../lib/agents';
 import type { AttachmentRef } from '../lib/attachments';
 import { MAX_ADJUNTOS, planificarEnvio, subirArchivos } from '../lib/attachment-upload';
 import { buildRequestChat, commitTurn } from '../lib/chat-turn';
-import { useAgent } from '../lib/queries';
-import { runAgentStream, type ChatMessage } from '../lib/run-agent';
+import { compatibleCredentials } from '../lib/credentials';
+import { useAgent, useCredentials } from '../lib/queries';
+import { runAgentStream, type ChatMessage, type RunCredential } from '../lib/run-agent';
 import type { SseMessage } from '../lib/sse';
-import { Field, inputClass } from '../components/ui/Field';
+import { PlaygroundCredential } from '../components/agents/PlaygroundCredential';
 
 /**
  * Filtros del dialogo del SO por categoria de adjunto. Son SOLO una sugerencia para el picker;
@@ -132,8 +133,19 @@ export function PlaygroundPage() {
   const { id } = useParams<{ id: string }>();
   const { data: agent, isLoading, isError, refetch } = useAgent(id);
 
-  // Todo vive SOLO en memoria: la key y la conversacion JAMAS se persisten.
-  const [providerKey, setProviderKey] = useState('');
+  // Credenciales del usuario, filtradas al proveedor del agente: solo esas pueden ejecutarlo (el
+  // backend valida el match). La query no depende del agente; el filtro espera a que cargue.
+  const { data: allCredentials, isLoading: loadingCreds } = useCredentials();
+  const compatible = useMemo(
+    () => (agent ? compatibleCredentials(allCredentials ?? [], agent.providerId) : []),
+    [allCredentials, agent],
+  );
+
+  // Fuente de la key de la sesion: una credencial GUARDADA de la boveda (filtrada por proveedor) o
+  // una key pegada AL MOMENTO. Ambas viven SOLO en memoria; la key y la conversacion JAMAS se persisten.
+  const [credMode, setCredMode] = useState<'saved' | 'paste'>('saved');
+  const [pasteKey, setPasteKey] = useState('');
+  const [savedId, setSavedId] = useState('');
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [vista, setVista] = useState<ViewItem[]>([]);
   const [draft, setDraft] = useState('');
@@ -148,14 +160,20 @@ export function PlaygroundPage() {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const keyMissing = providerKey.trim() === '';
-  // Heuristica de formato (NO es validacion real ni llama a ninguna API): la key "parece"
-  // presente si, tras recortar espacios, no esta vacia y empieza con "sk-". Solo decide el
-  // color de fondo; toda la logica de habilitar/enviar sigue usando keyMissing.
-  const keyPresente = providerKey.trim().startsWith('sk-');
-  // Fondo condicional del panel de chat y de la caja del input: hueso cuando hay key,
-  // gris apagado cuando no. La transicion suave la agrega cada elemento con transition.
-  const fondoSegunKey = keyPresente ? 'bg-[#FAF9F5]' : 'bg-[#E7E4DD]';
+  // La credencial esta "lista" cuando hay una guardada compatible elegida, o una key al momento no
+  // vacia. credential es null mientras falte; toda la logica de habilitar/enviar usa credMissing.
+  const savedValid = compatible.some((cred) => cred.id === savedId);
+  const credMissing = credMode === 'saved' ? !savedValid : pasteKey.trim() === '';
+  const credential: RunCredential | null = credMissing
+    ? null
+    : credMode === 'saved'
+      ? { mode: 'saved', credentialId: savedId }
+      : { mode: 'paste', apiKey: pasteKey };
+  // Fondo condicional del panel de chat y de la caja del input: claro cuando la credencial esta
+  // lista, gris apagado cuando falta. Reemplaza la vieja heuristica del prefijo "sk-", que enganaba
+  // a keys que no lo usan (p. ej. openai-compatible); ahora depende de tener una fuente de key, no
+  // de su formato. La transicion suave la agrega cada elemento con transition.
+  const fondoSegunKey = credMissing ? 'bg-[#E7E4DD]' : 'bg-[#FAF9F5]';
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -233,7 +251,7 @@ export function PlaygroundPage() {
 
   /** Ejecuta un turno con el texto dado. Si ya hay un turno corriendo, retorna (doble envio). */
   async function sendText(content: string, attachments: AttachmentRef[] = []) {
-    if (!id || !agent || running || keyMissing || content === '') return;
+    if (!id || !agent || running || !credential || content === '') return;
 
     // El request usa el historial confirmado mas este user; chat NO se actualiza todavia.
     const requestChat: ChatMessage[] = buildRequestChat(chat, content);
@@ -250,7 +268,7 @@ export function PlaygroundPage() {
     try {
       await runAgentStream({
         agentId: id,
-        providerKey,
+        credential,
         messages: requestChat,
         attachments,
         signal: controller.signal,
@@ -273,7 +291,7 @@ export function PlaygroundPage() {
   }
 
   function send() {
-    if (!agent || running || keyMissing || subiendo) return;
+    if (!agent || running || credMissing || subiendo) return;
     // Se puede enviar solo-texto, texto + adjuntos, o adjuntos solos (con un texto por defecto).
     const plan = planificarEnvio({ draft, adjuntos });
     if (!plan) return;
@@ -362,29 +380,29 @@ export function PlaygroundPage() {
             </Link>
           </div>
 
-          <div className="mt-6 rounded-xl border border-grafito-border bg-grafito p-5">
-            <Field
-              label="API key del proveedor"
-              hint="Tu llave se usa solo para esta sesion de prueba, viaja cifrada en cada peticion y NUNCA se guarda en la plataforma."
-            >
-              <input
-                type="password"
-                value={providerKey}
-                onChange={(e) => setProviderKey(e.target.value)}
-                className={inputClass}
-                placeholder="sk-..."
-                autoComplete="off"
-              />
-            </Field>
+          <div className="mt-6">
+            <PlaygroundCredential
+              providerId={agent.providerId}
+              compatible={compatible}
+              loading={loadingCreds}
+              mode={credMode}
+              onModeChange={setCredMode}
+              credentialId={savedId}
+              onCredentialIdChange={setSavedId}
+              apiKey={pasteKey}
+              onApiKeyChange={setPasteKey}
+            />
           </div>
 
           <div
             ref={scrollRef}
             className={`mt-4 h-[26rem] overflow-y-auto rounded-xl border border-grafito-border ${fondoSegunKey} p-4 transition-colors duration-300`}
           >
-            {keyMissing ? (
+            {credMissing ? (
               <div className="flex h-full items-center justify-center">
-                <p className="text-sm text-hueso-muted">Pega tu API key para probar el agente.</p>
+                <p className="text-sm text-hueso-muted">
+                  Elegi una credencial o pega tu API key para probar el agente.
+                </p>
               </div>
             ) : vista.length === 0 ? (
               <div className="flex h-full items-center justify-center">
@@ -524,13 +542,13 @@ export function PlaygroundPage() {
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  disabled={keyMissing}
+                  disabled={credMissing}
                   className="w-full resize-none bg-transparent px-3.5 pt-2.5 text-sm text-ink outline-none transition placeholder:text-muted-soft disabled:cursor-not-allowed disabled:opacity-60"
                   placeholder="Escribe un mensaje..."
                 />
                 <div className="flex items-center px-2 pb-2">
                   <MenuAdjuntar
-                    disabled={keyMissing || subiendo || adjuntos.length >= MAX_ADJUNTOS}
+                    disabled={credMissing || subiendo || adjuntos.length >= MAX_ADJUNTOS}
                     titulo={
                       adjuntos.length >= MAX_ADJUNTOS
                         ? `Maximo ${MAX_ADJUNTOS} archivos`
@@ -556,7 +574,7 @@ export function PlaygroundPage() {
                 <button
                   type="button"
                   onClick={() => send()}
-                  disabled={keyMissing || subiendo || (draft.trim() === '' && adjuntos.length === 0)}
+                  disabled={credMissing || subiendo || (draft.trim() === '' && adjuntos.length === 0)}
                   aria-label="Enviar"
                   title="Enviar"
                   className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brasa text-carbon transition-colors duration-300 hover:bg-brasa-hover disabled:cursor-not-allowed disabled:bg-line disabled:text-muted"
