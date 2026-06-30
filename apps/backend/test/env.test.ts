@@ -57,4 +57,35 @@ describe('parseEnv', () => {
     const env = parseEnv({ DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', VAULT_SECRET: 'vault-secret-distinto-del-de-sesion-aaaa' });
     expect(env.VAULT_SECRET).toBe('vault-secret-distinto-del-de-sesion-aaaa');
   });
+
+  const minimo = {
+    DATABASE_URL: 'postgres://x',
+    ADMIN_API_TOKEN: 'test-admin-token-1234567890',
+    SUPABASE_URL: 'https://x.supabase.co',
+    SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+    VAULT_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+  };
+
+  // Cortes de seguridad del motor: RUN_TIMEOUT_SECONDS y RUN_MAX_TOKENS, opcionales con default.
+  it('RUN_TIMEOUT_SECONDS y RUN_MAX_TOKENS usan defaults cuando faltan (600s, 1000000 tokens)', () => {
+    const env = parseEnv(minimo);
+    expect(env.RUN_TIMEOUT_SECONDS).toBe(600);
+    expect(env.RUN_MAX_TOKENS).toBe(1_000_000);
+  });
+
+  it('respeta RUN_TIMEOUT_SECONDS y RUN_MAX_TOKENS configurados (coercion de string)', () => {
+    const env = parseEnv({ ...minimo, RUN_TIMEOUT_SECONDS: '30', RUN_MAX_TOKENS: '5000' });
+    expect(env.RUN_TIMEOUT_SECONDS).toBe(30);
+    expect(env.RUN_MAX_TOKENS).toBe(5000);
+  });
+
+  it('falla con RUN_TIMEOUT_SECONDS no positivo', () => {
+    expect(() => parseEnv({ ...minimo, RUN_TIMEOUT_SECONDS: '0' })).toThrow();
+    expect(() => parseEnv({ ...minimo, RUN_TIMEOUT_SECONDS: '-5' })).toThrow();
+  });
+
+  it('falla con RUN_MAX_TOKENS no positivo o no numerico', () => {
+    expect(() => parseEnv({ ...minimo, RUN_MAX_TOKENS: '0' })).toThrow();
+    expect(() => parseEnv({ ...minimo, RUN_MAX_TOKENS: 'muchos' })).toThrow();
+  });
 });

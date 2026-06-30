@@ -293,6 +293,8 @@ export function runAgentByIdRoutes(
           providerId: agent.providerId,
           credentials,
           request: normalizedRequest,
+          maxTokens: config.RUN_MAX_TOKENS,
+          runTimeoutMs: config.RUN_TIMEOUT_SECONDS * 1000,
           ...(parsed.data.maxIterations !== undefined ? { maxIterations: parsed.data.maxIterations } : {}),
         },
         executeTool,

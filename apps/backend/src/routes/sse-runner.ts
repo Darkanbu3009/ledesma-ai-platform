@@ -1,6 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { AgentEvent } from '@ledesma-platform/shared';
-import { runAgent, type AgentRunInput, type ToolExecutor } from '../agent/index.js';
+import { runAgent, type AgentRunInput, type ToolExecutor, DEFAULT_RUN_TIMEOUT_SECONDS } from '../agent/index.js';
 import { ProviderError } from '../providers/index.js';
 
 /** Desenlace de una corrida: SOLO metadatos (tokens, status, duracion). Nunca contenido. */
@@ -44,6 +44,11 @@ export async function streamAgentRun(
   // Bandera para distinguir el cierre normal de la respuesta (que provocamos nosotros al terminar
   // de escribir el stream) de una desconexion real del cliente.
   let finished = false;
+  // Distingue la DESCONEXION del cliente (socket ya muerto: no se debe escribir nada) de NUESTRO
+  // aborto por timeout (socket vivo: cerramos limpio con stop 'timeout' + done). Ambos disparan el
+  // mismo AbortController, por eso necesitamos esta bandera aparte para no escribir a un socket
+  // cerrado si ambos ocurren casi a la vez.
+  let clientGone = false;
 
   // Tomamos control manual del ciclo de respuesta: a partir de aca escribimos el SSE directamente
   // sobre reply.raw. hijack evita que Fastify intente serializar/enviar (y advierta) al cerrar.
@@ -69,9 +74,21 @@ export async function streamAgentRun(
   // reply.raw.end() no cancela porque para entonces finished ya es true.
   reply.raw.on('close', () => {
     if (!finished) {
+      clientGone = true;
       controller.abort();
     }
   });
+
+  // TIMEOUT GLOBAL del run (deadline de pared sobre la peticion completa). Al vencer, abortamos el
+  // run reusando el MISMO AbortController que la desconexion del cliente, pero marcamos timedOut: eso
+  // distingue nuestro corte por tiempo (cierre LIMPIO: stop 'timeout' + done) del cierre silencioso
+  // de una desconexion real. El timer se limpia en el finally (clearTimeout), sin fugas.
+  const runTimeoutMs = input.runTimeoutMs ?? DEFAULT_RUN_TIMEOUT_SECONDS * 1000;
+  let timedOut = false;
+  const timeoutTimer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, runTimeoutMs);
 
   const stream: AsyncIterable<AgentEvent> = runAgent(
     { ...input, signal: controller.signal },
@@ -83,6 +100,19 @@ export async function streamAgentRun(
   let outputTokens = 0;
   let stopReason: string | null = null;
   let errorCode: string | null = null;
+  // Marca que el loop emitio su stop natural (runAgent emite uno solo, al final). Distingue el fin
+  // por cuenta propia del corte por timeout/desconexion.
+  let sawStop = false;
+
+  // Cierre LIMPIO por timeout: un stop con razon clara + done, igual que cualquier corte controlado
+  // (max_iterations, token_cap). No es un error: nunca emite el evento error. El uso reportado es el
+  // acumulado visto hasta el corte (0 si el timeout llego antes del primer stop natural).
+  const writeTimeoutClose = (): void => {
+    stopReason = 'timeout';
+    const stop: AgentEvent = { type: 'stop', reason: 'timeout', usage: { inputTokens, outputTokens } };
+    sseWrite(reply, { data: stop });
+    sseWrite(reply, { event: 'done', data: {} });
+  };
 
   try {
     for await (const event of stream) {
@@ -90,44 +120,68 @@ export async function streamAgentRun(
         break;
       }
       if (event.type === 'stop') {
+        sawStop = true;
         stopReason = event.reason;
         inputTokens = event.usage.inputTokens;
         outputTokens = event.usage.outputTokens;
       }
       sseWrite(reply, { data: event });
     }
-    if (!controller.signal.aborted) {
+    if (clientGone) {
+      // Desconexion del cliente: cierre silencioso, el socket ya no existe (no escribir nada).
+    } else if (sawStop) {
+      // El run termino por cuenta propia (stop natural ya escrito): cerramos con done normal.
       sseWrite(reply, { event: 'done', data: {} });
+    } else if (timedOut) {
+      // El loop corto al abortar por timeout sin lanzar: cierre limpio con razon 'timeout'.
+      writeTimeoutClose();
     }
   } catch (error) {
-    errorCode = error instanceof ProviderError ? error.code : 'UNKNOWN';
-    if (!controller.signal.aborted) {
-      if (error instanceof ProviderError) {
-        sseWrite(reply, {
-          event: 'error',
-          data: {
-            code: error.code,
-            message: error.message,
-            providerId: error.providerId,
-            ...(error.status !== undefined ? { status: error.status } : {}),
-          },
-        });
-      } else {
-        sseWrite(reply, { event: 'error', data: { code: 'UNKNOWN', message: 'Internal error during agent run' } });
+    if (timedOut && !clientGone) {
+      // El abort por timeout hizo que el provider/loop lanzara (p.ej. AbortError). NO es un error
+      // real del run: cerramos limpio con la razon 'timeout', sin evento error ni errorCode.
+      writeTimeoutClose();
+    } else {
+      errorCode = error instanceof ProviderError ? error.code : 'UNKNOWN';
+      if (!clientGone && !timedOut) {
+        if (error instanceof ProviderError) {
+          sseWrite(reply, {
+            event: 'error',
+            data: {
+              code: error.code,
+              message: error.message,
+              providerId: error.providerId,
+              ...(error.status !== undefined ? { status: error.status } : {}),
+            },
+          });
+        } else {
+          sseWrite(reply, { event: 'error', data: { code: 'UNKNOWN', message: 'Internal error during agent run' } });
+        }
       }
+      request.log.error(
+        { err: error instanceof Error ? { name: error.name, message: error.message } : 'unknown' },
+        'agent run failed',
+      );
     }
-    request.log.error(
-      { err: error instanceof Error ? { name: error.name, message: error.message } : 'unknown' },
-      'agent run failed',
-    );
   } finally {
     // Marcamos finished ANTES de end(): asi el evento close que dispara end() ve finished=true y
-    // no aborta. El orden importa.
+    // no aborta. El orden importa. Limpiamos el timer del timeout aca para no dejar timers colgados
+    // cuando el run termina (normal, error o desconexion) antes de vencer el deadline.
     finished = true;
+    clearTimeout(timeoutTimer);
     if (onRunFinished) {
       try {
         onRunFinished({
-          status: controller.signal.aborted ? 'aborted' : errorCode !== null ? 'error' : 'completed',
+          // 'aborted' queda solo para la desconexion real del cliente. Un timeout cierra LIMPIO (stop
+          // 'timeout' + done), asi que cuenta como 'completed' con su stopReason, igual que
+          // max_iterations/token_cap.
+          status: clientGone
+            ? 'aborted'
+            : timedOut
+              ? 'completed'
+              : errorCode !== null
+                ? 'error'
+                : 'completed',
           inputTokens,
           outputTokens,
           stopReason,

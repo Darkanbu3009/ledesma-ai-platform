@@ -1,7 +1,15 @@
 import type { StopReason, TokenUsage } from '../provider/events.js';
 
-/** Razon de fin del loop agentico: las razones del modelo mas la cota de iteraciones del cuerpo. */
-export type AgentStopReason = StopReason | 'max_iterations';
+/**
+ * Razon de fin del loop agentico: las razones del modelo mas los CORTES de seguridad del motor de
+ * ejecucion (cota de iteraciones, timeout global de pared y cap de tokens acumulados del run).
+ *
+ * Nota: 'max_tokens' (heredado de StopReason) es el corte que reporta el PROVEEDOR cuando el modelo
+ * agota su presupuesto de salida en un solo turno. Es distinto de 'token_cap', el corte de la
+ * PLATAFORMA cuando el uso ACUMULADO (input + output) a traves de las iteraciones del run supera el
+ * cap configurado. Se nombran aparte a proposito para no confundir ambos limites.
+ */
+export type AgentStopReason = StopReason | 'max_iterations' | 'timeout' | 'token_cap';
 
 /**
  * Eventos que emite el cuerpo (loop agentico) hacia el consumidor / SSE.

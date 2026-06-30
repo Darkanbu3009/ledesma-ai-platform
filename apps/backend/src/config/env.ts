@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_RUN_TIMEOUT_SECONDS, DEFAULT_RUN_MAX_TOKENS } from '../agent/limits.js';
 
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -26,6 +27,13 @@ const EnvSchema = z.object({
   // al actual. WEB_WORKER_SECRET firma los POST al worker (no es el whsec_ por agente).
   WEB_WORKER_URL: z.string().url().optional(),
   WEB_WORKER_SECRET: z.string().min(32).optional(),
+  // Cortes de seguridad del MOTOR DE EJECUCION, opcionales con default (mismo patron WEB_WORKER_*):
+  // si faltan, se usan los defaults de la plataforma (agent/limits.ts) y el comportamiento de un run
+  // normal no cambia. RUN_TIMEOUT_SECONDS es el deadline de pared sobre la peticion completa;
+  // RUN_MAX_TOKENS es el cap de tokens acumulados (input + output) a traves de las iteraciones del
+  // run. Ambos numeros positivos (coercion de string como PORT).
+  RUN_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(DEFAULT_RUN_TIMEOUT_SECONDS),
+  RUN_MAX_TOKENS: z.coerce.number().int().positive().default(DEFAULT_RUN_MAX_TOKENS),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
