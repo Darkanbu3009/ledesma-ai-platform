@@ -172,6 +172,28 @@ describe('JobsRepository', () => {
       // valores: last_error primero, luego el id del where.
       expect(sqlValues(sql)).toEqual(['boom', 'job-1']);
     });
+
+    it('markPendingRetry vuelve a pending (no terminal): last_error + scheduled_for + started_at null', async () => {
+      const sql = makeSqlReturning([]);
+      const when = new Date('2026-07-01T00:00:00.000Z');
+      await new JobsRepository(sql).markPendingRetry('job-1', 'transitorio', when);
+      const texto = sqlText(sql);
+      expect(texto).toContain("status = 'pending'");
+      expect(texto).toContain('last_error = ');
+      expect(texto).toContain('scheduled_for = ');
+      expect(texto).toContain('started_at = null');
+      // NO toca attempts (lo lleva el claim) ni finished_at (no es terminal).
+      expect(texto).not.toContain('attempts');
+      expect(texto).not.toContain('finished_at');
+      // valores: last_error, luego scheduled_for, luego el id del where.
+      expect(sqlValues(sql)).toEqual(['transitorio', when, 'job-1']);
+    });
+
+    it('markPendingRetry sin scheduled_for lo deja en null (elegible de inmediato)', async () => {
+      const sql = makeSqlReturning([]);
+      await new JobsRepository(sql).markPendingRetry('job-1', 'transitorio');
+      expect(sqlValues(sql)).toEqual(['transitorio', null, 'job-1']);
+    });
   });
 
   describe('rowToJob', () => {

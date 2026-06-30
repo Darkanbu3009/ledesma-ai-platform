@@ -1,19 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
-import type { JobsRepository, Job } from '@ledesma-platform/shared';
-import { pollQueueOnce } from '../src/worker.js';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import type { AgentEvent, Job } from '@ledesma-platform/shared';
+import type { AgentConfig, AgentRunInput, DecryptedProviderCredential } from '@ledesma-platform/backend/execution';
+import { drainQueue, startWorker } from '../src/worker.js';
+import type { JobRunnerDeps } from '../src/execution.js';
 import type { Logger } from '../src/logger.js';
 
-type Entry = [string, Record<string, unknown> | undefined];
-
-function makeLogger(): { logger: Logger; calls: Record<'debug' | 'info' | 'warn' | 'error', Entry[]> } {
-  const calls = { debug: [] as Entry[], info: [] as Entry[], warn: [] as Entry[], error: [] as Entry[] };
-  const logger: Logger = {
-    debug: (msg, meta) => void calls.debug.push([msg, meta]),
-    info: (msg, meta) => void calls.info.push([msg, meta]),
-    warn: (msg, meta) => void calls.warn.push([msg, meta]),
-    error: (msg, meta) => void calls.error.push([msg, meta]),
-  };
-  return { logger, calls };
+function makeLogger(): Logger {
+  return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 }
 
 function makeJob(overrides: Partial<Job> = {}): Job {
@@ -22,57 +15,126 @@ function makeJob(overrides: Partial<Job> = {}): Job {
     agentId: 'agent-1',
     ownerId: 'user-1',
     credentialId: 'cred-1',
-    status: 'pending',
-    payload: {},
+    status: 'running',
+    payload: { messages: [{ role: 'user', content: 'hola' }] },
     scheduledFor: null,
-    attempts: 0,
+    attempts: 1,
     lastError: null,
     createdAt: '2026-06-30T00:00:00.000Z',
     updatedAt: '2026-06-30T00:00:00.000Z',
-    startedAt: null,
+    startedAt: '2026-06-30T00:00:00.000Z',
     finishedAt: null,
     ...overrides,
   };
 }
 
-describe('pollQueueOnce (esqueleto: solo lectura)', () => {
-  it('cola vacia: loguea debug y NO consulta el proximo job', async () => {
-    const countPending = vi.fn(async () => 0);
-    const getNextPendingJob = vi.fn(async () => null);
-    const claimNextJob = vi.fn();
-    const repo = { countPending, getNextPendingJob, claimNextJob } as unknown as JobsRepository;
-    const { logger, calls } = makeLogger();
+const FAKE_AGENT = { id: 'agent-1', providerId: 'anthropic', model: 'claude-x', tools: [] } as unknown as AgentConfig;
+const FAKE_CRED: DecryptedProviderCredential = { apiKey: 'sk', providerId: 'anthropic', baseUrl: null };
 
-    await pollQueueOnce(repo, logger);
+async function* successRun(): AsyncIterable<AgentEvent> {
+  yield { type: 'stop', reason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } };
+}
 
-    expect(countPending).toHaveBeenCalledTimes(1);
-    expect(getNextPendingJob).not.toHaveBeenCalled();
-    expect(calls.debug).toHaveLength(1);
-    expect(calls.info).toHaveLength(0);
+function makeDeps(overrides: Partial<JobRunnerDeps> = {}): JobRunnerDeps {
+  return {
+    jobs: {
+      claimNextJob: vi.fn(async () => null),
+      markCompleted: vi.fn(async () => {}),
+      markFailed: vi.fn(async () => {}),
+      markPendingRetry: vi.fn(async () => {}),
+    },
+    getProfileTier: vi.fn(async () => 'autonomous' as const),
+    loadAgent: vi.fn(async () => FAKE_AGENT),
+    resolveCredential: vi.fn(async () => FAKE_CRED),
+    assembleAgentRun: vi.fn(() => ({
+      input: {} as unknown as AgentRunInput,
+      executeTool: vi.fn(),
+    })),
+    runAgent: vi.fn(() => successRun()),
+    logger: makeLogger(),
+    config: { runTimeoutMs: 600_000, runMaxTokens: 1_000_000 },
+    ...overrides,
+  };
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+describe('drainQueue', () => {
+  it('drena la cola hasta vaciarla (procesa todos los jobs elegibles en una pasada)', async () => {
+    const deps = makeDeps();
+    (deps.jobs.claimNextJob as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(makeJob({ id: 'a' }))
+      .mockResolvedValueOnce(makeJob({ id: 'b' }))
+      .mockResolvedValueOnce(null);
+
+    await drainQueue(deps, new AbortController().signal);
+
+    expect(deps.jobs.claimNextJob).toHaveBeenCalledTimes(3);
+    expect(deps.jobs.markCompleted).toHaveBeenCalledWith('a');
+    expect(deps.jobs.markCompleted).toHaveBeenCalledWith('b');
   });
 
-  it('con pending: loguea el conteo y el proximo job, sin TOMARLO (no claim)', async () => {
-    const countPending = vi.fn(async () => 3);
-    const getNextPendingJob = vi.fn(async () => makeJob({ id: 'job-7', agentId: 'agent-9' }));
-    const claimNextJob = vi.fn();
-    const markCompleted = vi.fn();
-    const repo = {
-      countPending,
-      getNextPendingJob,
-      claimNextJob,
-      markCompleted,
-    } as unknown as JobsRepository;
-    const { logger, calls } = makeLogger();
+  it('un job roto NO tumba el loop: sigue con el siguiente job', async () => {
+    let call = 0;
+    const deps = makeDeps({
+      runAgent: vi.fn(() => {
+        call += 1;
+        if (call === 1) throw new Error('job 1 explota');
+        return successRun();
+      }),
+    });
+    (deps.jobs.claimNextJob as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(makeJob({ id: 'roto', attempts: 1 }))
+      .mockResolvedValueOnce(makeJob({ id: 'sano' }))
+      .mockResolvedValueOnce(null);
 
-    await pollQueueOnce(repo, logger);
+    await drainQueue(deps, new AbortController().signal);
 
-    expect(getNextPendingJob).toHaveBeenCalledTimes(1);
-    // El esqueleto NO debe tomar ni cerrar jobs (eso es PR 5.2).
-    expect(claimNextJob).not.toHaveBeenCalled();
-    expect(markCompleted).not.toHaveBeenCalled();
-    expect(calls.info).toHaveLength(1);
-    const meta = calls.info[0]?.[1] as { pending: number; nextJobId: string | null };
-    expect(meta.pending).toBe(3);
-    expect(meta.nextJobId).toBe('job-7');
+    // El job roto se reencolo y el loop continuo hasta procesar el sano y vaciar la cola.
+    expect(deps.jobs.markPendingRetry).toHaveBeenCalledWith('roto', expect.any(String), expect.any(Date));
+    expect(deps.jobs.markCompleted).toHaveBeenCalledWith('sano');
+    expect(deps.jobs.claimNextJob).toHaveBeenCalledTimes(3);
+  });
+
+  it('si el claim lanza (DB caida) corta la pasada y NO entra en bucle apretado', async () => {
+    const deps = makeDeps();
+    (deps.jobs.claimNextJob as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('conexion caida'));
+
+    await drainQueue(deps, new AbortController().signal);
+
+    expect(deps.jobs.claimNextJob).toHaveBeenCalledTimes(1);
+    expect(deps.logger.error).toHaveBeenCalled();
+  });
+
+  it('respeta el apagado: con el signal abortado no reclama nada', async () => {
+    const deps = makeDeps();
+    const controller = new AbortController();
+    controller.abort();
+
+    await drainQueue(deps, controller.signal);
+
+    expect(deps.jobs.claimNextJob).not.toHaveBeenCalled();
+  });
+});
+
+describe('startWorker', () => {
+  it('arranca, drena en la primera pasada y stop() resuelve un cierre limpio', async () => {
+    const deps = makeDeps();
+    (deps.jobs.claimNextJob as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(makeJob({ id: 'x' }))
+      .mockResolvedValue(null);
+
+    const handle = startWorker({ deps, logger: deps.logger, intervalMs: 60_000 });
+    // Deja correr la pasada inmediata.
+    await new Promise((r) => setTimeout(r, 0));
+    await handle.stop();
+
+    expect(deps.jobs.markCompleted).toHaveBeenCalledWith('x');
+    expect(deps.logger.info).toHaveBeenCalledWith('worker detenido');
+    // stop() es idempotente.
+    await expect(handle.stop()).resolves.toBeUndefined();
   });
 });

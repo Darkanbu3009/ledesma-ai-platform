@@ -162,4 +162,25 @@ export class JobsRepository {
       where id = ${id}
     `;
   }
+
+  /**
+   * Devuelve un job a 'pending' para REINTENTAR un fallo TRANSITORIO (error de proveedor, timeout,
+   * credencial momentaneamente irresoluble). NO es un estado terminal: el job vuelve a la cola y otro
+   * tick/worker lo retomara con claimNextJob (que incrementa attempts de nuevo). Guarda el ultimo
+   * error en last_error y, opcionalmente, un scheduled_for futuro (backoff) para que el claim no lo
+   * retome hasta que venza; null = elegible de inmediato. started_at se limpia (la corrida anterior no
+   * llego a un cierre terminal). NO toca attempts: el conteo lo lleva el claim, asi un fallo permanente
+   * (p.ej. tier insuficiente) que va directo a markFailed nunca pasa por aca.
+   */
+  async markPendingRetry(id: string, error: string, scheduledFor?: Date | string | null): Promise<void> {
+    await this.sql`
+      update jobs set
+        status = 'pending',
+        last_error = ${error},
+        scheduled_for = ${scheduledFor ?? null},
+        started_at = null,
+        updated_at = now()
+      where id = ${id}
+    `;
+  }
 }
