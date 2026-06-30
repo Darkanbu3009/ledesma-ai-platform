@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ArrowRight, Bot, Plus, RefreshCw } from 'lucide-react';
+import { ArrowRight, Bot, Plus, RefreshCw, Sparkles } from 'lucide-react';
 import { useAgents } from '../lib/queries';
 import { AgentCard } from '../components/agents/AgentCard';
 
@@ -14,6 +14,20 @@ function CreateAgentButton() {
     >
       <Plus className="h-[17px] w-[17px]" />
       Crear agente
+    </Link>
+  );
+}
+
+// Entrada al alta CONVERSACIONAL (Configurador). Es aditiva: convive con el alta manual
+// (CreateAgentButton -> /agentes/nuevo) sin reemplazarla.
+function ConfiguratorButton() {
+  return (
+    <Link
+      to="/configurador"
+      className="inline-flex items-center gap-2 rounded-[10px] border border-line bg-surface px-[20px] py-[11px] text-sm font-semibold text-ink transition hover:border-brasa-line hover:text-brasa"
+    >
+      <Sparkles className="h-[17px] w-[17px]" />
+      Crear con el Configurador
     </Link>
   );
 }
@@ -81,6 +95,14 @@ function AgentsEmptyState() {
       <div className="mt-7">
         <CreateAgentPill />
       </div>
+      {/* Alternativa conversacional, sin quitar el alta manual de arriba. */}
+      <Link
+        to="/configurador"
+        className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-muted transition hover:text-brasa"
+      >
+        <Sparkles className="h-4 w-4" />
+        o crealo conversando con el Configurador
+      </Link>
     </div>
   );
 }
@@ -96,7 +118,12 @@ export function AgentsPage() {
           <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">Agentes</h1>
           <p className="mt-1.5 text-[15px] text-muted">Configura y administra tus agentes de IA.</p>
         </div>
-        {hasAgents && <CreateAgentButton />}
+        {hasAgents && (
+          <div className="flex flex-wrap items-center gap-2.5">
+            <ConfiguratorButton />
+            <CreateAgentButton />
+          </div>
+        )}
       </div>
 
       {isLoading ? (
