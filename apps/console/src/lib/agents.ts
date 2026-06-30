@@ -39,3 +39,13 @@ export function providerLabel(providerId: ProviderId): string {
       return providerId;
   }
 }
+
+/**
+ * Ruta del Playground (conversacion) de un agente. Centraliza el destino del puente
+ * "crear -> conversar": al crear un agente (asistente, autonomo o manual) la consola redirige aqui,
+ * y la lista usa la misma funcion para el boton "Conversar". Un solo lugar para la ruta evita que
+ * los flujos se desincronicen si cambia el path.
+ */
+export function playgroundPath(agentId: string): string {
+  return `/agentes/${agentId}/playground`;
+}
