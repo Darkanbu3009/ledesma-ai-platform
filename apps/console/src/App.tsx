@@ -4,6 +4,7 @@ import { LoginPage } from './pages/LoginPage';
 import { RegistrationPage } from './pages/RegistrationPage';
 import { AgentsPage } from './pages/AgentsPage';
 import { AgentFormPage } from './pages/AgentFormPage';
+import { CredentialsPage } from './pages/CredentialsPage';
 import { PlaygroundPage } from './pages/PlaygroundPage';
 import { ConnectPage } from './pages/ConnectPage';
 import { UsagePage } from './pages/UsagePage';
@@ -30,6 +31,7 @@ export function App() {
             <Route path="/agentes/:id/playground" element={<PlaygroundPage />} />
             <Route path="/agentes/:id/conectar" element={<ConnectPage />} />
             <Route path="/agentes/:id/uso" element={<UsagePage />} />
+            <Route path="/credenciales" element={<CredentialsPage />} />
           </Route>
         </Route>
       </Route>

@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from './api';
 import type { AgentConfig } from './agents';
+import type { ProviderCredential } from './credentials';
 import type { AgentUsage, UsageRange } from './usage';
 import type { RegistrationState } from './registration';
 
@@ -16,6 +17,15 @@ export function useAgents() {
   return useQuery({
     queryKey: ['agents'],
     queryFn: () => apiFetch<{ agents: AgentConfig[] }>('/v1/agents').then((r) => r.agents),
+  });
+}
+
+/** Lista la metadata de las credenciales del usuario (sin la key, por diseno del backend). */
+export function useCredentials() {
+  return useQuery({
+    queryKey: ['credentials'],
+    queryFn: () =>
+      apiFetch<{ credentials: ProviderCredential[] }>('/v1/credentials').then((r) => r.credentials),
   });
 }
 

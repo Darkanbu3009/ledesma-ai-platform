@@ -1,10 +1,13 @@
 import { NavLink } from 'react-router-dom';
-import { Bot, LogOut } from 'lucide-react';
+import { Bot, KeyRound, LogOut } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../auth/useAuth';
 import { BrandMark } from '../BrandMark';
 
-const navItems = [{ to: '/agentes', label: 'Agentes', icon: Bot }];
+const navItems = [
+  { to: '/agentes', label: 'Agentes', icon: Bot },
+  { to: '/credenciales', label: 'Credenciales', icon: KeyRound },
+];
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { user } = useAuth();
