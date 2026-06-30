@@ -9,7 +9,7 @@ const BASE_ENV = {
   NODE_ENV: 'test',
   DATABASE_URL: 'postgres://x',
   ADMIN_API_TOKEN: 'test-admin-token-1234567890',
-  SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+  SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', VAULT_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
 };
 
 describe('cors comodin', () => {
@@ -45,6 +45,24 @@ describe('cors comodin', () => {
     expect(res.statusCode).toBeLessThan(300);
     const allowHeaders = String(res.headers['access-control-allow-headers']).toLowerCase();
     expect(allowHeaders).toContain('x-session-token');
+    await app.close();
+  });
+
+  it('el preflight permite el header x-credential-id (boveda de credenciales)', async () => {
+    const app = await buildServer(parseEnv({ ...BASE_ENV, CORS_ORIGINS: '*' }));
+    const res = await app.inject({
+      method: 'OPTIONS',
+      url: '/v1/configurator/message',
+      headers: {
+        origin: 'https://app.ledesma-ai-labs.com',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'authorization,content-type,x-credential-id',
+      },
+    });
+    expect(res.statusCode).toBeGreaterThanOrEqual(200);
+    expect(res.statusCode).toBeLessThan(300);
+    const allowHeaders = String(res.headers['access-control-allow-headers']).toLowerCase();
+    expect(allowHeaders).toContain('x-credential-id');
     await app.close();
   });
 

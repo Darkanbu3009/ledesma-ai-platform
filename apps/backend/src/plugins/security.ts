@@ -38,6 +38,10 @@ export const securityPlugin = fp<SecurityPluginOptions>(async (app, opts) => {
       'x-provider-key',
       'x-provider-base-url',
       'x-session-token',
+      // Boveda de credenciales: la consola (cross-origin) manda x-credential-id para usar una
+      // credencial guardada en /v1/configurator/message y /v1/run/:agentId. Sin esto, el preflight
+      // del navegador rechazaria el header.
+      'x-credential-id',
     ],
   });
 

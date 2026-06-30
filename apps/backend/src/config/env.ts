@@ -14,6 +14,13 @@ const EnvSchema = z.object({
   ADMIN_API_TOKEN: z.string().min(16),
   SUPABASE_URL: z.string().url(),
   SESSION_TOKEN_SECRET: z.string().min(32),
+  // Secreto maestro de la BOVEDA DE CREDENCIALES: cifra y descifra (AES-256-GCM) las API keys que el
+  // usuario guarda. REQUERIDO (no opcional): sin el, la boveda no puede cifrar al guardar ni descifrar
+  // al usar, asi que arrancar sin VAULT_SECRET es un error de configuracion explicito. Es una env
+  // SEPARADA de SESSION_TOKEN_SECRET a proposito, para poder rotar cada secreto de forma independiente
+  // (rotar el de la boveda no invalida los session-tokens en vuelo y viceversa). Debe setearse en el
+  // entorno con 32+ caracteres.
+  VAULT_SECRET: z.string().min(32),
   // Tools nativas de plataforma (web worker propio). Opcionales a proposito: si falta cualquiera
   // de las dos, la feature se desactiva (no se inyectan nativas) y el comportamiento es identico
   // al actual. WEB_WORKER_SECRET firma los POST al worker (no es el whsec_ por agente).

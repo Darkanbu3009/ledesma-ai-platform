@@ -22,7 +22,7 @@ const BASE_ENV = {
   DATABASE_URL: 'postgres://x',
   ADMIN_API_TOKEN: 'admin-token-1234567890',
   SUPABASE_URL: 'https://x.supabase.co',
-  SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+  SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', VAULT_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
 };
 const WORKER_ENV = {
   WEB_WORKER_URL: 'https://web-worker.example.com',

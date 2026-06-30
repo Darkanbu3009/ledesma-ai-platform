@@ -13,6 +13,10 @@ import { verifySessionToken } from '../auth/session-token.js';
 import { getSql } from '../db/client.js';
 import { AgentRepository } from '../agents/agent-repository.js';
 import { AgentRunRepository } from '../agents/run-repository.js';
+import { createSupabaseJwtVerifier, type JwtVerifier } from '../auth/jwt-verifier.js';
+import { requireUser } from '../auth/require-user.js';
+import { ProviderCredentialRepository } from '../credentials/provider-credential-repository.js';
+import { resolveStoredCredential } from '../credentials/resolve-stored-credential.js';
 import { createDemoRegistry } from '../tools/demo-registry.js';
 import { createWebhookExecutor, storedToolsToDefinitions } from '../tools/webhook-tools.js';
 import { createNativeExecutor, nativeToolsToDefinitions, NATIVE_TOOL_NAMES } from '../tools/native-tools.js';
@@ -130,27 +134,51 @@ async function buildMessagesWithAttachments(params: {
  * Contrato de integracion para sistemas externos: la config del agente vive en la plataforma;
  * el integrador solo manda mensajes + su key BYOK. Devuelve el mismo SSE que /v1/agent/run.
  */
-export function runAgentByIdRoutes(config: Env) {
+export function runAgentByIdRoutes(
+  config: Env,
+  deps?: { verifier?: JwtVerifier; credentialRepo?: ProviderCredentialRepository },
+) {
   return async function (app: FastifyInstance): Promise<void> {
     const repo = new AgentRepository(getSql(config));
     const runRepo = new AgentRunRepository(getSql(config));
+    const credentialRepo = deps?.credentialRepo ?? new ProviderCredentialRepository(getSql(config));
+    const verifier = deps?.verifier ?? createSupabaseJwtVerifier(config);
 
     // Plano de ejecucion: BYOK por header o token de sesion efimero; el agentId (uuid)
     // identifica la config.
     app.post('/v1/run/:agentId', { bodyLimit: AGENT_LIMITS.maxBodyBytes }, async (request, reply) => {
       const { agentId } = request.params as { agentId: string };
-      // El token de sesion (emitido en /v1/session-tokens) trae la key cifrada y va atado a
-      // este agentId; cualquier fallo (corrupto, expirado, de otro agente) responde 401 generico.
+      // Fuente de la key, con PRECEDENCIA explicita. Las dos primeras ramas son el flujo del widget
+      // publico y NO cambian (no requieren identidad de usuario / JWT):
+      //  1) x-session-token (emitido en /v1/session-tokens): trae la key cifrada atada a este agentId;
+      //     cualquier fallo (corrupto, expirado, de otro agente) responde 401 generico.
+      //  2) x-provider-key: la key BYOK al momento.
+      //  3) x-credential-id: una credencial GUARDADA. A diferencia del widget, esto SI requiere
+      //     identidad de usuario (JWT Bearer) porque una credencial guardada solo es usable por su
+      //     owner; sin key al momento y con credentialId, resolvemos la credencial del usuario
+      //     autenticado. La config del agente sigue siendo autoritativa (providerId/model/baseUrl):
+      //     la credencial solo aporta la apiKey.
       const sessionToken = request.headers['x-session-token'];
+      const credentialIdHeader = request.headers['x-credential-id'];
       let apiKey: string;
       if (typeof sessionToken === 'string' && sessionToken !== '') {
         apiKey = verifySessionToken(sessionToken, agentId, config.SESSION_TOKEN_SECRET).providerKey;
       } else {
         const headerKey = request.headers['x-provider-key'];
-        if (typeof headerKey !== 'string' || headerKey.trim() === '') {
+        if (typeof headerKey === 'string' && headerKey.trim() !== '') {
+          apiKey = headerKey;
+        } else if (typeof credentialIdHeader === 'string' && credentialIdHeader.trim() !== '') {
+          const user = await requireUser(request, verifier);
+          const credential = await resolveStoredCredential(
+            credentialRepo,
+            user.id,
+            credentialIdHeader,
+            config.VAULT_SECRET,
+          );
+          apiKey = credential.apiKey;
+        } else {
           throw new AppError('VALIDATION_ERROR', 400, 'Missing x-provider-key header');
         }
-        apiKey = headerKey;
       }
       const agent = await repo.getById(agentId);
       if (!agent) {

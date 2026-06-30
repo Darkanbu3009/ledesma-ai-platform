@@ -90,7 +90,7 @@ beforeEach(async () => {
   runModelMock.mockReset();
   getByIdMock.mockReset();
   extractDocMock.mockReset();
-  app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: SESSION_SECRET }));
+  app = await buildServer(parseEnv({ NODE_ENV: 'test', DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: SESSION_SECRET, VAULT_SECRET: SESSION_SECRET }));
 });
 
 afterEach(() => {
