@@ -1,5 +1,12 @@
 import { z } from 'zod';
-import type { AgentEvent, Job, NormalizedMessage, TokenUsage } from '@ledesma-platform/shared';
+import { isRecipeJobPayload, parseRecipeJobPayload } from '@ledesma-platform/shared';
+import type {
+  AgentEvent,
+  Job,
+  NormalizedMessage,
+  RecipeStepPayload,
+  TokenUsage,
+} from '@ledesma-platform/shared';
 // IMPORTS DE TIPOS (type-only): el motor real (assembleAgentRun/runAgent), los repos y la boveda se
 // INYECTAN como dependencias (ver JobRunnerDeps). Asi este modulo no carga en runtime el backend ni sus
 // SDK de proveedor: los tests pasan fakes y nunca llaman al modelo. El cableado de las implementaciones
@@ -24,6 +31,16 @@ export const MAX_ATTEMPTS = 3;
 
 /** Base del backoff lineal entre reintentos (ms). El claim no retoma el job hasta que venza. */
 const RETRY_BACKOFF_BASE_MS = 5_000;
+
+/**
+ * Tope de contexto ACUMULADO de una receta, en caracteres. El historial conversacional crece paso a
+ * paso (el user + el assistant de cada paso); si al armar un paso el historial supera este tope,
+ * cortamos la receta con un fallo claro en vez de mandarle al modelo un historial gigante. Es un CORTE
+ * DE SEGURIDAD, no un resumen (Camino A: sin over-engineering). Espeja el presupuesto del cuerpo del
+ * backend (AGENT_LIMITS.maxTotalContentChars, ~50k tokens); se define LOCAL a proposito para no
+ * importar runtime del backend (este modulo se testea sin cargar sus SDK de proveedor).
+ */
+const RECIPE_MAX_CONTEXT_CHARS = 200_000;
 
 /**
  * Fallo PERMANENTE: no tiene sentido reintentar porque no se va a arreglar solo (hoy: tier
@@ -149,7 +166,7 @@ async function runAgentWithDeadline(
   input: AgentRunInput,
   executeTool: AssembledAgentRun['executeTool'],
   shutdownSignal?: AbortSignal,
-): Promise<{ stopReason: string; usage: TokenUsage }> {
+): Promise<{ stopReason: string; usage: TokenUsage; text: string }> {
   const controller = new AbortController();
   let timedOut = false;
   const onShutdown = (): void => controller.abort();
@@ -164,9 +181,14 @@ async function runAgentWithDeadline(
 
   let stopReason: string | null = null;
   let usage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  // Acumula el TEXTO generado por el agente (los text_delta) a lo largo de la corrida: es el OUTPUT del
+  // paso, que la ejecucion de recetas encadena como historial (mensaje assistant) al paso siguiente. El
+  // job simple lo ignora (mismo comportamiento observable: solo consume stopReason + usage).
+  let text = '';
   try {
     for await (const event of deps.runAgent({ ...input, signal: controller.signal }, { executeTool })) {
       if (controller.signal.aborted) break;
+      if (event.type === 'text_delta') text += event.text;
       if (event.type === 'stop') {
         stopReason = event.reason;
         usage = event.usage;
@@ -174,7 +196,7 @@ async function runAgentWithDeadline(
     }
     // Un stop natural manda: si el run llego a emitir su stop final, TERMINO ok aunque el abort por
     // timeout/apagado se haya disparado en el mismo instante (no re-encolar ni re-cobrar un run hecho).
-    if (stopReason !== null) return { stopReason, usage };
+    if (stopReason !== null) return { stopReason, usage, text };
     // Sin stop: el controller se aborto, o por timeout (transitorio) o por apagado (re-reclamable).
     if (timedOut) throw new RunTimeoutError(deps.config.runTimeoutMs);
     if (controller.signal.aborted) throw new ShutdownAbortError();
@@ -234,10 +256,20 @@ export async function processClaimedJob(
       );
     }
 
-    // 5. Mensajes del payload -> NormalizedMessage[].
+    // 5. RAMIFICAR simple vs receta. El gate/carga/resolucion/match de proveedor de arriba corren UNA
+    //    vez para AMBOS tipos. Un job de RECETA (payload con kind:'recipe', via el validador de 5.5a)
+    //    ejecuta N pasos EN SECUENCIA dentro del mismo job (encadenando el output de cada paso como
+    //    historial). Un job SIMPLE (sin kind:'recipe') sigue el camino de siempre, INTACTO. La deteccion
+    //    es INEQUIVOCA: un job simple nunca entra al bucle, uno de receta nunca al camino simple.
+    if (isRecipeJobPayload(job.payload)) {
+      await runRecipeJob(deps, job, agent, credential, shutdownSignal);
+      return;
+    }
+
+    // 6. Mensajes del payload -> NormalizedMessage[] (CAMINO SIMPLE, sin cambios).
     const { messages, maxIterations } = parsePayloadMessages(job.payload);
 
-    // 6. Ensamblar el run (executeTool + AgentRunInput) con el motor reutilizable, sin HTTP.
+    // 7. Ensamblar el run (executeTool + AgentRunInput) con el motor reutilizable, sin HTTP.
     const { input, executeTool } = deps.assembleAgentRun({
       agent,
       credential: { apiKey: credential.apiKey, baseUrl: credential.baseUrl },
@@ -251,7 +283,7 @@ export async function processClaimedJob(
       warn: (message) => logger.warn('aviso al ensamblar el run', { jobId: job.id, message }),
     });
 
-    // 7. Ejecutar con el deadline de pared propio del worker.
+    // 8. Ejecutar con el deadline de pared propio del worker.
     const { stopReason, usage } = await runAgentWithDeadline(deps, input, executeTool, shutdownSignal);
 
     await deps.jobs.markCompleted(job.id);
@@ -265,6 +297,137 @@ export async function processClaimedJob(
   } catch (error) {
     await handleFailure(deps, job, error);
   }
+}
+
+/** Construye un NormalizedMessage de un solo bloque de texto para el rol dado (user / assistant). */
+function textMessage(role: NormalizedMessage['role'], text: string): NormalizedMessage {
+  return { role, content: [{ type: 'text', text }] };
+}
+
+/** Suma los caracteres de todo el texto de un historial (para el corte de contexto acumulado). */
+function totalContentChars(messages: NormalizedMessage[]): number {
+  let total = 0;
+  for (const message of messages) {
+    for (const block of message.content) {
+      if (block.type === 'text') total += block.text.length;
+    }
+  }
+  return total;
+}
+
+/**
+ * Ejecuta un job de RECETA: un flujo LINEAL de N pasos DENTRO del mismo job (Camino A, sin checkpoint).
+ * Cada paso corre el MISMO agente/credencial con su PROPIO deadline y cap (una corrida de runAgent por
+ * paso, no comparten presupuesto), captura el OUTPUT de texto y lo inyecta como HISTORIAL
+ * CONVERSACIONAL (un mensaje assistant) en el paso siguiente, de modo que el paso i+1 ve toda la
+ * conversacion previa. El job ENTERO es la unidad de reintento: si un paso falla, se PROPAGA el error
+ * -> handleFailure lo reintenta / marca failed y, al re-reclamarse, la receta re-corre DESDE EL PASO 1
+ * (el last_error indica en que paso fallo, para diagnostico). Al completar TODOS los pasos:
+ * markCompleted. Corre DENTRO del try de processClaimedJob, asi que un job de receta roto no tumba el
+ * worker (lo cierra handleFailure como cualquier otro).
+ */
+async function runRecipeJob(
+  deps: JobRunnerDeps,
+  job: Job,
+  agent: AgentConfig,
+  credential: DecryptedProviderCredential,
+  shutdownSignal?: AbortSignal,
+): Promise<void> {
+  const { logger } = deps;
+
+  // Validar COMPLETAMENTE el snapshot embebido en el payload (kind ya es 'recipe'; falta la forma). Un
+  // payload de receta malformado es un fallo del intento (transitorio), como un payload simple invalido.
+  const parsed = parseRecipeJobPayload(job.payload);
+  if (!parsed.success) {
+    throw new Error(`payload de receta invalido: ${parsed.error}`);
+  }
+  const steps: RecipeStepPayload[] = parsed.data.steps;
+  const totalSteps = steps.length;
+
+  // Historial conversacional que se ACUMULA entre pasos. Arranca vacio; el paso 1 solo lleva su user.
+  const history: NormalizedMessage[] = [];
+  const usage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+
+  for (let i = 0; i < totalSteps; i++) {
+    const stepNumber = i + 1;
+    const step = steps[i];
+    if (step === undefined) continue; // inalcanzable (i < totalSteps); satisface noUncheckedIndexedAccess.
+
+    // Apagado ENTRE pasos: no arrancar un paso nuevo si ya llego la senal. Devuelve el job a 'pending'
+    // (re-reclamable) sin dejarlo running huerfano; al re-reclamarse re-corre desde el paso 1.
+    if (shutdownSignal?.aborted) throw new ShutdownAbortError();
+
+    // Mensajes de ESTE paso: el historial acumulado + la instruccion (user) del paso actual.
+    const messages: NormalizedMessage[] = [...history, textMessage('user', step.message)];
+
+    // Corte de seguridad de contexto: si el historial acumulado supera el tope, cortar la receta con un
+    // fallo claro (indicando el paso) en vez de mandar un historial gigante al modelo.
+    const chars = totalContentChars(messages);
+    if (chars > RECIPE_MAX_CONTEXT_CHARS) {
+      throw new Error(
+        `la receta excedio el limite de contexto acumulado en el paso ${stepNumber} de ${totalSteps}: ` +
+          `${chars} caracteres supera el tope de ${RECIPE_MAX_CONTEXT_CHARS}`,
+      );
+    }
+
+    // Ensamblar el run de ESTE paso: MISMO agente/credencial, su propio deadline/cap (por corrida).
+    const { input, executeTool } = deps.assembleAgentRun({
+      agent,
+      credential: { apiKey: credential.apiKey, baseUrl: credential.baseUrl },
+      messages,
+      nativeTools: {
+        ...(deps.config.webWorkerUrl !== undefined ? { workerUrl: deps.config.webWorkerUrl } : {}),
+        ...(deps.config.webWorkerSecret !== undefined ? { workerSecret: deps.config.webWorkerSecret } : {}),
+      },
+      limits: { maxTokens: deps.config.runMaxTokens, runTimeoutMs: deps.config.runTimeoutMs },
+      warn: (message) =>
+        logger.warn('aviso al ensamblar el run', { jobId: job.id, step: stepNumber, message }),
+    });
+
+    let stepResult: { stopReason: string; usage: TokenUsage; text: string };
+    try {
+      stepResult = await runAgentWithDeadline(deps, input, executeTool, shutdownSignal);
+    } catch (error) {
+      // El apagado se PROPAGA tal cual (route a re-pending, no gasta el intento como permanente).
+      // Cualquier otro fallo (timeout, error de proveedor, excepcion) hace fallar el JOB ENTERO, con el
+      // numero de paso en el last_error para diagnostico (el reintento igual re-corre desde el paso 1).
+      if (error instanceof ShutdownAbortError) throw error;
+      throw new Error(`fallo en el paso ${stepNumber} de ${totalSteps}: ${describeError(error)}`, {
+        cause: error,
+      });
+    }
+
+    // Un stop 'error' del proveedor tambien es un fallo del paso: encadenar un output erroneo es peor.
+    if (stepResult.stopReason === 'error') {
+      throw new Error(`fallo en el paso ${stepNumber} de ${totalSteps}: el run termino con stop 'error'`);
+    }
+
+    usage.inputTokens += stepResult.usage.inputTokens;
+    usage.outputTokens += stepResult.usage.outputTokens;
+
+    // Exito del paso: agregar al historial la instruccion (user) Y el OUTPUT (assistant) para que el
+    // paso i+1 vea la conversacion previa (encadenamiento conversacional).
+    history.push(textMessage('user', step.message));
+    history.push(textMessage('assistant', stepResult.text));
+
+    logger.info('paso de receta completado', {
+      jobId: job.id,
+      recipeId: parsed.data.recipeId,
+      step: stepNumber,
+      totalSteps,
+      stopReason: stepResult.stopReason,
+    });
+  }
+
+  await deps.jobs.markCompleted(job.id);
+  logger.info('receta completada', {
+    jobId: job.id,
+    agentId: job.agentId,
+    recipeId: parsed.data.recipeId,
+    steps: totalSteps,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+  });
 }
 
 /** Decide el cierre de un job que fallo: permanente / apagado / transitorio (reintento o definitivo). */

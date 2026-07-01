@@ -66,6 +66,44 @@ function hangingRun(input: AgentRunInput): AsyncIterable<AgentEvent> {
   return gen();
 }
 
+// --- Helpers de RECETA -------------------------------------------------------------------------
+
+/** Mensaje normalizado de un solo bloque de texto (para armar los historiales esperados). */
+function u(text: string): { role: 'user'; content: { type: 'text'; text: string }[] } {
+  return { role: 'user', content: [{ type: 'text', text }] };
+}
+function a(text: string): { role: 'assistant'; content: { type: 'text'; text: string }[] } {
+  return { role: 'assistant', content: [{ type: 'text', text }] };
+}
+
+/** Payload de un job de RECETA (kind:'recipe') con un paso por cada instruccion de texto. */
+function recipePayload(messages: string[]): unknown {
+  return { kind: 'recipe', recipeId: 'receta-1', steps: messages.map((message) => ({ message })) };
+}
+
+/**
+ * runAgent mock que devuelve un OUTPUT de texto DISTINTO por corrida (una por paso). Cada entrada puede
+ * ser un string (un solo text_delta) o un array de strings (varios text_delta, para probar que
+ * runAgentWithDeadline ACUMULA el texto). Cierra siempre con un stop natural (exito).
+ */
+function runAgentSequence(outputsPerCall: Array<string | string[]>): JobRunnerDeps['runAgent'] {
+  let call = 0;
+  return vi.fn(() => {
+    const spec = outputsPerCall[call] ?? '';
+    call += 1;
+    const chunks = Array.isArray(spec) ? spec : [spec];
+    return (async function* (): AsyncIterable<AgentEvent> {
+      for (const chunk of chunks) yield { type: 'text_delta', text: chunk };
+      yield { type: 'stop', reason: 'end_turn', usage: { inputTokens: 2, outputTokens: 3 } };
+    })();
+  });
+}
+
+/** Lee los messages con los que se llamo a assembleAgentRun en la corrida `callIndex`. */
+function assembledMessages(fn: unknown, callIndex: number): unknown {
+  return (callArgs(fn, callIndex)[0] as AssembleAgentRunParams).messages;
+}
+
 function makeDeps(overrides: Partial<JobRunnerDeps> = {}): JobRunnerDeps {
   return {
     jobs: {
@@ -256,5 +294,251 @@ describe('claimAndProcessOne', () => {
 
     await expect(claimAndProcessOne(deps)).resolves.toBe('processed');
     expect(deps.jobs.markPendingRetry).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('processClaimedJob - recetas (kind:recipe)', () => {
+  it('ejecuta los N pasos EN ORDEN, encadenando el output previo como historial, y markCompleted', async () => {
+    const deps = makeDeps({ runAgent: runAgentSequence(['salida-1', 'salida-2', 'salida-3']) });
+    const job = makeJob({ payload: recipePayload(['paso 1', 'paso 2', 'paso 3']) });
+
+    await processClaimedJob(deps, job);
+
+    // Una corrida (assembleAgentRun + runAgent) POR PASO, en orden.
+    expect(deps.assembleAgentRun).toHaveBeenCalledTimes(3);
+    expect(deps.runAgent).toHaveBeenCalledTimes(3);
+
+    // Paso 1: solo su user. Paso 2: user1 + assistant(output1) + user2. Paso 3: toda la conversacion.
+    expect(assembledMessages(deps.assembleAgentRun, 0)).toEqual([u('paso 1')]);
+    expect(assembledMessages(deps.assembleAgentRun, 1)).toEqual([u('paso 1'), a('salida-1'), u('paso 2')]);
+    expect(assembledMessages(deps.assembleAgentRun, 2)).toEqual([
+      u('paso 1'),
+      a('salida-1'),
+      u('paso 2'),
+      a('salida-2'),
+      u('paso 3'),
+    ]);
+
+    // Mismo agente/credencial en todos los pasos.
+    const p0 = callArgs(deps.assembleAgentRun, 0)[0] as AssembleAgentRunParams;
+    const p2 = callArgs(deps.assembleAgentRun, 2)[0] as AssembleAgentRunParams;
+    expect(p0.agent).toBe(FAKE_AGENT);
+    expect(p2.agent).toBe(FAKE_AGENT);
+    expect(p0.credential).toEqual({ apiKey: 'sk-secreta', baseUrl: null });
+
+    expect(deps.jobs.markCompleted).toHaveBeenCalledWith('job-1');
+    expect(deps.jobs.markFailed).not.toHaveBeenCalled();
+    expect(deps.jobs.markPendingRetry).not.toHaveBeenCalled();
+  });
+
+  it('captura de output: runAgentWithDeadline ACUMULA los text_delta y los inyecta como assistant', async () => {
+    // El paso 1 emite el output en DOS text_delta: el assistant del paso 2 debe traer la concatenacion.
+    const deps = makeDeps({ runAgent: runAgentSequence([['Hola, ', 'mundo'], 'ok']) });
+    const job = makeJob({ payload: recipePayload(['p1', 'p2']) });
+
+    await processClaimedJob(deps, job);
+
+    expect(assembledMessages(deps.assembleAgentRun, 1)).toEqual([u('p1'), a('Hola, mundo'), u('p2')]);
+    expect(deps.jobs.markCompleted).toHaveBeenCalledWith('job-1');
+  });
+
+  it('encadenamiento: el assistant inyectado en el paso i+1 CONTIENE el output del paso i', async () => {
+    const deps = makeDeps({ runAgent: runAgentSequence(['RESULTADO-DEL-PASO-1', 'ok']) });
+    const job = makeJob({ payload: recipePayload(['p1', 'p2']) });
+
+    await processClaimedJob(deps, job);
+
+    const m2 = assembledMessages(deps.assembleAgentRun, 1) as ReturnType<typeof a>[];
+    const assistant = m2.find((m) => m.role === 'assistant');
+    expect(assistant?.content[0]?.text).toBe('RESULTADO-DEL-PASO-1');
+  });
+
+  it('fallo en un paso INTERMEDIO (paso 2 de 3 lanza): el job entero falla, sin correr el paso 3', async () => {
+    let call = 0;
+    const runAgent = vi.fn(() => {
+      call += 1;
+      if (call === 2) throw new Error('boom en el paso 2');
+      return successRun();
+    });
+    const deps = makeDeps({ runAgent });
+    const job = makeJob({ payload: recipePayload(['p1', 'p2', 'p3']), attempts: 1 });
+
+    await processClaimedJob(deps, job);
+
+    // El paso 3 nunca se ensambla (la receta se corta en el fallo del paso 2).
+    expect(deps.assembleAgentRun).toHaveBeenCalledTimes(2);
+    // attempts < 3 -> reintento, con el last_error mencionando EN QUE paso fallo.
+    expect(deps.jobs.markPendingRetry).toHaveBeenCalledTimes(1);
+    expect(String(callArgs(deps.jobs.markPendingRetry)[1])).toContain('paso 2 de 3');
+    expect(deps.jobs.markCompleted).not.toHaveBeenCalled();
+    expect(deps.jobs.markFailed).not.toHaveBeenCalled();
+  });
+
+  it('fallo en un paso con attempts agotados -> failed definitivo, con el paso en el last_error', async () => {
+    let call = 0;
+    const runAgent = vi.fn(() => {
+      call += 1;
+      if (call === 2) throw new Error('boom en el paso 2');
+      return successRun();
+    });
+    const deps = makeDeps({ runAgent });
+    const job = makeJob({ payload: recipePayload(['p1', 'p2', 'p3']), attempts: MAX_ATTEMPTS });
+
+    await processClaimedJob(deps, job);
+
+    expect(deps.jobs.markFailed).toHaveBeenCalledTimes(1);
+    expect(String(callArgs(deps.jobs.markFailed)[1])).toContain('paso 2 de 3');
+    expect(deps.jobs.markPendingRetry).not.toHaveBeenCalled();
+  });
+
+  it('un stop "error" en un paso INTERMEDIO falla el job y corta la receta (no encadena el output erroneo)', async () => {
+    // El paso 1 completa ok; el paso 2 emite texto parcial y cierra con stop 'error'.
+    let call = 0;
+    const deps = makeDeps({
+      runAgent: vi.fn(() => {
+        call += 1;
+        if (call === 2) {
+          return (async function* (): AsyncIterable<AgentEvent> {
+            yield { type: 'text_delta', text: 'parcial-erroneo' };
+            yield { type: 'stop', reason: 'error', usage: { inputTokens: 1, outputTokens: 1 } };
+          })();
+        }
+        return successRun();
+      }),
+    });
+    const job = makeJob({ payload: recipePayload(['p1', 'p2', 'p3']), attempts: 1 });
+
+    await processClaimedJob(deps, job);
+
+    // El paso 2 fallo por stop 'error'; el paso 3 NUNCA se ensambla, asi que el output erroneo del
+    // paso 2 no se encadena hacia adelante como historial.
+    expect(deps.assembleAgentRun).toHaveBeenCalledTimes(2);
+    expect(deps.jobs.markPendingRetry).toHaveBeenCalledTimes(1);
+    expect(String(callArgs(deps.jobs.markPendingRetry)[1])).toContain('paso 2 de 3');
+    expect(deps.jobs.markCompleted).not.toHaveBeenCalled();
+  });
+
+  it('deadline POR PASO: un paso intermedio que se cuelga expira con su propio timer y falla en ese paso', async () => {
+    vi.useFakeTimers();
+    // El paso 1 completa al instante; el paso 2 se cuelga hasta el abort del deadline (su propio timer).
+    let call = 0;
+    const deps = makeDeps({
+      runAgent: vi.fn((input: AgentRunInput) => {
+        call += 1;
+        return call === 1 ? successRun() : hangingRun(input);
+      }),
+      config: { runTimeoutMs: 1_000, runMaxTokens: 1_000_000 },
+    });
+    const job = makeJob({ payload: recipePayload(['p1', 'p2', 'p3']), attempts: 1 });
+
+    const p = processClaimedJob(deps, job);
+    await vi.runAllTimersAsync();
+    await p;
+
+    // El paso 2 se ensamblo y se colgo; el paso 3 nunca (la receta se corta en el timeout del paso 2).
+    expect(deps.assembleAgentRun).toHaveBeenCalledTimes(2);
+    expect(deps.jobs.markPendingRetry).toHaveBeenCalledTimes(1);
+    const reason = String(callArgs(deps.jobs.markPendingRetry)[1]);
+    expect(reason).toContain('paso 2 de 3'); // el last_error indica el paso donde vencio el deadline
+    expect(reason).toContain('timeout');
+    // Cada paso arma y limpia SU PROPIO timer (clearTimeout en finally): sin timers colgados al final.
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('acumula el uso de tokens de TODOS los pasos y lo registra al completar la receta', async () => {
+    // runAgentSequence reporta { inputTokens: 2, outputTokens: 3 } por corrida; 3 pasos -> 6 / 9.
+    const deps = makeDeps({ runAgent: runAgentSequence(['a', 'b', 'c']) });
+    const job = makeJob({ payload: recipePayload(['p1', 'p2', 'p3']) });
+
+    await processClaimedJob(deps, job);
+
+    const infoCalls = (deps.logger.info as ReturnType<typeof vi.fn>).mock.calls as Array<
+      [string, Record<string, unknown>]
+    >;
+    const completed = infoCalls.find((c) => c[0] === 'receta completada');
+    expect(completed?.[1]).toMatchObject({ steps: 3, inputTokens: 6, outputTokens: 9 });
+    expect(deps.jobs.markCompleted).toHaveBeenCalledWith('job-1');
+  });
+
+  it('limite de contexto acumulado: un historial que supera el tope corta con fallo claro', async () => {
+    // Cada paso genera ~120k chars; el historial acumulado supera 200k al armar el paso 3.
+    const big = 'x'.repeat(120_000);
+    const deps = makeDeps({ runAgent: runAgentSequence([big, big, big]) });
+    const job = makeJob({ payload: recipePayload(['p1', 'p2', 'p3']), attempts: 1 });
+
+    await processClaimedJob(deps, job);
+
+    // Pasos 1 y 2 se ensamblan; el 3 se corta ANTES de llamar al modelo.
+    expect(deps.assembleAgentRun).toHaveBeenCalledTimes(2);
+    expect(deps.jobs.markPendingRetry).toHaveBeenCalledTimes(1);
+    const reason = String(callArgs(deps.jobs.markPendingRetry)[1]);
+    expect(reason).toContain('limite de contexto acumulado');
+    expect(reason).toContain('paso 3');
+    expect(deps.jobs.markCompleted).not.toHaveBeenCalled();
+  });
+
+  it('payload de receta malformado (kind:recipe pero sin pasos) -> fallo del intento, sin ensamblar', async () => {
+    const deps = makeDeps();
+    const job = makeJob({ payload: { kind: 'recipe', recipeId: 'r1', steps: [] }, attempts: 1 });
+
+    await processClaimedJob(deps, job);
+
+    expect(deps.jobs.markPendingRetry).toHaveBeenCalledTimes(1);
+    expect(String(callArgs(deps.jobs.markPendingRetry)[1])).toContain('payload de receta invalido');
+    expect(deps.assembleAgentRun).not.toHaveBeenCalled();
+  });
+
+  it('el gate por tier aplica al job de receta UNA vez, antes del bucle: owner no autonomous -> failed', async () => {
+    const deps = makeDeps({ getProfileTier: vi.fn(async () => 'free' as const) });
+    const job = makeJob({ payload: recipePayload(['p1', 'p2']), attempts: 1 });
+
+    await processClaimedJob(deps, job);
+
+    expect(deps.jobs.markFailed).toHaveBeenCalledTimes(1);
+    expect(String(callArgs(deps.jobs.markFailed)[1])).toContain('autonomous');
+    // Fallo permanente antes de ramificar: ni siquiera se ensambla ni se corre un paso.
+    expect(deps.jobs.markPendingRetry).not.toHaveBeenCalled();
+    expect(deps.assembleAgentRun).not.toHaveBeenCalled();
+    expect(deps.runAgent).not.toHaveBeenCalled();
+  });
+
+  it('apagado ENTRE pasos: el paso en curso termina y el siguiente no arranca; job vuelve a pending', async () => {
+    const controller = new AbortController();
+    // El paso 1 completa (emite su stop); recien despues del ultimo yield llega el apagado, asi el
+    // guard del paso 2 lo detecta y corta sin dejar el job running huerfano.
+    const runAgent = vi.fn(
+      () =>
+        (async function* (): AsyncIterable<AgentEvent> {
+          yield { type: 'text_delta', text: 'salida-1' };
+          yield { type: 'stop', reason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } };
+          controller.abort();
+        })(),
+    );
+    const deps = makeDeps({ runAgent });
+    // attempts agotados: aun asi el apagado NO debe marcar failed.
+    const job = makeJob({ payload: recipePayload(['p1', 'p2', 'p3']), attempts: MAX_ATTEMPTS });
+
+    await processClaimedJob(deps, job, controller.signal);
+
+    expect(deps.assembleAgentRun).toHaveBeenCalledTimes(1); // solo el paso 1
+    expect(deps.jobs.markPendingRetry).toHaveBeenCalledTimes(1);
+    expect(deps.jobs.markFailed).not.toHaveBeenCalled();
+    expect(deps.jobs.markCompleted).not.toHaveBeenCalled();
+  });
+
+  it('no-regresion: un job SIMPLE (sin kind:recipe) no entra al bucle -> ejecuta una sola vez', async () => {
+    const deps = makeDeps();
+    const job = makeJob(); // payload simple { messages: [...] }
+
+    await processClaimedJob(deps, job);
+
+    expect(deps.assembleAgentRun).toHaveBeenCalledTimes(1);
+    expect(deps.runAgent).toHaveBeenCalledTimes(1);
+    expect(assembledMessages(deps.assembleAgentRun, 0)).toEqual([
+      { role: 'user', content: [{ type: 'text', text: 'hola' }] },
+    ]);
+    expect(deps.jobs.markCompleted).toHaveBeenCalledWith('job-1');
+    expect(deps.jobs.markFailed).not.toHaveBeenCalled();
+    expect(deps.jobs.markPendingRetry).not.toHaveBeenCalled();
   });
 });
