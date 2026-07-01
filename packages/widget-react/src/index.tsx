@@ -15,6 +15,8 @@ declare module 'react' {
         'session-token'?: string;
         'provider-key'?: string;
         placeholder?: string;
+        'ai-notice'?: string;
+        'privacy-url'?: string;
       };
     }
   }
@@ -27,6 +29,10 @@ export interface LedesmaAgentProps {
   providerKey?: string;
   title?: string;
   placeholder?: string;
+  /** Texto de la divulgacion de IA (EU AI Act Art 50). Si se omite, el widget muestra un texto por defecto. */
+  aiNotice?: string;
+  /** URL del aviso de privacidad para enlazar desde la divulgacion. Solo http(s) o rutas relativas. */
+  privacyUrl?: string;
   className?: string;
   style?: CSSProperties;
 }
@@ -44,6 +50,8 @@ export function LedesmaAgent({
   providerKey,
   title,
   placeholder,
+  aiNotice,
+  privacyUrl,
   className,
   style,
 }: LedesmaAgentProps): ReactElement {
@@ -59,12 +67,14 @@ export function LedesmaAgent({
       'provider-key': providerKey,
       title,
       placeholder,
+      'ai-notice': aiNotice,
+      'privacy-url': privacyUrl,
     };
     for (const [name, value] of Object.entries(attributes)) {
       if (value === undefined) element.removeAttribute(name);
       else element.setAttribute(name, value);
     }
-  }, [endpoint, tokenUrl, sessionToken, providerKey, title, placeholder]);
+  }, [endpoint, tokenUrl, sessionToken, providerKey, title, placeholder, aiNotice, privacyUrl]);
 
   return <ledesma-agent ref={ref} class={className} style={style} />;
 }

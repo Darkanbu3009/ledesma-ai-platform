@@ -61,4 +61,20 @@ describe('LedesmaAgent', () => {
     renderAgent({ endpoint });
     expect(element.hasAttribute('provider-key')).toBe(false);
   });
+
+  it('mapea aiNotice/privacyUrl (divulgacion de IA) a los atributos ai-notice/privacy-url', () => {
+    const element = renderAgent({
+      endpoint,
+      aiNotice: 'Chat con IA',
+      privacyUrl: 'https://ejemplo.com/privacidad',
+    });
+    expect(element.getAttribute('ai-notice')).toBe('Chat con IA');
+    expect(element.getAttribute('privacy-url')).toBe('https://ejemplo.com/privacidad');
+  });
+
+  it('sin aiNotice/privacyUrl no crea esos atributos (el widget usa su divulgacion por defecto)', () => {
+    const element = renderAgent({ endpoint });
+    expect(element.hasAttribute('ai-notice')).toBe(false);
+    expect(element.hasAttribute('privacy-url')).toBe(false);
+  });
 });

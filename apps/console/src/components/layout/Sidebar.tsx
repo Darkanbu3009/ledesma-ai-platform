@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Bot, CalendarClock, ChefHat, KeyRound, LogOut, Webhook } from 'lucide-react';
+import { Bot, CalendarClock, ChefHat, KeyRound, LogOut, ShieldCheck, Webhook } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../auth/useAuth';
 import { BrandMark } from '../BrandMark';
@@ -10,6 +10,7 @@ const navItems = [
   { to: '/tareas', label: 'Tareas', icon: CalendarClock },
   { to: '/triggers', label: 'Triggers', icon: Webhook },
   { to: '/credenciales', label: 'Credenciales', icon: KeyRound },
+  { to: '/privacidad', label: 'Privacidad', icon: ShieldCheck },
 ];
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {

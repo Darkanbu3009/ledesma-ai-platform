@@ -25,6 +25,7 @@ import type {
   RegistrationResult,
   RegistrationState,
 } from './registration';
+import type { Consent, CreateConsentInput, CreateDataRequestInput, DataRequest } from './privacy';
 
 /** Registra al usuario actual como individuo: queda activo de inmediato. */
 export function useRegisterIndividual() {
@@ -54,6 +55,40 @@ export function useRegisterOrganization() {
     onSuccess: (result) => {
       qc.setQueryData<RegistrationState>(['me'], result);
     },
+  });
+}
+
+/**
+ * Registra la aceptacion de uno o mas documentos (consentimiento versionado). Recibe un array (uno por
+ * documento faltante) y los envia todos; refresca el estado de consentimiento al terminar. La aceptacion
+ * es EXPLICITA: la dispara el usuario al marcar el check y confirmar (nunca automatica).
+ */
+export function useAcceptConsents() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (inputs: CreateConsentInput[]) =>
+      Promise.all(
+        inputs.map((input) =>
+          apiFetch<{ consent: Consent }>('/v1/consents', {
+            method: 'POST',
+            body: JSON.stringify(input),
+          }).then((r) => r.consent),
+        ),
+      ),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['consents'] }),
+  });
+}
+
+/** Crea una solicitud de derechos del titular (ARCO/GDPR). Refresca la lista al crearla. */
+export function useCreateDataRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateDataRequestInput) =>
+      apiFetch<{ request: DataRequest }>('/v1/data-requests', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }).then((r) => r.request),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['data-requests'] }),
   });
 }
 

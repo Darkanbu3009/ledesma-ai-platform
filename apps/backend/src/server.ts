@@ -15,6 +15,10 @@ import { triggerRoutes } from './routes/triggers.js';
 import { incomingTriggerRoutes } from './routes/incoming-triggers.js';
 import { sessionTokenRoutes } from './routes/session-tokens.js';
 import { registrationRoutes } from './routes/registration.js';
+import { consentRoutes } from './routes/consents.js';
+import { dataSubjectRequestRoutes } from './routes/data-requests.js';
+import { processingRecordRoutes } from './routes/processing-records.js';
+import { retentionRoutes } from './routes/retention.js';
 import { securityPlugin } from './plugins/security.js';
 import { registerErrorHandler } from './errors/error-handler.js';
 import { loggerRedaction, loggerSerializers } from './logger.js';
@@ -73,6 +77,12 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
   await app.register(incomingTriggerRoutes(config));
   await app.register(sessionTokenRoutes(config));
   await app.register(registrationRoutes(config));
+  // Andamiaje de privacidad y cumplimiento (Fase 5.6): consentimiento versionado, derechos del titular
+  // (ARCO), registro de tratamiento y retencion. Aditivo: no toca los flujos anteriores.
+  await app.register(consentRoutes(config));
+  await app.register(dataSubjectRequestRoutes(config));
+  await app.register(processingRecordRoutes(config));
+  await app.register(retentionRoutes(config));
 
   return app;
 }
