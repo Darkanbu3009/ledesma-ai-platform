@@ -1,11 +1,12 @@
 import { NavLink } from 'react-router-dom';
-import { Bot, CalendarClock, KeyRound, LogOut, Webhook } from 'lucide-react';
+import { Bot, CalendarClock, ChefHat, KeyRound, LogOut, Webhook } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../auth/useAuth';
 import { BrandMark } from '../BrandMark';
 
 const navItems = [
   { to: '/agentes', label: 'Agentes', icon: Bot },
+  { to: '/recetas', label: 'Recetas', icon: ChefHat },
   { to: '/tareas', label: 'Tareas', icon: CalendarClock },
   { to: '/triggers', label: 'Triggers', icon: Webhook },
   { to: '/credenciales', label: 'Credenciales', icon: KeyRound },

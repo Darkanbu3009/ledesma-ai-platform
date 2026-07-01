@@ -197,4 +197,16 @@ export class RecipeRepository {
     `;
     return rows.length > 0;
   }
+
+  /**
+   * Marca que la receta materializo una corrida (last_run_at = now()). Lo llama el endpoint de
+   * ejecucion manual (POST /v1/recipes/:id/run) DESPUES de encolar el job, igual que markTriggered en
+   * los triggers. Acotado por id + owner_id: una receta ajena no se toca.
+   */
+  async markRunNow(id: string, ownerId: string): Promise<void> {
+    await this.sql`
+      update recipes set last_run_at = now(), updated_at = now()
+      where id = ${id} and owner_id = ${ownerId}
+    `;
+  }
 }

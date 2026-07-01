@@ -6,6 +6,7 @@ import type { AgentUsage, UsageRange } from './usage';
 import type { RegistrationState } from './registration';
 import type { ScheduledTask } from './scheduled-tasks';
 import type { Trigger } from './triggers';
+import type { Recipe, RecipeSummary } from './recipes';
 
 /** Estado de registro del usuario actual (perfil, organizacion, plan y uso). */
 export function useMe() {
@@ -45,6 +46,23 @@ export function useTriggers() {
   return useQuery({
     queryKey: ['triggers'],
     queryFn: () => apiFetch<{ triggers: Trigger[] }>('/v1/triggers').then((r) => r.triggers),
+  });
+}
+
+/** Lista las recetas del usuario (resumen con stepCount, sin los pasos). Mas nuevas primero. */
+export function useRecipes() {
+  return useQuery({
+    queryKey: ['recipes'],
+    queryFn: () => apiFetch<{ recipes: RecipeSummary[] }>('/v1/recipes').then((r) => r.recipes),
+  });
+}
+
+/** Detalle de UNA receta CON sus pasos (para editar). Solo corre cuando hay un id presente. */
+export function useRecipe(id: string | undefined) {
+  return useQuery({
+    queryKey: ['recipes', id],
+    queryFn: () => apiFetch<{ recipe: Recipe }>(`/v1/recipes/${id}`).then((r) => r.recipe),
+    enabled: Boolean(id),
   });
 }
 

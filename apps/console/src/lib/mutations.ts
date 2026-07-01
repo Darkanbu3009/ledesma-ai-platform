@@ -18,6 +18,7 @@ import type {
   TriggerUpdate,
   UpdateTriggerResponse,
 } from './triggers';
+import type { CreateRecipeInput, Recipe, RecipePatch, RunRecipeResult } from './recipes';
 import type {
   IndividualInput,
   OrganizationInput,
@@ -216,6 +217,59 @@ export function useDeleteTrigger() {
   return useMutation({
     mutationFn: (id: string) => apiFetch<void>(`/v1/triggers/${id}`, { method: 'DELETE' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['triggers'] }),
+  });
+}
+
+/** Crea una receta (POST /v1/recipes). Refresca la lista al crearla. */
+export function useCreateRecipe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateRecipeInput) =>
+      apiFetch<{ recipe: Recipe }>('/v1/recipes', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }).then((r) => r.recipe),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['recipes'] }),
+  });
+}
+
+/**
+ * Edita una receta (PATCH): name/description/steps (form de edicion) o activar/pausar (isActive, toggle
+ * de la lista). Refresca la lista y el detalle de esa receta.
+ */
+export function useUpdateRecipe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: RecipePatch }) =>
+      apiFetch<{ recipe: Recipe }>(`/v1/recipes/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }).then((r) => r.recipe),
+    onSuccess: (_recipe, { id }) => {
+      void qc.invalidateQueries({ queryKey: ['recipes'] });
+      void qc.invalidateQueries({ queryKey: ['recipes', id] });
+    },
+  });
+}
+
+/** Borra una receta (DELETE). Refresca la lista al eliminarla. */
+export function useDeleteRecipe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/v1/recipes/${id}`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['recipes'] }),
+  });
+}
+
+/**
+ * EJECUTAR AHORA una receta (POST /v1/recipes/:id/run): encola un job; el worker la corre en segundo
+ * plano (asincrono, sin resultado inline). Refresca la lista para reflejar el nuevo last_run_at.
+ */
+export function useRunRecipe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<RunRecipeResult>(`/v1/recipes/${id}/run`, { method: 'POST' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['recipes'] }),
   });
 }
 
