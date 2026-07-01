@@ -28,8 +28,6 @@ export function ConsentScreen({ state }: { state: ConsentsState }) {
     acceptConsents.mutate(pendingConsentBodies(state));
   }
 
-  const includesTerms = state.missing.includes('terms');
-
   return (
     <div className="flex min-h-screen items-center justify-center bg-cream px-4 py-10">
       <div className="w-full max-w-lg">
@@ -80,20 +78,6 @@ export function ConsentScreen({ state }: { state: ConsentsState }) {
             >
               aviso de privacidad integral
             </a>
-            {includesTerms && (
-              <>
-                {' '}
-                y los{' '}
-                <a
-                  href="/aviso-de-privacidad"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-brasa hover:underline"
-                >
-                  terminos
-                </a>
-              </>
-            )}
             .
           </div>
 
@@ -106,8 +90,7 @@ export function ConsentScreen({ state }: { state: ConsentsState }) {
               className="mt-0.5 h-4 w-4 flex-none accent-brasa"
             />
             <span className="text-sm text-ink">
-              He leido y acepto el Aviso de Privacidad
-              {includesTerms ? ' y los Terminos' : ''} de la plataforma.
+              He leido y acepto el Aviso de Privacidad de la plataforma.
             </span>
           </label>
 

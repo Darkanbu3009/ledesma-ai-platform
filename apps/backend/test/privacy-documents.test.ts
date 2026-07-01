@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   CURRENT_DOCUMENT_VERSIONS,
-  DOCUMENT_TYPES,
+  ENFORCED_DOCUMENT_TYPES,
   isDocumentType,
   missingConsents,
   type DocumentType,
@@ -19,15 +19,20 @@ describe('privacy/documents', () => {
   });
 
   describe('missingConsents', () => {
-    it('sin ningun consentimiento -> faltan TODOS los documentos vigentes', () => {
+    it('sin ningun consentimiento -> faltan TODOS los documentos EXIGIDOS', () => {
       const missing = missingConsents(new Map());
-      expect(missing).toEqual([...DOCUMENT_TYPES]);
+      expect(missing).toEqual([...ENFORCED_DOCUMENT_TYPES]);
     });
 
-    it('con la version VIGENTE aceptada -> no falta ese documento', () => {
+    it('solo se exige privacy_notice hoy (terms es tipo valido pero no se fuerza aun)', () => {
+      // Sin aceptar nada, terms NO aparece en missing aunque exista como DocumentType.
+      expect(missingConsents(new Map())).not.toContain('terms');
+      expect(ENFORCED_DOCUMENT_TYPES).toEqual(['privacy_notice']);
+    });
+
+    it('con la version VIGENTE del aviso aceptada -> no falta ese documento', () => {
       const accepted = new Map<DocumentType, Set<string>>([
         ['privacy_notice', new Set([CURRENT_DOCUMENT_VERSIONS.privacy_notice])],
-        ['terms', new Set([CURRENT_DOCUMENT_VERSIONS.terms])],
       ]);
       expect(missingConsents(accepted)).toEqual([]);
     });

@@ -13,11 +13,16 @@
 // [REVISION LEGAL PENDIENTE]. Subir una version aqui (cuando el abogado cambie el aviso) fuerza la
 // re-aceptacion de todos los usuarios de forma automatica.
 
-/** Tipos de documento que la plataforma versiona y para los que registra consentimiento. */
+/** Tipos de documento que la plataforma versiona y para los que puede registrar consentimiento. */
 export type DocumentType = 'privacy_notice' | 'terms';
 
-/** Lista de tipos de documento (para iterar). */
-export const DOCUMENT_TYPES: readonly DocumentType[] = ['privacy_notice', 'terms'];
+/**
+ * Tipos de documento cuyo consentimiento el GATE EXIGE hoy. 'terms' es un DocumentType valido (la tabla
+ * consents y el endpoint lo aceptan, para cuando exista una pagina de Terminos que el usuario pueda
+ * revisar), pero AUN NO se exige: forzar aceptar unos terminos inexistentes/irrevisables romperia el
+ * consentimiento informado. Al publicar la pagina de Terminos, agregar 'terms' aqui.
+ */
+export const ENFORCED_DOCUMENT_TYPES: readonly DocumentType[] = ['privacy_notice'];
 
 /**
  * Version VIGENTE de cada documento. Fecha ISO (YYYY-MM-DD) como esquema de versionado legible: la fecha
@@ -41,7 +46,7 @@ export function isDocumentType(value: unknown): value is DocumentType {
  */
 export function missingConsents(acceptedByType: Map<DocumentType, Set<string>>): DocumentType[] {
   const missing: DocumentType[] = [];
-  for (const type of DOCUMENT_TYPES) {
+  for (const type of ENFORCED_DOCUMENT_TYPES) {
     const current = CURRENT_DOCUMENT_VERSIONS[type];
     const accepted = acceptedByType.get(type);
     if (accepted === undefined || !accepted.has(current)) {

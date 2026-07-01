@@ -132,11 +132,12 @@ describe('GET /v1/consents/me', () => {
     expect(body.current).toEqual(CURRENT_DOCUMENT_VERSIONS);
   });
 
-  it('sin ningun consentimiento -> missing incluye privacy_notice y terms', async () => {
+  it('sin ningun consentimiento -> missing exige solo privacy_notice (terms no se fuerza aun)', async () => {
     listConsentsByOwner.mockResolvedValue([]);
     const res = await app.inject({ method: 'GET', url: '/v1/consents/me', headers: { authorization: 'Bearer valid-user-2' } });
     expect(res.statusCode).toBe(200);
-    expect(res.json().missing).toEqual(['privacy_notice', 'terms']);
+    expect(res.json().missing).toEqual(['privacy_notice']);
+    expect(res.json().missing).not.toContain('terms');
   });
 
   it('con una version VIEJA -> ese documento sigue en missing (re-aceptar por cambio de version)', async () => {

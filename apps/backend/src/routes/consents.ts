@@ -8,7 +8,7 @@ import { requireUser } from '../auth/require-user.js';
 import { ConsentRepository } from '../privacy/consent-repository.js';
 import {
   CURRENT_DOCUMENT_VERSIONS,
-  DOCUMENT_TYPES,
+  ENFORCED_DOCUMENT_TYPES,
   missingConsents,
   type DocumentType,
 } from '../privacy/documents.js';
@@ -91,7 +91,7 @@ export function consentRoutes(
       return reply.send({
         consents,
         current: CURRENT_DOCUMENT_VERSIONS,
-        documentTypes: DOCUMENT_TYPES,
+        documentTypes: ENFORCED_DOCUMENT_TYPES,
         missing,
       });
     });
