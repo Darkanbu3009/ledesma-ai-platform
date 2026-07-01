@@ -10,6 +10,7 @@ import { toolCatalogRoutes } from './routes/tools.js';
 import { configuratorRoutes } from './routes/configurator.js';
 import { credentialRoutes } from './routes/credentials.js';
 import { scheduledTaskRoutes } from './routes/scheduled-tasks.js';
+import { recipeRoutes } from './routes/recipes.js';
 import { triggerRoutes } from './routes/triggers.js';
 import { incomingTriggerRoutes } from './routes/incoming-triggers.js';
 import { sessionTokenRoutes } from './routes/session-tokens.js';
@@ -67,6 +68,7 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
   await app.register(configuratorRoutes(config));
   await app.register(credentialRoutes(config));
   await app.register(scheduledTaskRoutes(config));
+  await app.register(recipeRoutes(config));
   await app.register(triggerRoutes(config));
   await app.register(incomingTriggerRoutes(config));
   await app.register(sessionTokenRoutes(config));
