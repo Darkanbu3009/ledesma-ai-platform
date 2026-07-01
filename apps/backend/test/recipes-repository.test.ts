@@ -213,4 +213,16 @@ describe('RecipeRepository', () => {
       expect(await new RecipeRepository(makeSqlReturning([])).deleteRecipeForOwner(RECIPE_ID, 'user-2')).toBe(false);
     });
   });
+
+  describe('markRunNow', () => {
+    it('actualiza last_run_at = now() acotado por id + owner_id', async () => {
+      const sql = makeSqlReturning([]);
+      await new RecipeRepository(sql).markRunNow(RECIPE_ID, 'user-1');
+      const text = sqlText(sql);
+      expect(text).toContain('update recipes set');
+      expect(text).toContain('last_run_at = now()');
+      expect(text).toMatch(/where id = <param> and owner_id = <param>/);
+      expect(sqlValues(sql)).toEqual([RECIPE_ID, 'user-1']);
+    });
+  });
 });

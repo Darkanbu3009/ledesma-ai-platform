@@ -32,6 +32,7 @@ const listRecipesByOwner = vi.fn();
 const getRecipeForOwner = vi.fn();
 const updateRecipeForOwner = vi.fn();
 const deleteRecipeForOwner = vi.fn();
+const markRunNow = vi.fn();
 const getByIdForOwner = vi.fn();
 const existsForOwner = vi.fn();
 const getProfileTier = vi.fn();
@@ -60,7 +61,7 @@ async function makeApp(): Promise<FastifyInstance> {
   await app.register(
     recipeRoutes(config, {
       verifier,
-      recipeRepo: { createRecipe, listRecipesByOwner, getRecipeForOwner, updateRecipeForOwner, deleteRecipeForOwner },
+      recipeRepo: { createRecipe, listRecipesByOwner, getRecipeForOwner, updateRecipeForOwner, deleteRecipeForOwner, markRunNow },
       agentRepo: { getByIdForOwner },
       credentialRepo: { existsForOwner },
       registrationRepo: { getProfileTier },

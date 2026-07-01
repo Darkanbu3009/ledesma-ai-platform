@@ -8,6 +8,7 @@ import { ConfiguratorPage } from './pages/ConfiguratorPage';
 import { CredentialsPage } from './pages/CredentialsPage';
 import { ScheduledTasksPage } from './pages/ScheduledTasksPage';
 import { TriggersPage } from './pages/TriggersPage';
+import { RecipesPage } from './pages/RecipesPage';
 import { PlaygroundPage } from './pages/PlaygroundPage';
 import { ConnectPage } from './pages/ConnectPage';
 import { UsagePage } from './pages/UsagePage';
@@ -39,6 +40,7 @@ export function App() {
             <Route path="/credenciales" element={<CredentialsPage />} />
             <Route path="/tareas" element={<ScheduledTasksPage />} />
             <Route path="/triggers" element={<TriggersPage />} />
+            <Route path="/recetas" element={<RecipesPage />} />
           </Route>
         </Route>
       </Route>
