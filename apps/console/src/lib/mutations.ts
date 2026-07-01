@@ -13,6 +13,12 @@ import type {
   ScheduledTaskPatch,
 } from './scheduled-tasks';
 import type {
+  CreateTriggerInput,
+  CreateTriggerResponse,
+  TriggerUpdate,
+  UpdateTriggerResponse,
+} from './triggers';
+import type {
   IndividualInput,
   OrganizationInput,
   RegistrationResult,
@@ -169,6 +175,47 @@ export function useDeleteScheduledTask() {
     mutationFn: (id: string) =>
       apiFetch<void>(`/v1/scheduled-tasks/${id}`, { method: 'DELETE' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['scheduled-tasks'] }),
+  });
+}
+
+/**
+ * Crea un trigger por evento (POST /v1/triggers). Devuelve la RESPUESTA COMPLETA (no solo el trigger):
+ * incluye el secreto/URL con token que se muestra UNA sola vez. Refresca la lista al crearlo.
+ */
+export function useCreateTrigger() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateTriggerInput) =>
+      apiFetch<CreateTriggerResponse>('/v1/triggers', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['triggers'] }),
+  });
+}
+
+/**
+ * Edita un trigger (PATCH): activar/pausar (isActive) o ROTAR el secreto/token (rotate). Devuelve la
+ * respuesta completa: al rotar trae el material nuevo (una sola vez). Refresca la lista.
+ */
+export function useUpdateTrigger() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, update }: { id: string; update: TriggerUpdate }) =>
+      apiFetch<UpdateTriggerResponse>(`/v1/triggers/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(update),
+      }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['triggers'] }),
+  });
+}
+
+/** Borra un trigger (DELETE). Refresca la lista al eliminarlo. */
+export function useDeleteTrigger() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/v1/triggers/${id}`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['triggers'] }),
   });
 }
 
