@@ -1,11 +1,12 @@
 import { NavLink } from 'react-router-dom';
-import { Bot, KeyRound, LogOut } from 'lucide-react';
+import { Bot, CalendarClock, KeyRound, LogOut } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../auth/useAuth';
 import { BrandMark } from '../BrandMark';
 
 const navItems = [
   { to: '/agentes', label: 'Agentes', icon: Bot },
+  { to: '/tareas', label: 'Tareas', icon: CalendarClock },
   { to: '/credenciales', label: 'Credenciales', icon: KeyRound },
 ];
 
