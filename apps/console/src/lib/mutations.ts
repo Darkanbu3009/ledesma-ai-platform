@@ -8,6 +8,11 @@ import type { CredentialFormParsed } from './credential-schema';
 import { toCredentialApiInput } from './credential-schema';
 import { specToAgentInput, type AgentSpecDraft } from './configurator';
 import type {
+  CreateScheduledTaskInput,
+  ScheduledTask,
+  ScheduledTaskPatch,
+} from './scheduled-tasks';
+import type {
   IndividualInput,
   OrganizationInput,
   RegistrationResult,
@@ -128,6 +133,42 @@ export function useDeleteAgent() {
   return useMutation({
     mutationFn: (id: string) => apiFetch<void>(`/v1/agents/${id}`, { method: 'DELETE' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['agents'] }),
+  });
+}
+
+/** Programa una tarea nueva (POST /v1/scheduled-tasks). Refresca la lista al crearla. */
+export function useCreateScheduledTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateScheduledTaskInput) =>
+      apiFetch<{ task: ScheduledTask }>('/v1/scheduled-tasks', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }).then((r) => r.task),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['scheduled-tasks'] }),
+  });
+}
+
+/** Edita una tarea (PATCH): activar/pausar (isActive) o cambiar cron/payload. Refresca la lista. */
+export function useUpdateScheduledTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: ScheduledTaskPatch }) =>
+      apiFetch<{ task: ScheduledTask }>(`/v1/scheduled-tasks/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }).then((r) => r.task),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['scheduled-tasks'] }),
+  });
+}
+
+/** Borra una tarea (DELETE). Refresca la lista al eliminarla. */
+export function useDeleteScheduledTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/v1/scheduled-tasks/${id}`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['scheduled-tasks'] }),
   });
 }
 

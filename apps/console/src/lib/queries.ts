@@ -4,6 +4,7 @@ import type { AgentConfig } from './agents';
 import type { ProviderCredential } from './credentials';
 import type { AgentUsage, UsageRange } from './usage';
 import type { RegistrationState } from './registration';
+import type { ScheduledTask } from './scheduled-tasks';
 
 /** Estado de registro del usuario actual (perfil, organizacion, plan y uso). */
 export function useMe() {
@@ -26,6 +27,15 @@ export function useCredentials() {
     queryKey: ['credentials'],
     queryFn: () =>
       apiFetch<{ credentials: ProviderCredential[] }>('/v1/credentials').then((r) => r.credentials),
+  });
+}
+
+/** Lista las tareas programadas del usuario (mas nuevas primero, tal como las ordena el backend). */
+export function useScheduledTasks() {
+  return useQuery({
+    queryKey: ['scheduled-tasks'],
+    queryFn: () =>
+      apiFetch<{ tasks: ScheduledTask[] }>('/v1/scheduled-tasks').then((r) => r.tasks),
   });
 }
 
