@@ -10,11 +10,13 @@ import { toolCatalogRoutes } from './routes/tools.js';
 import { configuratorRoutes } from './routes/configurator.js';
 import { credentialRoutes } from './routes/credentials.js';
 import { scheduledTaskRoutes } from './routes/scheduled-tasks.js';
+import { triggerRoutes } from './routes/triggers.js';
+import { incomingTriggerRoutes } from './routes/incoming-triggers.js';
 import { sessionTokenRoutes } from './routes/session-tokens.js';
 import { registrationRoutes } from './routes/registration.js';
 import { securityPlugin } from './plugins/security.js';
 import { registerErrorHandler } from './errors/error-handler.js';
-import { loggerRedaction } from './logger.js';
+import { loggerRedaction, loggerSerializers } from './logger.js';
 import type { Env } from './config/env.js';
 
 export interface BuildServerOptions {
@@ -28,6 +30,7 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
     logger: {
       level: config.LOG_LEVEL,
       redact: loggerRedaction,
+      serializers: loggerSerializers,
       ...(options.loggerDestination !== undefined ? { stream: options.loggerDestination } : {}),
     },
   });
@@ -64,6 +67,8 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
   await app.register(configuratorRoutes(config));
   await app.register(credentialRoutes(config));
   await app.register(scheduledTaskRoutes(config));
+  await app.register(triggerRoutes(config));
+  await app.register(incomingTriggerRoutes(config));
   await app.register(sessionTokenRoutes(config));
   await app.register(registrationRoutes(config));
 

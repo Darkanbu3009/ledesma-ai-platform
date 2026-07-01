@@ -22,6 +22,12 @@ const EnvSchema = z.object({
   // (rotar el de la boveda no invalida los session-tokens en vuelo y viceversa). Debe setearse en el
   // entorno con 32+ caracteres.
   VAULT_SECRET: z.string().min(32),
+  // URL base PUBLICA del backend, para construir la URL del webhook ENTRANTE de un trigger (Fase 5.4)
+  // que se le muestra al usuario al crear/rotar (p.ej. https://api.ledesma-ai-labs.com). Opcional: si
+  // falta, la ruta la deriva del request (protocolo + host). Setearla en prod es lo robusto cuando el
+  // backend esta detras de un proxy/CDN (el host del request puede no ser el publico). Sin trailing
+  // slash requerido: se normaliza al construir. NO expone secretos; es solo el origen para armar la URL.
+  PUBLIC_BASE_URL: z.string().url().optional(),
   // Tools nativas de plataforma (web worker propio). Opcionales a proposito: si falta cualquiera
   // de las dos, la feature se desactiva (no se inyectan nativas) y el comportamiento es identico
   // al actual. WEB_WORKER_SECRET firma los POST al worker (no es el whsec_ por agente).
