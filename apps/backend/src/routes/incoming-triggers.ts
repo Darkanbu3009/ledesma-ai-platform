@@ -54,7 +54,7 @@ function eventContext(rawBody: string): string | undefined {
  * cual, igual que los que encola el scheduler. Nota de seguridad: el contexto del evento es entrada no
  * confiable (posible prompt injection); va claramente delimitado y acotado en tamano.
  */
-function buildJobPayload(template: unknown, rawBody: string): unknown {
+function buildJobPayload(template: unknown, rawBody: string): { messages: unknown[]; maxIterations?: number } {
   const base =
     typeof template === 'object' && template !== null ? (template as Record<string, unknown>) : {};
   const messages = Array.isArray(base.messages) ? [...base.messages] : [];
@@ -181,13 +181,23 @@ export function incomingTriggerRoutes(
           throw new AppError('UNAUTHORIZED', 401, 'Unauthorized');
         }
 
+        const payload = buildJobPayload(trigger.payloadTemplate, rawBody);
+        // Fail-fast defensivo: un payload_template ya validado al crear (messages.min(1)) e inmutable
+        // (PATCH no lo edita) SIEMPRE aporta >= 1 mensaje. Si aqui quedaran 0 mensajes, el trigger tiene
+        // datos corruptos (p.ej. un INSERT directo saltando la API): no encolamos un job que el worker
+        // rechazaria tras reintentos; cortamos en el origen. Se loguea solo el id del trigger (sin secreto).
+        if (payload.messages.length === 0) {
+          request.log.warn({ triggerId: trigger.id }, 'trigger con payload_template sin mensajes: no se encola');
+          throw new AppError('INTERNAL_ERROR', 500, 'Trigger misconfigured');
+        }
+
         // Encola el job EXACTAMENTE como el scheduler: status 'pending' (default de la tabla), sin
         // scheduled_for (ASAP). NO se ejecuta el agente aqui.
         await jobsRepo.createJob({
           agentId: trigger.agentId,
           ownerId: trigger.ownerId,
           credentialId: trigger.credentialId,
-          payload: buildJobPayload(trigger.payloadTemplate, rawBody),
+          payload,
         });
         await triggerRepo.markTriggered(trigger.id);
 

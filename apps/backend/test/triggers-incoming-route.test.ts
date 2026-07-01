@@ -300,6 +300,22 @@ describe('composicion del payload', () => {
     expect(res.statusCode).toBe(202);
     expect(createJob.mock.calls[0]?.[0]?.payload.messages).toHaveLength(1);
   });
+
+  it('template corrupto (sin mensajes) + cuerpo vacio -> 500 y NO encola (fail-fast defensivo)', async () => {
+    // Escenario solo alcanzable por corrupcion de datos (INSERT directo): la API exige messages.min(1).
+    getByIdForDispatch.mockResolvedValue(
+      dispatchTrigger({ authMode: 'url_token', urlTokenHash: hashUrlToken(token), payloadTemplate: { messages: [] } }),
+    );
+    const res = await app.inject({
+      method: 'POST',
+      url: `/webhooks/triggers/${TRIGGER_ID}?token=${encodeURIComponent(token)}`,
+      headers: { 'content-type': 'application/json' },
+      payload: '',
+    });
+    expect(res.statusCode).toBe(500);
+    expect(createJob).not.toHaveBeenCalled();
+    expect(markTriggered).not.toHaveBeenCalled();
+  });
 });
 
 describe('encapsulacion del raw-body parser', () => {
