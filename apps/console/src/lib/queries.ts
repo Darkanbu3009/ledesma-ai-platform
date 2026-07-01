@@ -7,6 +7,7 @@ import type { RegistrationState } from './registration';
 import type { ScheduledTask } from './scheduled-tasks';
 import type { Trigger } from './triggers';
 import type { Recipe, RecipeSummary } from './recipes';
+import type { ConsentsState, DataRequest } from './privacy';
 
 /** Estado de registro del usuario actual (perfil, organizacion, plan y uso). */
 export function useMe() {
@@ -63,6 +64,26 @@ export function useRecipe(id: string | undefined) {
     queryKey: ['recipes', id],
     queryFn: () => apiFetch<{ recipe: Recipe }>(`/v1/recipes/${id}`).then((r) => r.recipe),
     enabled: Boolean(id),
+  });
+}
+
+/**
+ * Estado de consentimiento del titular (GET /v1/consents/me): que acepto, versiones vigentes y `missing`
+ * (documentos cuya version vigente falta aceptar). El ConsentGate usa `missing` para decidir si solicita
+ * la aceptacion. El backend es la autoridad del calculo.
+ */
+export function useConsents() {
+  return useQuery({
+    queryKey: ['consents'],
+    queryFn: () => apiFetch<ConsentsState>('/v1/consents/me'),
+  });
+}
+
+/** Lista las solicitudes de derechos del titular (ARCO/GDPR), mas nuevas primero. */
+export function useDataRequests() {
+  return useQuery({
+    queryKey: ['data-requests'],
+    queryFn: () => apiFetch<{ requests: DataRequest[] }>('/v1/data-requests').then((r) => r.requests),
   });
 }
 

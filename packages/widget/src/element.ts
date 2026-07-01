@@ -2,6 +2,7 @@ import { streamAgent } from './client.js';
 import type { SseMessage } from './sse.js';
 import { createTokenManager, type TokenManager } from './token-manager.js';
 import { buildRequestChat, commitTurn, type ChatMessage } from './turns.js';
+import { isSafeDisclosureUrl, resolveAiNotice } from './ai-disclosure.js';
 
 /**
  * Estilos del Shadow DOM. Tema oscuro por defecto, personalizable desde la pagina anfitriona
@@ -170,6 +171,22 @@ const styles = `
   color: var(--la-muted, #a8a29a);
   font-size: 11px;
 }
+.disclosure {
+  flex-shrink: 0;
+  padding: 6px 16px;
+  background: var(--la-surface, #1a1a1f);
+  border-bottom: 1px solid var(--la-border, #2a2a30);
+  color: var(--la-muted, #a8a29a);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.disclosure-link {
+  color: var(--la-accent, #e5562a);
+  text-decoration: none;
+}
+.disclosure-link:hover {
+  text-decoration: underline;
+}
 `;
 
 /**
@@ -182,7 +199,16 @@ const styles = `
  */
 export class LedesmaAgentElement extends HTMLElement {
   static get observedAttributes(): string[] {
-    return ['endpoint', 'provider-key', 'session-token', 'token-url', 'title', 'placeholder'];
+    return [
+      'endpoint',
+      'provider-key',
+      'session-token',
+      'token-url',
+      'title',
+      'placeholder',
+      'ai-notice',
+      'privacy-url',
+    ];
   }
 
   private chat: ChatMessage[] = [];
@@ -199,6 +225,7 @@ export class LedesmaAgentElement extends HTMLElement {
   private tokenManagerUrl: string | null = null;
 
   private titleEl: HTMLDivElement | null = null;
+  private disclosureEl: HTMLDivElement | null = null;
   private messagesEl: HTMLDivElement | null = null;
   private textareaEl: HTMLTextAreaElement | null = null;
   private actionEl: HTMLButtonElement | null = null;
@@ -234,6 +261,10 @@ export class LedesmaAgentElement extends HTMLElement {
     if (name === 'title' && this.titleEl !== null) this.titleEl.textContent = this.headerTitle;
     if (name === 'placeholder' && this.textareaEl !== null) {
       this.textareaEl.placeholder = this.placeholderText;
+    }
+    // La divulgacion de IA (EU AI Act Art 50) se actualiza en caliente sin re-montar la conversacion.
+    if ((name === 'ai-notice' || name === 'privacy-url') && this.disclosureEl !== null) {
+      this.renderDisclosure();
     }
   }
 
@@ -272,6 +303,36 @@ export class LedesmaAgentElement extends HTMLElement {
     return this.getAttribute('placeholder') ?? 'Escribe un mensaje...';
   }
 
+  /** URL opcional del aviso de privacidad para enlazar desde la divulgacion de IA. null si falta/insegura. */
+  private get privacyUrl(): string | null {
+    return this.readAttribute('privacy-url');
+  }
+
+  /**
+   * Rellena la divulgacion de IA (EU AI Act Art 50): texto (default o el del atributo `ai-notice`) y, si
+   * `privacy-url` es una URL segura, un enlace al aviso de privacidad. Todo via DOM (textContent/setAttribute),
+   * nunca innerHTML: el texto y la URL vienen de atributos del integrador.
+   */
+  private renderDisclosure(): void {
+    const el = this.disclosureEl;
+    if (el === null) return;
+    el.textContent = '';
+    const notice = document.createElement('span');
+    notice.textContent = resolveAiNotice(this.getAttribute('ai-notice'));
+    el.append(notice);
+    const url = this.privacyUrl;
+    if (isSafeDisclosureUrl(url)) {
+      const link = document.createElement('a');
+      link.className = 'disclosure-link';
+      link.textContent = 'Aviso de privacidad';
+      link.setAttribute('href', url);
+      link.setAttribute('target', '_blank');
+      link.setAttribute('rel', 'noopener noreferrer');
+      el.append(document.createTextNode(' · '));
+      el.append(link);
+    }
+  }
+
   /** Re-monta el shadow completo. Resetea el turno en curso y el historial. */
   private render(): void {
     const shadow = this.shadowRoot;
@@ -295,11 +356,13 @@ export class LedesmaAgentElement extends HTMLElement {
       ? '<div class="messages"></div>' +
         '<div class="composer"><textarea rows="1"></textarea><button type="button" class="action"></button></div>'
       : `<div class="config">${configMessage}</div>`;
+    // La divulgacion de IA (EU AI Act Art 50) va SIEMPRE bajo el header, este o no configurado el chat.
     shadow.innerHTML =
       `<style>${styles}</style>` +
-      `<div class="root"><div class="header"></div>${body}<div class="footer">Impulsado por Ledesma AI Labs</div></div>`;
+      `<div class="root"><div class="header"></div><div class="disclosure"></div>${body}<div class="footer">Impulsado por Ledesma AI Labs</div></div>`;
 
     this.titleEl = shadow.querySelector<HTMLDivElement>('.header');
+    this.disclosureEl = shadow.querySelector<HTMLDivElement>('.disclosure');
     this.messagesEl = shadow.querySelector<HTMLDivElement>('.messages');
     this.textareaEl = shadow.querySelector<HTMLTextAreaElement>('textarea');
     this.actionEl = shadow.querySelector<HTMLButtonElement>('.action');
@@ -314,6 +377,7 @@ export class LedesmaAgentElement extends HTMLElement {
     if (this.actionEl !== null) {
       this.actionEl.addEventListener('click', () => this.onAction());
     }
+    this.renderDisclosure();
     this.updateAction();
   }
 

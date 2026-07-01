@@ -47,5 +47,7 @@ export function Asistente() {
 | `providerKey`  | `provider-key`        | Solo pruebas: la key queda visible en el cliente.  |
 | `title`        | `title`               | Titulo del header del chat.                        |
 | `placeholder`  | `placeholder`         | Placeholder del composer.                          |
+| `aiNotice`     | `ai-notice`           | Texto de la divulgacion de IA (EU AI Act Art 50). Por defecto se muestra un aviso. |
+| `privacyUrl`   | `privacy-url`         | URL del aviso de privacidad enlazada en la divulgacion (http(s) o ruta relativa). |
 | `className`    | `class`               | Clases CSS del elemento.                           |
 | `style`        | `style`               | Estilos inline (React.CSSProperties).              |
