@@ -7,6 +7,7 @@ import { AgentFormPage } from './pages/AgentFormPage';
 import { ConfiguratorPage } from './pages/ConfiguratorPage';
 import { CredentialsPage } from './pages/CredentialsPage';
 import { ScheduledTasksPage } from './pages/ScheduledTasksPage';
+import { TriggersPage } from './pages/TriggersPage';
 import { PlaygroundPage } from './pages/PlaygroundPage';
 import { ConnectPage } from './pages/ConnectPage';
 import { UsagePage } from './pages/UsagePage';
@@ -37,6 +38,7 @@ export function App() {
             <Route path="/agentes/:id/uso" element={<UsagePage />} />
             <Route path="/credenciales" element={<CredentialsPage />} />
             <Route path="/tareas" element={<ScheduledTasksPage />} />
+            <Route path="/triggers" element={<TriggersPage />} />
           </Route>
         </Route>
       </Route>

@@ -5,6 +5,7 @@ import type { ProviderCredential } from './credentials';
 import type { AgentUsage, UsageRange } from './usage';
 import type { RegistrationState } from './registration';
 import type { ScheduledTask } from './scheduled-tasks';
+import type { Trigger } from './triggers';
 
 /** Estado de registro del usuario actual (perfil, organizacion, plan y uso). */
 export function useMe() {
@@ -36,6 +37,14 @@ export function useScheduledTasks() {
     queryKey: ['scheduled-tasks'],
     queryFn: () =>
       apiFetch<{ tasks: ScheduledTask[] }>('/v1/scheduled-tasks').then((r) => r.tasks),
+  });
+}
+
+/** Lista los triggers por evento del usuario (mas nuevos primero). Sin material de auth (por diseno). */
+export function useTriggers() {
+  return useQuery({
+    queryKey: ['triggers'],
+    queryFn: () => apiFetch<{ triggers: Trigger[] }>('/v1/triggers').then((r) => r.triggers),
   });
 }
 
