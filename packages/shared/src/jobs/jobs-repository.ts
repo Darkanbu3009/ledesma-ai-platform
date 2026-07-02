@@ -1,5 +1,12 @@
 import type postgres from 'postgres';
-import type { CreateJobInput, Job, JobStatus } from './types.js';
+import type {
+  CreateJobInput,
+  Job,
+  JobStatus,
+  JobSummary,
+  ListJobsByOwnerOptions,
+} from './types.js';
+import { RECIPE_JOB_KIND } from './recipe-payload.js';
 
 /**
  * Cliente postgres (tagged template) que el repositorio recibe por inyeccion, IGUAL que los
@@ -50,6 +57,41 @@ function rowToJob(row: JobRow): Job {
     lastError: row.last_error,
     createdAt: toIso(row.created_at) ?? EPOCH_ISO,
     updatedAt: toIso(row.updated_at) ?? EPOCH_ISO,
+    startedAt: toIso(row.started_at),
+    finishedAt: toIso(row.finished_at),
+  };
+}
+
+/**
+ * Fila del LISTADO de observabilidad: las columnas seguras del job MAS `payload_kind`, que es solo el
+ * valor escalar `payload->>'kind'` (no el payload entero). Asi la query nunca trae los mensajes del
+ * usuario a memoria: para decidir 'recipe' vs 'simple' basta el discriminador, no el contenido.
+ */
+interface JobSummaryRow {
+  id: string;
+  agent_id: string;
+  status: string;
+  payload_kind: string | null;
+  attempts: number;
+  last_error: string | null;
+  scheduled_for: Date | string | null;
+  created_at: Date | string;
+  started_at: Date | string | null;
+  finished_at: Date | string | null;
+}
+
+function rowToSummary(row: JobSummaryRow): JobSummary {
+  return {
+    id: row.id,
+    agentId: row.agent_id,
+    status: row.status as JobStatus,
+    // Mismo criterio que isRecipeJobPayload (payload.kind === 'recipe'), pero evaluado sobre el escalar
+    // que trajo la query. Cualquier otro valor (null incluido) es un job simple.
+    type: row.payload_kind === RECIPE_JOB_KIND ? 'recipe' : 'simple',
+    attempts: Number(row.attempts ?? 0),
+    lastError: row.last_error,
+    scheduledFor: toIso(row.scheduled_for),
+    createdAt: toIso(row.created_at) ?? EPOCH_ISO,
     startedAt: toIso(row.started_at),
     finishedAt: toIso(row.finished_at),
   };
@@ -109,6 +151,39 @@ export class JobsRepository {
       where status = 'pending' and (scheduled_for is null or scheduled_for <= now())
     `;
     return Number(rows[0]?.count ?? 0);
+  }
+
+  /**
+   * LISTADO de OBSERVABILIDAD: los jobs de UN owner, del mas nuevo al mas viejo (created_at desc),
+   * paginado por limit/offset y opcionalmente filtrado por estado. Read-only y AISLADO por owner_id
+   * (jamas devuelve jobs de otro dueno), igual que listRecipesByOwner. NO trae el `payload` (dato
+   * sensible): solo columnas seguras + `payload->>'kind'` para inferir el tipo (recipe|simple).
+   *
+   * Dos ramas explicitas (con/sin status) en vez de un fragmento SQL condicional: cada rama es UN solo
+   * template, mas legible y trivial de testear con un mock del tagged template. La ruta valida y acota
+   * limit/offset antes de llamar aca (este metodo confia en valores ya saneados).
+   */
+  async listByOwner(ownerId: string, options: ListJobsByOwnerOptions): Promise<JobSummary[]> {
+    const { limit, offset, status } = options;
+    const rows =
+      status === undefined
+        ? await this.sql<JobSummaryRow[]>`
+            select id, agent_id, status, payload->>'kind' as payload_kind, attempts, last_error,
+              scheduled_for, created_at, started_at, finished_at
+            from jobs
+            where owner_id = ${ownerId}
+            order by created_at desc
+            limit ${limit} offset ${offset}
+          `
+        : await this.sql<JobSummaryRow[]>`
+            select id, agent_id, status, payload->>'kind' as payload_kind, attempts, last_error,
+              scheduled_for, created_at, started_at, finished_at
+            from jobs
+            where owner_id = ${ownerId} and status = ${status}
+            order by created_at desc
+            limit ${limit} offset ${offset}
+          `;
+    return rows.map(rowToSummary);
   }
 
   /**

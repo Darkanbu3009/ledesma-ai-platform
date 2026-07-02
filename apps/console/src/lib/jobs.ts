@@ -1,0 +1,103 @@
+/**
+ * Tipos y logica PURA del HISTORIAL DE EJECUCIONES (observabilidad de jobs) en la consola. Espeja la
+ * forma camelCase que devuelve el backend (GET /v1/jobs, ver apps/backend/src/routes/jobs.ts). Sin React
+ * ni red: las etiquetas de estado/tipo, la deteccion de jobs "en vuelo" (para el auto-refresh) y el
+ * armado del querystring se testean como funciones puras, igual que scheduled-tasks.ts / recipes.ts.
+ *
+ * Es una vista de SOLO LECTURA: no hay reintento manual ni borrado (PR futuro). El backend NO expone el
+ * payload (dato sensible) y trunca last_error; aca solo lo mostramos.
+ */
+
+/** Tipo inferido del job (del payload, sin exponerlo): receta multi-paso o mensaje suelto. */
+export type JobType = 'recipe' | 'simple';
+
+/** Estados de la cola (mismos que el backend / el CHECK de V008). */
+export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+/** Una ejecucion del historial, tal como la devuelve GET /v1/jobs (sin payload; last_error truncado). */
+export interface JobActivity {
+  id: string;
+  type: JobType;
+  /** Agente que ejecuto (la pantalla resuelve el nombre con useAgents). */
+  agentId: string;
+  status: JobStatus;
+  attempts: number;
+  /** Detalle del ultimo fallo (ya truncado por el backend). null si nunca fallo. */
+  lastError: string | null;
+  scheduledFor: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+/** Una pagina del historial: los jobs + la metadata de paginacion que devuelve el backend. */
+export interface JobsPage {
+  jobs: JobActivity[];
+  pagination: { limit: number; offset: number; hasMore: boolean };
+}
+
+/** Tamano de pagina del historial (alineado con el default del backend). */
+export const JOB_PAGE_SIZE = 20;
+
+/** Intervalo de auto-refresh cuando hay ejecuciones en vuelo (ms). */
+export const JOBS_REFETCH_MS = 10_000;
+
+/** Filtro de estado en la UI. 'all' = todos (sin filtro en la query). */
+export type JobStatusFilter = JobStatus | 'all';
+
+/** Opciones del selector de filtro por estado (orden de aparicion en la UI). */
+export const JOB_STATUS_FILTERS: { value: JobStatusFilter; label: string }[] = [
+  { value: 'all', label: 'Todas' },
+  { value: 'pending', label: 'Pendiente' },
+  { value: 'running', label: 'En curso' },
+  { value: 'completed', label: 'Completada' },
+  { value: 'failed', label: 'Fallida' },
+];
+
+/** Etiqueta legible del estado de un job. */
+export function jobStatusLabel(status: JobStatus): string {
+  switch (status) {
+    case 'pending':
+      return 'Pendiente';
+    case 'running':
+      return 'En curso';
+    case 'completed':
+      return 'Completada';
+    case 'failed':
+      return 'Fallida';
+    default:
+      return status;
+  }
+}
+
+/** Etiqueta legible del tipo de job: 'Receta' (multi-paso) o 'Mensaje' (suelto). */
+export function jobTypeLabel(type: JobType): string {
+  return type === 'recipe' ? 'Receta' : 'Mensaje';
+}
+
+/** Un job pending o running sigue "en vuelo": su estado puede cambiar y justifica auto-refrescar. */
+export function isJobInFlight(status: JobStatus): boolean {
+  return status === 'pending' || status === 'running';
+}
+
+/**
+ * ¿Hay algun job en vuelo (pending/running) entre los cargados? La pagina lo usa para decidir si
+ * conviene auto-refrescar: si todo esta en estado terminal (completed/failed), NO reconsulta el API.
+ */
+export function hasInFlightJobs(jobs: JobActivity[]): boolean {
+  return jobs.some((job) => isJobInFlight(job.status));
+}
+
+/**
+ * Arma el querystring de una pagina del historial: limit, offset y, si el filtro no es 'all', el status.
+ * Mantiene la construccion de la URL en un unico lugar testeable (el hook solo la consume).
+ */
+export function buildJobsQuery(params: { limit: number; offset: number; status?: JobStatusFilter }): string {
+  const search = new URLSearchParams();
+  search.set('limit', String(params.limit));
+  search.set('offset', String(params.offset));
+  if (params.status && params.status !== 'all') {
+    search.set('status', params.status);
+  }
+  return `?${search.toString()}`;
+}
