@@ -5,6 +5,7 @@ apps/backend/public/widget/ledesma-agent.js
 .env
 .env.*
 !.env.example
+scripts/validacion-e2e/salida/
 *.local
 *.log
 .vite/
