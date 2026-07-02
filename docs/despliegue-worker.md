@@ -126,6 +126,23 @@ esta mal formada, `parseEnv` lanza y el proceso hace `exit(1)` **al arrancar** (
 | `RUN_MAX_TOKENS` | `1000000` (`env.ts:32`) | Cap de tokens acumulados por run |
 | `WEB_WORKER_URL` | opcional, URL (`env.ts:22`) | Tools nativas de plataforma. Solo se inyectan si estan **ambas** (`WEB_WORKER_URL` **y** `WEB_WORKER_SECRET`); si falta cualquiera, no se inyectan (comportamiento identico a un run sin nativas) |
 | `WEB_WORKER_SECRET` | opcional, 32+ (`env.ts:23`) | Firma los POST al worker nativo. Ver la fila anterior: va en par con `WEB_WORKER_URL` |
+| `RESEND_API_KEY` | opcional, no vacio (`env.ts`) | **Alertas de fallo por correo.** Key de la API de Resend. Sin ella no se envian alertas (se loguea y se sigue) |
+| `RESEND_FROM_EMAIL` | opcional, email (`env.ts`) | Remitente verificado en Resend de las alertas (ej. `alertas@send.ledesma-ai-labs.com`). Si falta, no se notifica |
+| `CONSOLE_BASE_URL` | opcional, URL (`env.ts`) | Base de la consola para el enlace a `/actividad` del correo (ej. `https://app.ledesma-ai-labs.com`). Si falta, el correo va sin enlace |
+
+> **Alertas de fallo (aditivo, best-effort).** Cuando el worker marca un job como `failed` de forma
+> DEFINITIVA (fallo permanente o reintentos agotados) envia **un** correo al dueno del job con el agente,
+> el tipo (receta/mensaje), la fecha, el error truncado (300 chars, **sin** el contenido de los mensajes
+> del usuario) y el enlace a `/actividad`. Es best-effort: **las tres variables de arriba son opcionales**
+> y si falta cualquiera —o si Resend falla o da timeout (5s)— el worker **no se cae**, solo loguea que no
+> pudo notificar y sigue procesando jobs. Hay un **cooldown anti-rafaga por owner** (max 1 correo cada 15
+> min; los demas se loguean), en memoria del proceso (se resetea al redesplegar, aceptable para alertas).
+>
+> **Requisito de permisos:** el email del dueno vive en `auth.users.email` de Supabase (la tabla
+> `profiles` no tiene email). El worker lo lee con el mismo `DATABASE_URL`. Para que los correos salgan,
+> el rol de esa conexion debe tener **`SELECT` sobre `auth.users`** (el rol de servicio/`postgres` del
+> pooler de Supabase ya lo tiene). Si no lo tuviera, la lectura falla de forma controlada: no se envia el
+> correo (se loguea) y el worker sigue igual.
 
 ### Variables que el worker NO necesita (para evitar confusion)
 

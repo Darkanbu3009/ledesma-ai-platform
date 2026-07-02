@@ -30,6 +30,17 @@ const EnvSchema = z.object({
   // cuenta (runAgent no lo aplica); RUN_MAX_TOKENS es el cap de tokens acumulados del run.
   RUN_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(600),
   RUN_MAX_TOKENS: z.coerce.number().int().positive().default(1_000_000),
+  // ALERTAS DE FALLO por correo (aditivo, best-effort). Las TRES son OPCIONALES: si falta cualquiera, el
+  // worker NO se cae ni cambia su comportamiento de ejecucion; simplemente no envia el correo de alerta y
+  // lo loguea (las alertas son una mejora, no una dependencia dura). Se agregan a mano en Railway (ver
+  // docs/despliegue-worker.md). Un valor PRESENTE pero mal formado (email/url invalido) si lanza al
+  // arrancar, igual que WEB_WORKER_URL: es un error de config, no un "falta la feature".
+  //   RESEND_API_KEY:    key de la API de Resend (emisor de los correos de alerta).
+  //   RESEND_FROM_EMAIL: remitente verificado en Resend (ej. alertas@send.ledesma-ai-labs.com).
+  //   CONSOLE_BASE_URL:  base de la consola para el enlace a /actividad del correo (ej. https://app.ejemplo.com).
+  RESEND_API_KEY: z.string().min(1).optional(),
+  RESEND_FROM_EMAIL: z.string().email().optional(),
+  CONSOLE_BASE_URL: z.string().url().optional(),
 });
 
 export type WorkerEnv = z.infer<typeof EnvSchema>;
