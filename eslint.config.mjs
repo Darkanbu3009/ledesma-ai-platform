@@ -33,6 +33,11 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.node } },
   },
   {
+    // Script de validacion e2e contra produccion (Node puro, sin build).
+    files: ['scripts/**/*.mjs'],
+    languageOptions: { globals: { ...globals.node } },
+  },
+  {
     files: ['packages/widget/**/*.ts'],
     languageOptions: { globals: { ...globals.browser } },
   },
