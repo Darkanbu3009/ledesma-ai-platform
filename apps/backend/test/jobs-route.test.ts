@@ -1,0 +1,243 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import Fastify, { type FastifyInstance } from 'fastify';
+import type { JwtVerifier } from '../src/auth/jwt-verifier.js';
+import { jobsRoutes } from '../src/routes/jobs.js';
+import { registerErrorHandler } from '../src/errors/error-handler.js';
+import { parseEnv } from '../src/config/env.js';
+
+const BASE = {
+  NODE_ENV: 'test',
+  DATABASE_URL: 'postgres://x',
+  ADMIN_API_TOKEN: 'admin-token-1234567890',
+  SUPABASE_URL: 'https://x.supabase.co',
+  SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+  VAULT_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+};
+
+const AGENT_ID = '11111111-1111-4111-8111-111111111111';
+const JOB_ID = '99999999-9999-4999-8999-999999999999';
+
+// Verifier falso (sin red): user-1 y user-2 validos; cualquier otro token invalido.
+const verifier: JwtVerifier = {
+  verify: async (token: string) => {
+    if (token === 'valid-user-1') return { id: 'user-1', email: 'u1@test.com' };
+    if (token === 'valid-user-2') return { id: 'user-2', email: 'u2@test.com' };
+    throw new Error('invalid');
+  },
+};
+
+const listByOwner = vi.fn();
+
+/** Resumen de job tal como lo devuelve JobsRepository.listByOwner (camelCase, sin payload). */
+function makeJobSummary(overrides: Record<string, unknown> = {}) {
+  return {
+    id: JOB_ID,
+    agentId: AGENT_ID,
+    status: 'completed',
+    type: 'simple',
+    attempts: 1,
+    lastError: null,
+    scheduledFor: null,
+    createdAt: '2026-06-30T00:00:00.000Z',
+    startedAt: '2026-06-30T00:01:00.000Z',
+    finishedAt: '2026-06-30T00:02:00.000Z',
+    ...overrides,
+  };
+}
+
+async function makeApp(): Promise<FastifyInstance> {
+  const config = parseEnv(BASE);
+  const app = Fastify();
+  registerErrorHandler(app, config);
+  await app.register(jobsRoutes(config, { verifier, jobsRepo: { listByOwner } }));
+  return app;
+}
+
+let app: FastifyInstance;
+beforeEach(async () => {
+  vi.clearAllMocks();
+  listByOwner.mockResolvedValue([]);
+  app = await makeApp();
+});
+
+describe('auth: GET /v1/jobs sin JWT', () => {
+  it('sin Authorization -> 401 (no toca el repo)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/jobs' });
+    expect(res.statusCode).toBe(401);
+    expect(listByOwner).not.toHaveBeenCalled();
+  });
+
+  it('token invalido -> 401', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/jobs',
+      headers: { authorization: 'Bearer no-sirve' },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(listByOwner).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /v1/jobs: aislamiento por owner', () => {
+  it('lista con el owner del token (user-1), defaults de paginacion', async () => {
+    listByOwner.mockResolvedValue([makeJobSummary()]);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/jobs',
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(listByOwner).toHaveBeenCalledWith('user-1', { limit: 20, offset: 0, status: undefined });
+    expect(res.json().jobs).toHaveLength(1);
+  });
+
+  it('otro usuario (user-2) solo lista lo suyo: el owner sale del token', async () => {
+    await app.inject({
+      method: 'GET',
+      url: '/v1/jobs',
+      headers: { authorization: 'Bearer valid-user-2' },
+    });
+    expect(listByOwner).toHaveBeenCalledWith('user-2', { limit: 20, offset: 0, status: undefined });
+  });
+});
+
+describe('GET /v1/jobs: paginacion', () => {
+  it('respeta limit y offset del querystring', async () => {
+    await app.inject({
+      method: 'GET',
+      url: '/v1/jobs?limit=10&offset=30',
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(listByOwner).toHaveBeenCalledWith('user-1', { limit: 10, offset: 30, status: undefined });
+  });
+
+  it('limit > 50 (techo) -> 400 (no lista)', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/jobs?limit=51',
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('VALIDATION_ERROR');
+    expect(listByOwner).not.toHaveBeenCalled();
+  });
+
+  it('limit=50 (borde) es valido', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/jobs?limit=50',
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(listByOwner).toHaveBeenCalledWith('user-1', { limit: 50, offset: 0, status: undefined });
+  });
+
+  it('limit=0 u offset negativo -> 400', async () => {
+    const r1 = await app.inject({
+      method: 'GET',
+      url: '/v1/jobs?limit=0',
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(r1.statusCode).toBe(400);
+    const r2 = await app.inject({
+      method: 'GET',
+      url: '/v1/jobs?offset=-1',
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(r2.statusCode).toBe(400);
+    expect(listByOwner).not.toHaveBeenCalled();
+  });
+
+  it('hasMore=true cuando la pagina viene LLENA (jobs.length === limit)', async () => {
+    listByOwner.mockResolvedValue(Array.from({ length: 10 }, (_, i) => makeJobSummary({ id: `j-${i}` })));
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/jobs?limit=10',
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(res.json().pagination).toEqual({ limit: 10, offset: 0, hasMore: true });
+  });
+
+  it('hasMore=false cuando la pagina viene incompleta', async () => {
+    listByOwner.mockResolvedValue([makeJobSummary(), makeJobSummary({ id: 'otro' })]);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/jobs?limit=10',
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(res.json().pagination).toEqual({ limit: 10, offset: 0, hasMore: false });
+  });
+});
+
+describe('GET /v1/jobs: filtro por status', () => {
+  it('status valido se pasa al repo', async () => {
+    await app.inject({
+      method: 'GET',
+      url: '/v1/jobs?status=failed',
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(listByOwner).toHaveBeenCalledWith('user-1', { limit: 20, offset: 0, status: 'failed' });
+  });
+
+  it('status invalido -> 400 (no lista)', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/jobs?status=bogus',
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('VALIDATION_ERROR');
+    expect(listByOwner).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /v1/jobs: last_error truncado y sin payload', () => {
+  it('trunca last_error largo a 500 chars + marcador', async () => {
+    const largo = 'x'.repeat(600);
+    listByOwner.mockResolvedValue([makeJobSummary({ status: 'failed', lastError: largo })]);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/jobs',
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    const job = res.json().jobs[0];
+    expect(job.lastError).toBe(`${'x'.repeat(500)}...`);
+    expect(job.lastError.length).toBe(503);
+  });
+
+  it('last_error corto pasa sin recortar; null se conserva', async () => {
+    listByOwner.mockResolvedValue([
+      makeJobSummary({ id: 'a', status: 'failed', lastError: 'boom' }),
+      makeJobSummary({ id: 'b', status: 'completed', lastError: null }),
+    ]);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/jobs',
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    const [a, b] = res.json().jobs;
+    expect(a.lastError).toBe('boom');
+    expect(b.lastError).toBeNull();
+  });
+
+  it('la respuesta NO incluye el payload y devuelve el tipo inferido', async () => {
+    listByOwner.mockResolvedValue([makeJobSummary({ type: 'recipe' })]);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/jobs',
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    const job = res.json().jobs[0];
+    expect(job).not.toHaveProperty('payload');
+    expect(job).not.toHaveProperty('ownerId');
+    expect(job.type).toBe('recipe');
+    // Campos que si expone el historial.
+    expect(job).toMatchObject({
+      id: JOB_ID,
+      agentId: AGENT_ID,
+      status: 'completed',
+      attempts: 1,
+      createdAt: '2026-06-30T00:00:00.000Z',
+    });
+  });
+});

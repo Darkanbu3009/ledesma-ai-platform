@@ -213,4 +213,100 @@ describe('JobsRepository', () => {
       expect(job?.lastError).toBe('algo');
     });
   });
+
+  describe('listByOwner', () => {
+    // Fila del LISTADO (resumen): NO trae payload entero, solo `payload_kind` escalar + columnas seguras.
+    function makeSummaryRow(overrides: Record<string, unknown> = {}) {
+      return {
+        id: '99999999-9999-9999-9999-999999999999',
+        agent_id: '11111111-1111-1111-1111-111111111111',
+        status: 'completed',
+        payload_kind: null,
+        attempts: 1,
+        last_error: null,
+        scheduled_for: null,
+        created_at: '2026-06-30T00:00:00.000Z',
+        started_at: '2026-06-30T00:01:00.000Z',
+        finished_at: '2026-06-30T00:02:00.000Z',
+        ...overrides,
+      };
+    }
+
+    it('AISLAMIENTO: filtra por owner_id, ordena por created_at desc y pagina con limit/offset', async () => {
+      const sql = makeSqlReturning([makeSummaryRow()]);
+      const jobs = await new JobsRepository(sql).listByOwner('user-1', { limit: 20, offset: 40 });
+      expect(jobs).toHaveLength(1);
+      const texto = sqlText(sql);
+      expect(texto).toContain('from jobs');
+      expect(texto).toContain('where owner_id = ');
+      expect(texto).toContain('order by created_at desc');
+      expect(texto).toContain('limit ');
+      expect(texto).toContain('offset ');
+      // Owner del parametro, limit y offset viajan como parametros (no interpolados en el texto).
+      expect(sqlValues(sql)).toEqual(['user-1', 20, 40]);
+    });
+
+    it('NO expone el payload: selecciona payload->>\'kind\' como escalar, nunca el payload entero ni select *', async () => {
+      const sql = makeSqlReturning([makeSummaryRow()]);
+      await new JobsRepository(sql).listByOwner('user-1', { limit: 20, offset: 0 });
+      const texto = sqlText(sql);
+      expect(texto).toContain("payload->>'kind' as payload_kind");
+      expect(texto).not.toContain('select *');
+      // No selecciona la columna payload cruda (solo su discriminador escalar).
+      expect(texto).not.toMatch(/,\s*payload\s*,/);
+    });
+
+    it('sin status: la query no filtra por estado', async () => {
+      const sql = makeSqlReturning([]);
+      await new JobsRepository(sql).listByOwner('user-1', { limit: 10, offset: 0 });
+      const texto = sqlText(sql);
+      expect(texto).not.toContain('status = ');
+      expect(sqlValues(sql)).toEqual(['user-1', 10, 0]);
+    });
+
+    it('con status: agrega el filtro y lo pasa como parametro', async () => {
+      const sql = makeSqlReturning([makeSummaryRow({ status: 'failed' })]);
+      await new JobsRepository(sql).listByOwner('user-1', { limit: 10, offset: 0, status: 'failed' });
+      const texto = sqlText(sql);
+      expect(texto).toContain('and status = ');
+      // owner, status, limit, offset (en ese orden dentro del template).
+      expect(sqlValues(sql)).toEqual(['user-1', 'failed', 10, 0]);
+    });
+
+    it('infiere type=recipe cuando payload_kind es \'recipe\', y simple en cualquier otro caso', async () => {
+      const sql = makeSqlReturning([
+        makeSummaryRow({ id: 'j-recipe', payload_kind: 'recipe' }),
+        makeSummaryRow({ id: 'j-simple', payload_kind: null }),
+        makeSummaryRow({ id: 'j-otro', payload_kind: 'algo-raro' }),
+      ]);
+      const jobs = await new JobsRepository(sql).listByOwner('user-1', { limit: 10, offset: 0 });
+      expect(jobs.map((j) => [j.id, j.type])).toEqual([
+        ['j-recipe', 'recipe'],
+        ['j-simple', 'simple'],
+        ['j-otro', 'simple'],
+      ]);
+    });
+
+    it('mapea el resumen a camelCase y NO incluye payload ni ownerId', async () => {
+      const sql = makeSqlReturning([
+        makeSummaryRow({ status: 'failed', attempts: 3, last_error: 'boom', payload_kind: 'recipe' }),
+      ]);
+      const [job] = await new JobsRepository(sql).listByOwner('user-1', { limit: 10, offset: 0 });
+      expect(job).toEqual({
+        id: '99999999-9999-9999-9999-999999999999',
+        agentId: '11111111-1111-1111-1111-111111111111',
+        status: 'failed',
+        type: 'recipe',
+        attempts: 3,
+        lastError: 'boom',
+        scheduledFor: null,
+        createdAt: '2026-06-30T00:00:00.000Z',
+        startedAt: '2026-06-30T00:01:00.000Z',
+        finishedAt: '2026-06-30T00:02:00.000Z',
+      });
+      // Explicito: el resumen no filtra datos sensibles ni redundantes.
+      expect(job).not.toHaveProperty('payload');
+      expect(job).not.toHaveProperty('ownerId');
+    });
+  });
 });

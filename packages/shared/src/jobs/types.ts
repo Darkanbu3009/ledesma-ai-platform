@@ -39,3 +39,43 @@ export interface CreateJobInput {
   /** null/ausente = ASAP. Acepta Date o ISO string. */
   scheduledFor?: Date | string | null;
 }
+
+/**
+ * Tipo de un job INFERIDO del payload (para OBSERVABILIDAD): 'recipe' si el payload lleva el
+ * discriminador kind === 'recipe' (ver recipe-payload.ts), 'simple' en cualquier otro caso (el job de
+ * un mensaje suelto). Es lo unico que se puede saber del payload SIN exponerlo: el origen
+ * (scheduler/trigger/manual) NO es inferible sin cambios de esquema, asi que no se modela aqui.
+ */
+export type JobType = 'recipe' | 'simple';
+
+/**
+ * RESUMEN de un job para el historial de ejecuciones (listado de OBSERVABILIDAD). Deliberadamente NO
+ * incluye el `payload` (contiene mensajes del usuario / snapshots de recetas: dato sensible) ni el
+ * `ownerId` (siempre es el del que consulta). En su lugar expone `type`, inferido del payload en la
+ * propia query. `lastError` viaja COMPLETO desde el repo; la capa HTTP lo trunca antes de serializar.
+ */
+export interface JobSummary {
+  id: string;
+  /** Agente que ejecuto (o ejecutara) el job. */
+  agentId: string;
+  status: JobStatus;
+  /** Tipo inferido del payload: 'recipe' o 'simple'. Sin exponer el payload. */
+  type: JobType;
+  attempts: number;
+  /** Detalle del ultimo fallo (COMPLETO aqui; la ruta lo trunca). null si nunca fallo. */
+  lastError: string | null;
+  scheduledFor: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+/** Opciones del listado paginado por owner (observabilidad). status opcional = todos los estados. */
+export interface ListJobsByOwnerOptions {
+  /** Maximo de filas a devolver (la ruta lo acota; el repo confia en el valor ya validado). */
+  limit: number;
+  /** Desplazamiento para paginar (0 = primera pagina). */
+  offset: number;
+  /** Filtro opcional por estado. Ausente = todos. */
+  status?: JobStatus;
+}

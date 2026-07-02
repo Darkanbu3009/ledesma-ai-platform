@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { apiFetch } from './api';
 import type { AgentConfig } from './agents';
 import type { ProviderCredential } from './credentials';
@@ -7,6 +7,8 @@ import type { RegistrationState } from './registration';
 import type { ScheduledTask } from './scheduled-tasks';
 import type { Trigger } from './triggers';
 import type { Recipe, RecipeSummary } from './recipes';
+import type { JobsPage, JobStatusFilter } from './jobs';
+import { JOB_PAGE_SIZE, JOBS_REFETCH_MS, buildJobsQuery, hasInFlightJobs } from './jobs';
 import type { ConsentsState, DataRequest } from './privacy';
 
 /** Estado de registro del usuario actual (perfil, organizacion, plan y uso). */
@@ -64,6 +66,30 @@ export function useRecipe(id: string | undefined) {
     queryKey: ['recipes', id],
     queryFn: () => apiFetch<{ recipe: Recipe }>(`/v1/recipes/${id}`).then((r) => r.recipe),
     enabled: Boolean(id),
+  });
+}
+
+/**
+ * HISTORIAL DE EJECUCIONES del usuario (GET /v1/jobs), paginado con "cargar mas" (useInfiniteQuery).
+ * Cada pagina trae JOB_PAGE_SIZE jobs; getNextPageParam avanza el offset mientras el backend diga
+ * hasMore. El filtro por estado va en la queryKey: cambiarlo arranca una lista nueva.
+ *
+ * AUTO-REFRESH PRUDENTE: refetchInterval reconsulta cada JOBS_REFETCH_MS SOLO si hay algun job en vuelo
+ * (pending/running) entre los cargados; si todo esta en estado terminal, devuelve false y no toca el API
+ * (no lo martillamos cuando no hay nada que pueda cambiar).
+ */
+export function useJobs(status: JobStatusFilter = 'all') {
+  return useInfiniteQuery({
+    queryKey: ['jobs', status],
+    queryFn: ({ pageParam }) =>
+      apiFetch<JobsPage>(`/v1/jobs${buildJobsQuery({ limit: JOB_PAGE_SIZE, offset: pageParam, status })}`),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) =>
+      lastPage.pagination.hasMore ? lastPage.pagination.offset + lastPage.pagination.limit : undefined,
+    refetchInterval: (query) => {
+      const jobs = query.state.data?.pages.flatMap((page) => page.jobs) ?? [];
+      return hasInFlightJobs(jobs) ? JOBS_REFETCH_MS : false;
+    },
   });
 }
 
