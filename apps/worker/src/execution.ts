@@ -111,6 +111,14 @@ export interface JobRunnerDeps {
   runAgent(input: AgentRunInput, deps: AgentDeps): AsyncIterable<AgentEvent>;
   logger: Logger;
   config: ExecutionConfig;
+  /**
+   * Notifica por correo (best-effort) un fallo DEFINITIVO del job. Se invoca SOLO tras markFailed (fallo
+   * permanente o reintentos agotados), NUNCA en un reintento ni en un apagado. La implementacion real
+   * (Resend + cooldown + lectura del email del owner) vive en alertas.ts y se cablea en index.ts; en
+   * tests es un vi.fn(). OPCIONAL: si no se cablea, no se notifica. La llamada ademas se envuelve en
+   * try/catch (ver notifyDefinitiveFailure), asi una alerta jamas bloquea el cierre del job.
+   */
+  notifyJobFailure?: (job: Job, reason: string) => Promise<void>;
 }
 
 /** Mensajes del payload de un job: mismo shape que el body de /v1/run/:agentId. */
@@ -430,20 +438,40 @@ async function runRecipeJob(
   });
 }
 
+/**
+ * Dispara la alerta de fallo DEFINITIVO (best-effort). Se llama SOLO tras markFailed. NUNCA lanza: un
+ * fallo del envio (Resend caido, sin config, sin email del owner) se traga aca para no bloquear el
+ * cierre del job ni el loop del worker. La deduplicacion/cooldown y el envio real viven en la
+ * implementacion inyectada (alertas.ts). Si no se cablea notifyJobFailure, es un no-op.
+ */
+async function notifyDefinitiveFailure(deps: JobRunnerDeps, job: Job, reason: string): Promise<void> {
+  if (!deps.notifyJobFailure) return;
+  try {
+    await deps.notifyJobFailure(job, reason);
+  } catch (error) {
+    deps.logger.error('fallo al notificar el fallo definitivo del job (se ignora, best-effort)', {
+      jobId: job.id,
+      err: error instanceof Error ? error.message : 'desconocido',
+    });
+  }
+}
+
 /** Decide el cierre de un job que fallo: permanente / apagado / transitorio (reintento o definitivo). */
 async function handleFailure(deps: JobRunnerDeps, job: Job, error: unknown): Promise<void> {
   const { logger } = deps;
   const reason = describeError(error);
 
   // Apagado del worker: no es culpa del job. Vuelve a 'pending' para re-reclamar, sin gastar el intento
-  // como fallo permanente (incluso si ya agoto attempts: el corte fue externo).
+  // como fallo permanente (incluso si ya agoto attempts: el corte fue externo). NO se notifica (no es
+  // un fallo definitivo: el job se re-reclama).
   if (error instanceof ShutdownAbortError) {
     await deps.jobs.markPendingRetry(job.id, reason, null);
     logger.info('job devuelto a pending por apagado del worker', { jobId: job.id, attempts: job.attempts });
     return;
   }
 
-  // Fallo PERMANENTE (tier insuficiente): no se reintenta, va directo a 'failed'.
+  // Fallo PERMANENTE (tier insuficiente): no se reintenta, va directo a 'failed'. Fallo DEFINITIVO -> se
+  // notifica al owner tras markFailed.
   if (error instanceof PermanentExecutionError) {
     await deps.jobs.markFailed(job.id, reason);
     logger.warn('job fallido permanente (sin reintento)', {
@@ -451,6 +479,7 @@ async function handleFailure(deps: JobRunnerDeps, job: Job, error: unknown): Pro
       attempts: job.attempts,
       reason,
     });
+    await notifyDefinitiveFailure(deps, job, reason);
     return;
   }
 
@@ -462,6 +491,8 @@ async function handleFailure(deps: JobRunnerDeps, job: Job, error: unknown): Pro
       attempts: job.attempts,
       reason,
     });
+    // Fallo DEFINITIVO (reintentos agotados) -> se notifica al owner tras markFailed.
+    await notifyDefinitiveFailure(deps, job, reason);
     return;
   }
 

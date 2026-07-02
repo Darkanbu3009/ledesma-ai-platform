@@ -122,6 +122,7 @@ function makeDeps(overrides: Partial<JobRunnerDeps> = {}): JobRunnerDeps {
     runAgent: vi.fn(() => successRun()),
     logger: makeLogger(),
     config: { runTimeoutMs: 600_000, runMaxTokens: 1_000_000 },
+    notifyJobFailure: vi.fn(async () => {}),
     ...overrides,
   };
 }
@@ -262,6 +263,82 @@ describe('processClaimedJob', () => {
 
     expect(deps.jobs.markPendingRetry).toHaveBeenCalledTimes(1);
     expect(deps.jobs.markFailed).not.toHaveBeenCalled();
+  });
+});
+
+describe('notificacion de fallo definitivo (hook en handleFailure)', () => {
+  it('fallo permanente (tier no autonomous) -> notifica al owner con job + reason', async () => {
+    const deps = makeDeps({ getProfileTier: vi.fn(async () => 'free' as const) });
+    const job = makeJob({ attempts: 1 });
+
+    await processClaimedJob(deps, job);
+
+    expect(deps.jobs.markFailed).toHaveBeenCalledTimes(1);
+    expect(deps.notifyJobFailure).toHaveBeenCalledTimes(1);
+    const [notifiedJob, reason] = callArgs(deps.notifyJobFailure);
+    expect((notifiedJob as Job).id).toBe('job-1');
+    expect(String(reason)).toContain('autonomous');
+  });
+
+  it('fallo transitorio con attempts agotados -> notifica al owner con el error como reason', async () => {
+    const deps = makeDeps({
+      runAgent: vi.fn(() => {
+        throw new Error('proveedor 500');
+      }),
+    });
+    const job = makeJob({ attempts: MAX_ATTEMPTS });
+
+    await processClaimedJob(deps, job);
+
+    expect(deps.jobs.markFailed).toHaveBeenCalledTimes(1);
+    expect(deps.notifyJobFailure).toHaveBeenCalledTimes(1);
+    expect(String(callArgs(deps.notifyJobFailure)[1])).toContain('proveedor 500');
+  });
+
+  it('reintento transitorio (attempts < 3) -> NO notifica', async () => {
+    const deps = makeDeps({
+      runAgent: vi.fn(() => {
+        throw new Error('proveedor 500');
+      }),
+    });
+    const job = makeJob({ attempts: 1 });
+
+    await processClaimedJob(deps, job);
+
+    expect(deps.jobs.markPendingRetry).toHaveBeenCalledTimes(1);
+    expect(deps.notifyJobFailure).not.toHaveBeenCalled();
+  });
+
+  it('apagado del worker -> vuelve a pending y NO notifica (no es fallo definitivo)', async () => {
+    const controller = new AbortController();
+    const deps = makeDeps({ runAgent: vi.fn((input: AgentRunInput) => hangingRun(input)) });
+    const job = makeJob({ attempts: MAX_ATTEMPTS });
+
+    const p = processClaimedJob(deps, job, controller.signal);
+    await Promise.resolve();
+    controller.abort();
+    await p;
+
+    expect(deps.jobs.markPendingRetry).toHaveBeenCalledTimes(1);
+    expect(deps.jobs.markFailed).not.toHaveBeenCalled();
+    expect(deps.notifyJobFailure).not.toHaveBeenCalled();
+  });
+
+  it('si notifyJobFailure lanza, el job igual queda failed y processClaimedJob no propaga', async () => {
+    const deps = makeDeps({
+      getProfileTier: vi.fn(async () => 'free' as const),
+      notifyJobFailure: vi.fn(async () => {
+        throw new Error('resend caido');
+      }),
+    });
+    const job = makeJob({ attempts: 1 });
+
+    // No debe rechazar: el fallo de la alerta se traga (best-effort).
+    await expect(processClaimedJob(deps, job)).resolves.toBeUndefined();
+    expect(deps.jobs.markFailed).toHaveBeenCalledTimes(1);
+    // Se intento notificar y se registro el fallo del envio, sin romper el cierre del job.
+    expect(deps.notifyJobFailure).toHaveBeenCalledTimes(1);
+    expect(deps.logger.error).toHaveBeenCalled();
   });
 });
 

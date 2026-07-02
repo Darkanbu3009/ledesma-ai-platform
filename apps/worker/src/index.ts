@@ -11,6 +11,7 @@ import { parseEnv, type WorkerEnv } from './env.js';
 import { createLogger } from './logger.js';
 import { getSql, closeSql } from './db.js';
 import { startWorker } from './worker.js';
+import { crearNotificadorFallos, leerEmailOwner, leerNombreAgente } from './alertas.js';
 import type { JobRunnerDeps } from './execution.js';
 
 /**
@@ -43,6 +44,18 @@ function main(): void {
   const credentialRepo = new ProviderCredentialRepository(sql);
   const registrationRepo = new RegistrationRepository(sql);
 
+  // Notificador de fallos DEFINITIVOS por correo (best-effort). Lee el email del owner de auth.users y el
+  // nombre del agente con el MISMO cliente sql. El cooldown por owner vive en el closure (una instancia
+  // por proceso). Si falta la config de email, notificarFallo loguea y no envia (no tumba el worker).
+  const notificador = crearNotificadorFallos({
+    ...(config.RESEND_API_KEY !== undefined ? { resendApiKey: config.RESEND_API_KEY } : {}),
+    ...(config.RESEND_FROM_EMAIL !== undefined ? { fromEmail: config.RESEND_FROM_EMAIL } : {}),
+    ...(config.CONSOLE_BASE_URL !== undefined ? { consoleBaseUrl: config.CONSOLE_BASE_URL } : {}),
+    getOwnerEmail: (ownerId) => leerEmailOwner(sql, ownerId, logger),
+    getAgentName: (agentId) => leerNombreAgente(sql, agentId, logger),
+    logger,
+  });
+
   const deps: JobRunnerDeps = {
     jobs,
     getProfileTier: (ownerId) => registrationRepo.getProfileTier(ownerId),
@@ -58,6 +71,7 @@ function main(): void {
       ...(config.WEB_WORKER_URL !== undefined ? { webWorkerUrl: config.WEB_WORKER_URL } : {}),
       ...(config.WEB_WORKER_SECRET !== undefined ? { webWorkerSecret: config.WEB_WORKER_SECRET } : {}),
     },
+    notifyJobFailure: (job, reason) => notificador.notificarFallo(job, reason),
   };
 
   const handle = startWorker({ deps, logger, intervalMs: config.WORKER_POLL_INTERVAL_MS });
