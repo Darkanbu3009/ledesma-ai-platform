@@ -2,7 +2,7 @@
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
 import { cargarEnv, crearRedactor } from './lib/env.mjs';
-import { conectarDb } from './lib/db.mjs';
+import { crearPgrest } from './lib/pgrest.mjs';
 import { pedirJson } from './lib/http.mjs';
 import { crearReporte } from './lib/reporte.mjs';
 import { listarUsuariosPruebaRestantes, borrarUsuario } from './lib/supabase.mjs';
@@ -48,11 +48,13 @@ async function main() {
     process.exit(1);
   });
 
-  const sql = conectarDb(env.DATABASE_URL);
+  // Acceso a la base via PostgREST (HTTPS): el entorno bloquea el puerto postgres directo. La
+  // service_role key bypassa RLS, igual que el rol de servicio del backend.
+  const db = crearPgrest(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
   const ctx = {
     env,
-    sql,
+    db,
     reporte,
     redactar,
     datos: { jobsVistos: new Set() },
@@ -78,7 +80,7 @@ async function main() {
     const restos = await listarUsuariosPruebaRestantes(env);
     for (const resto of restos) {
       try {
-        await limpiarRestosDeOwner(sql, resto.id);
+        await limpiarRestosDeOwner(db, resto.id);
         await borrarUsuario(env, resto.id);
       } catch (error) {
         reporte.info('PREPARACION', `barrido de resto ${resto.email}`, `fallo parcial: ${error.message}`);
@@ -90,7 +92,6 @@ async function main() {
   }
 
   if (flags.has('--solo-barrido')) {
-    await sql.end({ timeout: 5 });
     console.log('\nBarrido completado (--solo-barrido).');
     return;
   }
@@ -129,7 +130,6 @@ async function main() {
         reporte.fail('LIMPIEZA', 'error inesperado en la limpieza', error instanceof Error ? (error.stack ?? error.message) : String(error));
       }
     }
-    await sql.end({ timeout: 5 });
   }
 
   const salida = reporte.guardar(resolve(RAIZ_REPO, 'scripts/validacion-e2e/salida'), {

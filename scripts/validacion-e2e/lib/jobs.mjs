@@ -1,59 +1,53 @@
 import { esperarHasta } from './http.mjs';
 
-/** Lee un job por id (estado + diagnostico), acotado al owner de prueba. */
-export async function leerJob(sql, ownerId, jobId) {
-  const filas = await sql`
-    select id, status, attempts, last_error, created_at, started_at, finished_at
-    from jobs where id = ${jobId} and owner_id = ${ownerId}
-  `;
+/**
+ * Lectura de la cola `jobs` via PostgREST (HTTPS). El owner de prueba es NUEVO en cada corrida y
+ * solo tiene los jobs que este script genera, asi que la atribucion de jobs se hace por (marca unica
+ * en el payload) + (ids ya vistos), sin depender de timestamps de la base (evita sesgos de reloj
+ * entre el runner y Postgres).
+ */
+
+const COLUMNAS = 'id,status,attempts,last_error,payload,created_at,started_at,finished_at';
+
+/** Lee un job por id, acotado al owner de prueba. */
+export async function leerJob(db, ownerId, jobId) {
+  const filas = await db.get('jobs', `id=eq.${jobId}&owner_id=eq.${ownerId}&select=${COLUMNAS}`);
   return filas[0] ?? null;
 }
 
 /**
- * Pollea la tabla jobs hasta que el job llegue a un estado TERMINAL (completed/failed) o venza el
- * plazo. Devuelve { desenlace: 'completed'|'failed'|'timeout'|'desaparecido', job }. El timeout con
- * status 'pending' es la falla caracteristica de "el worker desplegado no esta tomando jobs".
+ * Pollea hasta que el job llegue a un estado TERMINAL (completed/failed) o venza el plazo. Devuelve
+ * { desenlace: 'completed'|'failed'|'timeout'|'desaparecido', job }. El timeout con status 'pending'
+ * es la falla caracteristica de "el worker desplegado no esta tomando jobs".
  */
-export async function esperarJobTerminal(sql, ownerId, jobId, { plazoMs = 180_000, intervaloMs = 5_000 } = {}) {
+export async function esperarJobTerminal(db, ownerId, jobId, { plazoMs = 180_000, intervaloMs = 5_000 } = {}) {
   let ultimo = null;
   const terminal = await esperarHasta(
     async () => {
-      ultimo = await leerJob(sql, ownerId, jobId);
+      ultimo = await leerJob(db, ownerId, jobId);
       if (ultimo === null) return { desenlace: 'desaparecido', job: null };
       if (ultimo.status === 'completed' || ultimo.status === 'failed') {
         return { desenlace: ultimo.status, job: ultimo };
       }
       return null;
     },
-    { plazoMs, intervaloMs, descripcion: `job ${jobId} terminal` },
+    { plazoMs, intervaloMs },
   );
   if (terminal !== null) return terminal;
   return { desenlace: 'timeout', job: ultimo };
 }
 
-/** Hora del SERVIDOR de la base (evita sesgos entre el reloj local y el created_at que pone la DB). */
-export async function ahoraDb(sql) {
-  const filas = await sql`select now() as t`;
-  return filas[0].t;
-}
-
 /**
- * Encuentra el job NUEVO del owner creado a partir de `desde` (timestamp de la DB) que no este en
- * `conocidos` (Set de ids) y cuyo payload contenga la `marca` (texto unico por fuente: scheduler /
- * trigger hmac / trigger url_token). La marca discrimina jobs de fuentes distintas aunque se
- * solapen en el tiempo (p.ej. un segundo encolado del scheduler antes de desactivar la tarea).
+ * Encuentra el job NUEVO del owner cuyo payload contiene la `marca` (texto unico por fuente:
+ * scheduler / trigger hmac / trigger url_token) y que no este en `conocidos` (Set de ids). Trae los
+ * jobs del owner (son pocos: solo los del usuario de prueba) y filtra la marca en JS sobre el
+ * payload jsonb.
  */
-export async function encontrarJobNuevo(sql, ownerId, desde, conocidos, marca, { plazoMs = 150_000, intervaloMs = 5_000 } = {}) {
-  const patron = `%${marca}%`;
+export async function encontrarJobNuevo(db, ownerId, conocidos, marca, { plazoMs = 150_000, intervaloMs = 5_000 } = {}) {
   return esperarHasta(
     async () => {
-      const filas = await sql`
-        select id, status, attempts, last_error, created_at
-        from jobs
-        where owner_id = ${ownerId} and created_at >= ${desde} and payload::text like ${patron}
-        order by created_at asc
-      `;
-      const nuevo = filas.find((f) => !conocidos.has(f.id));
+      const filas = await db.get('jobs', `owner_id=eq.${ownerId}&select=${COLUMNAS}&order=created_at.asc`);
+      const nuevo = filas.find((f) => !conocidos.has(f.id) && JSON.stringify(f.payload ?? '').includes(marca));
       return nuevo ?? null;
     },
     { plazoMs, intervaloMs },

@@ -10,49 +10,52 @@ import { borrarUsuario } from '../lib/supabase.mjs';
  * completed del usuario de prueba tambien desaparece; se reporta.
  */
 
-/** Barrido directo en DB de TODO lo asociado a UN owner de prueba. Orden respetando FKs. */
-export async function limpiarRestosDeOwner(sql, ownerId) {
+// Tablas acotadas por owner_id (hijos antes que agents por las FK on delete) y las scoped por
+// profile_id / id del usuario de prueba. Se listan aparte para reusarlas en barrido y verificacion.
+const TABLAS_OWNER = [
+  'jobs',
+  'scheduled_tasks',
+  'triggers',
+  'recipes',
+  'agent_runs',
+  'processing_records',
+  'consents',
+  'data_subject_requests',
+  'agents',
+  'provider_credentials',
+];
+const TABLAS_PROFILE = [
+  ['usage_counters', 'profile_id'],
+  ['subscriptions', 'profile_id'],
+  ['profiles', 'id'],
+];
+
+/** Barrido directo en DB de TODO lo asociado a UN owner de prueba, via PostgREST. Orden respeta FKs. */
+export async function limpiarRestosDeOwner(db, ownerId) {
   const conteos = {};
-  // Tablas con owner_id (el orden evita choques de FK: hijos antes que agents).
-  conteos.jobs = (await sql`delete from jobs where owner_id = ${ownerId} returning id`).length;
-  conteos.scheduled_tasks = (await sql`delete from scheduled_tasks where owner_id = ${ownerId} returning id`).length;
-  conteos.triggers = (await sql`delete from triggers where owner_id = ${ownerId} returning id`).length;
-  conteos.recipes = (await sql`delete from recipes where owner_id = ${ownerId} returning id`).length;
-  conteos.agent_runs = (await sql`delete from agent_runs where owner_id = ${ownerId} returning id`).length;
-  conteos.processing_records = (await sql`delete from processing_records where owner_id = ${ownerId} returning id`).length;
-  conteos.consents = (await sql`delete from consents where owner_id = ${ownerId} returning id`).length;
-  conteos.data_subject_requests = (await sql`delete from data_subject_requests where owner_id = ${ownerId} returning id`).length;
-  conteos.agents = (await sql`delete from agents where owner_id = ${ownerId} returning id`).length;
-  conteos.provider_credentials = (await sql`delete from provider_credentials where owner_id = ${ownerId} returning id`).length;
-  // Perfil y satelites (profile_id / id = sub del usuario de prueba).
-  conteos.usage_counters = (await sql`delete from usage_counters where profile_id = ${ownerId} returning id`).length;
-  conteos.subscriptions = (await sql`delete from subscriptions where profile_id = ${ownerId} returning id`).length;
-  conteos.profiles = (await sql`delete from profiles where id = ${ownerId} returning id`).length;
+  for (const tabla of TABLAS_OWNER) {
+    conteos[tabla] = await db.del(tabla, `owner_id=eq.${ownerId}`);
+  }
+  for (const [tabla, col] of TABLAS_PROFILE) {
+    conteos[tabla] = await db.del(tabla, `${col}=eq.${ownerId}`);
+  }
   return conteos;
 }
 
-/** Conteo de filas remanentes del owner por tabla (verificacion post-limpieza). */
-export async function contarRestosDeOwner(sql, ownerId) {
-  const filas = await sql`
-    select 'agents' as tabla, count(*)::int as n from agents where owner_id = ${ownerId}
-    union all select 'provider_credentials', count(*)::int from provider_credentials where owner_id = ${ownerId}
-    union all select 'jobs', count(*)::int from jobs where owner_id = ${ownerId}
-    union all select 'scheduled_tasks', count(*)::int from scheduled_tasks where owner_id = ${ownerId}
-    union all select 'triggers', count(*)::int from triggers where owner_id = ${ownerId}
-    union all select 'recipes', count(*)::int from recipes where owner_id = ${ownerId}
-    union all select 'agent_runs', count(*)::int from agent_runs where owner_id = ${ownerId}
-    union all select 'consents', count(*)::int from consents where owner_id = ${ownerId}
-    union all select 'data_subject_requests', count(*)::int from data_subject_requests where owner_id = ${ownerId}
-    union all select 'processing_records', count(*)::int from processing_records where owner_id = ${ownerId}
-    union all select 'profiles', count(*)::int from profiles where id = ${ownerId}
-    union all select 'subscriptions', count(*)::int from subscriptions where profile_id = ${ownerId}
-    union all select 'usage_counters', count(*)::int from usage_counters where profile_id = ${ownerId}
-  `;
-  return Object.fromEntries(filas.map((f) => [f.tabla, f.n]));
+/** Conteo de filas remanentes del owner por tabla (verificacion post-limpieza), via PostgREST. */
+export async function contarRestosDeOwner(db, ownerId) {
+  const conteos = {};
+  for (const tabla of TABLAS_OWNER) {
+    conteos[tabla] = await db.contar(tabla, `owner_id=eq.${ownerId}`);
+  }
+  for (const [tabla, col] of TABLAS_PROFILE) {
+    conteos[tabla] = await db.contar(tabla, `${col}=eq.${ownerId}`);
+  }
+  return conteos;
 }
 
 export async function limpiezaFinal(ctx) {
-  const { env, sql, reporte, api } = ctx;
+  const { env, db, reporte, api } = ctx;
   const F = 'LIMPIEZA';
   const d = ctx.datos;
   if (!d.usuario) {
@@ -90,7 +93,7 @@ export async function limpiezaFinal(ctx) {
   let barridoOk = false;
   if (ctx.datos.dbOk) {
     try {
-      const conteos = await limpiarRestosDeOwner(sql, d.usuario.id);
+      const conteos = await limpiarRestosDeOwner(db, d.usuario.id);
       barridoOk = true;
       const tocadas = Object.entries(conteos).filter(([, n]) => n > 0);
       reporte.info(
@@ -107,7 +110,7 @@ export async function limpiezaFinal(ctx) {
       reporte.fail(F, 'barrido DB acotado al owner de prueba', error.message);
     }
   } else {
-    reporte.skip(F, 'barrido DB acotado al owner de prueba', 'sin conexion a la base');
+    reporte.skip(F, 'barrido DB acotado al owner de prueba', 'sin acceso a la base');
   }
 
   // 3) Usuario de prueba en Supabase Auth. SOLO si el barrido DB corrio sin error: borrarlo antes
@@ -133,7 +136,7 @@ export async function limpiezaFinal(ctx) {
   // 4) Verificacion final: cero filas del owner de prueba en todas las tablas.
   if (ctx.datos.dbOk) {
     try {
-      const restos = await contarRestosDeOwner(sql, d.usuario.id);
+      const restos = await contarRestosDeOwner(db, d.usuario.id);
       const sucias = Object.entries(restos).filter(([, n]) => n > 0);
       if (sucias.length === 0) {
         reporte.pass(F, 'verificacion: cero filas E2E-VALIDACION activas', 'todas las tablas en 0 para el owner de prueba');

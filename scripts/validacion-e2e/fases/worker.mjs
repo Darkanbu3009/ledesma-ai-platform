@@ -6,7 +6,7 @@ import { esperarJobTerminal, resumenJob } from '../lib/jobs.mjs';
  * que queda 'pending' para siempre significa que el worker desplegado NO esta tomando jobs.
  */
 export async function faseWorker(ctx) {
-  const { sql, reporte, api } = ctx;
+  const { db, reporte, api } = ctx;
   const F = 'FASE 5 WORKER';
   if (!ctx.datos.agenteId || !ctx.datos.credencialId) {
     reporte.skip(F, 'toda la fase', 'sin agente o credencial (fase previa fallo)');
@@ -48,7 +48,7 @@ export async function faseWorker(ctx) {
     reporte.skip(F, 'job de receta completado por el worker', 'sin conexion a la base para pollear jobs');
     return;
   }
-  const { desenlace, job } = await esperarJobTerminal(sql, ctx.datos.usuario.id, ctx.datos.jobRecetaId, {
+  const { desenlace, job } = await esperarJobTerminal(db, ctx.datos.usuario.id, ctx.datos.jobRecetaId, {
     plazoMs: 180_000,
   });
   if (desenlace === 'completed') {

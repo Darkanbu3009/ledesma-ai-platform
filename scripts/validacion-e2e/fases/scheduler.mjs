@@ -1,4 +1,4 @@
-import { ahoraDb, encontrarJobNuevo, esperarJobTerminal, resumenJob } from '../lib/jobs.mjs';
+import { encontrarJobNuevo, esperarJobTerminal, resumenJob } from '../lib/jobs.mjs';
 
 /** Marca unica en el payload para reconocer los jobs que encolo ESTA tarea (y no otra fuente). */
 const MARCA = 'E2E-VALIDACION scheduler';
@@ -9,18 +9,17 @@ const MARCA = 'E2E-VALIDACION scheduler';
  * se DESACTIVA apenas se observa el primer job para que no siga encolando.
  */
 export async function faseScheduler(ctx) {
-  const { sql, reporte, api } = ctx;
+  const { db, reporte, api } = ctx;
   const F = 'FASE 6 SCHEDULER';
   if (!ctx.datos.agenteId || !ctx.datos.credencialId) {
     reporte.skip(F, 'toda la fase', 'sin agente o credencial (fase previa fallo)');
     return;
   }
   if (!ctx.datos.dbOk) {
-    reporte.skip(F, 'toda la fase', 'sin conexion a la base para observar la cola');
+    reporte.skip(F, 'toda la fase', 'sin acceso a la base para observar la cola');
     return;
   }
 
-  const desde = await ahoraDb(sql);
   const tarea = await api('/v1/scheduled-tasks', {
     method: 'POST',
     body: {
@@ -39,7 +38,7 @@ export async function faseScheduler(ctx) {
   }
 
   // pg_cron corre cada minuto; el peor caso razonable para ver el job encolado es ~2.5 min.
-  const jobEncolado = await encontrarJobNuevo(sql, ctx.datos.usuario.id, desde, ctx.datos.jobsVistos, MARCA, {
+  const jobEncolado = await encontrarJobNuevo(db, ctx.datos.usuario.id, ctx.datos.jobsVistos, MARCA, {
     plazoMs: 150_000,
   });
 
@@ -63,9 +62,9 @@ export async function faseScheduler(ctx) {
     return;
   }
   ctx.datos.jobsVistos.add(jobEncolado.id);
-  reporte.pass(F, 'pg_cron encolo un job de la tarea', `jobId=${jobEncolado.id}, encolado ${jobEncolado.created_at?.toISOString?.() ?? jobEncolado.created_at}`);
+  reporte.pass(F, 'pg_cron encolo un job de la tarea', `jobId=${jobEncolado.id}, encolado ${jobEncolado.created_at}`);
 
-  const { desenlace, job } = await esperarJobTerminal(sql, ctx.datos.usuario.id, jobEncolado.id, { plazoMs: 120_000 });
+  const { desenlace, job } = await esperarJobTerminal(db, ctx.datos.usuario.id, jobEncolado.id, { plazoMs: 120_000 });
   if (desenlace === 'completed') {
     // Exito = status 'completed' (last_error no nulo solo indica un reintento transitorio previo).
     reporte.pass(F, 'worker completo el job del scheduler', resumenJob(job));
@@ -74,11 +73,11 @@ export async function faseScheduler(ctx) {
   }
 
   // Evidencia extra: la tarea avanzo last_run_at/next_run_at al disparar.
-  const filas = await sql`
-    select last_run_at, next_run_at, is_active from scheduled_tasks
-    where id = ${ctx.datos.tareaId} and owner_id = ${ctx.datos.usuario.id}
-  `;
+  const filas = await db.get(
+    'scheduled_tasks',
+    `id=eq.${ctx.datos.tareaId}&owner_id=eq.${ctx.datos.usuario.id}&select=last_run_at,next_run_at,is_active`,
+  );
   if (filas[0]) {
-    reporte.info(F, 'estado final de la tarea', `last_run_at=${filas[0].last_run_at?.toISOString?.() ?? filas[0].last_run_at}, is_active=${filas[0].is_active}`);
+    reporte.info(F, 'estado final de la tarea', `last_run_at=${filas[0].last_run_at}, is_active=${filas[0].is_active}`);
   }
 }

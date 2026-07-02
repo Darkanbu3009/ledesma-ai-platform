@@ -4,7 +4,7 @@
  * (credencial de un proveedor contra agente de otro -> 400 antes de tocar al proveedor).
  */
 export async function faseBoveda(ctx) {
-  const { env, sql, reporte, api } = ctx;
+  const { env, db, reporte, api } = ctx;
   const F = 'FASE 3 BOVEDA';
   if (!ctx.datos.identidadLista) {
     reporte.skip(F, 'toda la fase', 'sin identidad de prueba (FASE 2 fallo)');
@@ -28,10 +28,10 @@ export async function faseBoveda(ctx) {
   }
 
   if (ctx.datos.dbOk) {
-    const filas = await sql`
-      select encrypted_key from provider_credentials
-      where id = ${ctx.datos.credencialId} and owner_id = ${ctx.datos.usuario.id}
-    `;
+    const filas = await db.get(
+      'provider_credentials',
+      `id=eq.${ctx.datos.credencialId}&owner_id=eq.${ctx.datos.usuario.id}&select=encrypted_key`,
+    );
     const cifrada = filas[0]?.encrypted_key ?? '';
     if (cifrada === '') {
       reporte.fail(F, 'cifrado real en DB (encrypted_key)', 'fila no encontrada en provider_credentials');

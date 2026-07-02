@@ -30,7 +30,7 @@ export async function faseGates(ctx) {
       },
     });
     if (intento.status === 403) {
-      reporte.pass(F, 'crear scheduled task con tier free -> 403', `status 403: ${JSON.stringify(intento.body?.message ?? '').slice(0, 120)}`);
+      reporte.pass(F, 'crear scheduled task con tier free -> 403', `status 403: ${JSON.stringify(intento.body?.error?.message ?? intento.body).slice(0, 140)}`);
     } else {
       reporte.fail(F, 'crear scheduled task con tier free -> 403', `status ${intento.status}: ${JSON.stringify(intento.body).slice(0, 200)}`);
       // Si contra lo esperado se creo, se registra para que la limpieza la borre.

@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { pedirJson } from '../lib/http.mjs';
 import { registrarSecreto } from '../lib/env.mjs';
-import { ahoraDb, encontrarJobNuevo, esperarJobTerminal, resumenJob } from '../lib/jobs.mjs';
+import { encontrarJobNuevo, esperarJobTerminal, resumenJob } from '../lib/jobs.mjs';
 
 /** Marcas unicas en el payload_template para reconocer los jobs de CADA trigger. */
 const MARCA_HMAC = 'E2E-VALIDACION trigger hmac';
@@ -18,7 +18,7 @@ function firmar(secreto, timestamp, cuerpo) {
  * viejo, >300s) -> 401. url_token: token correcto -> 202 y el job completa; incorrecto -> 401.
  */
 export async function faseTriggers(ctx) {
-  const { env, sql, reporte, api } = ctx;
+  const { env, db, reporte, api } = ctx;
   const F = 'FASE 7 TRIGGERS';
   if (!ctx.datos.agenteId || !ctx.datos.credencialId) {
     reporte.skip(F, 'toda la fase', 'sin agente o credencial (fase previa fallo)');
@@ -54,7 +54,6 @@ export async function faseTriggers(ctx) {
       reporte.info(F, 'webhookUrl devuelta vs API_BASE_URL', `devuelta=${th.body.webhookUrl} (PUBLIC_BASE_URL sin setear?)`);
     }
 
-    const desde = ctx.datos.dbOk ? await ahoraDb(sql) : new Date();
     const ts = Math.floor(Date.now() / 1000);
     const valido = await pedirJson(urlWebhook, {
       method: 'POST',
@@ -68,12 +67,12 @@ export async function faseTriggers(ctx) {
     }
 
     if (valido.status === 202 && ctx.datos.dbOk) {
-      const jobTrigger = await encontrarJobNuevo(sql, ctx.datos.usuario.id, desde, ctx.datos.jobsVistos, MARCA_HMAC, { plazoMs: 60_000 });
+      const jobTrigger = await encontrarJobNuevo(db, ctx.datos.usuario.id, ctx.datos.jobsVistos, MARCA_HMAC, { plazoMs: 60_000 });
       if (jobTrigger === null) {
         reporte.fail(F, 'job del trigger hmac completado', 'el 202 no encolo ningun job visible del owner');
       } else {
         ctx.datos.jobsVistos.add(jobTrigger.id);
-        const { desenlace, job } = await esperarJobTerminal(sql, ctx.datos.usuario.id, jobTrigger.id, { plazoMs: 120_000 });
+        const { desenlace, job } = await esperarJobTerminal(db, ctx.datos.usuario.id, jobTrigger.id, { plazoMs: 120_000 });
         if (desenlace === 'completed') {
           reporte.pass(F, 'job del trigger hmac completado', resumenJob(job));
         } else {
@@ -127,7 +126,6 @@ export async function faseTriggers(ctx) {
   }
 
   const urlToken = `${env.API_BASE_URL}/webhooks/triggers/${ctx.datos.triggerTokenId}`;
-  const desdeToken = ctx.datos.dbOk ? await ahoraDb(sql) : new Date();
   const tokenOk = await pedirJson(`${urlToken}?token=${encodeURIComponent(tt.body.urlToken)}`, {
     method: 'POST',
     body: cuerpoEvento,
@@ -139,12 +137,12 @@ export async function faseTriggers(ctx) {
   }
 
   if (tokenOk.status === 202 && ctx.datos.dbOk) {
-    const jobToken = await encontrarJobNuevo(sql, ctx.datos.usuario.id, desdeToken, ctx.datos.jobsVistos, MARCA_TOKEN, { plazoMs: 60_000 });
+    const jobToken = await encontrarJobNuevo(db, ctx.datos.usuario.id, ctx.datos.jobsVistos, MARCA_TOKEN, { plazoMs: 60_000 });
     if (jobToken === null) {
       reporte.fail(F, 'job del trigger url_token completado', 'el 202 no encolo ningun job visible del owner');
     } else {
       ctx.datos.jobsVistos.add(jobToken.id);
-      const { desenlace, job } = await esperarJobTerminal(sql, ctx.datos.usuario.id, jobToken.id, { plazoMs: 120_000 });
+      const { desenlace, job } = await esperarJobTerminal(db, ctx.datos.usuario.id, jobToken.id, { plazoMs: 120_000 });
       if (desenlace === 'completed') {
         reporte.pass(F, 'job del trigger url_token completado', resumenJob(job));
       } else {
