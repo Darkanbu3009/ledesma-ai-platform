@@ -16,6 +16,12 @@ vi.mock('openai', () => ({
 }));
 
 import { OpenAICompatibleProvider } from '../src/providers/openai-compatible/index.js';
+import type { LookupFn } from '../src/tools/ip-guard.js';
+
+// La guarda anti-SSRF del provider resuelve el host de baseUrl por DNS. En estos tests (que ejercen el
+// camino feliz con baseUrls publicas) inyectamos una IP publica para no depender del DNS real; el
+// rechazo de hosts internos/metadata y de http:// se cubre en openai-compatible-provider-ssrf.test.ts.
+const publicLookup: LookupFn = async () => [{ address: '34.107.221.82', family: 4 }];
 
 function chunkStream(chunks: unknown[]): AsyncIterable<unknown> {
   return (async function* () {
@@ -66,7 +72,7 @@ describe('OpenAICompatibleProvider', () => {
     );
 
     await collect(
-      new OpenAICompatibleProvider().stream(
+      new OpenAICompatibleProvider(publicLookup).stream(
         makeInput('sk-byok', 'https://openrouter.ai/api/v1'),
       ),
     );
@@ -86,7 +92,7 @@ describe('OpenAICompatibleProvider', () => {
     );
 
     const events = await collect(
-      new OpenAICompatibleProvider().stream(makeInput('sk-byok', 'https://my-vllm.local/v1')),
+      new OpenAICompatibleProvider(publicLookup).stream(makeInput('sk-byok', 'https://my-vllm.local/v1')),
     );
 
     expect(events).toEqual([
@@ -114,7 +120,7 @@ describe('OpenAICompatibleProvider', () => {
     createMock.mockImplementation(async () =>
       chunkStream([{ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }]),
     );
-    const provider = new OpenAICompatibleProvider();
+    const provider = new OpenAICompatibleProvider(publicLookup);
 
     await collect(provider.stream(makeInput('sk-A', 'https://endpoint-a/v1')));
     await collect(provider.stream(makeInput('sk-B', 'https://endpoint-b/v1')));
@@ -136,7 +142,7 @@ describe('OpenAICompatibleProvider', () => {
     const controller = new AbortController();
 
     await collect(
-      new OpenAICompatibleProvider().stream(
+      new OpenAICompatibleProvider(publicLookup).stream(
         makeInput('sk-A', 'https://endpoint/v1', controller.signal),
       ),
     );

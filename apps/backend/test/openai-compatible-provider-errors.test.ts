@@ -12,6 +12,11 @@ vi.mock('openai', () => ({
 }));
 
 import { OpenAICompatibleProvider } from '../src/providers/openai-compatible/index.js';
+import type { LookupFn } from '../src/tools/ip-guard.js';
+
+// La guarda anti-SSRF resuelve el host de baseUrl por DNS; inyectamos una IP publica para que el
+// camino llegue al SDK (mockeado) y se ejerza la normalizacion de errores, sin depender del DNS real.
+const publicLookup: LookupFn = async () => [{ address: '34.107.221.82', family: 4 }];
 
 function makeInput(apiKey: string): ProviderStreamInput {
   return {
@@ -38,7 +43,7 @@ beforeEach(() => {
 describe('OpenAICompatibleProvider error normalization', () => {
   it('normaliza un 500 del endpoint a PROVIDER_UNAVAILABLE con su providerId', async () => {
     createMock.mockRejectedValue({ status: 500, message: 'server error' });
-    await expect(collect(new OpenAICompatibleProvider().stream(makeInput('sk-A')))).rejects.toMatchObject({
+    await expect(collect(new OpenAICompatibleProvider(publicLookup).stream(makeInput('sk-A')))).rejects.toMatchObject({
       code: 'PROVIDER_UNAVAILABLE',
       providerId: 'openai-compatible',
     });
@@ -48,7 +53,7 @@ describe('OpenAICompatibleProvider error normalization', () => {
     createMock.mockRejectedValue({ status: 401, message: 'invalid key' });
     let thrown: unknown;
     try {
-      await collect(new OpenAICompatibleProvider().stream(makeInput('sk-leak-compat-999')));
+      await collect(new OpenAICompatibleProvider(publicLookup).stream(makeInput('sk-leak-compat-999')));
     } catch (error) {
       thrown = error;
     }
