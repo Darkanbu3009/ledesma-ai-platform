@@ -80,6 +80,7 @@ describe('OpenAICompatibleProvider', () => {
     expect(constructorSpy).toHaveBeenCalledWith({
       apiKey: 'sk-byok',
       baseURL: 'https://openrouter.ai/api/v1',
+      fetch: expect.any(Function),
     });
   });
 
@@ -128,10 +129,12 @@ describe('OpenAICompatibleProvider', () => {
     expect(constructorSpy).toHaveBeenNthCalledWith(1, {
       apiKey: 'sk-A',
       baseURL: 'https://endpoint-a/v1',
+      fetch: expect.any(Function),
     });
     expect(constructorSpy).toHaveBeenNthCalledWith(2, {
       apiKey: 'sk-B',
       baseURL: 'https://endpoint-b/v1',
+      fetch: expect.any(Function),
     });
   });
 
