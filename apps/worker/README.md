@@ -21,6 +21,37 @@ workers nunca toman el mismo) y lo ejecuta de punta a punta:
    (`markPendingRetry`, `attempts++` via el proximo claim) mientras queden intentos, o `failed`
    definitivo al 3er intento. Un job roto NO tumba el worker: se registra y sigue con el siguiente.
 
+### Robustez de la cola (fix informe 06)
+
+Dos endurecimientos aditivos sobre el nucleo (el claim atomico `FOR UPDATE SKIP LOCKED` queda INTACTO):
+
+- **Reaper de jobs huerfanos (H3/H4).** Un `kill -9`/OOM, o el watchdog forzando `exit(0)` con el drain
+  colgado, puede matar el worker ENTRE el claim y el cierre, dejando un job atascado en `running` para
+  siempre (el claim solo mira `pending`; la retencion solo borra terminales). En cada pasada del loop
+  (throttled: a lo sumo cada 60s, y siempre en el arranque -> recupera lo que dejo un proceso anterior
+  muerto), el worker corre `reapOrphanedJobs`: devuelve a `pending` (o `failed` si ya agoto intentos, con
+  `last_error` de "recuperado de estado huerfano") los `running` cuyo `started_at` supera un **margen
+  amplio calibrado por tipo** — varias veces `RUN_TIMEOUT_SECONDS` para un job simple, y mas de
+  `MAX_STEPS(50) * RUN_TIMEOUT_SECONDS` para una receta. El margen SUPERA el maximo wall-clock legitimo de
+  cada tipo, asi que el reaper **jamas toca un job vivo**; ademas corre dentro del guard `inFlight`, sin
+  solaparse con un job en vuelo de este proceso. Las transiciones de cierre (`markCompleted/Failed/
+  PendingRetry`) llevan ahora **compare-and-set** (`... and status = 'running'`) para que el reaper y el
+  worker no se pisen (cierra H8). Alternativa de cobertura total (worker caido): una funcion SQL + pg_cron
+  (como el scheduler), que reapea aunque no haya worker vivo — no hace falta con 1 worker en Railway (si
+  no hay worker, nadie consume la cola de todos modos) y quedaria como PR posterior si se escala a N workers.
+
+- **Cierre endurecido contra doble ejecucion (H1).** Los efectos de un run (llamada al proveedor, tokens,
+  tools nativas) ocurren ANTES de persistir `completed`. Si `markCompleted` fallaba por un blip transitorio
+  de red, el job caia a reintento y se **re-ejecutaba** (doble cobro/efectos). Ahora `markCompleted` se
+  **reintenta con backoff corto (3 intentos)** antes de rendirse, absorbiendo el blip en el caso comun.
+
+  > **Honestidad de diseno — sigue siendo at-least-once, NO exactly-once.** Este fix REDUCE la
+  > probabilidad de doble ejecucion y la hace recuperable, pero **no la elimina**: si Postgres esta
+  > realmente caido, tras agotar los reintentos el job vuelve a `pending` y puede re-ejecutarse. La unica
+  > defensa COMPLETA es la **idempotencia de los efectos** (claves de idempotencia en las tools que
+  > escriben / dedupe por job id) o un **checkpoint por paso** en recetas; ambos son un cambio grande y
+  > quedan FUERA de alcance de este fix.
+
 ### Como reusa el motor del backend
 
 El worker importa el motor, los repos y la boveda del backend por el **subpath de paquete**
@@ -40,9 +71,9 @@ con `agent_id`, `owner_id`, `credential_id` y `payload = { messages: [{ role, co
 
 Ante `SIGTERM`/`SIGINT` el worker deja de tomar jobs nuevos, **aborta** el run en curso (que vuelve a
 `pending` para re-reclamar, sin marcarlo `failed`) y espera a que la pasada en vuelo termine antes de
-cerrar el pool. NO existe todavia un "reaper" de jobs `running` huerfanos (proceso muerto de golpe): un
-job tomado y no cerrado queda en `running` hasta que se lo re-reclame manualmente; el reaper automatico
-es alcance de un PR posterior.
+cerrar el pool. Si el proceso muere de golpe (crash/OOM/`kill -9`, o el watchdog forzando `exit(0)` con
+el drain colgado) dejando un job en `running`, el **reaper** (ver "Robustez de la cola" arriba) lo
+recupera automaticamente al siguiente arranque / pasada del loop.
 
 Lo que falta (PRs siguientes):
 

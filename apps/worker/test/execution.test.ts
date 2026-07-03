@@ -9,7 +9,9 @@ import type {
 import {
   processClaimedJob,
   claimAndProcessOne,
+  reapThresholdsMs,
   MAX_ATTEMPTS,
+  MAX_RECIPE_STEPS,
   type JobRunnerDeps,
 } from '../src/execution.js';
 import type { Logger } from '../src/logger.js';
@@ -111,6 +113,7 @@ function makeDeps(overrides: Partial<JobRunnerDeps> = {}): JobRunnerDeps {
       markCompleted: vi.fn(async () => {}),
       markFailed: vi.fn(async () => {}),
       markPendingRetry: vi.fn(async () => {}),
+      reapOrphanedJobs: vi.fn(async () => []),
     },
     getProfileTier: vi.fn(async () => 'autonomous' as const),
     loadAgent: vi.fn(async () => FAKE_AGENT),
@@ -339,6 +342,105 @@ describe('notificacion de fallo definitivo (hook en handleFailure)', () => {
     // Se intento notificar y se registro el fallo del envio, sin romper el cierre del job.
     expect(deps.notifyJobFailure).toHaveBeenCalledTimes(1);
     expect(deps.logger.error).toHaveBeenCalled();
+  });
+});
+
+describe('reapThresholdsMs (calibracion del margen del reaper)', () => {
+  it('deriva umbrales por tipo desde runTimeoutMs (simple = 3x, receta = MAX_RECIPE_STEPS * 1.5x)', () => {
+    const { simpleMs, recipeMs } = reapThresholdsMs(600_000);
+    expect(simpleMs).toBe(600_000 * 3);
+    expect(recipeMs).toBe(MAX_RECIPE_STEPS * 600_000 * 1.5);
+  });
+
+  it('PROPIEDAD CRITICA: el margen SUPERA el maximo wall-clock legitimo de cada tipo (jamas toca vivos)', () => {
+    const runTimeoutMs = 600_000;
+    const { simpleMs, recipeMs } = reapThresholdsMs(runTimeoutMs);
+    // Un job simple corre a lo sumo ~1 runTimeoutMs; el margen lo supera con holgura.
+    expect(simpleMs).toBeGreaterThan(runTimeoutMs);
+    // Una receta corre a lo sumo MAX_RECIPE_STEPS pasos, cada uno hasta runTimeoutMs; el margen lo supera.
+    expect(recipeMs).toBeGreaterThan(MAX_RECIPE_STEPS * runTimeoutMs);
+    // Y el margen de receta es mucho mayor que el de simple (una receta vive legitimamente mucho mas).
+    expect(recipeMs).toBeGreaterThan(simpleMs);
+  });
+
+  it('escala proporcional con runTimeoutMs (subir el deadline sube el margen)', () => {
+    const a = reapThresholdsMs(600_000);
+    const b = reapThresholdsMs(1_200_000);
+    expect(b.simpleMs).toBe(a.simpleMs * 2);
+    expect(b.recipeMs).toBe(a.recipeMs * 2);
+  });
+});
+
+describe('endurecimiento del cierre contra doble ejecucion (H1: markCompleted con reintento)', () => {
+  it('fallo transitorio de markCompleted -> reintenta y eventualmente marca completed, SIN reencolar', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const markCompleted = vi.fn(async () => {
+      calls += 1;
+      if (calls < 3) throw new Error('blip de red a Postgres');
+    });
+    const deps = makeDeps();
+    deps.jobs.markCompleted = markCompleted;
+    const job = makeJob({ attempts: 1 });
+
+    const p = processClaimedJob(deps, job);
+    await vi.runAllTimersAsync();
+    await p;
+
+    // Se reintento hasta que la escritura de cierre tuvo exito: el job NO cae a re-encolar (sin doble ejecucion).
+    expect(markCompleted).toHaveBeenCalledTimes(3);
+    expect(deps.jobs.markPendingRetry).not.toHaveBeenCalled();
+    expect(deps.jobs.markFailed).not.toHaveBeenCalled();
+  });
+
+  it('markCompleted que SIEMPRE falla -> tras agotar reintentos cae a handleFailure (residual at-least-once documentado)', async () => {
+    vi.useFakeTimers();
+    const markCompleted = vi.fn(async () => {
+      throw new Error('postgres caido');
+    });
+    const deps = makeDeps();
+    deps.jobs.markCompleted = markCompleted;
+    const job = makeJob({ attempts: 1 });
+
+    const p = processClaimedJob(deps, job);
+    await vi.runAllTimersAsync();
+    await p;
+
+    // Se intento el maximo de veces y luego se propago: el job vuelve a pending (comportamiento documentado).
+    expect(markCompleted).toHaveBeenCalledTimes(3);
+    expect(deps.jobs.markPendingRetry).toHaveBeenCalledTimes(1);
+    expect(deps.logger.error).toHaveBeenCalled();
+  });
+
+  it('no-regresion: markCompleted OK a la primera -> se llama UNA sola vez, sin reintentos', async () => {
+    const deps = makeDeps();
+    const job = makeJob();
+
+    await processClaimedJob(deps, job);
+
+    expect(deps.jobs.markCompleted).toHaveBeenCalledTimes(1);
+    expect(deps.jobs.markCompleted).toHaveBeenCalledWith('job-1');
+    expect(deps.jobs.markPendingRetry).not.toHaveBeenCalled();
+  });
+
+  it('receta: markCompleted transitorio al cerrar -> reintenta y completa sin reencolar la receta entera', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const markCompleted = vi.fn(async () => {
+      calls += 1;
+      if (calls < 2) throw new Error('blip al cerrar la receta');
+    });
+    const deps = makeDeps({ runAgent: runAgentSequence(['s1', 's2']) });
+    deps.jobs.markCompleted = markCompleted;
+    const job = makeJob({ payload: recipePayload(['p1', 'p2']), attempts: 1 });
+
+    const p = processClaimedJob(deps, job);
+    await vi.runAllTimersAsync();
+    await p;
+
+    expect(markCompleted).toHaveBeenCalledTimes(2);
+    expect(deps.jobs.markPendingRetry).not.toHaveBeenCalled();
+    expect(deps.jobs.markFailed).not.toHaveBeenCalled();
   });
 });
 

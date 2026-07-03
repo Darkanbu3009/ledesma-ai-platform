@@ -42,6 +42,7 @@ function makeDeps(overrides: Partial<JobRunnerDeps> = {}): JobRunnerDeps {
       markCompleted: vi.fn(async () => {}),
       markFailed: vi.fn(async () => {}),
       markPendingRetry: vi.fn(async () => {}),
+      reapOrphanedJobs: vi.fn(async () => []),
     },
     getProfileTier: vi.fn(async () => 'autonomous' as const),
     loadAgent: vi.fn(async () => FAKE_AGENT),
@@ -136,5 +137,61 @@ describe('startWorker', () => {
     expect(deps.logger.info).toHaveBeenCalledWith('worker detenido');
     // stop() es idempotente.
     await expect(handle.stop()).resolves.toBeUndefined();
+  });
+});
+
+describe('reaper de huerfanos en el loop del worker', () => {
+  it('corre el reaper en la PRIMERA pasada, con umbrales derivados de runTimeoutMs y MAX_ATTEMPTS', async () => {
+    const deps = makeDeps({ config: { runTimeoutMs: 600_000, runMaxTokens: 1_000_000 } });
+    (deps.jobs.claimNextJob as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+    const handle = startWorker({ deps, logger: deps.logger, intervalMs: 60_000 });
+    await new Promise((r) => setTimeout(r, 0));
+    await handle.stop();
+
+    expect(deps.jobs.reapOrphanedJobs).toHaveBeenCalled();
+    const arg = (deps.jobs.reapOrphanedJobs as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+    // simple = 3 * runTimeoutMs; receta = 50 * runTimeoutMs * 1.5; maxAttempts = 3.
+    expect(arg).toMatchObject({
+      simpleThresholdMs: 600_000 * 3,
+      recipeThresholdMs: 50 * 600_000 * 1.5,
+      maxAttempts: 3,
+    });
+  });
+
+  it('un fallo del reaper NO rompe la pasada: la cola igual se drena', async () => {
+    const deps = makeDeps();
+    (deps.jobs.reapOrphanedJobs as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('reaper boom'));
+    (deps.jobs.claimNextJob as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(makeJob({ id: 'x' }))
+      .mockResolvedValue(null);
+
+    const handle = startWorker({ deps, logger: deps.logger, intervalMs: 60_000 });
+    await new Promise((r) => setTimeout(r, 0));
+    await handle.stop();
+
+    // El fallo del reaper se registro pero el job igual se proceso (best-effort, no tumba la pasada).
+    expect(deps.logger.error).toHaveBeenCalled();
+    expect(deps.jobs.markCompleted).toHaveBeenCalledWith('x');
+  });
+
+  it('registra los huerfanos recuperados y sigue drenando en la MISMA pasada (reaper antes del claim)', async () => {
+    const deps = makeDeps();
+    (deps.jobs.reapOrphanedJobs as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 'huerfano', status: 'pending', attempts: 1 },
+    ]);
+    (deps.jobs.claimNextJob as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(makeJob({ id: 'huerfano', attempts: 2 }))
+      .mockResolvedValue(null);
+
+    const handle = startWorker({ deps, logger: deps.logger, intervalMs: 60_000 });
+    await new Promise((r) => setTimeout(r, 0));
+    await handle.stop();
+
+    expect(deps.logger.warn).toHaveBeenCalledWith(
+      'reaper: jobs huerfanos recuperados',
+      expect.objectContaining({ count: 1, toPending: 1, toFailed: 0 }),
+    );
+    expect(deps.jobs.markCompleted).toHaveBeenCalledWith('huerfano');
   });
 });
