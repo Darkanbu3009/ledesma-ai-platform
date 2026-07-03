@@ -22,6 +22,9 @@ import { resolvesToForbiddenIp, type LookupFn } from '../../tools/ip-guard.js';
  * ni sirve de oraculo de puertos (la conexion nunca se abre). Se lanza como Error plano (no
  * ProviderError) y FUERA del try, igual que la guarda de baseUrl ausente, para que no se emita nada.
  *
+ * Solo valida el HOST INICIAL de la baseUrl. El salto por redireccion 3xx (que evadiria esta guarda
+ * apuntando a un host interno) lo cierra `makeNoRedirectFetch` mas abajo, no esta funcion.
+ *
  * Riesgo residual TOCTOU (DNS-rebinding): el DNS puede re-resolverse a otra IP entre este check y el
  * fetch del SDK; mitigarlo por completo requeriria fijar la conexion a la IP ya validada (futuro). Es
  * la MISMA limitacion conocida y documentada del ejecutor de webhooks (ver tools/webhook-tools.ts).
@@ -39,6 +42,26 @@ async function assertBaseUrlAllowed(baseURL: string, lookupFn?: LookupFn): Promi
   if (await resolvesToForbiddenIp(parsed.hostname, lookupFn)) {
     throw new Error('openai-compatible provider baseUrl is not allowed');
   }
+}
+
+/**
+ * Envuelve el fetch del SDK para que NO siga redirecciones (`redirect: 'manual'`) y rechace cualquier
+ * 3xx. Sin esto, la guarda de baseUrl (que solo valida el host INICIAL) seria evadible: un host
+ * publico valido podria responder 302/307 con `Location` hacia un destino interno
+ * (169.254.169.254 metadata, 10.x, 127.0.0.1, [::1]) y el fetch global (undici) seguiria el salto
+ * hasta 20 veces SIN revalidar el destino contra ip-guard, abriendo la conexion interna. Es el MISMO
+ * control que ya aplica el POST firmado de las tools (tools/signed-tool-fetch.ts: redirect 'manual' +
+ * rechazo de 3xx); un proveedor openai-compatible legitimo responde 200 al POST de /chat/completions,
+ * no redirige, asi que no se pierde funcionalidad. baseFetch es inyectable para tests.
+ */
+export function makeNoRedirectFetch(baseFetch: typeof fetch = fetch): typeof fetch {
+  return async (input, init) => {
+    const response = await baseFetch(input, { ...init, redirect: 'manual' });
+    if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+      throw new Error('openai-compatible provider baseUrl redirected to another host, which is not allowed');
+    }
+    return response;
+  };
 }
 
 /**
@@ -73,7 +96,13 @@ export class OpenAICompatibleProvider implements ModelProvider {
     await assertBaseUrlAllowed(baseURL, this.lookupFn);
 
     try {
-      const client = new OpenAI({ apiKey: input.credentials.apiKey, baseURL });
+      // fetch endurecido: no sigue redirecciones (un 3xx hacia un host interno evadiria la guarda de
+      // arriba, que solo valida el host inicial). Mismo control que el POST firmado de las tools.
+      const client = new OpenAI({
+        apiKey: input.credentials.apiKey,
+        baseURL,
+        fetch: makeNoRedirectFetch(),
+      });
       const params = mapRequestToOpenAI(input.request);
 
       const stream = await client.chat.completions.create(params, { signal: input.signal });
