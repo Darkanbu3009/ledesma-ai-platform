@@ -1,31 +1,28 @@
 import { useEffect, useRef, type JSX } from 'react';
-import { drawCloud, drawRing, hash, type DitherViewport } from './pixel-dither';
 
-/** Tamano de celda de la rejilla de pixeles del flujo, en px CSS. */
-const PX = 4;
-/** Velocidad de un paquete, en progreso de curva por frame a 60Hz. */
-const SPEED_MIN = 0.0022;
-const SPEED_MAX = 0.004;
-/** Paquetes simultaneos por curva. */
-const PACKETS_PER_CURVE = 2;
-/** Progreso bajo el cual el paquete esta naciendo (puff + pixeles sueltos). */
-const BIRTH_P = 0.06;
-/** Duracion del crecimiento del radio al nacer. */
-const BIRTH_MS = 150;
-/** Progreso a partir del cual el paquete se desintegra hacia el nodo. */
-const ABSORB_P = 0.94;
-/** Vida de las particulas de absorcion. */
-const PARTICLE_MS = 250;
-/** Duracion del micro-flash del nodo. */
-const FLASH_MS = 300;
-/** Separacion minima entre bursts: nunca dos absorciones simultaneas. */
-const BURST_GAP_MS = 380;
-/** Maximo de puntos de estela por paquete. */
-const TRAIL_MAX = 4;
-/** Decaimiento de vida de la estela por frame a 60Hz. */
-const TRAIL_DECAY = 0.08;
+/** Duracion de un ciclo completo (viaje + silencio) por curva, en segundos. */
+const PERIOD_S = 3.6;
+/** Fraccion del ciclo durante la que el pulso viaja; el resto es silencio. */
+const TRAVEL_FRACTION = 0.62;
+/** Segmentos muestreados sobre la bezier para dibujar la cola del cometa. */
+const SEGS = 22;
+/** Longitud de la cola como fraccion del recorrido de la curva. */
+const TAIL_LEN = 0.13;
+/** Decaimiento de vida del anillo de llegada por frame a 60Hz. */
+const RING_DECAY = 0.035;
 /** Duracion nominal de un frame a 60Hz; base para normalizar por dt. */
 const FRAME_MS = 1000 / 60;
+
+/**
+ * Estilo y grosor de cada segmento de la cola, precomputados: dependen solo
+ * del indice y construirlos por frame seria puro churn en el loop caliente.
+ * k=1 en la cabeza (brillante, ~3px) decayendo cuadraticamente a nada.
+ */
+const SEG_STYLE = Array.from({ length: SEGS }, (_, s) => {
+  const k = 1 - s / SEGS;
+  return `rgba(229, 81, 30, ${0.85 * k * k})`;
+});
+const SEG_WIDTH = Array.from({ length: SEGS }, (_, s) => 1.1 + 1.9 * (1 - s / SEGS));
 
 /** Curva bezier cubica en px CSS del canvas, extraida del SVG de lineas. */
 interface Curve {
@@ -39,34 +36,17 @@ interface Curve {
   y1: number;
 }
 
-interface TrailPoint {
+/** Anillo de llegada expandiendose en el nodo del modelo. */
+interface Ring {
   x: number;
   y: number;
   life: number;
 }
 
-/** Particula de absorcion: vuela del punto de burst al centro del nodo. */
-interface Particle {
-  sx: number;
-  sy: number;
-  /** Dispersion inicial alrededor del punto de burst. */
-  ox: number;
-  oy: number;
-  born: number;
-}
-
-interface Packet {
-  curve: number;
-  p: number;
-  speed: number;
-  /** Timestamp del ultimo respawn, para el puff de nacimiento. */
-  spawnAt: number;
-  /** Semilla estable para los pixeles sueltos del nacimiento. */
-  seed: number;
-  absorbing: boolean;
-  particles: Particle[];
-  trail: TrailPoint[];
-  sinceTrail: number;
+/** Estado de ciclo por curva: detecta el fin del viaje para disparar el anillo. */
+interface PulseState {
+  cycle: number;
+  traveled: boolean;
 }
 
 /** Geometria medida en runtime: curvas en coords del canvas y centro del nodo. */
@@ -87,6 +67,10 @@ function bezier(c: Curve, t: number): { x: number; y: number } {
     x: a * c.x0 + b * c.cx1 + d * c.cx2 + e * c.x1,
     y: a * c.y0 + b * c.cy1 + d * c.cy2 + e * c.y1,
   };
+}
+
+function easeInOutQuad(t: number): number {
+  return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
 }
 
 /**
@@ -117,7 +101,7 @@ function measureGeometry(canvas: HTMLCanvasElement): Geometry | null {
   );
   for (const path of svg.querySelectorAll('path')) {
     const match = curveRe.exec(path.getAttribute('d') ?? '');
-    if (!match) continue; // el tramo recto nodo->carta (M..L) no lleva paquetes
+    if (!match) continue; // el tramo recto nodo->carta (M..L) no lleva pulsos
     const [, x0, y0, cx1, cy1, cx2, cy2, x1, y1] = match.map(Number);
     curves.push({
       x0: offX + (x0 ?? 0) * sx,
@@ -135,21 +119,18 @@ function measureGeometry(canvas: HTMLCanvasElement): Geometry | null {
   return { curves, nodeX: first.x1, nodeY: first.y1 };
 }
 
-function randomSpeed(): number {
-  return SPEED_MIN + Math.random() * (SPEED_MAX - SPEED_MIN);
-}
-
 /**
- * Flujo de datos pixelado del hero: paquetes de pixeles con dithering viajan
- * por las curvas punteadas desde cada sistema hacia el nodo del modelo, con
- * puff de nacimiento, pulso a mitad de curva y burst de absorcion con
- * micro-flash en el nodo.
+ * Pulsos cometa del hero: un trazo fino de luz brasa con cola degradada
+ * recorre cada curva punteada desde cada sistema hacia el nodo del modelo y
+ * dispara un anillo sutil al llegar. Baja frecuencia: cada curva pulsa una
+ * vez por ciclo (viaje en el primer 62%, silencio el resto) con fases
+ * escalonadas para que nunca lleguen dos anillos a la vez.
  *
  * Cambio puramente aditivo: canvas absoluto sin eventos de puntero superpuesto
- * al showcase; las lineas punteadas originales quedan intactas y los paquetes
+ * al showcase; las lineas punteadas originales quedan intactas y los pulsos
  * se pintan encima. La geometria se lee en runtime de los paths reales del SVG
- * y se recalcula en resize. Repintado con clearRect completo cada frame (nunca
- * fade del frame anterior, que emborrona el dithering). No hace nada en touch,
+ * y se recalcula en resize. Repintado con clearRect completo cada frame. El
+ * glow lo da el degradado de la cola (sin shadowBlur). No hace nada en touch,
  * con prefers-reduced-motion ni cuando el carril de lineas esta oculto
  * (viewport angosto). Pausa fuera de viewport y con la pestana oculta.
  */
@@ -173,10 +154,8 @@ export function PixelDataFlow(): JSX.Element {
     let width = 0;
     let height = 0;
     let geometry: Geometry | null = null;
-    let packets: Packet[] = [];
-    /** Flashes activos en el nodo: timestamp de inicio de cada uno. */
-    let flashes: number[] = [];
-    let lastBurstAt = -Infinity;
+    let pulses: PulseState[] = [];
+    let rings: Ring[] = [];
     let t = 0;
     let rafId = 0;
     let lastTime = 0;
@@ -191,34 +170,8 @@ export function PixelDataFlow(): JSX.Element {
       cv.width = width * dpr;
       cv.height = height * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    }
-
-    /**
-     * Construye los paquetes con fases iniciales separadas (paso aureo por
-     * paquete mas un jitter corto): siempre hay movimiento en varias curvas y
-     * las llegadas nunca caen en fase; el gate de bursts remata la garantia.
-     */
-    function buildPackets(curveCount: number, now: number): Packet[] {
-      const built: Packet[] = [];
-      for (let i = 0; i < curveCount; i++) {
-        for (let j = 0; j < PACKETS_PER_CURVE; j++) {
-          const k = i * PACKETS_PER_CURVE + j;
-          const phase = (k * 0.618 + Math.random() * 0.09) % 1;
-          built.push({
-            curve: i,
-            p: phase * ABSORB_P,
-            speed: randomSpeed(),
-            // Nacen "ya viajando": sin puff en el primer frame del montaje.
-            spawnAt: now - BIRTH_MS * 2,
-            seed: Math.random() * 1000,
-            absorbing: false,
-            particles: [],
-            trail: [],
-            sinceTrail: 0,
-          });
-        }
-      }
-      return built;
+      // Asignar cv.width resetea el estado del contexto: se restaura aqui.
+      ctx.lineCap = 'round';
     }
 
     function clearCanvas(): void {
@@ -229,42 +182,40 @@ export function PixelDataFlow(): JSX.Element {
     function remeasure(): void {
       resizeCanvas();
       geometry = measureGeometry(cv);
+      // Los anillos vivos guardan coords absolutas del nodo anterior: tras
+      // cualquier re-medida quedarian flotando en la posicion vieja.
+      rings = [];
       if (!geometry) {
-        packets = [];
-        flashes = [];
+        pulses = [];
         stop();
         clearCanvas();
         return;
       }
-      if (packets.length !== geometry.curves.length * PACKETS_PER_CURVE) {
-        packets = buildPackets(geometry.curves.length, performance.now());
+      if (pulses.length !== geometry.curves.length) {
+        pulses = geometry.curves.map(() => ({ cycle: -1, traveled: false }));
       }
       start();
     }
 
-    function respawn(packet: Packet, now: number): void {
-      packet.p = 0;
-      packet.speed = randomSpeed();
-      packet.spawnAt = now;
-      packet.seed = Math.random() * 1000;
-      packet.absorbing = false;
-      packet.particles = [];
-      packet.trail = [];
-      packet.sinceTrail = 0;
-    }
-
-    /** Pixeles sueltos dispersandose durante el nacimiento del paquete. */
-    function drawBirthSpecks(packet: Packet, curve: Curve): void {
-      const k = packet.p / BIRTH_P;
-      const specks = 3 + Math.floor(hash(packet.seed, 7) * 2);
-      for (let s = 0; s < specks; s++) {
-        const angle = hash(packet.seed, s * 3.1) * Math.PI * 2;
-        const reach = (6 + hash(packet.seed, s * 5.7) * 10) * k;
-        const x = curve.x0 + Math.cos(angle) * reach;
-        const y = curve.y0 + Math.sin(angle) * reach;
-        ctx.globalAlpha = (1 - k) * 0.9;
-        ctx.fillStyle = s % 2 === 0 ? '#E5511E' : '#F0997B';
-        ctx.fillRect(Math.round(x / PX) * PX, Math.round(y / PX) * PX, PX - 1, PX - 1);
+    /**
+     * Cola del cometa: SEGS segmentos muestreados sobre la bezier cubriendo
+     * TAIL_LEN del recorrido detras de la cabeza. La cabeza (~3px) brilla y
+     * cada segmento se desvanece cuadraticamente hasta nada. Segmentos
+     * adyacentes comparten extremo: cada punto se evalua una sola vez.
+     */
+    function drawComet(curve: Curve, head: number): void {
+      let to = bezier(curve, head);
+      for (let s = 0; s < SEGS; s++) {
+        if (head - (s / SEGS) * TAIL_LEN <= 0) break;
+        const p0 = Math.max(head - ((s + 1) / SEGS) * TAIL_LEN, 0);
+        const from = bezier(curve, p0);
+        ctx.strokeStyle = SEG_STYLE[s] ?? '';
+        ctx.lineWidth = SEG_WIDTH[s] ?? 1;
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(to.x, to.y);
+        ctx.stroke();
+        to = from;
       }
     }
 
@@ -279,93 +230,49 @@ export function PixelDataFlow(): JSX.Element {
       lastTime = now;
       const step = dt / FRAME_MS;
       t += dt * 0.001;
-      const vp: DitherViewport = { width, height, px: PX, t };
       const { curves, nodeX, nodeY } = geometry;
 
       clearCanvas();
 
-      // Micro-flash del nodo primero: queda detras de paquetes y particulas.
-      flashes = flashes.filter((start) => now - start < FLASH_MS);
-      for (const start of flashes) {
-        const k = (now - start) / FLASH_MS;
-        drawRing(ctx, vp, nodeX, nodeY, 20 + 14 * k, 7, 0.8 * (1 - k));
+      // Anillos de llegada primero: quedan detras de los cometas.
+      if (rings.length > 0) {
+        rings = rings.filter((ring) => (ring.life -= RING_DECAY * step) > 0);
+        for (const ring of rings) {
+          ctx.strokeStyle = `rgba(229, 81, 30, ${0.5 * ring.life})`;
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.arc(ring.x, ring.y, 6 + (1 - ring.life) * 20, 0, Math.PI * 2);
+          ctx.stroke();
+        }
       }
 
-      for (const packet of packets) {
-        const curve = curves[packet.curve];
-        if (!curve) continue;
-
-        if (packet.absorbing) {
-          // ABSORCION: particulas volando al nodo con easing; al morir todas,
-          // el paquete renace en p=0 con nueva velocidad.
-          let alive = false;
-          for (const particle of packet.particles) {
-            const k = (now - particle.born) / PARTICLE_MS;
-            if (k >= 1) continue;
-            alive = true;
-            const ease = k * k; // acelera hacia el nodo
-            const x = particle.sx + particle.ox + (nodeX - particle.sx - particle.ox) * ease;
-            const y = particle.sy + particle.oy + (nodeY - particle.sy - particle.oy) * ease;
-            ctx.globalAlpha = (1 - k) * 0.95;
-            ctx.fillStyle = hash(particle.ox, particle.oy) > 0.3 ? '#E5511E' : '#B23E14';
-            ctx.fillRect(Math.round(x / PX) * PX, Math.round(y / PX) * PX, PX - 1, PX - 1);
-          }
-          if (!alive) respawn(packet, now);
-          continue;
+      // Un pulso por curva, con fase escalonada: viaja durante el primer
+      // TRAVEL_FRACTION del ciclo y descansa el resto (baja frecuencia).
+      // El paso de fase se deriva del numero de curvas (0.9s con las 4 del
+      // diseno original): un paso fijo cuyo multiplo coincida con el periodo
+      // pondria dos curvas en fase y sus anillos llegarian a la vez.
+      const phaseStep = PERIOD_S / curves.length;
+      for (let i = 0; i < curves.length; i++) {
+        const curve = curves[i];
+        const state = pulses[i];
+        if (!curve || !state) continue;
+        const local = t + i * phaseStep;
+        const cycle = Math.floor(local / PERIOD_S);
+        const frac = local / PERIOD_S - cycle;
+        if (cycle !== state.cycle) {
+          state.cycle = cycle;
+          state.traveled = false;
         }
-
-        packet.p += packet.speed * step;
-
-        if (packet.p >= ABSORB_P) {
-          // Gate global: si hubo un burst hace poco, el paquete espera en el
-          // umbral para que nunca lleguen dos bursts al mismo tiempo.
-          if (now - lastBurstAt < BURST_GAP_MS) {
-            packet.p = ABSORB_P;
-          } else {
-            lastBurstAt = now;
-            flashes.push(now);
-            const at = bezier(curve, ABSORB_P);
-            const count = 6 + Math.floor(Math.random() * 5);
-            packet.particles = Array.from({ length: count }, () => ({
-              sx: at.x,
-              sy: at.y,
-              ox: (Math.random() - 0.5) * 16,
-              oy: (Math.random() - 0.5) * 16,
-              born: now,
-            }));
-            packet.absorbing = true;
-            packet.trail = [];
-            continue;
-          }
+        if (frac < TRAVEL_FRACTION) {
+          state.traveled = true;
+          drawComet(curve, easeInOutQuad(frac / TRAVEL_FRACTION));
+        } else if (state.traveled) {
+          // El pulso acaba de llegar: el anillo es todo el evento de llegada.
+          state.traveled = false;
+          rings.push({ x: nodeX, y: nodeY, life: 1 });
         }
-
-        // VIAJE: crece y brilla a mitad de curva, llega compacto.
-        const pulse = Math.sin(packet.p * Math.PI);
-        const birthScale = Math.min(1, (now - packet.spawnAt) / BIRTH_MS);
-        const radius = (9 + pulse * 6) * birthScale;
-        const fuerza = (0.7 + pulse * 0.5) * birthScale;
-        const pos = bezier(curve, packet.p);
-
-        // Estela corta detras del paquete, decayendo rapido.
-        for (const point of packet.trail) point.life -= TRAIL_DECAY * step;
-        packet.trail = packet.trail.filter((point) => point.life > 0);
-        packet.sinceTrail += step;
-        if (packet.sinceTrail >= 3) {
-          packet.sinceTrail = 0;
-          packet.trail.push({ x: pos.x, y: pos.y, life: 1 });
-          if (packet.trail.length > TRAIL_MAX) packet.trail.shift();
-        }
-        for (const point of packet.trail) {
-          drawCloud(ctx, vp, point.x, point.y, radius * 0.5, point.life * 0.45 * fuerza);
-        }
-
-        drawCloud(ctx, vp, pos.x, pos.y, radius, fuerza);
-
-        // NACIMIENTO: puff con pixeles sueltos dispersandose al inicio.
-        if (packet.p < BIRTH_P) drawBirthSpecks(packet, curve);
       }
 
-      ctx.globalAlpha = 1;
       rafId = requestAnimationFrame(frame);
     }
 
