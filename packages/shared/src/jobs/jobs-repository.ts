@@ -5,6 +5,7 @@ import type {
   JobStatus,
   JobSummary,
   ListJobsByOwnerOptions,
+  ReapedJob,
 } from './types.js';
 import { RECIPE_JOB_KIND } from './recipe-payload.js';
 
@@ -222,19 +223,29 @@ export class JobsRepository {
     `;
   }
 
-  /** Cierra un job OK: estado terminal 'completed' + finished_at. */
+  /**
+   * Cierra un job OK: estado terminal 'completed' + finished_at.
+   *
+   * COMPARE-AND-SET (`and status = 'running'`): el cierre SOLO aplica si el job sigue 'running'. Es una
+   * guarda barata contra el REAPER (reapOrphanedJobs) y contra N workers con recovery: si otro actor ya
+   * movio el job (p.ej. el reaper lo devolvio a 'pending' por creerlo huerfano), este cierre no PISA ese
+   * estado -- afecta 0 filas y es un no-op, en vez de resucitar un job ya re-transicionado (cierra H8 del
+   * informe 06). Con un solo worker mono-proceso el job siempre sigue 'running' aqui, asi que no cambia el
+   * camino feliz; es defensa para cuando exista un reaper o mas de un worker.
+   */
   async markCompleted(id: string): Promise<void> {
     await this.sql`
       update jobs set status = 'completed', finished_at = now(), updated_at = now()
-      where id = ${id}
+      where id = ${id} and status = 'running'
     `;
   }
 
-  /** Cierra un job con error: estado terminal 'failed', guardando el detalle en last_error. */
+  /** Cierra un job con error: estado terminal 'failed', guardando el detalle en last_error. Con guarda
+   *  de estado (`and status = 'running'`), igual que markCompleted (ver su nota; cierra H8). */
   async markFailed(id: string, error: string): Promise<void> {
     await this.sql`
       update jobs set status = 'failed', last_error = ${error}, finished_at = now(), updated_at = now()
-      where id = ${id}
+      where id = ${id} and status = 'running'
     `;
   }
 
@@ -255,7 +266,67 @@ export class JobsRepository {
         scheduled_for = ${scheduledFor ?? null},
         started_at = null,
         updated_at = now()
-      where id = ${id}
+      where id = ${id} and status = 'running'
     `;
+  }
+
+  /**
+   * REAPER de jobs HUERFANOS: recupera los jobs 'running' que quedaron ATASCADOS porque el worker murio
+   * entre el claim y el cierre (crash / OOM / kill -9, o el watchdog forzando exit(0) con el drain
+   * colgado). Cierra H3 y H4 del informe 06: sin esto, un 'running' nunca sale de ese estado (el claim
+   * solo mira 'pending' y la retencion solo borra terminales), quedando invisible para siempre.
+   *
+   * QUE toca (y que JAMAS toca): SOLO jobs 'running' cuyo `started_at` sea mas viejo que un MARGEN AMPLIO,
+   * calibrado por TIPO de job para SUPERAR SIEMPRE el maximo wall-clock legitimo:
+   *   - job SIMPLE: una sola corrida acotada a runTimeoutMs -> margen `simpleThresholdMs` (varias veces
+   *     runTimeoutMs).
+   *   - job de RECETA (payload.kind = 'recipe'): hasta MAX_RECIPE_STEPS pasos, cada uno con su propio
+   *     deadline runTimeoutMs -> margen `recipeThresholdMs` (> MAX_RECIPE_STEPS * runTimeoutMs).
+   * El discriminador se lee del propio payload (`payload->>'kind'`, el mismo criterio que listByOwner),
+   * sin traer el payload a memoria. Un job dentro de su margen (posiblemente vivo) NUNCA se toca: un
+   * margen mal calibrado mataria jobs vivos, por eso es holgado.
+   *
+   * COMO cierra el job recuperado (respeta attempts/MAX_ATTEMPTS, que el claim ya incremento):
+   *   - attempts < maxAttempts -> vuelve a 'pending' (scheduled_for=null: elegible ya) para re-ejecutarse.
+   *   - attempts >= maxAttempts -> 'failed' con finished_at, sin re-ejecutar (ya agoto su presupuesto).
+   * En ambos casos deja constancia en last_error de que fue una RECUPERACION de estado huerfano.
+   *
+   * ATOMICIDAD / CONCURRENCIA: es UN solo UPDATE ... WHERE status='running'. Postgres toma el lock de
+   * fila; dos reapers concurrentes (o un reaper y otro worker) no la recuperan dos veces: el segundo ve
+   * la fila con status ya cambiado y su WHERE la excluye. No re-ejecuta el motor ni toca el claim.
+   * Devuelve las filas recuperadas (id + estado destino + attempts) para que el worker lo registre.
+   */
+  async reapOrphanedJobs(params: {
+    simpleThresholdMs: number;
+    recipeThresholdMs: number;
+    maxAttempts: number;
+  }): Promise<ReapedJob[]> {
+    const { simpleThresholdMs, recipeThresholdMs, maxAttempts } = params;
+    const pendingMessage =
+      'recuperado de estado huerfano: el worker murio entre el claim y el cierre; devuelto a pending para reintento';
+    const failedMessage =
+      'recuperado de estado huerfano: el worker murio entre el claim y el cierre; intentos agotados, marcado failed';
+    const rows = await this.sql<Array<{ id: string; status: string; attempts: number }>>`
+      update jobs set
+        status = case when attempts >= ${maxAttempts} then 'failed' else 'pending' end,
+        last_error = case when attempts >= ${maxAttempts} then ${failedMessage} else ${pendingMessage} end,
+        started_at = null,
+        finished_at = case when attempts >= ${maxAttempts} then now() else null end,
+        scheduled_for = null,
+        updated_at = now()
+      where status = 'running'
+        and started_at is not null
+        and started_at < now() - case
+          when payload->>'kind' = ${RECIPE_JOB_KIND}
+            then make_interval(secs => ${recipeThresholdMs / 1000})
+          else make_interval(secs => ${simpleThresholdMs / 1000})
+        end
+      returning id, status, attempts
+    `;
+    return rows.map((row) => ({
+      id: row.id,
+      status: row.status as JobStatus,
+      attempts: Number(row.attempts ?? 0),
+    }));
   }
 }

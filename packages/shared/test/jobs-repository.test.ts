@@ -194,6 +194,90 @@ describe('JobsRepository', () => {
       await new JobsRepository(sql).markPendingRetry('job-1', 'transitorio');
       expect(sqlValues(sql)).toEqual(['transitorio', null, 'job-1']);
     });
+
+    it('COMPARE-AND-SET: los tres cierres solo aplican si el job SIGUE running (guarda vs reaper / N workers)', async () => {
+      const completed = makeSqlReturning([]);
+      await new JobsRepository(completed).markCompleted('job-1');
+      expect(sqlText(completed)).toContain("where id = ");
+      expect(sqlText(completed)).toContain("status = 'running'");
+
+      const failed = makeSqlReturning([]);
+      await new JobsRepository(failed).markFailed('job-1', 'boom');
+      expect(sqlText(failed)).toContain("status = 'running'");
+
+      const pending = makeSqlReturning([]);
+      await new JobsRepository(pending).markPendingRetry('job-1', 'transitorio');
+      expect(sqlText(pending)).toContain("status = 'running'");
+    });
+  });
+
+  describe('reapOrphanedJobs (recuperacion de jobs huerfanos)', () => {
+    it('SQL: solo toca running con started_at VIEJO, umbral POR TIPO (payload->>kind), con returning explicito', async () => {
+      const sql = makeSqlReturning([]);
+      await new JobsRepository(sql).reapOrphanedJobs({
+        simpleThresholdMs: 1_800_000,
+        recipeThresholdMs: 45_000_000,
+        maxAttempts: 3,
+      });
+      const texto = sqlText(sql).toLowerCase();
+      expect(texto).toContain('update jobs set');
+      expect(texto).toContain("where status = 'running'");
+      expect(texto).toContain('started_at is not null');
+      // Solo huerfanos: started_at mas viejo que now() menos el margen.
+      expect(texto).toContain('started_at < now() -');
+      // Umbral distinto para receta vs simple, discriminado por el payload sin traerlo entero.
+      expect(texto).toContain("payload->>'kind'");
+      expect(texto).toContain('make_interval');
+      expect(texto).toContain('returning id');
+      expect(texto).not.toContain('returning *');
+      // Umbrales viajan en SEGUNDOS (make_interval secs); y maxAttempts para la decision pending/failed.
+      const values = sqlValues(sql);
+      expect(values).toContain(45_000); // recipe: 45_000_000 ms / 1000
+      expect(values).toContain(1_800); // simple: 1_800_000 ms / 1000
+      expect(values).toContain(3); // maxAttempts
+    });
+
+    it('SQL: decide pending vs failed por attempts, limpia started_at y solo el failed pone finished_at', async () => {
+      const sql = makeSqlReturning([]);
+      await new JobsRepository(sql).reapOrphanedJobs({
+        simpleThresholdMs: 1000,
+        recipeThresholdMs: 2000,
+        maxAttempts: 3,
+      });
+      const texto = sqlText(sql).toLowerCase();
+      expect(texto).toContain('attempts >= ');
+      expect(texto).toContain("then 'failed'");
+      expect(texto).toContain("else 'pending'");
+      expect(texto).toContain('started_at = null');
+      expect(texto).toContain('finished_at = case when attempts >=');
+      // Deja constancia de la recuperacion en last_error.
+      expect(sqlValues(sql).some((v) => typeof v === 'string' && v.includes('huerfano'))).toBe(true);
+    });
+
+    it('mapea las filas recuperadas a { id, status, attempts }', async () => {
+      const sql = makeSqlReturning([
+        { id: 'huerfano-a-pending', status: 'pending', attempts: 1 },
+        { id: 'huerfano-a-failed', status: 'failed', attempts: 3 },
+      ]);
+      const reaped = await new JobsRepository(sql).reapOrphanedJobs({
+        simpleThresholdMs: 1000,
+        recipeThresholdMs: 2000,
+        maxAttempts: 3,
+      });
+      expect(reaped).toEqual([
+        { id: 'huerfano-a-pending', status: 'pending', attempts: 1 },
+        { id: 'huerfano-a-failed', status: 'failed', attempts: 3 },
+      ]);
+    });
+
+    it('sin huerfanos (0 filas afectadas) -> devuelve []', async () => {
+      const reaped = await new JobsRepository(makeSqlReturning([])).reapOrphanedJobs({
+        simpleThresholdMs: 1000,
+        recipeThresholdMs: 2000,
+        maxAttempts: 3,
+      });
+      expect(reaped).toEqual([]);
+    });
   });
 
   describe('rowToJob', () => {

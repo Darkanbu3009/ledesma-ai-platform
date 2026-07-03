@@ -4,6 +4,7 @@ import type {
   AgentEvent,
   Job,
   NormalizedMessage,
+  ReapedJob,
   RecipeStepPayload,
   TokenUsage,
 } from '@ledesma-platform/shared';
@@ -31,6 +32,53 @@ export const MAX_ATTEMPTS = 3;
 
 /** Base del backoff lineal entre reintentos (ms). El claim no retoma el job hasta que venza. */
 const RETRY_BACKOFF_BASE_MS = 5_000;
+
+/**
+ * Cap de pasos de una receta. ESPEJO de MAX_STEPS del backend (apps/backend/src/routes/recipes.ts):
+ * un job de receta legitimo corre a lo sumo este numero de pasos, cada uno con su PROPIO deadline de
+ * pared (runTimeoutMs). Por eso el peor caso de wall-clock legitimo de una receta es
+ * MAX_RECIPE_STEPS * runTimeoutMs; el margen del reaper para recetas DEBE superarlo para no tocar JAMAS
+ * un job vivo. Se define local (como los defaults de env.ts) para no acoplar el build del worker al del
+ * backend; si el backend sube su cap, subir este valor (o el margen no bastaria para una receta al maximo).
+ */
+export const MAX_RECIPE_STEPS = 50;
+
+/**
+ * Multiplicador del MARGEN del reaper para jobs SIMPLES, sobre su peor caso de wall-clock legitimo
+ * (~runTimeoutMs, una sola corrida). 3x es amplio -> el reaper jamas toca un job simple vivo, pero
+ * recupera un huerfano simple en pocas decenas de minutos (con runTimeoutMs=600s: ~30 min).
+ */
+const SIMPLE_REAP_MULTIPLIER = 3;
+
+/**
+ * Multiplicador del MARGEN del reaper para jobs de RECETA, sobre su peor caso de wall-clock legitimo
+ * (MAX_RECIPE_STEPS * runTimeoutMs). 1.5x es amplio -> el reaper jamas toca una receta viva, ni siquiera
+ * la de 50 pasos con cada paso al limite del deadline, sin esperar de mas para recuperar un huerfano.
+ */
+const RECIPE_REAP_MULTIPLIER = 1.5;
+
+/**
+ * Umbrales (ms) del reaper de huerfanos POR TIPO de job, derivados del deadline de pared (runTimeoutMs).
+ * Un job 'running' cuyo started_at sea mas viejo que su umbral es, con CERTEZA, un huerfano de un worker
+ * muerto: el margen supera el maximo wall-clock legitimo de cada tipo, asi que nunca corresponde a un job
+ * realmente en ejecucion. Exportada para testear la calibracion (la propiedad critica: "jamas toca vivos").
+ */
+export function reapThresholdsMs(runTimeoutMs: number): { simpleMs: number; recipeMs: number } {
+  return {
+    simpleMs: runTimeoutMs * SIMPLE_REAP_MULTIPLIER,
+    recipeMs: MAX_RECIPE_STEPS * runTimeoutMs * RECIPE_REAP_MULTIPLIER,
+  };
+}
+
+/**
+ * Intentos de la ESCRITURA de cierre exitoso (markCompleted) ante un fallo TRANSITORIO de la DB, ANTES
+ * de rendirse. Reduce la ventana de DOBLE EJECUCION del informe 06 (H1): un blip de red a Postgres justo
+ * despues de un run exitoso ya no cae directo a re-encolar (y por tanto re-ejecutar) el job.
+ */
+const COMPLETION_RETRY_ATTEMPTS = 3;
+
+/** Base del backoff CORTO entre reintentos de markCompleted (ms). Crece lineal por intento (200/400ms). */
+const COMPLETION_RETRY_BASE_MS = 200;
 
 /**
  * Tope de contexto ACUMULADO de una receta, en caracteres. El historial conversacional crece paso a
@@ -79,6 +127,12 @@ export interface JobQueue {
   markCompleted(id: string): Promise<void>;
   markFailed(id: string, error: string): Promise<void>;
   markPendingRetry(id: string, error: string, scheduledFor?: Date | string | null): Promise<void>;
+  /** Recupera jobs 'running' huerfanos (started_at muy viejo) a 'pending'/'failed'. Lo usa el loop del worker. */
+  reapOrphanedJobs(params: {
+    simpleThresholdMs: number;
+    recipeThresholdMs: number;
+    maxAttempts: number;
+  }): Promise<ReapedJob[]>;
 }
 
 /** Cortes y parametros del motor que el worker aplica al ejecutar un job. */
@@ -159,6 +213,56 @@ function parsePayloadMessages(payload: unknown): ParsedPayload {
 function describeError(error: unknown): string {
   if (error instanceof Error) return `${error.name}: ${error.message}`;
   return 'error desconocido';
+}
+
+/** Espera `ms` milisegundos (para el backoff corto del reintento de cierre). */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Persiste el CIERRE EXITOSO de un job (markCompleted) con REINTENTO + backoff CORTO. Endurece el cierre
+ * contra la DOBLE EJECUCION del informe 06 (H1): el run ya ocurrio (proveedor llamado, tokens cobrados,
+ * tools ejecutadas) ANTES de esta escritura; si markCompleted falla por un blip transitorio de red a
+ * Postgres, sin reintento el job caeria al catch -> handleFailure -> markPendingRetry -> se RE-EJECUTA
+ * (doble cobro/efectos). Reintentar aqui absorbe el blip y evita ese camino en el caso comun.
+ *
+ * HONESTIDAD DE DISENO (at-least-once, NO exactly-once): esto REDUCE la probabilidad de doble ejecucion,
+ * no la elimina. Si markCompleted sigue fallando tras agotar los reintentos (Postgres realmente caido),
+ * se PROPAGA el error a proposito: handleFailure devuelve el job a 'pending' y se re-ejecutara -- residual
+ * ACEPTADO del modelo de entrega. La unica defensa COMPLETA es la idempotencia de los efectos colaterales
+ * (claves de idempotencia en las tools que escriben / dedupe por job id) o un checkpoint por paso de
+ * receta; ambos son un cambio grande y quedan FUERA de alcance de este fix (ver README / PR).
+ */
+async function markCompletedWithRetry(deps: JobRunnerDeps, jobId: string): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= COMPLETION_RETRY_ATTEMPTS; attempt++) {
+    try {
+      await deps.jobs.markCompleted(jobId);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < COMPLETION_RETRY_ATTEMPTS) {
+        const nextRetryMs = COMPLETION_RETRY_BASE_MS * attempt;
+        deps.logger.warn('fallo transitorio al marcar el job completado; reintentando el cierre', {
+          jobId,
+          attempt,
+          maxAttempts: COMPLETION_RETRY_ATTEMPTS,
+          nextRetryMs,
+          err: describeError(error),
+        });
+        await sleep(nextRetryMs);
+      }
+    }
+  }
+  // Agotados los reintentos del cierre: el run YA ocurrio pero no pudimos persistir 'completed'. Se
+  // propaga -> handleFailure devolvera el job a 'pending' y PUEDE re-ejecutarse (residual at-least-once).
+  deps.logger.error(
+    'markCompleted fallo tras agotar los reintentos del cierre; el job volvera a pending y puede ' +
+      're-ejecutarse (modelo at-least-once, ver nota de diseno)',
+    { jobId, attempts: COMPLETION_RETRY_ATTEMPTS, err: describeError(lastError) },
+  );
+  throw lastError;
 }
 
 /**
@@ -294,7 +398,7 @@ export async function processClaimedJob(
     // 8. Ejecutar con el deadline de pared propio del worker.
     const { stopReason, usage } = await runAgentWithDeadline(deps, input, executeTool, shutdownSignal);
 
-    await deps.jobs.markCompleted(job.id);
+    await markCompletedWithRetry(deps, job.id);
     logger.info('job completado', {
       jobId: job.id,
       agentId: job.agentId,
@@ -427,7 +531,7 @@ async function runRecipeJob(
     });
   }
 
-  await deps.jobs.markCompleted(job.id);
+  await markCompletedWithRetry(deps, job.id);
   logger.info('receta completada', {
     jobId: job.id,
     agentId: job.agentId,

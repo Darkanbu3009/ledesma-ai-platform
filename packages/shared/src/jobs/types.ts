@@ -70,6 +70,18 @@ export interface JobSummary {
   finishedAt: string | null;
 }
 
+/**
+ * Fila devuelta por el REAPER de jobs huerfanos (recuperacion de jobs 'running' que quedaron atascados
+ * porque el worker murio entre el claim y el cierre). Es lo minimo que necesita el worker para LOGUEAR
+ * que recupero, sin traer el payload. `status` es el estado AL QUE se movio el job: 'pending'
+ * (re-reclamable) o 'failed' (ya habia agotado los intentos).
+ */
+export interface ReapedJob {
+  id: string;
+  status: JobStatus;
+  attempts: number;
+}
+
 /** Opciones del listado paginado por owner (observabilidad). status opcional = todos los estados. */
 export interface ListJobsByOwnerOptions {
   /** Maximo de filas a devolver (la ruta lo acota; el repo confia en el valor ya validado). */
