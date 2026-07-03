@@ -1,5 +1,5 @@
 import { useEffect, useRef, type JSX } from 'react';
-import { drawCloud } from './pixelDither';
+import { drawCloud, FRAME_MS, lerpK } from './pixelDither';
 
 /** Tamano de celda de la rejilla de pixeles, en px CSS. */
 const PX = 6;
@@ -10,22 +10,12 @@ const R = 150;
  * que tocar PX.
  */
 const MAX_TRAIL = 14;
-/** Duracion nominal de un frame a 60Hz; base para normalizar los lerps por dt. */
-const FRAME_MS = 1000 / 60;
 
 /** Punto de la estela: posicion suavizada capturada y vida restante en [0,1]. */
 interface TrailPoint {
   x: number;
   y: number;
   life: number;
-}
-
-/**
- * Factor de lerp equivalente a aplicar `k` una vez por frame a 60Hz, ajustado
- * al dt real para que la velocidad no dependa del refresh rate del monitor.
- */
-function lerpK(k: number, dtMs: number): number {
-  return 1 - Math.pow(1 - k, dtMs / FRAME_MS);
 }
 
 /**

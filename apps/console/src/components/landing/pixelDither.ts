@@ -16,6 +16,17 @@ export const BAYER = [
 /** Paleta ponderada de la nube: brasa dominante, con sombra, ink y un highlight. */
 export const COLORS = ['#E5511E', '#E5511E', '#B23E14', '#1F1E1C', '#F0997B'];
 
+/** Duracion nominal de un frame a 60Hz; base para normalizar los lerps por dt. */
+export const FRAME_MS = 1000 / 60;
+
+/**
+ * Factor de lerp equivalente a aplicar `k` una vez por frame a 60Hz, ajustado
+ * al dt real para que la velocidad no dependa del refresh rate del monitor.
+ */
+export function lerpK(k: number, dtMs: number): number {
+  return 1 - Math.pow(1 - k, dtMs / FRAME_MS);
+}
+
 /** Hash pseudoaleatorio determinista en [0,1). */
 export function hash(x: number, y: number): number {
   const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;

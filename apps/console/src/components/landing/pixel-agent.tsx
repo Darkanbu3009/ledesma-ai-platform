@@ -1,5 +1,5 @@
 import { useEffect, useRef, type JSX } from 'react';
-import { drawCloud } from './pixelDither';
+import { drawCloud, FRAME_MS, lerpK } from './pixelDither';
 
 /** Tamano de celda de la rejilla de pixeles del agente, en px CSS. */
 const PX = 5;
@@ -11,7 +11,7 @@ const TRAIL_R = 34;
 const LANE_OFFSET = 72;
 /** Maximo de puntos de estela. */
 const MAX_TRAIL = 10;
-/** Velocidad vertical minima (px/frame) para alimentar la estela. */
+/** Velocidad vertical minima (px por frame de 60Hz) para alimentar la estela. */
 const TRAIL_SPEED = 0.8;
 /** Fraccion de la altura del hero que hay que scrollear para que aparezca. */
 const HERO_EXIT = 0.6;
@@ -30,10 +30,13 @@ interface TrailPoint {
  * cuando la velocidad es alta y hace bobbing en reposo. Aparece con fade solo
  * despues de salir del hero, para no competir con PixelCloud.
  *
- * Canvas fixed a viewport completo, pointer-events:none y z-index por debajo
- * del navbar sticky (z-40): el agente pasa por detras del nav y nunca
- * intercepta clicks. El scroll se lee dentro del frame de rAF (sin listener de
- * scroll que pinte directo) y el loop se pausa con la pestana oculta.
+ * Canvas fixed a viewport completo, pointer-events:none y z-index negativo
+ * dentro del wrapper isolate de la landing: pinta sobre el fondo hueso pero
+ * debajo de todo el contenido en flujo (secciones, cards, navbar sticky), asi
+ * que estructuralmente nunca se encima a la copy ni intercepta clicks. El
+ * scroll se lee dentro del frame de rAF (sin listener de scroll que pinte
+ * directo); el listener de scroll solo relanza el loop cuando este se detuvo
+ * en reposo dentro del hero. El loop se pausa con la pestana oculta.
  *
  * No monta listeners de render cuando el viewport es menor a 1280px (el margen
  * derecho no existe en tablet/movil), en dispositivos touch ni con
@@ -72,6 +75,9 @@ export function PixelAgent(): JSX.Element {
         cv.height = height * dpr;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         measureHero();
+        // El resize puede cambiar el umbral de aparicion con el loop detenido:
+        // se relanza y el propio frame decide si hay algo que pintar.
+        if (!document.hidden) start();
       }
 
       // El hero es la primera seccion del main de la landing; se mide el nodo
@@ -96,12 +102,14 @@ export function PixelAgent(): JSX.Element {
       }
 
       function frame(now: number): void {
-        rafId = requestAnimationFrame(frame);
         if (lastTime === 0) lastTime = now;
         // Tope de 100ms: tras una pausa larga de rAF el estado avanza un paso
         // normal en vez de saltar.
         const dt = Math.min(now - lastTime, 100);
         lastTime = now;
+        // Todo el movimiento se normaliza a frames de 60Hz (misma convencion
+        // que PixelCloud) para no depender del refresh rate del monitor.
+        const step = dt / FRAME_MS;
         t += dt * 0.001;
 
         // Scroll leido dentro del frame: nada pinta desde un listener de scroll.
@@ -117,26 +125,33 @@ export function PixelAgent(): JSX.Element {
           prevY = targetY;
           started = true;
         }
-        y += (targetY - y) * 0.06;
+        y += (targetY - y) * lerpK(0.06, dt);
 
         // Visible solo fuera del hero: asi no compite con PixelCloud.
         const visTarget = scrollY > heroHeight * HERO_EXIT ? 1 : 0;
-        vis += (visTarget - vis) * 0.08;
+        vis += (visTarget - vis) * lerpK(0.08, dt);
         if (vis < 0.01) {
           clearCanvas();
           trail.length = 0;
           prevY = y;
+          // Dentro del hero con todo apagado no hay nada que animar: el loop
+          // se detiene y el listener de scroll lo relanza.
+          if (visTarget === 0) {
+            rafId = 0;
+            return;
+          }
+          rafId = requestAnimationFrame(frame);
           return;
         }
 
         const x = width - LANE_OFFSET;
-        const speed = Math.abs(y - prevY);
+        const speed = step > 0 ? Math.abs(y - prevY) / step : 0;
         prevY = y;
         // Bobbing en reposo sobre la posicion suavizada.
         const yVis = y + Math.sin(t * 1.6) * 5;
 
         // Estela: decae, expira y se alimenta solo con velocidad alta.
-        for (const p of trail) p.life -= 0.05;
+        for (const p of trail) p.life -= 0.05 * step;
         while (trail.length > 0 && (trail[0]?.life ?? 0) <= 0) trail.shift();
         if (speed > TRAIL_SPEED) {
           trail.push({ x, y: yVis, life: 1 });
@@ -151,12 +166,19 @@ export function PixelAgent(): JSX.Element {
         }
         drawCloud(ctx, x, yVis, R, vis, t, PX);
         ctx.globalAlpha = 1;
+        rafId = requestAnimationFrame(frame);
       }
 
       function start(): void {
         if (rafId !== 0) return;
         lastTime = 0;
         rafId = requestAnimationFrame(frame);
+      }
+
+      // Solo relanza el loop si estaba detenido en reposo; el pintado sigue
+      // ocurriendo exclusivamente dentro del frame.
+      function onScroll(): void {
+        if (!document.hidden) start();
       }
 
       function stop(): void {
@@ -172,13 +194,29 @@ export function PixelAgent(): JSX.Element {
 
       resize();
       window.addEventListener('resize', resize);
+      window.addEventListener('scroll', onScroll, { passive: true });
       document.addEventListener('visibilitychange', onVisibilityChange);
+
+      // El hero cambia de altura sin resize de ventana (fonts, contenido
+      // async): se re-mide para que el umbral de aparicion no quede stale.
+      const hero = document.querySelector('main > section:first-of-type');
+      let heroObserver: ResizeObserver | null = null;
+      if (hero instanceof HTMLElement) {
+        heroObserver = new ResizeObserver(() => {
+          measureHero();
+          start();
+        });
+        heroObserver.observe(hero);
+      }
+
       if (!document.hidden) start();
 
       return () => {
         stop();
         window.removeEventListener('resize', resize);
+        window.removeEventListener('scroll', onScroll);
         document.removeEventListener('visibilitychange', onVisibilityChange);
+        heroObserver?.disconnect();
         clearCanvas();
       };
     }
@@ -213,7 +251,7 @@ export function PixelAgent(): JSX.Element {
     <canvas
       ref={canvasRef}
       aria-hidden="true"
-      className="pointer-events-none fixed inset-0 z-30 h-full w-full"
+      className="pointer-events-none fixed inset-0 -z-10 h-full w-full"
     />
   );
 }
