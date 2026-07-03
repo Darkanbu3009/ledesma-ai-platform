@@ -8,6 +8,13 @@ export interface AgentRunRecord {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  /**
+   * Tokens de prompt caching: cache_read (~0.1x) y cache_write (~1.25x) tienen precios distintos del
+   * input pleno. Opcionales: un proveedor sin caching los deja en undefined y se graban como 0, de modo
+   * que la fila de agent_runs sigue reflejando la factura real (input_tokens ya es solo el input pleno).
+   */
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   stopReason: string | null;
   status: 'completed' | 'error' | 'aborted';
   errorCode: string | null;
@@ -85,11 +92,13 @@ export class AgentRunRepository {
   }
 
   async record(run: AgentRunRecord): Promise<void> {
+    // cache_read_tokens/cache_write_tokens (V019) tienen default 0 en el esquema; el ?? 0 cubre a los
+    // proveedores/corridas que no reportan caching sin depender del default de la columna.
     await this.sql`
       insert into agent_runs
-        (agent_id, owner_id, provider_id, model, input_tokens, output_tokens, stop_reason, status, error_code, duration_ms)
+        (agent_id, owner_id, provider_id, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, stop_reason, status, error_code, duration_ms)
       values (${run.agentId}, ${run.ownerId}, ${run.providerId}, ${run.model}, ${run.inputTokens},
-        ${run.outputTokens}, ${run.stopReason}, ${run.status}, ${run.errorCode}, ${run.durationMs})
+        ${run.outputTokens}, ${run.cacheReadTokens ?? 0}, ${run.cacheWriteTokens ?? 0}, ${run.stopReason}, ${run.status}, ${run.errorCode}, ${run.durationMs})
     `;
   }
 

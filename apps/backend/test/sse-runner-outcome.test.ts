@@ -90,6 +90,46 @@ describe('streamAgentRun: reporte del desenlace via onRunFinished', () => {
     expect(outcomes[0]?.durationMs).toBeGreaterThanOrEqual(0);
   });
 
+  it('reporta cache_read/cache_write cuando el proveedor los devuelve', async () => {
+    runModelMock.mockReturnValue(
+      streamOf([
+        { type: 'text_delta', text: 'Hola' },
+        {
+          type: 'stop',
+          reason: 'end_turn',
+          usage: { inputTokens: 5, outputTokens: 3, cacheWriteTokens: 900, cacheReadTokens: 1500 },
+        },
+      ]),
+    );
+    const outcomes: AgentRunOutcome[] = [];
+    const app = await buildApp((o) => outcomes.push(o));
+
+    await app.inject({ method: 'POST', url: '/run', payload: {} });
+
+    expect(outcomes[0]).toMatchObject({
+      status: 'completed',
+      inputTokens: 5,
+      outputTokens: 3,
+      cacheWriteTokens: 900,
+      cacheReadTokens: 1500,
+    });
+  });
+
+  it('sin caching el desenlace reporta cache_read/cache_write en 0', async () => {
+    runModelMock.mockReturnValue(
+      streamOf([
+        { type: 'text_delta', text: 'Hola' },
+        { type: 'stop', reason: 'end_turn', usage: { inputTokens: 5, outputTokens: 3 } },
+      ]),
+    );
+    const outcomes: AgentRunOutcome[] = [];
+    const app = await buildApp((o) => outcomes.push(o));
+
+    await app.inject({ method: 'POST', url: '/run', payload: {} });
+
+    expect(outcomes[0]).toMatchObject({ cacheWriteTokens: 0, cacheReadTokens: 0 });
+  });
+
   it('ProviderError del modelo reporta status error con el codigo', async () => {
     runModelMock.mockReturnValue(
       // Stream que falla al primer next(): simula un error del proveedor durante la iteracion.

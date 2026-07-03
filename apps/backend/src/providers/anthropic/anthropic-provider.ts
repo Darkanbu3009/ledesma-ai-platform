@@ -36,12 +36,20 @@ export class AnthropicProvider implements ModelProvider {
       const toolBlocks = new Map<number, PendingToolUse>();
       let inputTokens = 0;
       let outputTokens = 0;
+      // Prompt caching: Anthropic separa el input en no-cacheado (input_tokens, 1x), escrito a cache
+      // (cache_creation_input_tokens, ~1.25x) y leido de cache (cache_read_input_tokens, ~0.1x). Los
+      // reporta en la usage del message_start. Se acarrean para que la facturacion refleje el ahorro;
+      // un modelo/proveedor sin caching deja estos campos en null -> quedan en 0 y no cambian el conteo.
+      let cacheWriteTokens = 0;
+      let cacheReadTokens = 0;
       let stopReason: StopReason = 'end_turn';
 
       for await (const event of stream) {
         switch (event.type) {
           case 'message_start': {
             inputTokens = event.message.usage.input_tokens ?? 0;
+            cacheWriteTokens = event.message.usage.cache_creation_input_tokens ?? 0;
+            cacheReadTokens = event.message.usage.cache_read_input_tokens ?? 0;
             break;
           }
           case 'content_block_start': {
@@ -89,7 +97,18 @@ export class AnthropicProvider implements ModelProvider {
         }
       }
 
-      yield { type: 'stop', reason: stopReason, usage: { inputTokens, outputTokens } };
+      yield {
+        type: 'stop',
+        reason: stopReason,
+        // cacheWriteTokens/cacheReadTokens solo se incluyen cuando el modelo cacheo algo (> 0): asi la
+        // forma de la usage queda identica a la actual cuando no hubo caching.
+        usage: {
+          inputTokens,
+          outputTokens,
+          ...(cacheWriteTokens > 0 ? { cacheWriteTokens } : {}),
+          ...(cacheReadTokens > 0 ? { cacheReadTokens } : {}),
+        },
+      };
     } catch (error) {
       throw toProviderError(error, this.id);
     }
