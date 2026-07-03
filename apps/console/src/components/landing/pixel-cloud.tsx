@@ -15,8 +15,20 @@ const COLORS = ['#E5511E', '#E5511E', '#B23E14', '#1F1E1C', '#F0997B'];
 const PX = 6;
 /** Radio de la nube alrededor del cursor, en px CSS. */
 const R = 150;
+/**
+ * Maximo de puntos de estela. Si el profiling muestra jank, bajar a 10 antes
+ * que tocar PX.
+ */
+const MAX_TRAIL = 14;
 /** Duracion nominal de un frame a 60Hz; base para normalizar los lerps por dt. */
 const FRAME_MS = 1000 / 60;
+
+/** Punto de la estela: posicion suavizada capturada y vida restante en [0,1]. */
+interface TrailPoint {
+  x: number;
+  y: number;
+  life: number;
+}
 
 /** Hash pseudoaleatorio determinista en [0,1). */
 function hash(x: number, y: number): number {
@@ -48,14 +60,18 @@ function lerpK(k: number, dtMs: number): number {
 }
 
 /**
- * Nube de pixeles con dithering que sigue al cursor dentro del hero.
+ * Nube de pixeles con dithering que sigue al cursor dentro del hero, con una
+ * estela que decae detras del movimiento.
  *
  * Canvas absoluto detras del contenido, sin eventos propios de puntero: escucha
  * mousemove en document para seguir el cursor, y desaparece con fade-out cuando
  * el cursor sale del documento (mouseleave en documentElement) o la ventana
  * pierde foco (blur). Con la pestana oculta (visibilitychange) el navegador
  * pausa rAF, asi que ahi se limpia el canvas de inmediato en vez de animar el
- * fade. No hace nada en dispositivos touch ni con prefers-reduced-motion.
+ * fade. La estela es una cola de puntos repintados cada frame (clearRect
+ * completo), nunca un fade del frame anterior via globalAlpha/destination-out,
+ * que emborrona los pixeles y rompe la estetica de dithering. No hace nada en
+ * dispositivos touch ni con prefers-reduced-motion.
  */
 export function PixelCloud(): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -103,11 +119,46 @@ export function PixelCloud(): JSX.Element {
     let inside = false;
     let vis = 0;
     let t = 0;
+    let lastPush = 0;
     let rafId = 0;
     let lastTime = 0;
     let running = false;
     let heroVisible = true;
     let disabled = false;
+    const trail: TrailPoint[] = [];
+
+    /**
+     * Pinta una nube ditherizada centrada en (cx, cy), iterando solo el
+     * bounding box del radio. Devuelve si pinto al menos una celda.
+     */
+    function drawCloud(cx: number, cy: number, radius: number, fuerza: number): boolean {
+      const x0 = Math.max(0, Math.floor((cx - radius) / PX));
+      const x1 = Math.min(Math.ceil(width / PX), Math.ceil((cx + radius) / PX));
+      const y0 = Math.max(0, Math.floor((cy - radius) / PX));
+      const y1 = Math.min(Math.ceil(height / PX), Math.ceil((cy + radius) / PX));
+
+      let drew = false;
+      for (let gx = x0; gx < x1; gx++) {
+        for (let gy = y0; gy < y1; gy++) {
+          const dx = gx * PX + PX / 2 - cx;
+          const dy = gy * PX + PX / 2 - cy;
+          const distSq = dx * dx + dy * dy;
+          if (distSq > radius * radius) continue;
+          const falloff = 1 - Math.sqrt(distSq) / radius;
+          const noise = valueNoise(gx * 0.13 + t * 0.6, gy * 0.13 - t * 0.35);
+          const intensity = falloff * falloff * (0.35 + noise * 0.9) * fuerza;
+          const threshold = ((BAYER[gx & 3]?.[gy & 3] ?? 0) + 1) / 17;
+          if (intensity > threshold) {
+            const pick = hash(gx * 3.7, gy * 5.1 + Math.floor(t * 2));
+            ctx.fillStyle = COLORS[Math.floor(pick * COLORS.length)] ?? '#E5511E';
+            ctx.globalAlpha = Math.min(1, intensity * 1.2);
+            ctx.fillRect(gx * PX, gy * PX, PX - 1, PX - 1);
+            drew = true;
+          }
+        }
+      }
+      return drew;
+    }
 
     function frame(now: number): void {
       if (lastTime === 0) lastTime = now;
@@ -115,10 +166,13 @@ export function PixelCloud(): JSX.Element {
       // normal en vez de saltar.
       const dt = Math.min(now - lastTime, 100);
       lastTime = now;
+      const step = dt / FRAME_MS;
       t += dt * 0.001;
       vis += ((inside ? 1 : 0) - vis) * lerpK(inside ? 0.12 : 0.18, dt);
       if (vis < 0.01) {
         clearCanvas();
+        // Sin nube no debe sobrevivir estela: al regresar no aparece una vieja.
+        trail.length = 0;
         // Nube apagada y cursor fuera: se detiene el loop hasta el proximo mousemove.
         if (!inside) {
           running = false;
@@ -132,43 +186,36 @@ export function PixelCloud(): JSX.Element {
       posY += (targetY - posY) * kPos;
       clearCanvas();
 
-      const x0 = Math.max(0, Math.floor((posX - R) / PX));
-      const x1 = Math.min(Math.ceil(width / PX), Math.ceil((posX + R) / PX));
-      const y0 = Math.max(0, Math.floor((posY - R) / PX));
-      const y1 = Math.min(Math.ceil(height / PX), Math.ceil((posY + R) / PX));
+      // Estela: decae, expira y se alimenta con la posicion suavizada actual.
+      for (const p of trail) p.life -= 0.028 * step;
+      while (trail.length > 0 && (trail[0]?.life ?? 0) <= 0) trail.shift();
+      if (inside && t - lastPush > 0.03) {
+        trail.push({ x: posX, y: posY, life: 1 });
+        if (trail.length > MAX_TRAIL) trail.shift();
+        lastPush = t;
+      }
 
+      // Estela primero: la nube principal queda encima.
       let drewAny = false;
-      for (let gx = x0; gx < x1; gx++) {
-        for (let gy = y0; gy < y1; gy++) {
-          const cx = gx * PX + PX / 2;
-          const cy = gy * PX + PX / 2;
-          const dx = cx - posX;
-          const dy = cy - posY;
-          const distSq = dx * dx + dy * dy;
-          if (distSq > R * R) continue;
-          const falloff = 1 - Math.sqrt(distSq) / R;
-          const noise = valueNoise(gx * 0.13 + t * 0.6, gy * 0.13 - t * 0.35);
-          const intensity = falloff * falloff * (0.35 + noise * 0.9) * vis;
-          const threshold = ((BAYER[gx & 3]?.[gy & 3] ?? 0) + 1) / 17;
-          if (intensity > threshold) {
-            const pick = hash(gx * 3.7, gy * 5.1 + Math.floor(t * 2));
-            ctx.fillStyle = COLORS[Math.floor(pick * COLORS.length)] ?? '#E5511E';
-            ctx.globalAlpha = Math.min(1, intensity * 1.2);
-            ctx.fillRect(gx * PX, gy * PX, PX - 1, PX - 1);
-            drewAny = true;
-          }
+      for (const p of trail) {
+        if (drawCloud(p.x, p.y, R * (0.35 + p.life * 0.45), p.life * 0.55 * vis)) {
+          drewAny = true;
         }
       }
+      if (drawCloud(posX, posY, R, vis)) drewAny = true;
       ctx.globalAlpha = 1;
 
       // Cursor en el documento pero lejos del hero, sin nada que dibujar y todo
-      // convergido: se detiene el loop; el proximo mousemove lo relanza.
+      // convergido: se detiene el loop; el proximo mousemove lo relanza. La
+      // estela (invisible: sus puntos tampoco pintaron) se vacia para no dejar
+      // puntos congelados que reaparecerian al relanzar.
       if (
         !drewAny &&
         vis > 0.99 &&
         Math.abs(targetX - posX) < 0.5 &&
         Math.abs(targetY - posY) < 0.5
       ) {
+        trail.length = 0;
         running = false;
         return;
       }
@@ -200,10 +247,12 @@ export function PixelCloud(): JSX.Element {
       lastClientY = event.clientY;
       updateTarget(event.clientX, event.clientY);
       // Al reaparecer, la nube nace donde este el cursor, sin viajar desde la
-      // posicion vieja.
+      // posicion vieja. La estela se vacia: si la salida fue tan corta que el
+      // fade-out no llego a vis<0.01, quedarian puntos viejos como fantasma.
       if (!inside) {
         posX = targetX;
         posY = targetY;
+        trail.length = 0;
         inside = true;
       }
       start();
@@ -221,15 +270,19 @@ export function PixelCloud(): JSX.Element {
       inside = false;
       // Si el loop ya esta detenido (canvas limpio), no habra frames que
       // decaigan vis: se apaga aqui para que la proxima entrada haga fade-in.
-      if (!running) vis = 0;
+      if (!running) {
+        vis = 0;
+        trail.length = 0;
+      }
     }
 
     // Con rAF pausado (pestana oculta, hero fuera de viewport) el fade no puede
-    // correr: se apaga y limpia de forma sincrona.
+    // correr: se apaga y limpia de forma sincrona, estela incluida.
     function shutOff(): void {
-      leave();
+      inside = false;
       stop();
       vis = 0;
+      trail.length = 0;
       clearCanvas();
     }
 
