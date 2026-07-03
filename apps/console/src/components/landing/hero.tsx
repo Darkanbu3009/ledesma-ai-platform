@@ -18,18 +18,11 @@ const DEMO_WHATSAPP_URL = `${WHATSAPP_URL}?text=${encodeURIComponent(
  * pasa a una columna.
  *
  * El hero es transparente y se apoya sobre el fondo solido de marca del wrapper de la
- * landing; conserva el glow radial sutil en brasa, arriba a la derecha.
+ * landing.
  */
 export function Hero(): JSX.Element {
   return (
     <section className="relative isolate overflow-hidden">
-      {/* Glow radial sutil en brasa, arriba a la derecha. Sobre el fondo hueso claro
-          se atenua (los glows son un recurso del tema oscuro): queda como un lavado
-          calido muy tenue para no ensuciar el crema. */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -right-32 -top-40 -z-10 h-[32rem] w-[32rem] rounded-full bg-[radial-gradient(circle,_rgba(232,81,31,0.07),_transparent_70%)] blur-3xl"
-      />
       <PixelCloud />
       <div className="relative z-10 mx-auto grid max-w-6xl items-center gap-12 px-6 py-20 min-[900px]:grid-cols-2 min-[900px]:py-28">
         <div>
