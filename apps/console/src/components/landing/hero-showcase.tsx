@@ -1,5 +1,6 @@
 import { type CSSProperties, type JSX, useCallback, useEffect, useRef, useState } from 'react';
 import { BrainSwap, type ModelProvider } from './brain-swap';
+import { PixelDataFlow } from './pixel-data-flow';
 
 /**
  * Proveedores de modelo (orden del mockup: Claude, ChatGPT y "Open source"). Cada uno
@@ -262,6 +263,8 @@ export function HeroShowcase(): JSX.Element {
       <div className="w-full min-w-0 min-[1100px]:flex-1">
         <BrainSwap providers={PROVIDERS} active={active} cardRef={cardRef} onSelect={handleSelect} />
       </div>
+
+      <PixelDataFlow />
     </div>
   );
 }
