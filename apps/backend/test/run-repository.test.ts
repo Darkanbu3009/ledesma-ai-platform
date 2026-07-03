@@ -28,6 +28,53 @@ describe('AgentRunRepository', () => {
     expect(sql).toHaveBeenCalledTimes(1);
   });
 
+  it('record inserta las columnas de cache; con caching graba los valores reportados', async () => {
+    const sql = makeSqlReturning([]);
+    const repo = new AgentRunRepository(sql);
+    await repo.record({
+      agentId: '22222222-2222-2222-2222-222222222222',
+      ownerId: 'user-1',
+      providerId: 'anthropic',
+      model: 'claude-opus-4-8',
+      inputTokens: 40,
+      outputTokens: 8,
+      cacheReadTokens: 1500,
+      cacheWriteTokens: 200,
+      stopReason: 'end_turn',
+      status: 'completed',
+      errorCode: null,
+      durationMs: 120,
+    });
+    const call = (sql as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    const text = (call?.[0] as readonly string[]).join('?');
+    const values = call?.slice(1);
+    expect(text).toContain('cache_read_tokens');
+    expect(text).toContain('cache_write_tokens');
+    expect(values).toContain(1500);
+    expect(values).toContain(200);
+  });
+
+  it('record sin campos de cache (proveedor sin caching) los graba como 0', async () => {
+    const sql = makeSqlReturning([]);
+    const repo = new AgentRunRepository(sql);
+    await repo.record({
+      agentId: '33333333-3333-3333-3333-333333333333',
+      ownerId: 'user-2',
+      providerId: 'openai',
+      model: 'gpt',
+      inputTokens: 10,
+      outputTokens: 4,
+      stopReason: 'end_turn',
+      status: 'completed',
+      errorCode: null,
+      durationMs: 90,
+    });
+    const call = (sql as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    // undefined -> 0: el ?? 0 en el repo cubre a los proveedores/corridas sin caching.
+    const values = call?.slice(1);
+    expect(values).not.toContain(undefined);
+  });
+
   it('totalsForAgent mapea counts y sums (strings de postgres) a number', async () => {
     const repo = new AgentRunRepository(
       makeSqlReturning([{ runs: '7', completed: '5', errors: '2', input_tokens: '120', output_tokens: '45' }]),

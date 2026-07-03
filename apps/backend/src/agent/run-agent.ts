@@ -63,6 +63,17 @@ export async function* runAgent(input: AgentRunInput, deps: AgentDeps): AsyncIte
   const messages: NormalizedMessage[] = [...input.request.messages];
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
+  // Acumulados de prompt caching a traves de las iteraciones. Se suman igual que input/output y solo se
+  // adjuntan a la usage final cuando son > 0, para no alterar la forma del conteo cuando no hubo caching.
+  let totalCacheWriteTokens = 0;
+  let totalCacheReadTokens = 0;
+
+  const accumulatedUsage = (): TokenUsage => ({
+    inputTokens: totalInputTokens,
+    outputTokens: totalOutputTokens,
+    ...(totalCacheWriteTokens > 0 ? { cacheWriteTokens: totalCacheWriteTokens } : {}),
+    ...(totalCacheReadTokens > 0 ? { cacheReadTokens: totalCacheReadTokens } : {}),
+  });
 
   for (let iteration = 0; iteration < maxIterations; iteration += 1) {
     const turnRequest: NormalizedRequest = { ...input.request, messages };
@@ -95,6 +106,8 @@ export async function* runAgent(input: AgentRunInput, deps: AgentDeps): AsyncIte
           if (event.usage) {
             totalInputTokens += event.usage.inputTokens;
             totalOutputTokens += event.usage.outputTokens;
+            totalCacheWriteTokens += event.usage.cacheWriteTokens ?? 0;
+            totalCacheReadTokens += event.usage.cacheReadTokens ?? 0;
           }
           break;
         }
@@ -103,7 +116,7 @@ export async function* runAgent(input: AgentRunInput, deps: AgentDeps): AsyncIte
       }
     }
 
-    const usage: TokenUsage = { inputTokens: totalInputTokens, outputTokens: totalOutputTokens };
+    const usage: TokenUsage = accumulatedUsage();
 
     if (stopReason !== 'tool_use' || toolCalls.length === 0) {
       yield { type: 'stop', reason: stopReason, usage };
@@ -157,6 +170,6 @@ export async function* runAgent(input: AgentRunInput, deps: AgentDeps): AsyncIte
   yield {
     type: 'stop',
     reason: 'max_iterations',
-    usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
+    usage: accumulatedUsage(),
   };
 }

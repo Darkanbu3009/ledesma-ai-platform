@@ -8,6 +8,10 @@ export interface AgentRunOutcome {
   status: 'completed' | 'error' | 'aborted';
   inputTokens: number;
   outputTokens: number;
+  /** Tokens escritos a la cache de prompt (Anthropic: cache_creation_input_tokens). 0 sin caching. */
+  cacheWriteTokens: number;
+  /** Tokens leidos de la cache de prompt (Anthropic: cache_read_input_tokens). 0 sin caching. */
+  cacheReadTokens: number;
   stopReason: string | null;
   errorCode: string | null;
   durationMs: number;
@@ -98,6 +102,10 @@ export async function streamAgentRun(
   // Metadatos del desenlace para onRunFinished. errorCode no nulo marca que entramos al catch.
   let inputTokens = 0;
   let outputTokens = 0;
+  // Prompt caching: se reportan aparte porque cache_read (~0.1x) y cache_write (~1.25x) tienen precios
+  // distintos del input pleno. 0 cuando el proveedor no cachea (usage sin estos campos).
+  let cacheWriteTokens = 0;
+  let cacheReadTokens = 0;
   let stopReason: string | null = null;
   let errorCode: string | null = null;
   // Marca que el loop emitio su stop natural (runAgent emite uno solo, al final). Distingue el fin
@@ -124,6 +132,8 @@ export async function streamAgentRun(
         stopReason = event.reason;
         inputTokens = event.usage.inputTokens;
         outputTokens = event.usage.outputTokens;
+        cacheWriteTokens = event.usage.cacheWriteTokens ?? 0;
+        cacheReadTokens = event.usage.cacheReadTokens ?? 0;
       }
       sseWrite(reply, { data: event });
     }
@@ -184,6 +194,8 @@ export async function streamAgentRun(
                 : 'completed',
           inputTokens,
           outputTokens,
+          cacheWriteTokens,
+          cacheReadTokens,
           stopReason,
           errorCode,
           durationMs: Date.now() - startedAt,

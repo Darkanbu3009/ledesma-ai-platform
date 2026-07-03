@@ -12,10 +12,24 @@ export type StopReason =
   | 'content_filter'
   | 'error';
 
-/** Conteo de tokens reportado por el proveedor al cierre del stream. */
+/**
+ * Conteo de tokens reportado por el proveedor al cierre del stream.
+ *
+ * `inputTokens`/`outputTokens` son los tokens facturados a precio pleno. Con prompt caching el
+ * proveedor separa el input en tres cubos con precios distintos: `inputTokens` pasa a ser SOLO el
+ * input no cacheado (1x), `cacheWriteTokens` los tokens escritos a la cache (~1.25x) y
+ * `cacheReadTokens` los leidos de la cache (~0.1x). Los dos ultimos son OPCIONALES: solo se pueblan
+ * cuando el proveedor los reporta (Anthropic los expone en la usage del stream); un proveedor sin
+ * caching los deja ausentes y el conteo actual no cambia. El total de input procesado es
+ * `inputTokens + (cacheWriteTokens ?? 0) + (cacheReadTokens ?? 0)`.
+ */
 export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
+  /** Tokens escritos a la cache de prompt este turno (Anthropic: cache_creation_input_tokens). */
+  cacheWriteTokens?: number;
+  /** Tokens servidos desde la cache de prompt este turno (Anthropic: cache_read_input_tokens). */
+  cacheReadTokens?: number;
 }
 
 /** Fragmento incremental de texto generado por el modelo. */

@@ -239,6 +239,8 @@ export function runAgentByIdRoutes(
               model: agent.model,
               inputTokens: outcome.inputTokens,
               outputTokens: outcome.outputTokens,
+              cacheReadTokens: outcome.cacheReadTokens,
+              cacheWriteTokens: outcome.cacheWriteTokens,
               stopReason: outcome.stopReason,
               status: outcome.status,
               errorCode: outcome.errorCode,
