@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import { Button } from '../ui/button';
 import { HeroShowcase } from './hero-showcase';
+import { PixelCloud } from './pixel-cloud';
 
 /** WhatsApp de contacto del showroom (mismo numero que el resto del sitio). */
 const WHATSAPP_URL = 'https://wa.me/528116261651';
@@ -29,6 +30,7 @@ export function Hero(): JSX.Element {
         aria-hidden="true"
         className="pointer-events-none absolute -right-32 -top-40 -z-10 h-[32rem] w-[32rem] rounded-full bg-[radial-gradient(circle,_rgba(232,81,31,0.07),_transparent_70%)] blur-3xl"
       />
+      <PixelCloud />
       <div className="relative z-10 mx-auto grid max-w-6xl items-center gap-12 px-6 py-20 min-[900px]:grid-cols-2 min-[900px]:py-28">
         <div>
           <h1 className="font-display text-4xl font-bold leading-[1.05] tracking-tight text-foreground sm:text-5xl min-[900px]:text-6xl">
