@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { BrandMark } from '../BrandMark';
@@ -23,6 +23,13 @@ export function ConsentScreen({ state }: { state: ConsentsState }) {
   const [accepted, setAccepted] = useState(false);
   const acceptConsents = useAcceptConsents();
 
+  // Al montar, mueve el foco al titulo (h1, tabindex -1) para que el lector de pantalla anuncie la
+  // pantalla de consentimiento en vez de dejar el foco en el body (hallazgo B13).
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
+
   function handleAccept() {
     if (!accepted) return;
     acceptConsents.mutate(pendingConsentBodies(state));
@@ -33,9 +40,13 @@ export function ConsentScreen({ state }: { state: ConsentsState }) {
       <div className="w-full max-w-lg">
         <div className="mb-8 flex flex-col items-center text-center">
           <BrandMark className="h-[46px] w-[46px]" />
-          <p className="mt-5 font-display text-2xl font-semibold tracking-tight text-ink">
+          <h1
+            ref={headingRef}
+            tabIndex={-1}
+            className="mt-5 font-display text-2xl font-semibold tracking-tight text-ink focus:outline-none"
+          >
             Antes de continuar
-          </p>
+          </h1>
           <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.24em] text-muted">
             AVISO DE PRIVACIDAD
           </p>

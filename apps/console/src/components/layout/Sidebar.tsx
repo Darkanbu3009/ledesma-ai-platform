@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom';
 import { Activity, Bot, CalendarClock, ChefHat, KeyRound, LogOut, ShieldCheck, Webhook } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../auth/useAuth';
+import { focusRing } from '../../lib/utils';
 import { BrandMark } from '../BrandMark';
 
 const navItems = [
@@ -37,6 +38,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             className={({ isActive }) =>
               [
                 'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition',
+                focusRing,
                 isActive
                   ? 'bg-brasa-soft font-semibold text-brasa'
                   : 'font-medium text-ink-soft hover:bg-line-soft',
@@ -53,7 +55,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <p className="truncate px-2 pb-2.5 text-xs text-muted-soft">{user?.email}</p>
         <button
           onClick={handleLogout}
-          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted transition hover:bg-line-soft hover:text-ink"
+          className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted transition hover:bg-line-soft hover:text-ink ${focusRing}`}
         >
           <LogOut className="h-[17px] w-[17px]" />
           Cerrar sesión

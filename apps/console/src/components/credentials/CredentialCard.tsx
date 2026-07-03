@@ -2,6 +2,7 @@ import { Calendar, KeyRound, Link2, Trash2 } from 'lucide-react';
 import type { ProviderId } from '../../lib/agents';
 import { providerLabel } from '../../lib/agents';
 import type { ProviderCredential } from '../../lib/credentials';
+import { focusRing } from '../../lib/utils';
 
 type Accent = { iconBox: string; badge: string };
 
@@ -79,7 +80,7 @@ export function CredentialCard({
         type="button"
         onClick={onDelete}
         aria-label={`Eliminar credencial ${credential.label}`}
-        className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-line bg-surface text-muted transition hover:border-[rgba(192,73,43,0.35)] hover:bg-[rgba(192,73,43,0.05)] hover:text-[#C0492B]"
+        className={`flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-line bg-surface text-muted transition hover:border-[rgba(192,73,43,0.35)] hover:bg-[rgba(192,73,43,0.05)] hover:text-[#C0492B] ${focusRing}`}
       >
         <Trash2 className="h-[17px] w-[17px]" />
       </button>

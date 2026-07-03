@@ -194,21 +194,26 @@ export function CredentialSessionForm({
                 error={savedErrors.model}
                 hint="El proveedor sale de la credencial; elegis el modelo a usar."
               >
-                <input
-                  value={savedModel}
-                  onChange={(e) => {
-                    setSavedModel(e.target.value);
-                    setSavedErrors((prev) => ({ ...prev, model: undefined }));
-                  }}
-                  className={inputClass}
-                  list={savedListId}
-                  placeholder={modelPlaceholder(savedProvider ?? 'anthropic')}
-                />
-                <datalist id={savedListId}>
-                  {modelSuggestions(savedProvider ?? 'anthropic').map((m) => (
-                    <option key={m} value={m} />
-                  ))}
-                </datalist>
+                {(field) => (
+                  <>
+                    <input
+                      {...field}
+                      value={savedModel}
+                      onChange={(e) => {
+                        setSavedModel(e.target.value);
+                        setSavedErrors((prev) => ({ ...prev, model: undefined }));
+                      }}
+                      className={inputClass}
+                      list={savedListId}
+                      placeholder={modelPlaceholder(savedProvider ?? 'anthropic')}
+                    />
+                    <datalist id={savedListId}>
+                      {modelSuggestions(savedProvider ?? 'anthropic').map((m) => (
+                        <option key={m} value={m} />
+                      ))}
+                    </datalist>
+                  </>
+                )}
               </Field>
 
               {selectedCredential?.baseUrl && (
@@ -240,25 +245,28 @@ export function CredentialSessionForm({
             error={pasteErrors.apiKey}
             hint="Viaja cifrada en cada turno y no se guarda en la plataforma."
           >
-            <div className="relative">
-              <input
-                type={showKey ? 'text' : 'password'}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                className={`${inputClass} pr-11`}
-                placeholder="sk-..."
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <button
-                type="button"
-                onClick={() => setShowKey((v) => !v)}
-                aria-label={showKey ? 'Ocultar API key' : 'Mostrar API key'}
-                className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-muted transition hover:text-ink"
-              >
-                {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
+            {(field) => (
+              <div className="relative">
+                <input
+                  {...field}
+                  type={showKey ? 'text' : 'password'}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  className={`${inputClass} pr-11`}
+                  placeholder="sk-..."
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey((v) => !v)}
+                  aria-label={showKey ? 'Ocultar API key' : 'Mostrar API key'}
+                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-muted transition hover:text-ink"
+                >
+                  {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            )}
           </Field>
 
           {providerNeedsBaseUrl(pasteProvider) && (
@@ -277,18 +285,23 @@ export function CredentialSessionForm({
           )}
 
           <Field label="Modelo" error={pasteErrors.model}>
-            <input
-              value={pasteModel}
-              onChange={(e) => setPasteModel(e.target.value)}
-              className={inputClass}
-              list={pasteListId}
-              placeholder={modelPlaceholder(pasteProvider)}
-            />
-            <datalist id={pasteListId}>
-              {modelSuggestions(pasteProvider).map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
+            {(field) => (
+              <>
+                <input
+                  {...field}
+                  value={pasteModel}
+                  onChange={(e) => setPasteModel(e.target.value)}
+                  className={inputClass}
+                  list={pasteListId}
+                  placeholder={modelPlaceholder(pasteProvider)}
+                />
+                <datalist id={pasteListId}>
+                  {modelSuggestions(pasteProvider).map((m) => (
+                    <option key={m} value={m} />
+                  ))}
+                </datalist>
+              </>
+            )}
           </Field>
         </div>
       )}

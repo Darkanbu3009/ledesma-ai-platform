@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { type FormEvent, type RefObject, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Loader2, X } from 'lucide-react';
 import { ApiError } from '../../lib/api';
@@ -19,6 +19,7 @@ import {
   type RecipeDraftErrors,
 } from '../../lib/recipes';
 import { Field, inputClass } from '../ui/Field';
+import { useDialog } from '../ui/useDialog';
 import { StepEditor } from './StepEditor';
 import { RetryWarning } from './RetryWarning';
 
@@ -39,35 +40,30 @@ function backendMessage(error: unknown, mode: Mode): string {
 
 /**
  * Shell del modal (backdrop + dialog + cabecera + cierre). Comparte estructura con
- * ScheduledTaskFormDialog. Cierra con Escape o click en el fondo.
+ * ScheduledTaskFormDialog. La accesibilidad (trampa de foco, Escape, retorno de foco) la aporta el hook
+ * `useDialog`; el foco inicial apunta a `initialFocusRef` (el campo Nombre cuando hay formulario, o el
+ * primer control disponible en los estados de carga/error).
  */
 function Shell({
   title,
   subtitle,
   onClose,
+  initialFocusRef,
   children,
 }: {
   title: string;
   subtitle: string;
   onClose: () => void;
+  initialFocusRef: RefObject<HTMLInputElement | null>;
   children: React.ReactNode;
 }) {
-  const onCloseRef = useRef(onClose);
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  });
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onCloseRef.current();
-    }
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, []);
+  const dialogRef = useDialog({ onClose, initialFocus: initialFocusRef });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8">
       <div className="absolute inset-0 bg-ink/40" onClick={onClose} aria-hidden="true" />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="recipe-form-title"
@@ -98,7 +94,8 @@ function Shell({
 /**
  * Cuerpo del formulario de receta (alta o edicion), con estado propio inicializado del draft. El AGENTE
  * y la CREDENCIAL son FIJOS al editar (el backend no los cambia): en modo edicion se muestran
- * deshabilitados. El editor de pasos preserva el orden y exige al menos 1 paso con contenido.
+ * deshabilitados. El editor de pasos preserva el orden y exige al menos 1 paso con contenido. El foco
+ * inicial (campo Nombre) lo maneja el Shell via `nameRef`, para no robarselo al hook de foco.
  */
 function RecipeForm({
   mode,
@@ -106,12 +103,14 @@ function RecipeForm({
   onClose,
   onSaved,
   recipeId,
+  nameRef,
 }: {
   mode: Mode;
   initialDraft: RecipeDraft;
   onClose: () => void;
   onSaved: (mode: Mode) => void;
   recipeId?: string;
+  nameRef: RefObject<HTMLInputElement | null>;
 }) {
   const { data: agents, isLoading: agentsLoading } = useAgents();
   const { data: credentials, isLoading: credentialsLoading } = useCredentials();
@@ -121,14 +120,9 @@ function RecipeForm({
 
   const [draft, setDraft] = useState<RecipeDraft>(initialDraft);
   const [errors, setErrors] = useState<RecipeDraftErrors>({});
-  const nameRef = useRef<HTMLInputElement>(null);
 
   const isEdit = mode === 'edit';
   const fieldsFixed = isEdit; // agente y credencial no se editan
-
-  useEffect(() => {
-    nameRef.current?.focus();
-  }, []);
 
   const selectedAgent = useMemo(
     () => agents?.find((agent) => agent.id === draft.agentId) ?? null,
@@ -193,7 +187,10 @@ function RecipeForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-5 overflow-y-auto px-6 py-6" noValidate>
       {mutation.isError && (
-        <div className="rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa">
+        <div
+          role="alert"
+          className="rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa"
+        >
           {backendMessage(mutation.error, mode)}
         </div>
       )}
@@ -258,48 +255,51 @@ function RecipeForm({
         error={errors.credentialId}
         hint={fieldsFixed ? 'La credencial es fija; crea una nueva receta para cambiarla.' : undefined}
       >
-        {!selectedAgent ? (
-          <div className="rounded-xl border border-line bg-field px-4 py-3 text-sm text-muted">
-            Elige primero un agente para ver sus credenciales.
-          </div>
-        ) : credentialsLoading ? (
-          <div className="h-11 animate-pulse rounded-xl border border-line bg-field" />
-        ) : fieldsFixed ? (
-          <select value={draft.credentialId} className={inputClass} disabled>
-            {compatible.map((cred) => (
-              <option key={cred.id} value={cred.id}>
-                {cred.label}
-              </option>
-            ))}
-            {compatible.every((cred) => cred.id !== draft.credentialId) && (
-              <option value={draft.credentialId}>Credencial no disponible</option>
-            )}
-          </select>
-        ) : compatible.length === 0 ? (
-          <div className="rounded-xl border border-line bg-field px-4 py-3 text-sm text-muted">
-            No tienes credenciales de {providerLabel(selectedAgent.providerId)}.{' '}
-            <Link to="/credenciales" className="font-medium text-brasa hover:underline">
-              Agrega una en Credenciales
-            </Link>
-            .
-          </div>
-        ) : (
-          <select
-            value={draft.credentialId}
-            onChange={(e) => {
-              patch({ credentialId: e.target.value });
-              setErrors((prev) => ({ ...prev, credentialId: undefined }));
-            }}
-            className={inputClass}
-          >
-            <option value="">Elige una credencial...</option>
-            {compatible.map((cred) => (
-              <option key={cred.id} value={cred.id}>
-                {cred.label}
-              </option>
-            ))}
-          </select>
-        )}
+        {(field) =>
+          !selectedAgent ? (
+            <div className="rounded-xl border border-line bg-field px-4 py-3 text-sm text-muted">
+              Elige primero un agente para ver sus credenciales.
+            </div>
+          ) : credentialsLoading ? (
+            <div className="h-11 animate-pulse rounded-xl border border-line bg-field" />
+          ) : fieldsFixed ? (
+            <select {...field} value={draft.credentialId} className={inputClass} disabled>
+              {compatible.map((cred) => (
+                <option key={cred.id} value={cred.id}>
+                  {cred.label}
+                </option>
+              ))}
+              {compatible.every((cred) => cred.id !== draft.credentialId) && (
+                <option value={draft.credentialId}>Credencial no disponible</option>
+              )}
+            </select>
+          ) : compatible.length === 0 ? (
+            <div className="rounded-xl border border-line bg-field px-4 py-3 text-sm text-muted">
+              No tienes credenciales de {providerLabel(selectedAgent.providerId)}.{' '}
+              <Link to="/credenciales" className="font-medium text-brasa hover:underline">
+                Agrega una en Credenciales
+              </Link>
+              .
+            </div>
+          ) : (
+            <select
+              {...field}
+              value={draft.credentialId}
+              onChange={(e) => {
+                patch({ credentialId: e.target.value });
+                setErrors((prev) => ({ ...prev, credentialId: undefined }));
+              }}
+              className={inputClass}
+            >
+              <option value="">Elige una credencial...</option>
+              {compatible.map((cred) => (
+                <option key={cred.id} value={cred.id}>
+                  {cred.label}
+                </option>
+              ))}
+            </select>
+          )
+        }
       </Field>
 
       <RetryWarning />
@@ -350,6 +350,8 @@ export function RecipeFormDialog({
 }) {
   const isEdit = Boolean(recipeId);
   const { data: recipe, isLoading, isError } = useRecipe(recipeId ?? undefined);
+  // El foco inicial (campo Nombre) lo comparte el Shell (para capturarlo) y el formulario (que lo monta).
+  const nameRef = useRef<HTMLInputElement>(null);
 
   const title = isEdit ? 'Editar receta' : 'Nueva receta';
   const subtitle = isEdit
@@ -358,7 +360,7 @@ export function RecipeFormDialog({
 
   if (isEdit && isLoading) {
     return (
-      <Shell title={title} subtitle={subtitle} onClose={onClose}>
+      <Shell title={title} subtitle={subtitle} onClose={onClose} initialFocusRef={nameRef}>
         <div className="space-y-4 px-6 py-6">
           {[0, 1, 2].map((i) => (
             <div key={i} className="h-11 animate-pulse rounded-xl border border-line bg-field" />
@@ -370,9 +372,12 @@ export function RecipeFormDialog({
 
   if (isEdit && (isError || !recipe)) {
     return (
-      <Shell title={title} subtitle={subtitle} onClose={onClose}>
+      <Shell title={title} subtitle={subtitle} onClose={onClose} initialFocusRef={nameRef}>
         <div className="px-6 py-6">
-          <div className="rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa">
+          <div
+            role="alert"
+            className="rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa"
+          >
             No pudimos cargar la receta. Cierra e intenta de nuevo.
           </div>
         </div>
@@ -384,13 +389,14 @@ export function RecipeFormDialog({
     isEdit && recipe ? recipeToDraft(recipe as Recipe) : emptyRecipeDraft();
 
   return (
-    <Shell title={title} subtitle={subtitle} onClose={onClose}>
+    <Shell title={title} subtitle={subtitle} onClose={onClose} initialFocusRef={nameRef}>
       <RecipeForm
         mode={isEdit ? 'edit' : 'create'}
         initialDraft={initialDraft}
         onClose={onClose}
         onSaved={onSaved}
         recipeId={recipeId ?? undefined}
+        nameRef={nameRef}
       />
     </Shell>
   );

@@ -41,7 +41,11 @@ export function ToolsEditor({ agentId }: { agentId?: string }) {
         {fields.map((field, index) => (
           <ToolCard key={field.id} index={index} agentId={agentId} onRemove={() => remove(index)} />
         ))}
-        {listError && <p className="text-sm text-brasa">{listError}</p>}
+        {listError && (
+          <p role="alert" className="text-sm text-brasa">
+            {listError}
+          </p>
+        )}
         <button
           type="button"
           onClick={() => append(emptyTool())}
@@ -205,7 +209,11 @@ function ToolCard({
           </div>
         </div>
 
-        {modeError && <p className="mb-2 text-sm text-brasa">{modeError}</p>}
+        {modeError && (
+          <p role="alert" className="mb-2 text-sm text-brasa">
+            {modeError}
+          </p>
+        )}
 
         {mode === 'simple' ? (
           <div className="space-y-3">
@@ -291,7 +299,9 @@ function ToolCard({
               placeholder='{ "type": "object", "properties": {} }'
             />
             {toolErrors?.rawSchema?.message && (
-              <p className="mt-1.5 text-sm text-brasa">{toolErrors.rawSchema.message}</p>
+              <p role="alert" className="mt-1.5 text-sm text-brasa">
+                {toolErrors.rawSchema.message}
+              </p>
             )}
           </div>
         )}

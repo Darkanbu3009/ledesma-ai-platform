@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, BarChart3, Play, Plug, RefreshCw } from 'lucide-react';
+import { ArrowLeft, BarChart3, Play, Plug } from 'lucide-react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { AgentFormSchema, type AgentFormParsed, type AgentFormValues } from '../lib/agent-schema';
@@ -10,6 +10,8 @@ import { storedToToolForm } from '../lib/tool-schema';
 import { useAgent } from '../lib/queries';
 import { useCreateAgent, useDeleteAgent, useUpdateAgent } from '../lib/mutations';
 import { Field, inputClass } from '../components/ui/Field';
+import { SkeletonList } from '../components/ui/SkeletonList';
+import { ErrorState } from '../components/ui/ErrorState';
 import { DeleteAgentDialog } from '../components/agents/DeleteAgentDialog';
 import { ToolsEditor } from '../components/agents/ToolsEditor';
 
@@ -127,29 +129,17 @@ export function AgentFormPage() {
       </div>
 
       {isEdit && isLoading ? (
-        <div className="mt-8 space-y-5">
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="h-28 animate-pulse rounded-2xl border border-line bg-surface" />
-          ))}
-        </div>
+        <SkeletonList count={4} cardClassName="h-28" className="mt-8 space-y-5" />
       ) : isEdit && isError ? (
-        <div className="mt-10 rounded-2xl border border-line bg-surface p-8 text-center shadow-card">
-          <p className="font-display text-lg font-bold text-ink">No pudimos cargar el agente</p>
-          <p className="mt-2 text-sm text-muted">Revisa tu conexión e intenta de nuevo.</p>
-          <button
-            type="button"
-            onClick={() => void refetch()}
-            className="mt-5 inline-flex items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Reintentar
-          </button>
-        </div>
+        <ErrorState title="No pudimos cargar el agente" onRetry={() => void refetch()} />
       ) : (
         <FormProvider {...form}>
           <form onSubmit={(e) => void onSubmit(e)} className="mt-8 space-y-6" noValidate>
             {saveFailed && (
-              <div className="rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa">
+              <div
+                role="alert"
+                className="rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa"
+              >
                 No pudimos guardar el agente. Intenta de nuevo.
               </div>
             )}
@@ -205,17 +195,22 @@ export function AgentFormPage() {
                 error={errors.model?.message}
                 hint="Sugerencias según el proveedor; puedes escribir cualquier identificador válido."
               >
-                <input
-                  {...register('model')}
-                  className={inputClass}
-                  list="model-suggestions"
-                  placeholder={modelPlaceholder(providerId)}
-                />
-                <datalist id="model-suggestions">
-                  {modelSuggestions(providerId).map((m) => (
-                    <option key={m} value={m} />
-                  ))}
-                </datalist>
+                {(field) => (
+                  <>
+                    <input
+                      {...register('model')}
+                      {...field}
+                      className={inputClass}
+                      list="model-suggestions"
+                      placeholder={modelPlaceholder(providerId)}
+                    />
+                    <datalist id="model-suggestions">
+                      {modelSuggestions(providerId).map((m) => (
+                        <option key={m} value={m} />
+                      ))}
+                    </datalist>
+                  </>
+                )}
               </Field>
 
               <div className="grid gap-5 sm:grid-cols-2">

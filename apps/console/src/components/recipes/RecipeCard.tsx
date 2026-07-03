@@ -1,6 +1,7 @@
 import { Bot, KeyRound, ListChecks, Loader2, Pause, Pencil, Play, Trash2 } from 'lucide-react';
 import type { RecipeSummary } from '../../lib/recipes';
 import { formatRunAt } from '../../lib/schedule';
+import { focusRing } from '../../lib/utils';
 
 /** Pill de estado: activa (verde) o pausada (neutra). Espeja el de ScheduledTaskCard. */
 function StatusBadge({ active }: { active: boolean }) {
@@ -87,7 +88,7 @@ export function RecipeCard({
           disabled={running || !recipe.isActive}
           aria-label="Ejecutar receta ahora"
           title={recipe.isActive ? undefined : 'Activa la receta para ejecutarla'}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-brasa-line bg-brasa-soft px-3 py-2 text-[13px] font-semibold text-brasa transition hover:bg-brasa/[0.14] disabled:cursor-not-allowed disabled:opacity-50"
+          className={`inline-flex items-center gap-1.5 rounded-lg border border-brasa-line bg-brasa-soft px-3 py-2 text-[13px] font-semibold text-brasa transition hover:bg-brasa/[0.14] disabled:cursor-not-allowed disabled:opacity-50 ${focusRing}`}
         >
           {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
           <span className="hidden sm:inline">Ejecutar</span>
@@ -97,7 +98,7 @@ export function RecipeCard({
           onClick={onToggle}
           disabled={toggling}
           aria-label={recipe.isActive ? 'Pausar receta' : 'Activar receta'}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-2 text-[13px] font-medium text-muted transition hover:border-brasa-line hover:text-brasa disabled:cursor-not-allowed disabled:opacity-60"
+          className={`inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-2 text-[13px] font-medium text-muted transition hover:border-brasa-line hover:text-brasa disabled:cursor-not-allowed disabled:opacity-60 ${focusRing}`}
         >
           {toggling ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -112,7 +113,7 @@ export function RecipeCard({
           type="button"
           onClick={onEdit}
           aria-label="Editar receta"
-          className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-line bg-surface text-muted transition hover:border-brasa-line hover:text-brasa"
+          className={`flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-line bg-surface text-muted transition hover:border-brasa-line hover:text-brasa ${focusRing}`}
         >
           <Pencil className="h-[17px] w-[17px]" />
         </button>
@@ -120,7 +121,7 @@ export function RecipeCard({
           type="button"
           onClick={onDelete}
           aria-label="Eliminar receta"
-          className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-line bg-surface text-muted transition hover:border-[rgba(192,73,43,0.35)] hover:bg-[rgba(192,73,43,0.05)] hover:text-[#C0492B]"
+          className={`flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-line bg-surface text-muted transition hover:border-[rgba(192,73,43,0.35)] hover:bg-[rgba(192,73,43,0.05)] hover:text-[#C0492B] ${focusRing}`}
         >
           <Trash2 className="h-[17px] w-[17px]" />
         </button>

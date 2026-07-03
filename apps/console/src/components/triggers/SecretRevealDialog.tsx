@@ -1,7 +1,8 @@
-import { type ReactNode, useEffect, useRef } from 'react';
+import { type ReactNode, useRef } from 'react';
 import { KeyRound, Link2, ShieldCheck, TriangleAlert } from 'lucide-react';
 import type { TriggerReveal } from '../../lib/triggers';
 import { CopyButton } from '../ui/CopyButton';
+import { useDialog } from '../ui/useDialog';
 
 /**
  * Modal "COPIA ESTO AHORA": muestra el material de auth (secreto HMAC + URL, o URL con token) UNA sola
@@ -25,48 +26,11 @@ export function SecretRevealDialog({
   context: 'created' | 'rotated';
   onClose: () => void;
 }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const onCloseRef = useRef(onClose);
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  });
-
-  // Foco al abrir en el boton de cerrar (accion segura, no un campo editable), trap de Tab dentro del
-  // modal y restauracion del foco al desmontar. Sin Escape a proposito (ver comentario del componente).
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    closeRef.current?.focus();
-
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key !== 'Tab') return;
-      const container = dialogRef.current;
-      if (!container) return;
-      const focusables = Array.from(
-        container.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-        ),
-      ).filter((el) => !el.hasAttribute('disabled'));
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      if (!first || !last) return;
-      const active = document.activeElement;
-      // Si el foco escapo del modal (o esta en el extremo), lo devolvemos adentro en ambos sentidos.
-      if (e.shiftKey && (active === first || !container.contains(active))) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && (active === last || !container.contains(active))) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      previous?.focus?.();
-    };
-  }, []);
+  // Foco inicial en el boton de cerrar (accion segura, no un campo editable), trampa de Tab dentro
+  // del modal y restauracion del foco al cerrar, via el hook compartido. `closeOnEscape=false` a
+  // proposito: perder el secreto es destructivo, se exige el click explicito en "Ya lo copie".
+  const dialogRef = useDialog({ onClose, closeOnEscape: false, initialFocus: closeRef });
 
   const subtitle =
     context === 'created'

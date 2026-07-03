@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
+import { useDialog } from '../ui/useDialog';
 
 /**
  * Confirmacion de borrado de una tarea programada. NO se borra al primer click: el usuario confirma
- * aqui antes de que la pantalla dispare el DELETE. Accesible: dialog modal, cierra con Escape o click
- * en el fondo y enfoca el boton de cancelar al abrir. Espeja DeleteCredentialDialog.
+ * aqui antes de que la pantalla dispare el DELETE. Accesible (via useDialog): dialog modal con trampa
+ * de foco, cierra con Escape o click en el fondo, enfoca Cancelar al abrir y devuelve el foco al cerrar.
  */
 export function DeleteScheduledTaskDialog({
   open,
@@ -21,23 +22,7 @@ export function DeleteScheduledTaskDialog({
   onCancel: () => void;
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
-
-  // Ref al ultimo onCancel: el efecto solo depende de `open`, asi el listener de Escape no se
-  // re-adjunta en cada render del padre (onCancel suele ser una arrow recreada cada vez).
-  const onCancelRef = useRef(onCancel);
-  useEffect(() => {
-    onCancelRef.current = onCancel;
-  });
-
-  useEffect(() => {
-    if (!open) return;
-    cancelRef.current?.focus();
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onCancelRef.current();
-    }
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open]);
+  const dialogRef = useDialog({ open, onClose: onCancel, initialFocus: cancelRef });
 
   if (!open) return null;
 
@@ -45,6 +30,7 @@ export function DeleteScheduledTaskDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
       <div className="absolute inset-0 bg-ink/40" onClick={onCancel} aria-hidden="true" />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Eliminar tarea programada"
@@ -56,7 +42,10 @@ export function DeleteScheduledTaskDialog({
           accion no se puede deshacer.
         </p>
         {error && (
-          <div className="mt-4 rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa">
+          <div
+            role="alert"
+            className="mt-4 rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa"
+          >
             {error}
           </div>
         )}

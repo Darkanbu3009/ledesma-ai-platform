@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, CheckCircle2, Plus, RefreshCw, Sparkles, Webhook } from 'lucide-react';
+import { ArrowRight, Plus, Sparkles, Webhook } from 'lucide-react';
 import { useAgents, useCredentials, useMe, useTriggers } from '../lib/queries';
 import { useDeleteTrigger, useUpdateTrigger } from '../lib/mutations';
 import {
@@ -15,66 +15,63 @@ import { TriggerFormDialog } from '../components/triggers/TriggerFormDialog';
 import { DeleteTriggerDialog } from '../components/triggers/DeleteTriggerDialog';
 import { RotateTriggerDialog } from '../components/triggers/RotateTriggerDialog';
 import { SecretRevealDialog } from '../components/triggers/SecretRevealDialog';
+import { PageHeader } from '../components/ui/PageHeader';
+import { SkeletonList } from '../components/ui/SkeletonList';
+import { ErrorState } from '../components/ui/ErrorState';
+import { EmptyState } from '../components/ui/EmptyState';
+import { Notice, type NoticeData } from '../components/ui/Notice';
 
 const addButtonClass =
   'inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:-translate-y-px hover:bg-brasa-hover hover:shadow-[0_2px_6px_rgba(31,30,28,0.14)]';
 
-type Notice = { kind: 'ok' | 'error'; text: string };
 /** Material de auth a mostrar una vez, con el origen (crear o rotar) para el copy del modal. */
 type Reveal = { data: TriggerReveal; context: 'created' | 'rotated' };
 
 /** Aviso: los triggers son del plan Autonomo. Sobrio, no un paywall agresivo (espejo del gate server-side). */
 function TriggersLocked() {
   return (
-    <div className="mt-10 flex flex-1 flex-col items-center justify-center text-center">
-      <span className="flex h-[52px] w-[52px] items-center justify-center rounded-2xl bg-brasa-soft text-brasa">
-        <Sparkles className="h-6 w-6" />
-      </span>
-      <h2 className="mt-5 max-w-md font-display text-[22px] font-bold leading-[1.2] text-ink">
-        Una funcion del plan Autonomo
-      </h2>
-      <p className="mt-3 max-w-md text-[13px] leading-[1.6] text-muted">
-        Los triggers dejan que un evento externo dispare tus agentes a traves de una URL de webhook.
-        Estan disponibles en el plan Autonomo. Cuando lo actives, vas a poder crearlos desde aqui.
-      </p>
-    </div>
+    <EmptyState
+      variant="centered"
+      media={
+        <span className="flex h-[52px] w-[52px] items-center justify-center rounded-2xl bg-brasa-soft text-brasa">
+          <Sparkles className="h-6 w-6" />
+        </span>
+      }
+      title="Una funcion del plan Autonomo"
+      description="Los triggers dejan que un evento externo dispare tus agentes a traves de una URL de webhook. Estan disponibles en el plan Autonomo. Cuando lo actives, vas a poder crearlos desde aqui."
+    />
   );
 }
 
 /** Estado vacio editorial, consistente con /tareas y /credenciales. */
 function TriggersEmptyState({ onAdd }: { onAdd: () => void }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center text-center">
-      {/* Maqueta decorativa de "asi se vera tu trigger". No interactiva; ancla el bloque centrado. */}
-      <div className="mb-10 hidden md:block">
-        <div
-          aria-hidden="true"
-          className="w-[260px] rounded-2xl border border-line-soft bg-surface p-[18px] shadow-card"
-        >
-          <div className="flex items-center gap-3">
-            <span className="flex h-[38px] w-[38px] flex-none items-center justify-center rounded-[10px] bg-brasa-soft text-brasa">
-              <Webhook className="h-5 w-5" />
-            </span>
-            <div className="min-w-0 flex-1 space-y-2">
-              <span className="block h-2.5 w-[110px] rounded-full bg-line" />
-              <span className="block h-2 w-[70px] rounded-full bg-line-soft" />
+    <EmptyState
+      media={
+        // Maqueta decorativa de "asi se vera tu trigger". No interactiva; ancla el bloque centrado.
+        <div className="mb-10 hidden md:block">
+          <div
+            aria-hidden="true"
+            className="w-[260px] rounded-2xl border border-line-soft bg-surface p-[18px] shadow-card"
+          >
+            <div className="flex items-center gap-3">
+              <span className="flex h-[38px] w-[38px] flex-none items-center justify-center rounded-[10px] bg-brasa-soft text-brasa">
+                <Webhook className="h-5 w-5" />
+              </span>
+              <div className="min-w-0 flex-1 space-y-2">
+                <span className="block h-2.5 w-[110px] rounded-full bg-line" />
+                <span className="block h-2 w-[70px] rounded-full bg-line-soft" />
+              </div>
+              <span className="block h-[22px] w-[52px] flex-none rounded-full bg-ok/15" />
             </div>
-            <span className="block h-[22px] w-[52px] flex-none rounded-full bg-ok/15" />
+            <div className="mt-[18px] h-[30px] rounded-lg bg-line-soft" />
           </div>
-          <div className="mt-[18px] h-[30px] rounded-lg bg-line-soft" />
         </div>
-      </div>
-      <span className="inline-flex items-center rounded-md bg-brasa-soft px-2.5 py-1 text-[11px] font-semibold tracking-wide text-[#993C1D]">
-        EMPIEZA AQUI
-      </span>
-      <h2 className="mt-4 max-w-md font-display text-[22px] font-bold leading-[1.2] text-ink">
-        Crea tu primer trigger
-      </h2>
-      <p className="mt-3 max-w-md text-[13px] leading-[1.5] text-muted">
-        Elige un agente y un mensaje base, y obtendras una URL de webhook. Cuando un evento externo la
-        llame, la plataforma ejecuta tu agente sola.
-      </p>
-      <div className="mt-7">
+      }
+      eyebrow="EMPIEZA AQUI"
+      title="Crea tu primer trigger"
+      description="Elige un agente y un mensaje base, y obtendras una URL de webhook. Cuando un evento externo la llame, la plataforma ejecuta tu agente sola."
+      action={
         <button
           type="button"
           onClick={onAdd}
@@ -85,8 +82,8 @@ function TriggersEmptyState({ onAdd }: { onAdd: () => void }) {
             <ArrowRight className="h-[18px] w-[18px]" />
           </span>
         </button>
-      </div>
-    </div>
+      }
+    />
   );
 }
 
@@ -107,7 +104,7 @@ export function TriggersPage() {
   const [toRotate, setToRotate] = useState<Trigger | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [reveal, setReveal] = useState<Reveal | null>(null);
-  const [notice, setNotice] = useState<Notice | null>(null);
+  const [notice, setNotice] = useState<NoticeData | null>(null);
 
   // El aviso se descarta solo a los pocos segundos.
   useEffect(() => {
@@ -198,64 +195,30 @@ export function TriggersPage() {
 
   return (
     <div className="mx-auto flex min-h-full max-w-4xl flex-col">
-      <div className="flex items-start justify-between gap-5">
-        <div>
-          <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">Triggers</h1>
-          <p className="mt-1.5 text-[15px] text-muted">
-            Crea URLs de webhook que ejecutan un agente cuando un evento externo las llama.
-          </p>
-        </div>
-        {isAutonomous && hasTriggers && (
-          <button type="button" onClick={() => setFormOpen(true)} className={addButtonClass}>
-            <Plus className="h-[17px] w-[17px]" />
-            Crear trigger
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="Triggers"
+        subtitle="Crea URLs de webhook que ejecutan un agente cuando un evento externo las llama."
+        action={
+          isAutonomous &&
+          hasTriggers && (
+            <button type="button" onClick={() => setFormOpen(true)} className={addButtonClass}>
+              <Plus className="h-[17px] w-[17px]" />
+              Crear trigger
+            </button>
+          )
+        }
+      />
 
-      <div className="mt-3" aria-live="polite">
-        {notice && (
-          <div
-            className={[
-              'inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-medium',
-              notice.kind === 'ok'
-                ? 'border-ok/30 bg-ok/10 text-ok'
-                : 'border-brasa-line bg-brasa-soft text-brasa',
-            ].join(' ')}
-          >
-            {notice.kind === 'ok' && <CheckCircle2 className="h-4 w-4" />}
-            {notice.text}
-          </div>
-        )}
-      </div>
+      <Notice notice={notice} />
 
       {me.isLoading ? (
-        <div className="mt-6 space-y-3">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="h-[148px] animate-pulse rounded-2xl border border-line bg-surface" />
-          ))}
-        </div>
+        <SkeletonList cardClassName="h-[148px]" />
       ) : !isAutonomous ? (
         <TriggersLocked />
       ) : listLoading ? (
-        <div className="mt-6 space-y-3">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="h-[148px] animate-pulse rounded-2xl border border-line bg-surface" />
-          ))}
-        </div>
+        <SkeletonList cardClassName="h-[148px]" />
       ) : isError ? (
-        <div className="mt-10 rounded-2xl border border-line bg-surface p-8 text-center shadow-card">
-          <p className="font-display text-lg font-bold text-ink">No pudimos cargar tus triggers</p>
-          <p className="mt-2 text-sm text-muted">Revisa tu conexion e intenta de nuevo.</p>
-          <button
-            type="button"
-            onClick={() => void refetch()}
-            className="mt-5 inline-flex items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Reintentar
-          </button>
-        </div>
+        <ErrorState title="No pudimos cargar tus triggers" onRetry={() => void refetch()} />
       ) : !hasTriggers ? (
         <TriggersEmptyState onAdd={() => setFormOpen(true)} />
       ) : (

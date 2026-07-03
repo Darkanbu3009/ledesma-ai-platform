@@ -408,6 +408,10 @@ export function PlaygroundPage() {
 
           <div
             ref={scrollRef}
+            role="log"
+            aria-live="polite"
+            aria-label="Conversacion con el agente"
+            aria-busy={running}
             className={`mt-4 h-[26rem] overflow-y-auto rounded-xl border border-grafito-border ${fondoSegunKey} p-4 transition-colors duration-300`}
           >
             {credMissing ? (
@@ -555,6 +559,7 @@ export function PlaygroundPage() {
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={handleKeyDown}
                   disabled={credMissing}
+                  aria-label="Mensaje para el agente"
                   className="w-full resize-none bg-transparent px-3.5 pt-2.5 text-sm text-ink outline-none transition placeholder:text-muted-soft disabled:cursor-not-allowed disabled:opacity-60"
                   placeholder="Escribe un mensaje..."
                 />

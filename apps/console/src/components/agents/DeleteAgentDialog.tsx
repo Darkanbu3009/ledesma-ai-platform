@@ -1,3 +1,5 @@
+import { useDialog } from '../ui/useDialog';
+
 export function DeleteAgentDialog({
   open,
   agentName,
@@ -13,12 +15,17 @@ export function DeleteAgentDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  // Antes no tenia ninguna gestion de foco/teclado; ahora hereda trampa de foco, Escape y retorno del
+  // hook compartido. `initialFocus` por defecto ('first') enfoca el boton Cancelar al abrir.
+  const dialogRef = useDialog({ open, onClose: onCancel });
+
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
       <div className="absolute inset-0 bg-black/60" onClick={onCancel} aria-hidden="true" />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Eliminar agente"
@@ -30,7 +37,10 @@ export function DeleteAgentDialog({
           deshacer.
         </p>
         {error && (
-          <div className="mt-4 rounded-lg border border-brasa/40 bg-brasa/10 px-4 py-3 text-sm text-brasa">
+          <div
+            role="alert"
+            className="mt-4 rounded-lg border border-brasa/40 bg-brasa/10 px-4 py-3 text-sm text-brasa"
+          >
             {error}
           </div>
         )}

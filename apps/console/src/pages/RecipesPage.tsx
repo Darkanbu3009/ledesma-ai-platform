@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, CheckCircle2, ListChecks, Plus, RefreshCw, Sparkles } from 'lucide-react';
+import { ArrowRight, ListChecks, Plus, Sparkles } from 'lucide-react';
 import { ApiError } from '../lib/api';
 import { useAgents, useCredentials, useMe, useRecipes } from '../lib/queries';
 import { useDeleteRecipe, useRunRecipe, useUpdateRecipe } from '../lib/mutations';
@@ -7,11 +7,14 @@ import type { RecipeSummary } from '../lib/recipes';
 import { RecipeCard } from '../components/recipes/RecipeCard';
 import { RecipeFormDialog } from '../components/recipes/RecipeFormDialog';
 import { DeleteRecipeDialog } from '../components/recipes/DeleteRecipeDialog';
+import { PageHeader } from '../components/ui/PageHeader';
+import { SkeletonList } from '../components/ui/SkeletonList';
+import { ErrorState } from '../components/ui/ErrorState';
+import { EmptyState } from '../components/ui/EmptyState';
+import { Notice, type NoticeData } from '../components/ui/Notice';
 
 const addButtonClass =
   'inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:-translate-y-px hover:bg-brasa-hover hover:shadow-[0_2px_6px_rgba(31,30,28,0.14)]';
-
-type Notice = { kind: 'ok' | 'error'; text: string };
 
 /** Mensaje de error al intentar ejecutar una receta. */
 function runErrorMessage(error: unknown): string {
@@ -26,57 +29,50 @@ function runErrorMessage(error: unknown): string {
 /** Aviso: las recetas son del plan Autonomo. Sobrio, no un paywall agresivo. Espeja SchedulingLocked. */
 function RecipesLocked() {
   return (
-    <div className="mt-10 flex flex-1 flex-col items-center justify-center text-center">
-      <span className="flex h-[52px] w-[52px] items-center justify-center rounded-2xl bg-brasa-soft text-brasa">
-        <Sparkles className="h-6 w-6" />
-      </span>
-      <h2 className="mt-5 max-w-md font-display text-[22px] font-bold leading-[1.2] text-ink">
-        Una funcion del plan Autonomo
-      </h2>
-      <p className="mt-3 max-w-md text-[13px] leading-[1.6] text-muted">
-        Las recetas encadenan varios pasos y tu agente los ejecuta en orden, solo. Estan disponibles en
-        el plan Autonomo. Cuando lo actives, vas a poder crearlas y ejecutarlas desde aqui.
-      </p>
-    </div>
+    <EmptyState
+      variant="centered"
+      media={
+        <span className="flex h-[52px] w-[52px] items-center justify-center rounded-2xl bg-brasa-soft text-brasa">
+          <Sparkles className="h-6 w-6" />
+        </span>
+      }
+      title="Una funcion del plan Autonomo"
+      description="Las recetas encadenan varios pasos y tu agente los ejecuta en orden, solo. Estan disponibles en el plan Autonomo. Cuando lo actives, vas a poder crearlas y ejecutarlas desde aqui."
+    />
   );
 }
 
 /** Estado vacio editorial, consistente con /tareas y /triggers. */
 function RecipesEmptyState({ onAdd }: { onAdd: () => void }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center text-center">
-      <div className="mb-10 hidden md:block">
-        <div
-          aria-hidden="true"
-          className="w-[250px] rounded-2xl border border-line-soft bg-surface p-[18px] shadow-card"
-        >
-          <div className="flex items-center gap-3">
-            <span className="flex h-[38px] w-[38px] flex-none items-center justify-center rounded-[10px] bg-brasa-soft text-brasa">
-              <ListChecks className="h-5 w-5" />
-            </span>
-            <div className="min-w-0 flex-1 space-y-2">
-              <span className="block h-2.5 w-[110px] rounded-full bg-line" />
-              <span className="block h-2 w-[70px] rounded-full bg-line-soft" />
+    <EmptyState
+      media={
+        <div className="mb-10 hidden md:block">
+          <div
+            aria-hidden="true"
+            className="w-[250px] rounded-2xl border border-line-soft bg-surface p-[18px] shadow-card"
+          >
+            <div className="flex items-center gap-3">
+              <span className="flex h-[38px] w-[38px] flex-none items-center justify-center rounded-[10px] bg-brasa-soft text-brasa">
+                <ListChecks className="h-5 w-5" />
+              </span>
+              <div className="min-w-0 flex-1 space-y-2">
+                <span className="block h-2.5 w-[110px] rounded-full bg-line" />
+                <span className="block h-2 w-[70px] rounded-full bg-line-soft" />
+              </div>
+              <span className="block h-[22px] w-[52px] flex-none rounded-full bg-ok/15" />
             </div>
-            <span className="block h-[22px] w-[52px] flex-none rounded-full bg-ok/15" />
-          </div>
-          <div className="mt-[18px] space-y-2">
-            <span className="block h-2 w-[150px] rounded-full bg-line-soft" />
-            <span className="block h-2 w-[120px] rounded-full bg-line-soft" />
+            <div className="mt-[18px] space-y-2">
+              <span className="block h-2 w-[150px] rounded-full bg-line-soft" />
+              <span className="block h-2 w-[120px] rounded-full bg-line-soft" />
+            </div>
           </div>
         </div>
-      </div>
-      <span className="inline-flex items-center rounded-md bg-brasa-soft px-2.5 py-1 text-[11px] font-semibold tracking-wide text-[#993C1D]">
-        EMPIEZA AQUI
-      </span>
-      <h2 className="mt-4 max-w-md font-display text-[22px] font-bold leading-[1.2] text-ink">
-        Crea tu primera receta
-      </h2>
-      <p className="mt-3 max-w-md text-[13px] leading-[1.5] text-muted">
-        Encadena varios pasos en un solo flujo: tu agente los ejecuta en orden y el resultado de cada
-        uno alimenta al siguiente.
-      </p>
-      <div className="mt-7">
+      }
+      eyebrow="EMPIEZA AQUI"
+      title="Crea tu primera receta"
+      description="Encadena varios pasos en un solo flujo: tu agente los ejecuta en orden y el resultado de cada uno alimenta al siguiente."
+      action={
         <button
           type="button"
           onClick={onAdd}
@@ -87,8 +83,8 @@ function RecipesEmptyState({ onAdd }: { onAdd: () => void }) {
             <ArrowRight className="h-[18px] w-[18px]" />
           </span>
         </button>
-      </div>
-    </div>
+      }
+    />
   );
 }
 
@@ -108,12 +104,12 @@ export function RecipesPage() {
   const [toDelete, setToDelete] = useState<RecipeSummary | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
-  const [notice, setNotice] = useState<Notice | null>(null);
+  const [notice, setNotice] = useState<NoticeData | null>(null);
 
   // El aviso se descarta solo a los pocos segundos.
   useEffect(() => {
     if (!notice) return;
-    const timer = setTimeout(() => setNotice(null), 4500);
+    const timer = setTimeout(() => setNotice(null), 4000);
     return () => clearTimeout(timer);
   }, [notice]);
 
@@ -180,64 +176,30 @@ export function RecipesPage() {
 
   return (
     <div className="mx-auto flex min-h-full max-w-4xl flex-col">
-      <div className="flex items-start justify-between gap-5">
-        <div>
-          <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">Recetas</h1>
-          <p className="mt-1.5 text-[15px] text-muted">
-            Encadena varios pasos en un flujo y ejecutalo cuando quieras, en segundo plano.
-          </p>
-        </div>
-        {isAutonomous && hasRecipes && (
-          <button type="button" onClick={openNew} className={addButtonClass}>
-            <Plus className="h-[17px] w-[17px]" />
-            Nueva receta
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="Recetas"
+        subtitle="Encadena varios pasos en un flujo y ejecutalo cuando quieras, en segundo plano."
+        action={
+          isAutonomous &&
+          hasRecipes && (
+            <button type="button" onClick={openNew} className={addButtonClass}>
+              <Plus className="h-[17px] w-[17px]" />
+              Nueva receta
+            </button>
+          )
+        }
+      />
 
-      <div className="mt-3" aria-live="polite">
-        {notice && (
-          <div
-            className={[
-              'inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-medium',
-              notice.kind === 'ok'
-                ? 'border-ok/30 bg-ok/10 text-ok'
-                : 'border-brasa-line bg-brasa-soft text-brasa',
-            ].join(' ')}
-          >
-            {notice.kind === 'ok' && <CheckCircle2 className="h-4 w-4" />}
-            {notice.text}
-          </div>
-        )}
-      </div>
+      <Notice notice={notice} />
 
       {me.isLoading ? (
-        <div className="mt-6 space-y-3">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="h-[112px] animate-pulse rounded-2xl border border-line bg-surface" />
-          ))}
-        </div>
+        <SkeletonList cardClassName="h-[112px]" />
       ) : !isAutonomous ? (
         <RecipesLocked />
       ) : listLoading ? (
-        <div className="mt-6 space-y-3">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="h-[112px] animate-pulse rounded-2xl border border-line bg-surface" />
-          ))}
-        </div>
+        <SkeletonList cardClassName="h-[112px]" />
       ) : isError ? (
-        <div className="mt-10 rounded-2xl border border-line bg-surface p-8 text-center shadow-card">
-          <p className="font-display text-lg font-bold text-ink">No pudimos cargar tus recetas</p>
-          <p className="mt-2 text-sm text-muted">Revisa tu conexion e intenta de nuevo.</p>
-          <button
-            type="button"
-            onClick={() => void refetch()}
-            className="mt-5 inline-flex items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Reintentar
-          </button>
-        </div>
+        <ErrorState title="No pudimos cargar tus recetas" onRetry={() => void refetch()} />
       ) : !hasRecipes ? (
         <RecipesEmptyState onAdd={openNew} />
       ) : (

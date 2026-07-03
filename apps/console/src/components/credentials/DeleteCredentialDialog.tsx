@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
+import { useDialog } from '../ui/useDialog';
 
 /**
  * Confirmacion de borrado: NO se borra al primer click. El usuario confirma aqui antes de que la
- * pantalla dispare el DELETE. Accesible: dialog modal, cierra con Escape o click en el fondo y
- * enfoca el boton de cancelar al abrir.
+ * pantalla dispare el DELETE. Accesible (via useDialog): dialog modal con trampa de foco, cierra con
+ * Escape o click en el fondo, enfoca el boton de cancelar al abrir y devuelve el foco al cerrar.
  */
 export function DeleteCredentialDialog({
   open,
@@ -21,16 +22,7 @@ export function DeleteCredentialDialog({
   onCancel: () => void;
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    cancelRef.current?.focus();
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onCancel();
-    }
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open, onCancel]);
+  const dialogRef = useDialog({ open, onClose: onCancel, initialFocus: cancelRef });
 
   if (!open) return null;
 
@@ -38,6 +30,7 @@ export function DeleteCredentialDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
       <div className="absolute inset-0 bg-ink/40" onClick={onCancel} aria-hidden="true" />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Eliminar credencial"
@@ -49,7 +42,10 @@ export function DeleteCredentialDialog({
           puede deshacer.
         </p>
         {error && (
-          <div className="mt-4 rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa">
+          <div
+            role="alert"
+            className="mt-4 rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa"
+          >
             {error}
           </div>
         )}

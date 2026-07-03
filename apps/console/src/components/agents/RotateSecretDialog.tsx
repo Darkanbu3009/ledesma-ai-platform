@@ -1,4 +1,5 @@
 import { RotateCcw } from 'lucide-react';
+import { useDialog } from '../ui/useDialog';
 
 export function RotateSecretDialog({
   open,
@@ -11,12 +12,17 @@ export function RotateSecretDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  // Antes no tenia ninguna gestion de foco/teclado; ahora hereda trampa de foco, Escape y retorno del
+  // hook compartido. `initialFocus` por defecto ('first') enfoca el boton Cancelar al abrir.
+  const dialogRef = useDialog({ open, onClose: onCancel });
+
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
       <div className="absolute inset-0 bg-black/60" onClick={onCancel} aria-hidden="true" />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Rotar el secreto de webhooks"

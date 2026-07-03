@@ -1,6 +1,7 @@
 import { CalendarClock, Clock, KeyRound, Loader2, Pause, Play, Trash2 } from 'lucide-react';
 import type { ScheduledTask } from '../../lib/scheduled-tasks';
 import { describeCron, formatRunAt } from '../../lib/schedule';
+import { focusRing } from '../../lib/utils';
 
 /** Pill de estado: activa (verde) o pausada (neutra). */
 function StatusBadge({ active }: { active: boolean }) {
@@ -89,7 +90,7 @@ export function ScheduledTaskCard({
           onClick={onToggle}
           disabled={toggling}
           aria-label={task.isActive ? 'Pausar tarea' : 'Activar tarea'}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-2 text-[13px] font-medium text-muted transition hover:border-brasa-line hover:text-brasa disabled:cursor-not-allowed disabled:opacity-60"
+          className={`inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-2 text-[13px] font-medium text-muted transition hover:border-brasa-line hover:text-brasa disabled:cursor-not-allowed disabled:opacity-60 ${focusRing}`}
         >
           {toggling ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -104,7 +105,7 @@ export function ScheduledTaskCard({
           type="button"
           onClick={onDelete}
           aria-label="Eliminar tarea"
-          className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-line bg-surface text-muted transition hover:border-[rgba(192,73,43,0.35)] hover:bg-[rgba(192,73,43,0.05)] hover:text-[#C0492B]"
+          className={`flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-line bg-surface text-muted transition hover:border-[rgba(192,73,43,0.35)] hover:bg-[rgba(192,73,43,0.05)] hover:text-[#C0492B] ${focusRing}`}
         >
           <Trash2 className="h-[17px] w-[17px]" />
         </button>
