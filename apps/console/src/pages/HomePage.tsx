@@ -9,6 +9,7 @@ import { Examples } from '../components/landing/examples';
 import { HowItWorks } from '../components/landing/how-it-works';
 import { FinalCTA } from '../components/landing/final-cta';
 import { LandingFooter } from '../components/landing/landing-footer';
+import { PixelAgent } from '../components/landing/pixel-agent';
 
 /**
  * Landing publica de marketing, portada del showroom (ai-labs-demos-agents). Compone las
@@ -41,6 +42,7 @@ export function HomePage(): JSX.Element | null {
         <FinalCTA />
       </main>
       <LandingFooter />
+      <PixelAgent />
     </div>
   );
 }
