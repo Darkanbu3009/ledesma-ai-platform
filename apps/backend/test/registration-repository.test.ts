@@ -260,6 +260,29 @@ describe('RegistrationRepository.getProfileTier', () => {
   });
 });
 
+describe('RegistrationRepository.isAdmin', () => {
+  it('devuelve true si el perfil es super-admin (is_admin true), leyendo por sub', async () => {
+    const sql = makeSql([[{ is_admin: true }]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    expect(await repo.isAdmin('user-1')).toBe(true);
+
+    const select = findCall(sql, 'select is_admin from profiles');
+    expect(select?.values).toEqual(['user-1']);
+  });
+
+  it('devuelve false si el perfil no es admin (is_admin false)', async () => {
+    const sql = makeSql([[{ is_admin: false }]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    expect(await repo.isAdmin('user-1')).toBe(false);
+  });
+
+  it('devuelve false si el perfil no existe (fail-closed: sin perfil = no admin)', async () => {
+    const sql = makeSql([[]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    expect(await repo.isAdmin('desconocido')).toBe(false);
+  });
+});
+
 describe('RegistrationRepository.updateProfileTier', () => {
   it('actualiza el tier, toca updated_at y mapea el perfil del returning', async () => {
     const sql = makeSql([[{ ...individualProfileRow, tier: 'autonomous' }]]);

@@ -1,0 +1,23 @@
+-- Rol de super-admin de PLATAFORMA: columna profiles.is_admin. Aditivo sobre V005__registration.sql
+-- (tabla profiles). Igual que el resto de las migraciones de este repo, se aplica A MANO en el SQL
+-- Editor de Supabase (no hay runner automatico: ni el backend ni CI las ejecutan) y es IDEMPOTENTE:
+-- re-aplicarla contra prod es un NO-OP y contra una base ya migrada converge sin cambios.
+--
+-- is_admin = true marca una cuenta como SUPER-ADMIN DE PLATAFORMA (autoridad global), un eje
+-- ORTOGONAL al role de la cuenta/org (individual | org_admin, V005) y al tier del plan (V007): un
+-- mismo usuario puede ser org_admin de su empresa Y super-admin de la plataforma, o ninguno de los
+-- dos. Por eso es un flag DEDICADO y no un valor mas de role, que mezclaria dos ejes distintos (rol
+-- de org vs autoridad de plataforma) e impediria representar a alguien que es ambos a la vez.
+--
+-- El gate vive server-side leyendo ESTA columna (nunca se confia en el cliente), analogo al gate por
+-- tier del Configurador (getProfileTier). La escritura de is_admin es EXCLUSIVA del backend (rol de
+-- servicio): V018 (identity_rls) ya deja profiles en default-deny para authenticated (RLS habilitado
+-- sin policy de escritura + REVOKE insert/update/delete), asi que esta columna NUEVA HEREDA esa
+-- proteccion y NINGUN usuario authenticated puede auto-promoverse is_admin=true via PostgREST. Se
+-- asigna a mano (fuera de este PR).
+
+-- boolean NOT NULL default false. ADD COLUMN IF NOT EXISTS captura una base donde la columna ya se
+-- haya agregado a mano (mismo criterio que tier en V007 y created_at/updated_at en V005). Sin CHECK:
+-- el tipo boolean ya restringe el dominio a true/false y el NOT NULL default false elimina el null,
+-- por eso (a diferencia de tier) no hace falta una constraint aparte.
+alter table profiles add column if not exists is_admin boolean not null default false;
