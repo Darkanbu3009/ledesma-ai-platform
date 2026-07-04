@@ -188,6 +188,20 @@ export class RecipeRepository {
     return row ? rowToRecipe(row) : null;
   }
 
+  /**
+   * CONTEO de recetas ACTIVAS del owner (is_active = true), para el eje OPERACIONES del dashboard. UNA
+   * query agregada (count server-side, sin traer los pasos ni la lista entera), read-only y aislada por
+   * owner_id. count(*)::int llega como number; el Number() es defensa extra.
+   */
+  async countActiveByOwner(ownerId: string): Promise<number> {
+    const rows = await this.sql<Array<{ count: number | string }>>`
+      select count(*)::int as count
+      from recipes
+      where owner_id = ${ownerId} and is_active = true
+    `;
+    return Number(rows[0]?.count ?? 0);
+  }
+
   /** Borra una receta del owner. true si borro una fila propia; false si ajena o inexistente. */
   async deleteRecipeForOwner(id: string, ownerId: string): Promise<boolean> {
     const rows = await this.sql<Array<{ id: string }>>`

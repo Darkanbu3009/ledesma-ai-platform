@@ -165,6 +165,20 @@ export class ScheduledTaskRepository {
     return row ? rowToTask(row) : null;
   }
 
+  /**
+   * CONTEO de tareas programadas ACTIVAS del owner (is_active = true), para el eje OPERACIONES del
+   * dashboard. UNA query agregada (count server-side), read-only y aislada por owner_id: no trae la lista
+   * entera solo para contarla. count(*)::int llega como number; el Number() es defensa extra.
+   */
+  async countActiveByOwner(ownerId: string): Promise<number> {
+    const rows = await this.sql<Array<{ count: number | string }>>`
+      select count(*)::int as count
+      from scheduled_tasks
+      where owner_id = ${ownerId} and is_active = true
+    `;
+    return Number(rows[0]?.count ?? 0);
+  }
+
   /** Borra una tarea del owner. true si borro una fila propia; false si ajena o inexistente. */
   async deleteTaskForOwner(id: string, ownerId: string): Promise<boolean> {
     const rows = await this.sql<Array<{ id: string }>>`

@@ -3,6 +3,7 @@ import type {
   CreateJobInput,
   Job,
   JobStatus,
+  JobStatusCounts,
   JobSummary,
   ListJobsByOwnerOptions,
   ReapedJob,
@@ -152,6 +153,32 @@ export class JobsRepository {
       where status = 'pending' and (scheduled_for is null or scheduled_for <= now())
     `;
     return Number(rows[0]?.count ?? 0);
+  }
+
+  /**
+   * CONTEO por estado de cola de los jobs de UN owner, para el eje OPERACIONES del dashboard. UNA sola
+   * query agregada (count(*) ... group by status), read-only y AISLADA por owner_id: jamas mezcla jobs de
+   * otro dueno. A diferencia de countPending (GLOBAL, sin owner, sobre jobs elegibles), esta cuenta TODOS
+   * los estados del owner: es la foto actual de SU cola, no de la cola compartida del worker.
+   *
+   * Devuelve SIEMPRE las cuatro claves (un estado sin filas -> 0): la query solo trae los estados con al
+   * menos una fila, y aqui se rellenan los ausentes. Un status inesperado (esquema divergente) se ignora
+   * en vez de contaminar el conteo. count(*)::int llega como number; el Number() es defensa extra.
+   */
+  async countByStatusForOwner(ownerId: string): Promise<JobStatusCounts> {
+    const rows = await this.sql<Array<{ status: string; count: number | string }>>`
+      select status, count(*)::int as count
+      from jobs
+      where owner_id = ${ownerId}
+      group by status
+    `;
+    const counts: JobStatusCounts = { pending: 0, running: 0, completed: 0, failed: 0 };
+    for (const row of rows) {
+      if (row.status === 'pending' || row.status === 'running' || row.status === 'completed' || row.status === 'failed') {
+        counts[row.status] = Number(row.count ?? 0);
+      }
+    }
+    return counts;
   }
 
   /**

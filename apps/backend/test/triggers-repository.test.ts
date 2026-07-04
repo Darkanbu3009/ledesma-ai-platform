@@ -227,4 +227,25 @@ describe('TriggersRepository', () => {
       expect(sqlValues(sql)).toEqual(['t1']);
     });
   });
+
+  describe('countActiveByOwner', () => {
+    it('cuenta server-side los activos del owner (where owner_id + is_active), sin material de auth', async () => {
+      const sql = makeSqlReturning([{ count: 2 }]);
+      expect(await new TriggersRepository(sql).countActiveByOwner('user-1')).toBe(2);
+      const texto = sqlText(sql);
+      expect(texto).toContain('count(*)::int');
+      expect(texto).toContain('from triggers');
+      expect(texto).toContain('where owner_id = ');
+      expect(texto).toContain('is_active = true');
+      // Un conteo jamas selecciona el material de auth.
+      expect(texto).not.toContain('hmac_secret_encrypted');
+      expect(texto).not.toContain('url_token_hash');
+      expect(sqlValues(sql)).toEqual(['user-1']);
+    });
+
+    it('normaliza el conteo a number (bigint string) y 0 sin filas', async () => {
+      expect(await new TriggersRepository(makeSqlReturning([{ count: '9' }])).countActiveByOwner('user-1')).toBe(9);
+      expect(await new TriggersRepository(makeSqlReturning([])).countActiveByOwner('user-1')).toBe(0);
+    });
+  });
 });

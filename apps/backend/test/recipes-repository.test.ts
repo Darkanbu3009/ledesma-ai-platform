@@ -225,4 +225,24 @@ describe('RecipeRepository', () => {
       expect(sqlValues(sql)).toEqual([RECIPE_ID, 'user-1']);
     });
   });
+
+  describe('countActiveByOwner', () => {
+    it('cuenta server-side las activas del owner (where owner_id + is_active), sin traer los pasos', async () => {
+      const sql = makeSqlReturning([{ count: 3 }]);
+      expect(await new RecipeRepository(sql).countActiveByOwner('user-1')).toBe(3);
+      const text = sqlText(sql);
+      expect(text).toContain('count(*)::int');
+      expect(text).toContain('from recipes');
+      expect(text).toContain('where owner_id = ');
+      expect(text).toContain('is_active = true');
+      // Un conteo no trae el contenido de las recetas.
+      expect(text).not.toContain('steps');
+      expect(sqlValues(sql)).toEqual(['user-1']);
+    });
+
+    it('normaliza el conteo a number (bigint string) y 0 sin filas', async () => {
+      expect(await new RecipeRepository(makeSqlReturning([{ count: '5' }])).countActiveByOwner('user-1')).toBe(5);
+      expect(await new RecipeRepository(makeSqlReturning([])).countActiveByOwner('user-1')).toBe(0);
+    });
+  });
 });

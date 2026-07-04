@@ -91,3 +91,16 @@ export interface ListJobsByOwnerOptions {
   /** Filtro opcional por estado. Ausente = todos. */
   status?: JobStatus;
 }
+
+/**
+ * Conteo de jobs de UN owner desglosado por estado de cola, para el eje OPERACIONES del dashboard. Las
+ * cuatro claves SIEMPRE estan presentes (un estado sin filas cuenta 0), asi el consumidor nunca tropieza
+ * con un estado ausente. Es una FOTO del estado ACTUAL de la cola del owner (no acotada por fecha):
+ * pending/running reflejan lo que hay en vuelo ahora; completed/failed acumulan dentro de la retencion.
+ */
+export interface JobStatusCounts {
+  pending: number;
+  running: number;
+  completed: number;
+  failed: number;
+}

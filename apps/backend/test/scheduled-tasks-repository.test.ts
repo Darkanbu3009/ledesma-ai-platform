@@ -193,4 +193,22 @@ describe('ScheduledTaskRepository', () => {
       expect(await new ScheduledTaskRepository(makeSqlReturning([])).deleteTaskForOwner(TASK_ID, 'user-2')).toBe(false);
     });
   });
+
+  describe('countActiveByOwner', () => {
+    it('cuenta server-side las activas del owner (where owner_id + is_active), sin traer la lista', async () => {
+      const sql = makeSqlReturning([{ count: 4 }]);
+      expect(await new ScheduledTaskRepository(sql).countActiveByOwner('user-1')).toBe(4);
+      const text = sqlText(sql);
+      expect(text).toContain('count(*)::int');
+      expect(text).toContain('from scheduled_tasks');
+      expect(text).toContain('where owner_id = ');
+      expect(text).toContain('is_active = true');
+      expect(sqlValues(sql)).toEqual(['user-1']);
+    });
+
+    it('normaliza el conteo a number (bigint string) y 0 sin filas', async () => {
+      expect(await new ScheduledTaskRepository(makeSqlReturning([{ count: '7' }])).countActiveByOwner('user-1')).toBe(7);
+      expect(await new ScheduledTaskRepository(makeSqlReturning([])).countActiveByOwner('user-1')).toBe(0);
+    });
+  });
 });

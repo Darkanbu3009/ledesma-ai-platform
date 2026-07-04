@@ -122,6 +122,55 @@ describe('JobsRepository', () => {
     });
   });
 
+  describe('countByStatusForOwner', () => {
+    it('AISLAMIENTO: filtra por owner_id, agrupa por status y NO usa la elegibilidad global de countPending', async () => {
+      const sql = makeSqlReturning([]);
+      await new JobsRepository(sql).countByStatusForOwner('user-1');
+      const texto = sqlText(sql);
+      expect(texto).toContain('from jobs');
+      expect(texto).toContain('where owner_id = ');
+      expect(texto).toContain('group by status');
+      // A diferencia de countPending (global, sobre elegibles), esta no filtra por elegibilidad de cola.
+      expect(texto).not.toContain('scheduled_for');
+      expect(sqlValues(sql)).toEqual(['user-1']);
+    });
+
+    it('mapea los estados presentes y rellena los ausentes con 0 (siempre las 4 claves)', async () => {
+      const sql = makeSqlReturning([
+        { status: 'pending', count: 2 },
+        { status: 'failed', count: '3' }, // bigint como string: se normaliza a number
+      ]);
+      expect(await new JobsRepository(sql).countByStatusForOwner('user-1')).toEqual({
+        pending: 2,
+        running: 0,
+        completed: 0,
+        failed: 3,
+      });
+    });
+
+    it('owner sin jobs (0 filas) -> las 4 claves en 0, sin error', async () => {
+      expect(await new JobsRepository(makeSqlReturning([])).countByStatusForOwner('user-1')).toEqual({
+        pending: 0,
+        running: 0,
+        completed: 0,
+        failed: 0,
+      });
+    });
+
+    it('ignora un status inesperado (esquema divergente) sin contaminar el conteo', async () => {
+      const sql = makeSqlReturning([
+        { status: 'completed', count: 5 },
+        { status: 'zombie', count: 9 },
+      ]);
+      expect(await new JobsRepository(sql).countByStatusForOwner('user-1')).toEqual({
+        pending: 0,
+        running: 0,
+        completed: 5,
+        failed: 0,
+      });
+    });
+  });
+
   describe('claimNextJob', () => {
     it('devuelve null si no hay job elegible', async () => {
       expect(await new JobsRepository(makeSqlReturning([])).claimNextJob()).toBeNull();
