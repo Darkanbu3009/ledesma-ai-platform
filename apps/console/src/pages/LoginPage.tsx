@@ -1,46 +1,32 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
-import { Mail } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/useAuth';
-import { AuthScreen, SubmitButton, authInputClass, authLabelClass } from '../components/AuthScreen';
-
-type Status = 'idle' | 'submitting' | 'sent' | 'error';
+import { BrandPanel, BrandCopy } from '../components/login/BrandPanel';
+import { LoginForm, type Modo, type LoginStatus } from '../components/login/LoginForm';
+import { LedesmaLogo } from '../components/login/LedesmaLogo';
 
 /**
- * Modo desde el que se llega a la pantalla, leido del query param `modo`:
- * - `registro`: el usuario viene de "Crear cuenta".
- * - `acceso`: el usuario viene de "Iniciar sesion" (default si el parametro falta o es desconocido).
+ * Pantalla de login/registro con layout de panel dividido estilo laboratorio:
+ * panel izquierdo de marca con la nube ditherizada (solo desktop >=1024px) y
+ * panel derecho con el formulario. En movil colapsa a columna unica: header
+ * compacto con el logo, formulario centrado y el bloque de marca como texto
+ * bajo el formulario, sin canvas.
  *
- * El mecanismo de acceso es IDENTICO en ambos modos (magic link via signInWithOtp); lo unico que
- * cambia es el texto de la pantalla inicial (titulo, subtitulo y boton).
+ * El flujo de autenticacion es el de siempre y no cambia: magic link via
+ * supabase.auth.signInWithOtp, identico en ambos modos (?modo=acceso |
+ * ?modo=registro); solo cambia la presentacion.
  */
-type Modo = 'registro' | 'acceso';
-
-const COPY: Record<Modo, { title: string; subtitle: string; submit: string }> = {
-  registro: {
-    title: 'Crear tu cuenta',
-    subtitle: 'Te enviamos un enlace para empezar.',
-    submit: 'Crear cuenta',
-  },
-  acceso: {
-    title: 'Iniciar sesion',
-    subtitle: 'Te enviamos un enlace de acceso.',
-    submit: 'Enviar enlace de acceso',
-  },
-};
-
 export function LoginPage() {
   const { session, loading } = useAuth();
   const [searchParams] = useSearchParams();
   const [email, setEmail] = useState('');
-  const [status, setStatus] = useState<Status>('idle');
+  const [status, setStatus] = useState<LoginStatus>('idle');
   const [errorMsg, setErrorMsg] = useState('');
 
   // Default razonable: cualquier valor distinto de `registro` (ausente o desconocido) se trata
   // como acceso, de modo que `/login` a secas siga funcionando igual que hoy.
   const modo: Modo = searchParams.get('modo') === 'registro' ? 'registro' : 'acceso';
-  const copy = COPY[modo];
 
   if (loading) return null;
   // Con `/` ahora publica (landing de marketing), un usuario ya autenticado va directo al
@@ -70,52 +56,37 @@ export function LoginPage() {
   }
 
   return (
-    <AuthScreen footer="Acceso solo por invitacion.">
-      {status === 'sent' ? (
-        <div className="flex flex-col items-center text-center">
-          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-brasa-soft text-brasa">
-            <Mail className="h-5 w-5" aria-hidden="true" />
-          </span>
-          <p className="mt-4 font-display text-lg font-semibold text-ink">Revisa tu correo</p>
-          <p className="mt-2 text-sm leading-relaxed text-muted">
-            Te enviamos un enlace de acceso a{' '}
-            <span className="font-medium text-ink">{email.trim()}</span>. Abrelo en este dispositivo
-            para entrar.
-          </p>
-        </div>
-      ) : (
-        <>
-          {/* Titulo + subtitulo segun el modo; el formulario de abajo es identico en ambos. */}
-          <div className="mb-6">
-            <h1 className="font-display text-lg font-semibold text-ink">{copy.title}</h1>
-            <p className="mt-1.5 text-sm leading-relaxed text-muted">{copy.subtitle}</p>
+    <div className="min-h-screen bg-cream lg:flex">
+      {/* Panel izquierdo de marca (solo desktop), separado por hairline de 0.5px. */}
+      <aside
+        className="hidden lg:block lg:w-[52%]"
+        style={{ borderRight: '0.5px solid rgba(31,30,28,0.14)' }}
+      >
+        <BrandPanel sent={status === 'sent'} />
+      </aside>
+
+      {/* Panel derecho: formulario centrado. En movil, columna unica con header
+          compacto arriba y el bloque de marca bajo el formulario. */}
+      <div className="flex min-h-screen flex-1 flex-col lg:min-h-0">
+        <header className="flex justify-center pt-12 lg:hidden">
+          <LedesmaLogo compact />
+        </header>
+        <main className="flex flex-1 items-center justify-center px-6 py-10">
+          <div className="w-full max-w-[400px]">
+            <LoginForm
+              modo={modo}
+              status={status}
+              errorMsg={errorMsg}
+              email={email}
+              onEmailChange={setEmail}
+              onSubmit={handleSubmit}
+            />
           </div>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label htmlFor="email" className={authLabelClass}>
-                Correo
-              </label>
-              <input
-                id="email"
-                type="email"
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="tu@empresa.com"
-                className={authInputClass}
-              />
-            </div>
-            {status === 'error' && (
-              <p className="text-sm text-brasa" role="alert">
-                {errorMsg}
-              </p>
-            )}
-            <SubmitButton pending={status === 'submitting'} pendingLabel="Enviando...">
-              {copy.submit}
-            </SubmitButton>
-          </form>
-        </>
-      )}
-    </AuthScreen>
+        </main>
+        <footer className="flex justify-center px-6 pb-12 lg:hidden">
+          <BrandCopy />
+        </footer>
+      </div>
+    </div>
   );
 }
