@@ -264,7 +264,9 @@ function AdvancedMode({
       </p>
 
       {!isEmpty && !valid && (
-        <p className="text-sm text-brasa">Formato de cron invalido (deben ser 5 campos).</p>
+        <p role="alert" className="text-sm text-brasa">
+          Formato de cron invalido (deben ser 5 campos).
+        </p>
       )}
 
       {valid && preview && (

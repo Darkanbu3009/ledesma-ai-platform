@@ -1,12 +1,14 @@
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import { RotateCcw } from 'lucide-react';
 import type { TriggerAuthMode } from '../../lib/triggers';
+import { useDialog } from '../ui/useDialog';
 
 /**
  * Confirmacion de ROTACION del secreto/token de un trigger. Rotar invalida el material anterior de
  * inmediato: el sistema externo deja de disparar hasta que se actualice con el nuevo valor. Por eso se
- * confirma antes y se avisa el impacto. Accesible: dialog modal, Escape/fondo cancelan, enfoca Cancelar
- * al abrir. Tras confirmar, la pantalla abre el modal "copia esto ahora" con el material nuevo.
+ * confirma antes y se avisa el impacto. Accesible (via useDialog): dialog modal con trampa de foco,
+ * Escape/fondo cancelan, enfoca Cancelar al abrir y devuelve el foco al cerrar. Tras confirmar, la
+ * pantalla abre el modal "copia esto ahora" con el material nuevo.
  */
 export function RotateTriggerDialog({
   open,
@@ -24,21 +26,7 @@ export function RotateTriggerDialog({
   onCancel: () => void;
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
-
-  const onCancelRef = useRef(onCancel);
-  useEffect(() => {
-    onCancelRef.current = onCancel;
-  });
-
-  useEffect(() => {
-    if (!open) return;
-    cancelRef.current?.focus();
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onCancelRef.current();
-    }
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open]);
+  const dialogRef = useDialog({ open, onClose: onCancel, initialFocus: cancelRef });
 
   if (!open) return null;
 
@@ -48,6 +36,7 @@ export function RotateTriggerDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
       <div className="absolute inset-0 bg-ink/40" onClick={onCancel} aria-hidden="true" />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Rotar el secreto del trigger"
@@ -60,7 +49,10 @@ export function RotateTriggerDialog({
           UNA sola vez.
         </p>
         {error && (
-          <div className="mt-4 rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa">
+          <div
+            role="alert"
+            className="mt-4 rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa"
+          >
             {error}
           </div>
         )}

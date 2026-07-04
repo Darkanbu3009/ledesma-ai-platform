@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { type FormEvent, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Link2, Loader2, ShieldCheck, X } from 'lucide-react';
 import { ApiError } from '../../lib/api';
@@ -15,6 +15,7 @@ import {
   type TriggerDraftErrors,
 } from '../../lib/triggers';
 import { Field, inputClass } from '../ui/Field';
+import { useDialog } from '../ui/useDialog';
 
 /** Traduce el error del backend a un mensaje en espanol. */
 function backendMessage(error: unknown): string {
@@ -79,25 +80,10 @@ export function TriggerFormDialog({
   const [authMode, setAuthMode] = useState<TriggerAuthMode>(DEFAULT_AUTH_MODE);
   const [errors, setErrors] = useState<TriggerDraftErrors>({});
 
+  // Foco inicial en el primer campo, trampa de foco, Escape y retorno del foco al cerrar, via el hook
+  // compartido (antes tenia foco+Escape+retorno pero NO trampa de foco).
   const agentRef = useRef<HTMLSelectElement>(null);
-  const onCloseRef = useRef(onClose);
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  });
-
-  // Enfoca el primer campo al abrir, cierra con Escape y devuelve el foco al cerrar.
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    agentRef.current?.focus();
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onCloseRef.current();
-    }
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      previous?.focus?.();
-    };
-  }, []);
+  const dialogRef = useDialog({ onClose, initialFocus: agentRef });
 
   const selectedAgent = useMemo(
     () => agents?.find((agent) => agent.id === agentId) ?? null,
@@ -146,6 +132,7 @@ export function TriggerFormDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8">
       <div className="absolute inset-0 bg-ink/40" onClick={onClose} aria-hidden="true" />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="trigger-form-title"
@@ -172,7 +159,10 @@ export function TriggerFormDialog({
 
         <form onSubmit={handleSubmit} className="space-y-5 overflow-y-auto px-6 py-6" noValidate>
           {createTrigger.isError && (
-            <div className="rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa">
+            <div
+              role="alert"
+              className="rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa"
+            >
               {backendMessage(createTrigger.error)}
             </div>
           )}
@@ -207,37 +197,40 @@ export function TriggerFormDialog({
           )}
 
           <Field label="Credencial" error={errors.credentialId}>
-            {!selectedAgent ? (
-              <div className="rounded-xl border border-line bg-field px-4 py-3 text-sm text-muted">
-                Elige primero un agente para ver sus credenciales.
-              </div>
-            ) : credentialsLoading ? (
-              <div className="h-11 animate-pulse rounded-xl border border-line bg-field" />
-            ) : compatible.length === 0 ? (
-              <div className="rounded-xl border border-line bg-field px-4 py-3 text-sm text-muted">
-                No tienes credenciales de {providerLabel(selectedAgent.providerId)}.{' '}
-                <Link to="/credenciales" className="font-medium text-brasa hover:underline">
-                  Agrega una en Credenciales
-                </Link>
-                .
-              </div>
-            ) : (
-              <select
-                value={credentialId}
-                onChange={(e) => {
-                  setCredentialId(e.target.value);
-                  setErrors((prev) => ({ ...prev, credentialId: undefined }));
-                }}
-                className={inputClass}
-              >
-                <option value="">Elige una credencial...</option>
-                {compatible.map((cred) => (
-                  <option key={cred.id} value={cred.id}>
-                    {cred.label}
-                  </option>
-                ))}
-              </select>
-            )}
+            {(field) =>
+              !selectedAgent ? (
+                <div className="rounded-xl border border-line bg-field px-4 py-3 text-sm text-muted">
+                  Elige primero un agente para ver sus credenciales.
+                </div>
+              ) : credentialsLoading ? (
+                <div className="h-11 animate-pulse rounded-xl border border-line bg-field" />
+              ) : compatible.length === 0 ? (
+                <div className="rounded-xl border border-line bg-field px-4 py-3 text-sm text-muted">
+                  No tienes credenciales de {providerLabel(selectedAgent.providerId)}.{' '}
+                  <Link to="/credenciales" className="font-medium text-brasa hover:underline">
+                    Agrega una en Credenciales
+                  </Link>
+                  .
+                </div>
+              ) : (
+                <select
+                  {...field}
+                  value={credentialId}
+                  onChange={(e) => {
+                    setCredentialId(e.target.value);
+                    setErrors((prev) => ({ ...prev, credentialId: undefined }));
+                  }}
+                  className={inputClass}
+                >
+                  <option value="">Elige una credencial...</option>
+                  {compatible.map((cred) => (
+                    <option key={cred.id} value={cred.id}>
+                      {cred.label}
+                    </option>
+                  ))}
+                </select>
+              )
+            }
           </Field>
 
           <Field
@@ -305,7 +298,11 @@ export function TriggerFormDialog({
                 );
               })}
             </div>
-            {errors.authMode && <p className="mt-1.5 text-sm text-brasa">{errors.authMode}</p>}
+            {errors.authMode && (
+              <p role="alert" className="mt-1.5 text-sm text-brasa">
+                {errors.authMode}
+              </p>
+            )}
           </fieldset>
 
           <div className="flex justify-end gap-3 pt-1">

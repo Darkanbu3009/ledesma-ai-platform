@@ -1,7 +1,11 @@
 import { Link } from 'react-router-dom';
-import { ArrowRight, Bot, Plus, RefreshCw, Sparkles } from 'lucide-react';
+import { ArrowRight, Bot, Plus, Sparkles } from 'lucide-react';
 import { useAgents } from '../lib/queries';
 import { AgentCard } from '../components/agents/AgentCard';
+import { PageHeader } from '../components/ui/PageHeader';
+import { SkeletonList } from '../components/ui/SkeletonList';
+import { ErrorState } from '../components/ui/ErrorState';
+import { EmptyState } from '../components/ui/EmptyState';
 
 const gridClass =
   'grid gap-[18px] [grid-template-columns:repeat(auto-fill,minmax(min(100%,310px),1fr))]';
@@ -50,60 +54,56 @@ function CreateAgentPill() {
 
 function AgentsEmptyState() {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center text-center">
-      {/* Hero (arriba): maqueta decorativa de "asi se vera tu agente". No es
-          interactiva (sin texto real, solo barras/chips placeholder); ancla el
-          bloque centrado y anticipa el resultado. Conserva su ancho (no se
-          estira) y se separa del texto con el margen inferior. Oculta en movil
-          para no recargar pantallas chicas. */}
-      <div className="mb-10 hidden md:block">
-        <div
-          aria-hidden="true"
-          className="w-[230px] rounded-2xl border border-line-soft bg-surface p-[18px] shadow-card"
-        >
-          {/* Encabezado: icono de agente + nombre y subtitulo (placeholder). */}
-          <div className="flex items-center gap-3">
-            <span className="flex h-[38px] w-[38px] flex-none items-center justify-center rounded-[10px] bg-brasa-soft text-brasa">
-              <Bot className="h-5 w-5" />
-            </span>
-            <div className="min-w-0 flex-1 space-y-2">
-              <span className="block h-2.5 w-[90px] rounded-full bg-line" />
-              <span className="block h-2 w-[60px] rounded-full bg-line-soft" />
+    <EmptyState
+      media={
+        // Hero (arriba): maqueta decorativa de "asi se vera tu agente". No es
+        // interactiva (sin texto real, solo barras/chips placeholder); ancla el
+        // bloque centrado y anticipa el resultado. Conserva su ancho (no se
+        // estira) y se separa del texto con el margen inferior. Oculta en movil
+        // para no recargar pantallas chicas.
+        <div className="mb-10 hidden md:block">
+          <div
+            aria-hidden="true"
+            className="w-[230px] rounded-2xl border border-line-soft bg-surface p-[18px] shadow-card"
+          >
+            {/* Encabezado: icono de agente + nombre y subtitulo (placeholder). */}
+            <div className="flex items-center gap-3">
+              <span className="flex h-[38px] w-[38px] flex-none items-center justify-center rounded-[10px] bg-brasa-soft text-brasa">
+                <Bot className="h-5 w-5" />
+              </span>
+              <div className="min-w-0 flex-1 space-y-2">
+                <span className="block h-2.5 w-[90px] rounded-full bg-line" />
+                <span className="block h-2 w-[60px] rounded-full bg-line-soft" />
+              </div>
+            </div>
+            {/* Cuerpo: dos lineas de descripcion (placeholder). */}
+            <div className="mt-[18px] space-y-2">
+              <span className="block h-[7px] w-full rounded-full bg-line-soft" />
+              <span className="block h-[7px] w-4/5 rounded-full bg-line-soft" />
+            </div>
+            {/* Pie: chips de tags/acciones (placeholder). */}
+            <div className="mt-[18px] flex items-center gap-2">
+              <span className="block h-[22px] w-[54px] rounded-full bg-brasa-soft" />
+              <span className="block h-[22px] w-[40px] rounded-full bg-line-soft" />
             </div>
           </div>
-          {/* Cuerpo: dos lineas de descripcion (placeholder). */}
-          <div className="mt-[18px] space-y-2">
-            <span className="block h-[7px] w-full rounded-full bg-line-soft" />
-            <span className="block h-[7px] w-4/5 rounded-full bg-line-soft" />
-          </div>
-          {/* Pie: chips de tags/acciones (placeholder). */}
-          <div className="mt-[18px] flex items-center gap-2">
-            <span className="block h-[22px] w-[54px] rounded-full bg-brasa-soft" />
-            <span className="block h-[22px] w-[40px] rounded-full bg-line-soft" />
-          </div>
         </div>
-      </div>
-      <span className="inline-flex items-center rounded-md bg-brasa-soft px-2.5 py-1 text-[11px] font-semibold tracking-wide text-[#993C1D]">
-        EMPIEZA AQUI
-      </span>
-      <h2 className="mt-4 max-w-md font-display text-[22px] font-bold leading-[1.2] text-ink">
-        El trabajo repetitivo, en piloto automático
-      </h2>
-      <p className="mt-3 max-w-md text-[13px] leading-[1.5] text-muted">
-        Configura un agente una vez y deja que ejecute tus procesos en tus propios sistemas.
-      </p>
-      <div className="mt-7">
-        <CreateAgentPill />
-      </div>
-      {/* Alternativa conversacional, sin quitar el alta manual de arriba. */}
-      <Link
-        to="/configurador"
-        className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-muted transition hover:text-brasa"
-      >
-        <Sparkles className="h-4 w-4" />
-        o crealo conversando con el Configurador
-      </Link>
-    </div>
+      }
+      eyebrow="EMPIEZA AQUI"
+      title="El trabajo repetitivo, en piloto automático"
+      description="Configura un agente una vez y deja que ejecute tus procesos en tus propios sistemas."
+      action={<CreateAgentPill />}
+      footer={
+        // Alternativa conversacional, sin quitar el alta manual de arriba.
+        <Link
+          to="/configurador"
+          className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-muted transition hover:text-brasa"
+        >
+          <Sparkles className="h-4 w-4" />
+          o crealo conversando con el Configurador
+        </Link>
+      }
+    />
   );
 }
 
@@ -113,38 +113,23 @@ export function AgentsPage() {
 
   return (
     <div className="mx-auto flex min-h-full max-w-6xl flex-col">
-      <div className="flex items-start justify-between gap-5">
-        <div>
-          <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">Agentes</h1>
-          <p className="mt-1.5 text-[15px] text-muted">Configura y administra tus agentes de IA.</p>
-        </div>
-        {hasAgents && (
-          <div className="flex flex-wrap items-center gap-2.5">
-            <ConfiguratorButton />
-            <CreateAgentButton />
-          </div>
-        )}
-      </div>
+      <PageHeader
+        title="Agentes"
+        subtitle="Configura y administra tus agentes de IA."
+        action={
+          hasAgents && (
+            <div className="flex flex-wrap items-center gap-2.5">
+              <ConfiguratorButton />
+              <CreateAgentButton />
+            </div>
+          )
+        }
+      />
 
       {isLoading ? (
-        <div className={`mt-8 ${gridClass}`}>
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="h-[212px] animate-pulse rounded-2xl border border-line bg-surface" />
-          ))}
-        </div>
+        <SkeletonList cardClassName="h-[212px]" className={`mt-8 ${gridClass}`} />
       ) : isError ? (
-        <div className="mt-10 rounded-2xl border border-line bg-surface p-8 text-center shadow-card">
-          <p className="font-display text-lg font-bold text-ink">No pudimos cargar tus agentes</p>
-          <p className="mt-2 text-sm text-muted">Revisa tu conexión e intenta de nuevo.</p>
-          <button
-            type="button"
-            onClick={() => void refetch()}
-            className="mt-5 inline-flex items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Reintentar
-          </button>
-        </div>
+        <ErrorState title="No pudimos cargar tus agentes" onRetry={() => void refetch()} />
       ) : !agents || agents.length === 0 ? (
         <AgentsEmptyState />
       ) : (

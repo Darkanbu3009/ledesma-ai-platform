@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { Bot, MessageCircle, Pencil, Wrench } from 'lucide-react';
 import type { AgentConfig, ProviderId } from '../../lib/agents';
 import { playgroundPath, providerLabel } from '../../lib/agents';
+import { focusRing } from '../../lib/utils';
 
 type Accent = {
   bar: string;
@@ -95,7 +96,7 @@ export function AgentCard({ agent }: { agent: AgentConfig }) {
           <Link
             to={`/agentes/${agent.id}`}
             aria-label={`Editar ${agent.name}`}
-            className="inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-line bg-surface px-3 py-2 text-[13px] font-semibold text-muted transition hover:border-ink-soft hover:text-ink"
+            className={`inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-line bg-surface px-3 py-2 text-[13px] font-semibold text-muted transition hover:border-ink-soft hover:text-ink ${focusRing}`}
           >
             <Pencil className="h-[15px] w-[15px]" />
             Editar
@@ -103,7 +104,7 @@ export function AgentCard({ agent }: { agent: AgentConfig }) {
           <Link
             to={playgroundPath(agent.id)}
             aria-label={`Conversar con ${agent.name}`}
-            className="inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-brasa-line bg-brasa-soft px-3 py-2 text-[13px] font-semibold text-brasa transition hover:bg-brasa hover:text-white"
+            className={`inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-brasa-line bg-brasa-soft px-3 py-2 text-[13px] font-semibold text-brasa transition hover:bg-brasa hover:text-white ${focusRing}`}
           >
             <MessageCircle className="h-[15px] w-[15px]" />
             Conversar

@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useTestTool } from '../../lib/mutations';
 import { tryParseJsonObject } from '../../lib/tool-schema';
 import { inputClass } from '../ui/Field';
+import { useDialog } from '../ui/useDialog';
 
 function formatDuration(ms: number): string {
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
@@ -25,6 +26,13 @@ export function TestToolDialog({
   const [jsonError, setJsonError] = useState<string | null>(null);
   const testTool = useTestTool(agentId);
 
+  // Antes no tenia ninguna gestion de foco/teclado; ahora hereda trampa de foco, Escape y retorno del
+  // hook compartido. Por defecto enfoca el primer control (el textarea del input).
+  const dialogRef = useDialog({ onClose });
+
+  const inputId = useId();
+  const jsonErrorId = `${inputId}-error`;
+
   function handleRun() {
     const parsed = tryParseJsonObject(input);
     if (!parsed) {
@@ -41,6 +49,7 @@ export function TestToolDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} aria-hidden="true" />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={`Probar ${toolName}`}
@@ -51,18 +60,29 @@ export function TestToolDialog({
           Se enviara un POST firmado al webhook con la version guardada de la herramienta.
         </p>
 
-        <label className="mb-2 mt-4 block text-sm font-medium text-hueso">Input (JSON)</label>
+        <label htmlFor={inputId} className="mb-2 mt-4 block text-sm font-medium text-hueso">
+          Input (JSON)
+        </label>
         <textarea
+          id={inputId}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           rows={6}
           spellCheck={false}
+          aria-describedby={jsonError ? jsonErrorId : undefined}
+          aria-invalid={jsonError ? true : undefined}
           className={`${inputClass} font-mono text-xs`}
         />
-        {jsonError && <p className="mt-1.5 text-sm text-brasa">{jsonError}</p>}
+        {jsonError && (
+          <p id={jsonErrorId} role="alert" className="mt-1.5 text-sm text-brasa">
+            {jsonError}
+          </p>
+        )}
 
         {testTool.isError && (
-          <p className="mt-3 text-sm text-brasa">No pudimos ejecutar la prueba. Intenta de nuevo.</p>
+          <p role="alert" className="mt-3 text-sm text-brasa">
+            No pudimos ejecutar la prueba. Intenta de nuevo.
+          </p>
         )}
 
         {result && (

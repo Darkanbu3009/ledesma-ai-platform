@@ -1,10 +1,11 @@
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { type FormEvent, useRef, useState } from 'react';
 import { Eye, EyeOff, Loader2, ShieldCheck, X } from 'lucide-react';
 import { ApiError } from '../../lib/api';
 import { providerLabel, type ProviderId } from '../../lib/agents';
 import { CredentialFormSchema } from '../../lib/credential-schema';
 import { useCreateCredential } from '../../lib/mutations';
 import { Field, inputClass } from '../ui/Field';
+import { useDialog } from '../ui/useDialog';
 
 const PROVIDER_IDS: ProviderId[] = ['anthropic', 'openai', 'openai-compatible'];
 
@@ -40,25 +41,10 @@ export function CredentialFormDialog({
   const [showKey, setShowKey] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
 
+  // Foco inicial en el primer campo, trampa de foco, Escape y retorno del foco al cerrar, via el hook
+  // compartido (antes tenia foco+Escape+retorno pero NO trampa de foco).
   const labelRef = useRef<HTMLInputElement>(null);
-  const onCloseRef = useRef(onClose);
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  });
-
-  // Enfoca el primer campo al abrir, cierra con Escape y devuelve el foco al cerrar.
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    labelRef.current?.focus();
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onCloseRef.current();
-    }
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      previous?.focus?.();
-    };
-  }, []);
+  const dialogRef = useDialog({ onClose, initialFocus: labelRef });
 
   const needsBaseUrl = providerId === 'openai-compatible';
 
@@ -99,6 +85,7 @@ export function CredentialFormDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8">
       <div className="absolute inset-0 bg-ink/40" onClick={onClose} aria-hidden="true" />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="credential-form-title"
@@ -125,7 +112,10 @@ export function CredentialFormDialog({
 
         <form onSubmit={handleSubmit} className="space-y-5 px-6 py-6" noValidate>
           {createCredential.isError && (
-            <div className="rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa">
+            <div
+              role="alert"
+              className="rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa"
+            >
               {backendMessage(createCredential.error)}
             </div>
           )}
@@ -160,25 +150,28 @@ export function CredentialFormDialog({
             error={errors.apiKey}
             hint="Se guarda cifrada y no se vuelve a mostrar."
           >
-            <div className="relative">
-              <input
-                type={showKey ? 'text' : 'password'}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                className={`${inputClass} pr-11`}
-                placeholder="sk-..."
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <button
-                type="button"
-                onClick={() => setShowKey((v) => !v)}
-                aria-label={showKey ? 'Ocultar API key' : 'Mostrar API key'}
-                className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-muted transition hover:text-ink"
-              >
-                {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
+            {(field) => (
+              <div className="relative">
+                <input
+                  {...field}
+                  type={showKey ? 'text' : 'password'}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  className={`${inputClass} pr-11`}
+                  placeholder="sk-..."
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey((v) => !v)}
+                  aria-label={showKey ? 'Ocultar API key' : 'Mostrar API key'}
+                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-muted transition hover:text-ink"
+                >
+                  {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            )}
           </Field>
 
           {needsBaseUrl && (

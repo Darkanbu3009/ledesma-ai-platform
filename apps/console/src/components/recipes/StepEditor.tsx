@@ -112,7 +112,11 @@ export function StepEditor({
         Agregar paso
       </button>
 
-      {error && <p className="mt-2 text-sm text-brasa">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-2 text-sm text-brasa">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

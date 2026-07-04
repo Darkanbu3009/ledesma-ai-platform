@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, Copy, TriangleAlert } from 'lucide-react';
-import { cn } from '../../lib/utils';
+import { cn, focusRing } from '../../lib/utils';
 
 type CopyButtonVariant = 'default' | 'primary';
 
@@ -73,6 +73,7 @@ export function CopyButton({
       aria-label={currentLabel}
       className={cn(
         'inline-flex shrink-0 items-center justify-center transition',
+        focusRing,
         VARIANT_CLASSES[variant],
         className,
       )}
