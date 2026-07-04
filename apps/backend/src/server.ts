@@ -12,6 +12,7 @@ import { credentialRoutes } from './routes/credentials.js';
 import { scheduledTaskRoutes } from './routes/scheduled-tasks.js';
 import { recipeRoutes } from './routes/recipes.js';
 import { jobsRoutes } from './routes/jobs.js';
+import { dashboardRoutes } from './routes/dashboard.js';
 import { triggerRoutes } from './routes/triggers.js';
 import { incomingTriggerRoutes } from './routes/incoming-triggers.js';
 import { sessionTokenRoutes } from './routes/session-tokens.js';
@@ -76,6 +77,9 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
   await app.register(recipeRoutes(config));
   // Observabilidad de la ejecucion autonoma (solo lectura): historial de jobs del owner. Aditivo.
   await app.register(jobsRoutes(config));
+  // Resumen AGREGADO del dashboard (solo lectura): los tres ejes (actividad, operaciones, gasto) por
+  // owner. Aditivo: lee agent_runs, jobs y los repos de recursos; no escribe nada.
+  await app.register(dashboardRoutes(config));
   await app.register(triggerRoutes(config));
   await app.register(incomingTriggerRoutes(config));
   await app.register(sessionTokenRoutes(config));

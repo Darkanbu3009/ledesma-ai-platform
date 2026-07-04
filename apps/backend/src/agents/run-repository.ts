@@ -52,6 +52,47 @@ export interface AgentRunsByDay {
   outputTokens: number;
 }
 
+/**
+ * Totales de ejecucion de UN owner (sumando TODOS sus agentes), para los ejes ACTIVIDAD y GASTO del
+ * dashboard. A diferencia de AgentUsageTotals (por agente, solo input/output), incluye los CUATRO cubos
+ * de tokens -- input/output plenos + cache_read/cache_write (V019) -- para que calcularCosto tarife el
+ * gasto real. `lastRunAt` es la ejecucion mas reciente del owner DENTRO del rango (null si no hubo).
+ */
+export interface OwnerUsageTotals {
+  runs: number;
+  completed: number;
+  errors: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  lastRunAt: string | null;
+}
+
+/** Serie diaria de UN owner con los cuatro cubos de tokens (para graficar actividad y gasto por dia). */
+export interface OwnerRunsByDay {
+  date: string;
+  runs: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
+/**
+ * Consumo de UN owner AGRUPADO por modelo, con los cuatro cubos de tokens. El desglose por modelo es
+ * imprescindible para el gasto: cada modelo tiene tarifa distinta, asi que calcularCosto se aplica por
+ * modelo y luego se suma. `runs` es cuantas corridas usaron ese modelo (contexto, no se tarifa).
+ */
+export interface OwnerModelUsage {
+  model: string;
+  runs: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
 /** ISO de epoch: fallback no-lanzante para timestamps ausentes o invalidos. */
 const EPOCH_ISO = new Date(0).toISOString();
 
@@ -174,5 +215,121 @@ export class AgentRunRepository {
       });
     }
     return series;
+  }
+
+  // ---------------------------------------------------------------------------------------------------
+  // LECTURAS POR OWNER (dashboard). Generalizan las de por-agente (totalsForAgent/runsByDay) sumando
+  // TODOS los agentes del owner y trayendo los CUATRO cubos de tokens (input/output + cache_read/
+  // cache_write, V019) que el gasto necesita. Todas AISLADAS por owner_id (jamas mezclan otro dueno) y
+  // acotables por rango de fecha. Cada una es UNA query agregada (sin N+1). El filtro owner_id + rango se
+  // apoya en el indice (owner_id, created_at desc) de V020: sin el, a volumen degrada a seq scan.
+
+  /** Totales del owner (los 4 cubos de tokens + ultima ejecucion) para ACTIVIDAD y GASTO. */
+  async totalsForOwner(ownerId: string, range?: AgentRunRange): Promise<OwnerUsageTotals> {
+    const rows = await this.sql<
+      {
+        runs: string;
+        completed: string;
+        errors: string;
+        input_tokens: string;
+        output_tokens: string;
+        cache_read_tokens: string;
+        cache_write_tokens: string;
+        last_run_at: Date | string | null;
+      }[]
+    >`
+      select count(*) as runs,
+             count(*) filter (where status = 'completed') as completed,
+             count(*) filter (where status = 'error') as errors,
+             coalesce(sum(input_tokens), 0) as input_tokens,
+             coalesce(sum(output_tokens), 0) as output_tokens,
+             coalesce(sum(cache_read_tokens), 0) as cache_read_tokens,
+             coalesce(sum(cache_write_tokens), 0) as cache_write_tokens,
+             max(created_at) as last_run_at
+      from agent_runs where owner_id = ${ownerId}
+      ${this.fromCondition(range)} ${this.toCondition(range)}
+    `;
+    const row = rows[0];
+    return {
+      runs: toCount(row?.runs),
+      completed: toCount(row?.completed),
+      errors: toCount(row?.errors),
+      inputTokens: toCount(row?.input_tokens),
+      outputTokens: toCount(row?.output_tokens),
+      cacheReadTokens: toCount(row?.cache_read_tokens),
+      cacheWriteTokens: toCount(row?.cache_write_tokens),
+      // max() sobre cero filas llega null -> lastRunAt null (owner sin corridas en el rango).
+      lastRunAt: toIso(row?.last_run_at),
+    };
+  }
+
+  /** Serie diaria del owner con los 4 cubos de tokens, ordenada por dia ascendente. */
+  async runsByDayForOwner(ownerId: string, range?: AgentRunRange): Promise<OwnerRunsByDay[]> {
+    const rows = await this.sql<
+      {
+        day: Date | string | null;
+        runs: string;
+        input_tokens: string | null;
+        output_tokens: string | null;
+        cache_read_tokens: string | null;
+        cache_write_tokens: string | null;
+      }[]
+    >`
+      select date_trunc('day', created_at) as day,
+             count(*) as runs,
+             coalesce(sum(input_tokens), 0) as input_tokens,
+             coalesce(sum(output_tokens), 0) as output_tokens,
+             coalesce(sum(cache_read_tokens), 0) as cache_read_tokens,
+             coalesce(sum(cache_write_tokens), 0) as cache_write_tokens
+      from agent_runs where owner_id = ${ownerId}
+      ${this.fromCondition(range)} ${this.toCondition(range)}
+      group by 1 order by 1
+    `;
+    const series: OwnerRunsByDay[] = [];
+    for (const r of rows) {
+      const day = toIso(r.day);
+      if (day === null) continue;
+      series.push({
+        date: day.slice(0, 10),
+        runs: toCount(r.runs),
+        inputTokens: toCount(r.input_tokens),
+        outputTokens: toCount(r.output_tokens),
+        cacheReadTokens: toCount(r.cache_read_tokens),
+        cacheWriteTokens: toCount(r.cache_write_tokens),
+      });
+    }
+    return series;
+  }
+
+  /** Consumo del owner AGRUPADO por modelo (los 4 cubos), base del desglose de gasto por modelo. */
+  async tokensByModelForOwner(ownerId: string, range?: AgentRunRange): Promise<OwnerModelUsage[]> {
+    const rows = await this.sql<
+      {
+        model: string;
+        runs: string;
+        input_tokens: string | null;
+        output_tokens: string | null;
+        cache_read_tokens: string | null;
+        cache_write_tokens: string | null;
+      }[]
+    >`
+      select model,
+             count(*) as runs,
+             coalesce(sum(input_tokens), 0) as input_tokens,
+             coalesce(sum(output_tokens), 0) as output_tokens,
+             coalesce(sum(cache_read_tokens), 0) as cache_read_tokens,
+             coalesce(sum(cache_write_tokens), 0) as cache_write_tokens
+      from agent_runs where owner_id = ${ownerId}
+      ${this.fromCondition(range)} ${this.toCondition(range)}
+      group by model order by model
+    `;
+    return rows.map((r) => ({
+      model: r.model,
+      runs: toCount(r.runs),
+      inputTokens: toCount(r.input_tokens),
+      outputTokens: toCount(r.output_tokens),
+      cacheReadTokens: toCount(r.cache_read_tokens),
+      cacheWriteTokens: toCount(r.cache_write_tokens),
+    }));
   }
 }

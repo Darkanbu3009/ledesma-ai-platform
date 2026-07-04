@@ -210,6 +210,20 @@ export class TriggersRepository {
     return row ? rowToMetadata(row) : null;
   }
 
+  /**
+   * CONTEO de triggers ACTIVOS del owner (is_active = true), para el eje OPERACIONES del dashboard. UNA
+   * query agregada (count server-side, sin traer material de auth ni la lista entera), read-only y
+   * aislada por owner_id. count(*)::int llega como number; el Number() es defensa extra.
+   */
+  async countActiveByOwner(ownerId: string): Promise<number> {
+    const rows = await this.sql<Array<{ count: number | string }>>`
+      select count(*)::int as count
+      from triggers
+      where owner_id = ${ownerId} and is_active = true
+    `;
+    return Number(rows[0]?.count ?? 0);
+  }
+
   /** Borra un trigger del owner. true si borro una fila propia; false si ajena o inexistente. */
   async deleteForOwner(id: string, ownerId: string): Promise<boolean> {
     const rows = await this.sql<Array<{ id: string }>>`
