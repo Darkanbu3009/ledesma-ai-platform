@@ -1,5 +1,14 @@
 import { useEffect, useRef, type JSX } from 'react';
 
+interface PixelDataFlowProps {
+  /**
+   * Color de acento del modelo activo (el mismo que tienen las lineas punteadas
+   * via `--panel-accent`). El mapeo modelo->color vive solo en el padre; aqui
+   * unicamente se recibe el color resultante, en cualquier formato CSS valido.
+   */
+  accent?: string;
+}
+
 /** Duracion de un ciclo completo (viaje + silencio) por curva, en segundos. */
 const PERIOD_S = 3.6;
 /** Fraccion del ciclo durante la que el pulso viaja; el resto es silencio. */
@@ -14,13 +23,15 @@ const RING_DECAY = 0.035;
 const FRAME_MS = 1000 / 60;
 
 /**
- * Estilo y grosor de cada segmento de la cola, precomputados: dependen solo
+ * Alpha y grosor de cada segmento de la cola, precomputados: dependen solo
  * del indice y construirlos por frame seria puro churn en el loop caliente.
- * k=1 en la cabeza (brillante, ~3px) decayendo cuadraticamente a nada.
+ * k=1 en la cabeza (brillante, ~3px) decayendo cuadraticamente a nada. El
+ * color lo pone el acento activo (strokeStyle) y el alpha va por globalAlpha,
+ * asi no se componen strings rgba() en el loop.
  */
-const SEG_STYLE = Array.from({ length: SEGS }, (_, s) => {
+const SEG_ALPHA = Array.from({ length: SEGS }, (_, s) => {
   const k = 1 - s / SEGS;
-  return `rgba(229, 81, 30, ${0.85 * k * k})`;
+  return 0.85 * k * k;
 });
 const SEG_WIDTH = Array.from({ length: SEGS }, (_, s) => 1.1 + 1.9 * (1 - s / SEGS));
 
@@ -55,6 +66,9 @@ interface Geometry {
   nodeX: number;
   nodeY: number;
 }
+
+/** Acento brasa original, fallback si no llega un color CSS valido. */
+const FALLBACK_ACCENT = '#E5511E';
 
 /** Punto de una bezier cubica en t. */
 function bezier(c: Curve, t: number): { x: number; y: number } {
@@ -120,7 +134,7 @@ function measureGeometry(canvas: HTMLCanvasElement): Geometry | null {
 }
 
 /**
- * Pulsos cometa del hero: un trazo fino de luz brasa con cola degradada
+ * Pulsos cometa del hero: un trazo fino de luz del acento activo con cola degradada
  * recorre cada curva punteada desde cada sistema hacia el nodo del modelo y
  * dispara un anillo sutil al llegar. Baja frecuencia: cada curva pulsa una
  * vez por ciclo (viaje en el primer 62%, silencio el resto) con fases
@@ -134,8 +148,18 @@ function measureGeometry(canvas: HTMLCanvasElement): Geometry | null {
  * con prefers-reduced-motion ni cuando el carril de lineas esta oculto
  * (viewport angosto). Pausa fuera de viewport y con la pestana oculta.
  */
-export function PixelDataFlow(): JSX.Element {
+export function PixelDataFlow({ accent }: PixelDataFlowProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Acento activo, leido por el loop de dibujo en cada frame via ref: el
+  // cambio de modelo actualiza el color sin remontar el efecto (los pulsos
+  // en vuelo adoptan el color nuevo de inmediato, completos, sin bicolor).
+  // Este efecto va declarado ANTES del principal para que el ref ya tenga el
+  // acento correcto cuando aquel arranque el primer frame.
+  const colorRef = useRef(FALLBACK_ACCENT);
+  useEffect(() => {
+    colorRef.current = accent && CSS.supports('color', accent) ? accent : FALLBACK_ACCENT;
+  }, [accent]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -204,12 +228,13 @@ export function PixelDataFlow(): JSX.Element {
      * adyacentes comparten extremo: cada punto se evalua una sola vez.
      */
     function drawComet(curve: Curve, head: number): void {
+      ctx.strokeStyle = colorRef.current;
       let to = bezier(curve, head);
       for (let s = 0; s < SEGS; s++) {
         if (head - (s / SEGS) * TAIL_LEN <= 0) break;
         const p0 = Math.max(head - ((s + 1) / SEGS) * TAIL_LEN, 0);
         const from = bezier(curve, p0);
-        ctx.strokeStyle = SEG_STYLE[s] ?? '';
+        ctx.globalAlpha = SEG_ALPHA[s] ?? 0;
         ctx.lineWidth = SEG_WIDTH[s] ?? 1;
         ctx.beginPath();
         ctx.moveTo(from.x, from.y);
@@ -237,8 +262,9 @@ export function PixelDataFlow(): JSX.Element {
       // Anillos de llegada primero: quedan detras de los cometas.
       if (rings.length > 0) {
         rings = rings.filter((ring) => (ring.life -= RING_DECAY * step) > 0);
+        ctx.strokeStyle = colorRef.current;
         for (const ring of rings) {
-          ctx.strokeStyle = `rgba(229, 81, 30, ${0.5 * ring.life})`;
+          ctx.globalAlpha = 0.5 * ring.life;
           ctx.lineWidth = 1.4;
           ctx.beginPath();
           ctx.arc(ring.x, ring.y, 6 + (1 - ring.life) * 20, 0, Math.PI * 2);

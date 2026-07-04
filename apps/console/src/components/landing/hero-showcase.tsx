@@ -264,7 +264,7 @@ export function HeroShowcase(): JSX.Element {
         <BrainSwap providers={PROVIDERS} active={active} cardRef={cardRef} onSelect={handleSelect} />
       </div>
 
-      <PixelDataFlow />
+      <PixelDataFlow accent={activeAccent} />
     </div>
   );
 }
