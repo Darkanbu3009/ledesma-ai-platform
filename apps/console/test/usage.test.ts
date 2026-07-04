@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
+  formatDayLabel,
   formatDurationMs,
   formatRunDate,
   formatTokens,
+  formatUSD,
   rangeFromPreset,
   statusLabel,
 } from '../src/lib/usage';
@@ -37,6 +39,37 @@ describe('formatDurationMs', () => {
   it('muestra minutos y omite los segundos cuando son cero', () => {
     expect(formatDurationMs(65000)).toBe('1 min 5 s');
     expect(formatDurationMs(120000)).toBe('2 min');
+  });
+});
+
+describe('formatUSD', () => {
+  it('formatea cero y enteros con dos decimales y simbolo', () => {
+    expect(formatUSD(0)).toBe('$0.00');
+    expect(formatUSD(12)).toBe('$12.00');
+  });
+
+  it('formatea decimales y separa miles con coma', () => {
+    expect(formatUSD(12.5)).toBe('$12.50');
+    expect(formatUSD(1234.5)).toBe('$1,234.50');
+    expect(formatUSD(1000000)).toBe('$1,000,000.00');
+  });
+
+  it('degrada a $0.00 ante un valor no finito', () => {
+    expect(formatUSD(Number.NaN)).toBe('$0.00');
+    expect(formatUSD(Number.POSITIVE_INFINITY)).toBe('$0.00');
+  });
+});
+
+describe('formatDayLabel', () => {
+  it('devuelve una etiqueta corta legible para una fecha ISO valida', () => {
+    const label = formatDayLabel('2026-06-10');
+    expect(label).toContain('10');
+    expect(label).not.toBe('2026-06-10');
+  });
+
+  it('devuelve la entrada tal cual si no es una fecha valida', () => {
+    expect(formatDayLabel('basura')).toBe('basura');
+    expect(formatDayLabel('')).toBe('');
   });
 });
 

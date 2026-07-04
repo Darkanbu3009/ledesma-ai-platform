@@ -59,6 +59,36 @@ export function formatDurationMs(ms: number): string {
   return seconds > 0 ? `${minutes} min ${seconds} s` : `${minutes} min`;
 }
 
+// Formateador de dinero reutilizable (USD, 2 decimales). Se construye una sola vez: instanciar
+// Intl.NumberFormat en cada llamada es caro. en-US para el simbolo '$' y separador de miles con coma.
+const USD_FORMATTER = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+/**
+ * Monto en USD con simbolo y 2 decimales: 0 -> '$0.00'; 1234.5 -> '$1,234.50'. El gasto del dashboard
+ * es transparencia BYOK (lo que el cliente quemo en SU key), no un cobro; el formateo solo lo presenta.
+ * Un valor no finito (NaN/Infinity, defensa ante datos incompletos) degrada a '$0.00' en vez de 'NaN'.
+ */
+export function formatUSD(value: number): string {
+  if (!Number.isFinite(value)) return '$0.00';
+  return USD_FORMATTER.format(value);
+}
+
+/** 'YYYY-MM-DD' -> '10 jun' (es-MX). Se interpreta en UTC para no desfasar el dia por zona horaria. */
+export function formatDayLabel(isoDate: string): string {
+  const [year, month, day] = isoDate.split('-').map(Number);
+  if (!year || !month || !day) return isoDate;
+  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString('es-MX', {
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'UTC',
+  });
+}
+
 /** ISO -> fecha corta es-MX, p.ej. '10 jun, 14:32'. */
 export function formatRunDate(iso: string): string {
   const date = new Date(iso);

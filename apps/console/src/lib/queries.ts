@@ -1,8 +1,10 @@
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { apiFetch } from './api';
 import type { AgentConfig } from './agents';
 import type { ProviderCredential } from './credentials';
 import type { AgentUsage, UsageRange } from './usage';
+import type { DashboardSummary } from './dashboard';
+import { dashboardQueryString } from './dashboard';
 import type { RegistrationState } from './registration';
 import type { ScheduledTask } from './scheduled-tasks';
 import type { Trigger } from './triggers';
@@ -118,6 +120,23 @@ export function useAgent(id: string | undefined) {
     queryKey: ['agents', id],
     queryFn: () => apiFetch<{ agent: AgentConfig }>(`/v1/agents/${id}`).then((r) => r.agent),
     enabled: Boolean(id),
+  });
+}
+
+/**
+ * RESUMEN del dashboard del owner (GET /v1/dashboard): los tres ejes -- actividad, operaciones y gasto
+ * -- en una sola lectura agregada. El rango (?from/?to) va en la queryKey: cambiar el preset arranca una
+ * consulta nueva. Sin gate por tier: cada quien ve su propio dashboard. Solo lectura.
+ */
+export function useDashboard(range: UsageRange = {}) {
+  const query = dashboardQueryString(range);
+  return useQuery({
+    queryKey: ['dashboard', range.from ?? null, range.to ?? null],
+    queryFn: () => apiFetch<DashboardSummary>(`/v1/dashboard${query}`),
+    // Al cambiar de rango la queryKey cambia: sin esto la vista se remontaria al SkeletonList (salto de
+    // layout) y el indicador "Actualizando" no aparecia. keepPreviousData conserva los datos del rango
+    // anterior mientras carga el nuevo, asi el refetch es silencioso (isLoading=false, isFetching=true).
+    placeholderData: keepPreviousData,
   });
 }
 

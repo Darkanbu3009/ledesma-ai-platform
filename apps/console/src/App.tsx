@@ -1,3 +1,4 @@
+import { Suspense, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
@@ -21,6 +22,21 @@ import { RegistrationGate } from './components/RegistrationGate';
 import { ConsentGate } from './components/ConsentGate';
 import { AppLayout } from './components/layout/AppLayout';
 
+// El Panel carga Recharts (pesado). Se importa de forma diferida para que su codigo NO entre al bundle
+// inicial: solo se descarga al entrar a /dashboard, dejando el resto de la consola sin ese peso.
+const DashboardPage = lazy(() =>
+  import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })),
+);
+
+/** Fallback mientras se descarga el chunk del Panel: un bloque con la altura de las tarjetas (sin salto). */
+function DashboardChunkFallback() {
+  return (
+    <div className="mx-auto mt-6 max-w-5xl">
+      <div className="h-40 animate-pulse rounded-2xl border border-line bg-surface" />
+    </div>
+  );
+}
+
 export function App() {
   return (
     <Routes>
@@ -41,6 +57,17 @@ export function App() {
         <Route element={<RegistrationGate />}>
           <Route element={<ConsentGate />}>
             <Route element={<AppLayout />}>
+              {/* Panel: resumen del owner (actividad, operaciones, gasto). Solo lectura, sin gate por
+                  tier -- cada quien ve su propio dashboard. Es la primera vista del layout. Diferido
+                  (Suspense) para que Recharts no pese en el bundle inicial de las demas vistas. */}
+              <Route
+                path="/dashboard"
+                element={
+                  <Suspense fallback={<DashboardChunkFallback />}>
+                    <DashboardPage />
+                  </Suspense>
+                }
+              />
               <Route path="/agentes" element={<AgentsPage />} />
               {/* Alta conversacional (Configurador). Aditiva: el alta manual sigue en /agentes/nuevo. */}
               <Route path="/configurador" element={<ConfiguratorPage />} />

@@ -1,11 +1,12 @@
 import { NavLink } from 'react-router-dom';
-import { Activity, Bot, CalendarClock, ChefHat, KeyRound, LogOut, ShieldCheck, Webhook } from 'lucide-react';
+import { Activity, Bot, CalendarClock, ChefHat, KeyRound, LayoutDashboard, LogOut, ShieldCheck, Webhook } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../auth/useAuth';
 import { focusRing } from '../../lib/utils';
 import { BrandMark } from '../BrandMark';
 
 const navItems = [
+  { to: '/dashboard', label: 'Panel', icon: LayoutDashboard },
   { to: '/agentes', label: 'Agentes', icon: Bot },
   { to: '/recetas', label: 'Recetas', icon: ChefHat },
   { to: '/tareas', label: 'Tareas', icon: CalendarClock },
