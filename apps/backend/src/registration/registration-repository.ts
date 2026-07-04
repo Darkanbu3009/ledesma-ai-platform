@@ -297,6 +297,20 @@ export class RegistrationRepository {
   }
 
   /**
+   * Lee SOLO el flag de super-admin de PLATAFORMA de un sub (profiles.id = sub, columna is_admin de
+   * V021). Lectura liviana para el gate server-side de admin (requireAdminRole), analoga a
+   * getProfileTier: nunca se confia en lo que diga el cliente. Query dedicada (NO pasa por loadState)
+   * para no acoplar el camino de /v1/me a esta columna. Fail-closed: devuelve false si el perfil no
+   * existe (usuario sin registro completo) o si is_admin es false, y solo true cuando is_admin es true.
+   */
+  async isAdmin(sub: string): Promise<boolean> {
+    const rows = await this.sql<{ is_admin: boolean }[]>`
+      select is_admin from profiles where id = ${sub}
+    `;
+    return rows[0]?.is_admin === true;
+  }
+
+  /**
    * Actualiza el tier de un perfil (solo super-admin, via POST /v1/admin/profiles/:id/tier). Es la
    * palanca manual para subir/bajar el plan de un usuario hasta que exista facturacion. Devuelve el
    * perfil actualizado (sin datos sensibles: Profile no contiene secretos) o null si no existe.
