@@ -16,6 +16,7 @@ import type {
   AgentConfig,
   AgentDeps,
   AgentRunInput,
+  AgentRunRecord,
   AssembleAgentRunParams,
   AssembledAgentRun,
   DecryptedProviderCredential,
@@ -173,6 +174,14 @@ export interface JobRunnerDeps {
    * try/catch (ver notifyDefinitiveFailure), asi una alerta jamas bloquea el cierre del job.
    */
   notifyJobFailure?: (job: Job, reason: string) => Promise<void>;
+  /**
+   * Persiste (best-effort) UNA fila en agent_runs por ejecucion autonoma -- el MISMO metodo
+   * (AgentRunRepository.record) que usa la ruta sincrona -- para unificar ambas vias en una sola fuente
+   * de verdad de ejecuciones. OPCIONAL: si no se cablea, el worker EJECUTA IGUAL (degrada sin telemetria,
+   * no se cae). Un fallo de esta escritura NUNCA cambia el estado del job ni tumba el worker (ver
+   * recordRunBestEffort). Se cablea en index.ts con el mismo cliente sql del worker; en tests es un vi.fn().
+   */
+  recordRun?: (run: AgentRunRecord) => Promise<void>;
 }
 
 /** Mensajes del payload de un job: mismo shape que el body de /v1/run/:agentId. */
@@ -324,6 +333,97 @@ async function runAgentWithDeadline(
   }
 }
 
+// --- PERSISTENCIA DEL USAGE (telemetria de la ejecucion autonoma) ------------------------------------
+// ADITIVO: al CERRAR un job (exito o fallo -- ambos consumieron tokens) el worker escribe UNA fila en
+// agent_runs -- la MISMA tabla y el MISMO metodo (AgentRunRepository.record via deps.recordRun) que la
+// ruta sincrona -- con owner+agente+modelo+proveedor+los 4 cubos de tokens (cache incluido)+stop+status+
+// duration. NO cambia la logica de ejecucion/reintentos/claim: solo agrega el registro del resultado, y
+// es BEST-EFFORT (un fallo al registrar jamas altera el estado del job ni tumba el worker).
+
+/** Acumulador mutable de los 4 cubos de tokens de una ejecucion (input, output, cache_read, cache_write). */
+interface MutableTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
+/**
+ * Suma el usage de una corrida al acumulador, INCLUYENDO los cubos de cache. El acumulador previo del
+ * worker sumaba solo input/output y DESCARTABA cache (auditoria 08, H-04); esto los captura igual que el
+ * camino sincrono. Un proveedor sin caching deja los cubos de cache ausentes -> se suman como 0.
+ */
+function addUsage(acc: MutableTokenUsage, usage: TokenUsage): void {
+  acc.inputTokens += usage.inputTokens;
+  acc.outputTokens += usage.outputTokens;
+  acc.cacheReadTokens += usage.cacheReadTokens ?? 0;
+  acc.cacheWriteTokens += usage.cacheWriteTokens ?? 0;
+}
+
+/** Codigo corto para agent_runs.error_code: el `code` del error si lo trae (p.ej. ProviderError), si no su nombre. */
+function errorCodeOf(error: unknown): string {
+  if (error !== null && typeof error === 'object' && 'code' in error) {
+    const code = (error as { code: unknown }).code;
+    if (typeof code === 'string' && code !== '') return code;
+  }
+  if (error instanceof Error) return error.name;
+  return 'UNKNOWN';
+}
+
+/** Traduce el error de cierre de un job al (status, error_code) de agent_runs. */
+function classifyFailure(error: unknown): { status: AgentRunRecord['status']; errorCode: string | null } {
+  // Apagado del worker: la ejecucion se ABORTO (el job vuelve a 'pending' y se re-reclama). Sin error_code.
+  if (error instanceof ShutdownAbortError) return { status: 'aborted', errorCode: null };
+  if (error instanceof RunTimeoutError) return { status: 'error', errorCode: 'TIMEOUT' };
+  if (error instanceof PermanentExecutionError) return { status: 'error', errorCode: 'PERMANENT' };
+  return { status: 'error', errorCode: errorCodeOf(error) };
+}
+
+/** Arma la fila de agent_runs (AgentRunRecord) de una ejecucion, con el shape exacto que espera record(). */
+function buildRunRecord(
+  job: Job,
+  attribution: { providerId: string; model: string },
+  usage: MutableTokenUsage,
+  status: AgentRunRecord['status'],
+  stopReason: string | null,
+  errorCode: string | null,
+  startedAt: number,
+): AgentRunRecord {
+  return {
+    agentId: job.agentId,
+    ownerId: job.ownerId,
+    providerId: attribution.providerId,
+    model: attribution.model,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheReadTokens: usage.cacheReadTokens,
+    cacheWriteTokens: usage.cacheWriteTokens,
+    stopReason,
+    status,
+    errorCode,
+    durationMs: Date.now() - startedAt,
+  };
+}
+
+/**
+ * Persiste (best-effort) la fila de agent_runs de una ejecucion. NUNCA lanza: si deps.recordRun no esta
+ * cableado es un NO-OP (el worker degrada sin telemetria) y si la escritura falla (error de DB) se loguea
+ * y se sigue -- el estado real del job ya lo fijaron markCompleted/handleFailure. La persistencia del run
+ * es un efecto secundario, no parte del exito del job.
+ */
+async function recordRunBestEffort(deps: JobRunnerDeps, run: AgentRunRecord): Promise<void> {
+  if (!deps.recordRun) return;
+  try {
+    await deps.recordRun(run);
+  } catch (error) {
+    deps.logger.error('fallo al registrar el usage de la ejecucion en agent_runs (se ignora, best-effort)', {
+      agentId: run.agentId,
+      status: run.status,
+      err: describeError(error),
+    });
+  }
+}
+
 /**
  * Ejecuta UN job ya reclamado (claimNextJob ya lo puso 'running' e incremento attempts) de punta a
  * punta y lo CIERRA en la cola segun el desenlace:
@@ -343,6 +443,16 @@ export async function processClaimedJob(
   shutdownSignal?: AbortSignal,
 ): Promise<void> {
   const { logger } = deps;
+  // Estado de la ejecucion para PERSISTIR el run en agent_runs al cerrar (best-effort, ver
+  // recordRunBestEffort). Se puebla a medida que avanza el job: `usage` acumula los 4 cubos de tokens
+  // (cache incluido) -- para una receta, la SUMA de todos los pasos, disponible aun si un paso posterior
+  // falla. `attribution` (provider/model del agente) queda null en un fallo TEMPRANO (antes de resolver
+  // el agente): sin provider/model no se escribe fila (agent_runs los exige NOT NULL, ademas de agent_id
+  // valido). Nada de esto cambia la ejecucion: solo se AGREGA la escritura del resultado.
+  const startedAt = Date.now();
+  const usage: MutableTokenUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+  let attribution: { providerId: string; model: string } | null = null;
+  let stopReason: string | null = null;
   try {
     // 1. GATE POR TIER (server-side, antes de gastar nada): la ejecucion autonoma es premium. Un owner
     //    que no es 'autonomous' no debe seguir corriendo jobs -> fallo permanente, no transitorio.
@@ -356,6 +466,9 @@ export async function processClaimedJob(
     if (!agent) {
       throw new Error(`agente ${job.agentId} no encontrado`);
     }
+    // Atribucion del run (provider/model del agente) para agent_runs: disponible desde aca (tras resolver
+    // el agente) para el cierre exitoso Y para un fallo posterior (ambos consumieron tokens del agente).
+    attribution = { providerId: agent.providerId, model: agent.model };
 
     // 3. Resolver la credencial de la boveda por owner + credential (descifra server-side).
     const credential = await deps.resolveCredential(job.ownerId, job.credentialId);
@@ -374,7 +487,14 @@ export async function processClaimedJob(
     //    historial). Un job SIMPLE (sin kind:'recipe') sigue el camino de siempre, INTACTO. La deteccion
     //    es INEQUIVOCA: un job simple nunca entra al bucle, uno de receta nunca al camino simple.
     if (isRecipeJobPayload(job.payload)) {
-      await runRecipeJob(deps, job, agent, credential, shutdownSignal);
+      // La receta acumula el usage de TODOS sus pasos en `usage` (un run por job, no por paso) y devuelve
+      // el stopReason del ultimo paso; su cierre (markCompleted) ya ocurrio dentro de runRecipeJob.
+      stopReason = await runRecipeJob(deps, job, agent, credential, usage, shutdownSignal);
+      // TELEMETRIA (best-effort): UN agent_run por job de receta con el usage AGREGADO de los N pasos.
+      await recordRunBestEffort(
+        deps,
+        buildRunRecord(job, attribution, usage, 'completed', stopReason, null, startedAt),
+      );
       return;
     }
 
@@ -396,7 +516,10 @@ export async function processClaimedJob(
     });
 
     // 8. Ejecutar con el deadline de pared propio del worker.
-    const { stopReason, usage } = await runAgentWithDeadline(deps, input, executeTool, shutdownSignal);
+    const result = await runAgentWithDeadline(deps, input, executeTool, shutdownSignal);
+    stopReason = result.stopReason;
+    // Captura los 4 cubos de tokens (cache incluido) del resultado -- el camino sincrono ya los tiene.
+    addUsage(usage, result.usage);
 
     await markCompletedWithRetry(deps, job.id);
     logger.info('job completado', {
@@ -406,8 +529,25 @@ export async function processClaimedJob(
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
     });
+    // TELEMETRIA (best-effort): un agent_run por ejecucion simple exitosa, con los 4 cubos de tokens.
+    await recordRunBestEffort(
+      deps,
+      buildRunRecord(job, attribution, usage, 'completed', stopReason, null, startedAt),
+    );
   } catch (error) {
     await handleFailure(deps, job, error);
+    // TELEMETRIA (best-effort): la ejecucion FALLIDA tambien consumio tokens (los ya acumulados: 0 en un
+    // fallo simple sin stop, o la suma de los pasos ya corridos en una receta). Solo se registra si hubo
+    // atribucion (agente resuelto); un fallo temprano (gate/carga/credencial) no tiene provider/model ni
+    // agent_id valido y no puede escribir una fila. Va DESPUES de handleFailure: el estado del job ya
+    // quedo fijado por su ejecucion real; este registro es un efecto secundario que no lo altera.
+    if (attribution) {
+      const { status, errorCode } = classifyFailure(error);
+      await recordRunBestEffort(
+        deps,
+        buildRunRecord(job, attribution, usage, status, stopReason, errorCode, startedAt),
+      );
+    }
   }
 }
 
@@ -443,8 +583,12 @@ async function runRecipeJob(
   job: Job,
   agent: AgentConfig,
   credential: DecryptedProviderCredential,
+  // Acumulador COMPARTIDO con processClaimedJob: la receta suma aca el usage de cada paso (los 4 cubos,
+  // cache incluido). Se comparte para que, si un paso falla, el usage ya consumido siga disponible para
+  // registrar el run fallido. Devuelve el stopReason del ULTIMO paso corrido.
+  usage: MutableTokenUsage,
   shutdownSignal?: AbortSignal,
-): Promise<void> {
+): Promise<string | null> {
   const { logger } = deps;
 
   // Validar COMPLETAMENTE el snapshot embebido en el payload (kind ya es 'recipe'; falta la forma). Un
@@ -458,7 +602,8 @@ async function runRecipeJob(
 
   // Historial conversacional que se ACUMULA entre pasos. Arranca vacio; el paso 1 solo lleva su user.
   const history: NormalizedMessage[] = [];
-  const usage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  // stopReason del ultimo paso corrido: es el que atribuye la fila de agent_runs del job de receta.
+  let lastStopReason: string | null = null;
 
   for (let i = 0; i < totalSteps; i++) {
     const stepNumber = i + 1;
@@ -514,8 +659,9 @@ async function runRecipeJob(
       throw new Error(`fallo en el paso ${stepNumber} de ${totalSteps}: el run termino con stop 'error'`);
     }
 
-    usage.inputTokens += stepResult.usage.inputTokens;
-    usage.outputTokens += stepResult.usage.outputTokens;
+    // Acumular el usage del paso INCLUYENDO cache (antes solo se sumaba input/output; auditoria 08 H-04).
+    addUsage(usage, stepResult.usage);
+    lastStopReason = stepResult.stopReason;
 
     // Exito del paso: agregar al historial la instruccion (user) Y el OUTPUT (assistant) para que el
     // paso i+1 vea la conversacion previa (encadenamiento conversacional).
@@ -540,6 +686,7 @@ async function runRecipeJob(
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
   });
+  return lastStopReason;
 }
 
 /**

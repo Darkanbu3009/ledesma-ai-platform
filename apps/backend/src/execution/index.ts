@@ -43,6 +43,13 @@ export type {
 export { AgentRepository } from '../agents/agent-repository.js';
 export type { AgentConfig, AgentConfigInput, StoredTool } from '../agents/types.js';
 
+// Registro de corridas: la MISMA tabla (agent_runs) y el MISMO metodo (record) que usa la ruta sincrona
+// (/v1/run/:agentId), reexpuestos para que el WORKER de ejecucion autonoma persista el usage de sus jobs
+// por la misma via -- unificando ambas en una sola fuente de verdad de ejecuciones. Es data-access puro
+// (solo necesita el cliente sql), sin acoplarse a HTTP ni a los SDK de proveedor.
+export { AgentRunRepository } from '../agents/run-repository.js';
+export type { AgentRunRecord } from '../agents/run-repository.js';
+
 // Boveda de credenciales: repo + resolucion server-side (descifra por owner + credential).
 export { ProviderCredentialRepository } from '../credentials/provider-credential-repository.js';
 export type {
