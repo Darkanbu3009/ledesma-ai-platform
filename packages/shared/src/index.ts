@@ -7,4 +7,5 @@ export * from './agent/agent-spec.js';
 export * from './jobs/types.js';
 export * from './jobs/jobs-repository.js';
 export * from './jobs/recipe-payload.js';
+export * from './pricing/pricing.js';
 export { FakeProvider } from './testing/fake-provider.js';

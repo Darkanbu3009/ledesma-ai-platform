@@ -3,6 +3,7 @@ import {
   assembleAgentRun,
   runAgent,
   AgentRepository,
+  AgentRunRepository,
   ProviderCredentialRepository,
   resolveStoredCredential,
   RegistrationRepository,
@@ -43,6 +44,9 @@ function main(): void {
   const agentRepo = new AgentRepository(sql);
   const credentialRepo = new ProviderCredentialRepository(sql);
   const registrationRepo = new RegistrationRepository(sql);
+  // Registro de corridas autonomas: la MISMA tabla/metodo (agent_runs.record) que la ruta sincrona,
+  // instanciada con el sql del worker. La escritura es best-effort (ver recordRun en JobRunnerDeps).
+  const runRepo = new AgentRunRepository(sql);
 
   // Notificador de fallos DEFINITIVOS por correo (best-effort). Lee el email del owner de auth.users y el
   // nombre del agente con el MISMO cliente sql. El cooldown por owner vive en el closure (una instancia
@@ -72,6 +76,9 @@ function main(): void {
       ...(config.WEB_WORKER_SECRET !== undefined ? { webWorkerSecret: config.WEB_WORKER_SECRET } : {}),
     },
     notifyJobFailure: (job, reason) => notificador.notificarFallo(job, reason),
+    // Persistencia best-effort del usage de cada ejecucion autonoma en agent_runs (misma via que la ruta
+    // sincrona). Si esto fallara, processClaimedJob lo traga: el job conserva su estado real.
+    recordRun: (run) => runRepo.record(run),
   };
 
   const handle = startWorker({ deps, logger, intervalMs: config.WORKER_POLL_INTERVAL_MS });
