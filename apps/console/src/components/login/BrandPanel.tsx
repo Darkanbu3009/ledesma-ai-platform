@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { memo, useEffect, useRef } from 'react';
 import { drawCloud } from '../landing/pixelDither';
 import { LedesmaLogo } from './LedesmaLogo';
 
@@ -44,28 +44,28 @@ export function BrandCopy() {
  * ~600ms ease-out) como feedback de "enlace enviado"; solo en la transicion
  * false -> true, una sola vez por envio.
  */
-export function BrandPanel({ sent }: { sent: boolean }) {
+export const BrandPanel = memo(function BrandPanel({ sent }: { sent: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const prevSentRef = useRef(sent);
-  const pulseQueuedRef = useRef(false);
+  /** Momento (performance.now) en que se pidio el pulso; null = nada pendiente. */
+  const pulseQueuedRef = useRef<number | null>(null);
 
-  // Se encola el pulso solo al entrar al estado "enviado"; el loop lo consume.
+  // Se encola el pulso solo al entrar al estado "enviado" (el componente monta
+  // siempre con sent=false, asi que basta la dependencia); el loop lo consume.
   useEffect(() => {
-    if (sent && !prevSentRef.current) pulseQueuedRef.current = true;
-    prevSentRef.current = sent;
+    if (sent) pulseQueuedRef.current = performance.now();
   }, [sent]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // En touch o con reduced-motion la animacion no se monta: hueso plano.
+    // En touch la animacion no se monta: hueso plano.
     if (window.matchMedia('(hover: none)').matches) return;
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-    if (reducedMotion.matches) return;
 
     const context = canvas.getContext('2d');
     if (!context) return;
+    // Alias no-nulos: TS no conserva el narrowing de arriba dentro de los closures.
     const cv = canvas;
     const ctx = context;
 
@@ -75,7 +75,9 @@ export function BrandPanel({ sent }: { sent: boolean }) {
     let lastTime = 0;
     let rafId = 0;
     let running = false;
-    let disabled = false;
+    // Con reduced-motion activo la nube no corre, pero el listener queda
+    // registrado: si el usuario lo desactiva sin recargar, la animacion arranca.
+    let disabled = reducedMotion.matches;
     /** Instante (en t) en que arranco el pulso; negativo = sin pulso activo. */
     let pulseStart = -1;
 
@@ -87,9 +89,12 @@ export function BrandPanel({ sent }: { sent: boolean }) {
       lastTime = now;
       t += dt * 0.001;
 
-      if (pulseQueuedRef.current) {
-        pulseQueuedRef.current = false;
-        pulseStart = t;
+      if (pulseQueuedRef.current !== null) {
+        // Un pulso encolado con el loop detenido (pestana oculta, panel
+        // colapsado) caduca: no se reproduce fuera de contexto al reanudar.
+        const age = performance.now() - pulseQueuedRef.current;
+        pulseQueuedRef.current = null;
+        if (age < 1000) pulseStart = t;
       }
       // Pulso de expansion: sube a +12% y regresa en ~600ms con ease-out.
       let pulse = 1;
@@ -168,7 +173,7 @@ export function BrandPanel({ sent }: { sent: boolean }) {
   }, []);
 
   return (
-    <div className="relative flex h-full min-h-screen w-full flex-col justify-between overflow-hidden bg-cream p-10">
+    <div className="relative flex h-full w-full flex-col justify-between overflow-hidden bg-cream p-10">
       <canvas
         ref={canvasRef}
         aria-hidden="true"
@@ -182,4 +187,4 @@ export function BrandPanel({ sent }: { sent: boolean }) {
       </div>
     </div>
   );
-}
+});

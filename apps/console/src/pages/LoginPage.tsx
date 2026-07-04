@@ -28,6 +28,19 @@ export function LoginPage() {
   // como acceso, de modo que `/login` a secas siga funcionando igual que hoy.
   const modo: Modo = searchParams.get('modo') === 'registro' ? 'registro' : 'acceso';
 
+  // Al alternar entre acceso y registro se limpia un error visible: es feedback
+  // del intento anterior y no aplica al formulario recien mostrado. Ajuste de
+  // estado durante el render (patron de React para reaccionar a un cambio de
+  // prop/param); solo presentacion, la validacion y el envio no cambian.
+  const [lastModo, setLastModo] = useState(modo);
+  if (lastModo !== modo) {
+    setLastModo(modo);
+    if (status === 'error') {
+      setStatus('idle');
+      setErrorMsg('');
+    }
+  }
+
   if (loading) return null;
   // Con `/` ahora publica (landing de marketing), un usuario ya autenticado va directo al
   // dashboard en vez de caer en marketing.
@@ -56,18 +69,15 @@ export function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-cream lg:flex">
+    <div className="flex min-h-screen flex-col bg-cream lg:flex-row">
       {/* Panel izquierdo de marca (solo desktop), separado por hairline de 0.5px. */}
-      <aside
-        className="hidden lg:block lg:w-[52%]"
-        style={{ borderRight: '0.5px solid rgba(31,30,28,0.14)' }}
-      >
+      <aside className="hidden border-ink/[0.14] lg:block lg:w-[52%] lg:border-r-[0.5px]">
         <BrandPanel sent={status === 'sent'} />
       </aside>
 
       {/* Panel derecho: formulario centrado. En movil, columna unica con header
           compacto arriba y el bloque de marca bajo el formulario. */}
-      <div className="flex min-h-screen flex-1 flex-col lg:min-h-0">
+      <div className="flex flex-1 flex-col">
         <header className="flex justify-center pt-12 lg:hidden">
           <LedesmaLogo compact />
         </header>

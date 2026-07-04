@@ -1,5 +1,5 @@
 import type { FormEvent, ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Mail } from 'lucide-react';
 
 /**
@@ -38,7 +38,7 @@ const COPY: Record<
 
 /** Estilo del input de correo: fondo blanco, hairline calida, foco brasa. */
 const inputClass =
-  'h-10 w-full rounded-lg border-[0.5px] border-[rgba(31,30,28,0.22)] bg-white px-3.5 text-sm text-ink outline-none transition placeholder:text-muted-soft focus:border-brasa focus:ring-2 focus:ring-brasa/25';
+  'h-10 w-full rounded-lg border-[0.5px] border-ink/[0.22] bg-white px-3.5 text-sm text-ink outline-none transition placeholder:text-muted-soft focus:border-brasa focus:ring-2 focus:ring-brasa/25';
 
 /** Label monospace estilo laboratorio (CORREO, divisores). */
 const monoLabelClass = 'font-mono text-[11px] uppercase text-muted';
@@ -64,6 +64,10 @@ interface LoginFormProps {
  */
 export function LoginForm({ modo, status, errorMsg, email, onEmailChange, onSubmit }: LoginFormProps) {
   const copy = COPY[modo];
+  const [searchParams] = useSearchParams();
+  // El toggle solo cambia `modo`: se preservan los demas query params (utm, etc.).
+  const toggleSearch = new URLSearchParams(searchParams);
+  toggleSearch.set('modo', copy.toggleTo);
 
   if (status === 'sent') {
     return (
@@ -106,21 +110,19 @@ export function LoginForm({ modo, status, errorMsg, email, onEmailChange, onSubm
             {errorMsg}
           </p>
         )}
-        <SubmitButton pending={status === 'submitting'} pendingLabel="Enviando...">
-          {copy.submit}
-        </SubmitButton>
+        <SubmitButton pending={status === 'submitting'}>{copy.submit}</SubmitButton>
       </form>
 
       <div className="mt-7 flex items-center gap-3">
-        <span className="h-px flex-1 bg-[rgba(31,30,28,0.14)]" aria-hidden="true" />
+        <span className="h-px flex-1 bg-ink/[0.14]" aria-hidden="true" />
         <span className={`${monoLabelClass} tracking-[2px]`}>Acceso solo por invitación</span>
-        <span className="h-px flex-1 bg-[rgba(31,30,28,0.14)]" aria-hidden="true" />
+        <span className="h-px flex-1 bg-ink/[0.14]" aria-hidden="true" />
       </div>
 
       <p className="mt-5 text-center text-sm text-muted">
         {copy.togglePrompt}{' '}
         <Link
-          to={{ search: `?modo=${copy.toggleTo}` }}
+          to={{ search: `?${toggleSearch.toString()}` }}
           className="font-medium text-brasa transition hover:text-brasa-hover"
         >
           {copy.toggleLabel}
@@ -134,15 +136,7 @@ export function LoginForm({ modo, status, errorMsg, email, onEmailChange, onSubm
  * Boton primario del login: ancho completo, 42px, brasa sobre hueso, con
  * spinner y disabled mientras envia (mismo comportamiento de siempre).
  */
-function SubmitButton({
-  pending = false,
-  pendingLabel = 'Enviando...',
-  children,
-}: {
-  pending?: boolean;
-  pendingLabel?: string;
-  children: ReactNode;
-}) {
+function SubmitButton({ pending = false, children }: { pending?: boolean; children: ReactNode }) {
   return (
     <button
       type="submit"
@@ -155,7 +149,7 @@ function SubmitButton({
             className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"
             aria-hidden="true"
           />
-          {pendingLabel}
+          Enviando...
         </span>
       ) : (
         children
