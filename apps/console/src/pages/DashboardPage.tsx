@@ -276,15 +276,20 @@ export function DashboardPage() {
         title="Panel"
         subtitle="Tu actividad, operaciones y gasto en un vistazo."
         action={
-          refreshing && (
-            <span
-              role="status"
-              className="inline-flex items-center gap-1.5 text-[12px] text-muted-soft"
-            >
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Actualizando
-            </span>
-          )
+          // Region viva SIEMPRE montada (aunque vacia): asi el lector de pantalla la registra al inicio
+          // y anuncia el refresco cuando aparece. Si solo se montara al refrescar, el AT no lo anunciaria.
+          <span
+            role="status"
+            aria-live="polite"
+            className="inline-flex items-center gap-1.5 text-[12px] text-muted-soft"
+          >
+            {refreshing && (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Actualizando
+              </>
+            )}
+          </span>
         }
       />
 

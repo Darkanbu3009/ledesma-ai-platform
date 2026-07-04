@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { apiFetch } from './api';
 import type { AgentConfig } from './agents';
 import type { ProviderCredential } from './credentials';
@@ -133,6 +133,10 @@ export function useDashboard(range: UsageRange = {}) {
   return useQuery({
     queryKey: ['dashboard', range.from ?? null, range.to ?? null],
     queryFn: () => apiFetch<DashboardSummary>(`/v1/dashboard${query}`),
+    // Al cambiar de rango la queryKey cambia: sin esto la vista se remontaria al SkeletonList (salto de
+    // layout) y el indicador "Actualizando" no aparecia. keepPreviousData conserva los datos del rango
+    // anterior mientras carga el nuevo, asi el refetch es silencioso (isLoading=false, isFetching=true).
+    placeholderData: keepPreviousData,
   });
 }
 

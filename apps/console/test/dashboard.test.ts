@@ -29,14 +29,14 @@ function modelSpend(model: string, costUsd: number | null): DashboardModelSpend 
   };
 }
 
-function summary(runs: number, jobsTotal: number): DashboardSummary {
+function summary(runs: number, jobsTotal: number, resourcesActive = 0): DashboardSummary {
   return {
     range: { from: 'a', to: 'b', defaulted: true, defaultWindowDays: 30 },
     retention: { agentRunsDays: 365, jobsTerminalDays: 90 },
     activity: { totals: { runs, completed: 0, errors: 0 }, byDay: [], lastRunAt: null },
     operations: {
       jobs: { pending: 0, running: 0, completed: 0, failed: 0, total: jobsTotal },
-      resources: { scheduledTasksActive: 0, triggersActive: 0, recipesActive: 0 },
+      resources: { scheduledTasksActive: resourcesActive, triggersActive: 0, recipesActive: 0 },
     },
     spend: {
       byok: true,
@@ -131,7 +131,11 @@ describe('hasDashboardData', () => {
     expect(hasDashboardData(summary(0, 2))).toBe(true);
   });
 
-  it('es false sin corridas ni jobs', () => {
-    expect(hasDashboardData(summary(0, 0))).toBe(false);
+  it('es true si hay recursos activos aunque no haya corridas ni jobs', () => {
+    expect(hasDashboardData(summary(0, 0, 1))).toBe(true);
+  });
+
+  it('es false sin corridas, ni jobs, ni recursos activos', () => {
+    expect(hasDashboardData(summary(0, 0, 0))).toBe(false);
   });
 });

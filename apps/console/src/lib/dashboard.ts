@@ -196,9 +196,18 @@ export function totalTokens(tokens: DashboardTokens): number {
 }
 
 /**
- * true si hay algo real que mostrar. "Nada ejecutado aun" = ni corridas de agente ni jobs en la cola;
- * en ese caso la pantalla guia con un EmptyState en vez de mostrar puros ceros y una grafica vacia.
+ * true si hay algo real que mostrar. El EmptyState de onboarding solo aplica cuando el owner NO tiene
+ * NADA: ni corridas de agente, ni jobs en la cola, ni recursos activos (tareas/triggers/recetas). Un
+ * owner que ya configuro una automatizacion -- aunque aun no se haya ejecutado (runs=0, cola=0) -- SI
+ * tiene datos (sus recursos activos), asi que ve el panel con sus conteos, no la pantalla de primer uso.
  */
 export function hasDashboardData(summary: DashboardSummary): boolean {
-  return summary.activity.totals.runs > 0 || summary.operations.jobs.total > 0;
+  const { resources } = summary.operations;
+  return (
+    summary.activity.totals.runs > 0 ||
+    summary.operations.jobs.total > 0 ||
+    resources.scheduledTasksActive > 0 ||
+    resources.triggersActive > 0 ||
+    resources.recipesActive > 0
+  );
 }
