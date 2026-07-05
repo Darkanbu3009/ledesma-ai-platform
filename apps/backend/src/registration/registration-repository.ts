@@ -1,7 +1,11 @@
 import type { Sql } from '../db/client.js';
 import type {
+  AccountType,
+  AdminUserListItem,
+  AdminUserPage,
   Organization,
   Profile,
+  ProfileRole,
   ProfileTier,
   RegistrationResult,
   RegistrationState,
@@ -51,6 +55,21 @@ interface UsageCounterRow {
   created_at: Date | string;
 }
 
+// Fila del listado de admin: profiles + email (join a auth.users) + total_count (count(*) over(), viene
+// como string porque bigint). Columnas explicitas, mismo criterio que arriba.
+interface AdminUserRow {
+  id: string;
+  email: string | null;
+  full_name: string;
+  account_type: string;
+  role: string;
+  is_admin: boolean;
+  tier: string;
+  identity_verified: boolean;
+  created_at: Date | string;
+  total_count: number | string;
+}
+
 /** True si el error es un unique_violation de Postgres (SQLSTATE 23505). */
 function isUniqueViolation(err: unknown): boolean {
   return (
@@ -68,6 +87,30 @@ const toInt = (value: number | string): number => {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 };
+
+function rowToAdminUser(row: AdminUserRow): AdminUserListItem {
+  return {
+    id: row.id,
+    email: row.email,
+    fullName: row.full_name,
+    accountType: row.account_type as AccountType,
+    role: row.role as ProfileRole,
+    isAdmin: row.is_admin,
+    tier: row.tier as ProfileTier,
+    identityVerified: row.identity_verified,
+    createdAt: toIso(row.created_at),
+  };
+}
+
+/**
+ * Escapa los metacaracteres de LIKE/ILIKE (`\`, `%`, `_`) para que el termino de busqueda se trate
+ * LITERAL (que un `%` tipeado por el admin no se comporte como comodin ni el search sea inesperado).
+ * NO tiene que ver con inyeccion SQL: el valor SIEMPRE viaja como parametro (`${}` de postgres.js),
+ * jamas concatenado; esto es solo semantica de patron. Se usa con `escape '\'` (el default de Postgres).
+ */
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
 
 function rowToProfile(row: ProfileRow): Profile {
   return {
@@ -308,6 +351,58 @@ export class RegistrationRepository {
       select is_admin from profiles where id = ${sub}
     `;
     return rows[0]?.is_admin === true;
+  }
+
+  /**
+   * LISTA a nivel PLATAFORMA todos los usuarios para el panel de admin (GET /v1/admin/users, gateado por
+   * requireAdminRole). Aislamiento NO por owner: el admin ve a TODOS; la proteccion es el gate de rol, no
+   * un filtro de pertenencia. Read-only.
+   *
+   * UN solo SELECT con JOIN a auth.users para el email (sin N+1: nunca una query por usuario). El email
+   * vive en auth.users, no en profiles; el left join lo trae con el rol de servicio (que puede leer el
+   * esquema auth, igual que el worker en alertas.ts) y devuelve null si faltara la fila. El total sale del
+   * mismo SELECT con `count(*) over()` (ventana calculada ANTES del limit/offset), asi que no hace falta
+   * una segunda query de conteo. Orden estable `created_at desc, id desc` (el id desempata cuando dos
+   * perfiles comparten created_at, para que la paginacion no repita ni salte filas).
+   *
+   * Dos ramas explicitas (con/sin search) en vez de un fragmento SQL condicional, mismo criterio que
+   * JobsRepository.listByOwner: cada rama es UN solo template, mas legible y trivial de testear. El search
+   * filtra por email o full_name con ILIKE PARAMETRIZADO (`${pattern}`, jamas concatenado -> no inyectable);
+   * los metacaracteres de LIKE se escapan (escapeLike) para match literal. La ruta valida y acota
+   * limit/offset/search antes de llamar aca (este metodo confia en valores ya saneados).
+   *
+   * Nota: en una pagina VACIA (offset mas alla del final) no hay filas y por tanto no hay total_count -> se
+   * devuelve total 0. Es un borde del que solo se llega paginando de mas; para las paginas con filas el
+   * total es exacto. La UI usa `hasMore` para el control de "cargar mas".
+   */
+  async listUsers(params: {
+    limit: number;
+    offset: number;
+    search?: string;
+  }): Promise<AdminUserPage> {
+    const { limit, offset, search } = params;
+    const rows =
+      search === undefined
+        ? await this.sql<AdminUserRow[]>`
+            select p.id, u.email, p.full_name, p.account_type, p.role, p.is_admin, p.tier,
+              p.identity_verified, p.created_at, count(*) over() as total_count
+            from profiles p
+            left join auth.users u on u.id = p.id
+            order by p.created_at desc, p.id desc
+            limit ${limit} offset ${offset}
+          `
+        : await this.sql<AdminUserRow[]>`
+            select p.id, u.email, p.full_name, p.account_type, p.role, p.is_admin, p.tier,
+              p.identity_verified, p.created_at, count(*) over() as total_count
+            from profiles p
+            left join auth.users u on u.id = p.id
+            where u.email ilike ${`%${escapeLike(search)}%`}
+               or p.full_name ilike ${`%${escapeLike(search)}%`}
+            order by p.created_at desc, p.id desc
+            limit ${limit} offset ${offset}
+          `;
+    const total = rows[0] ? toInt(rows[0].total_count) : 0;
+    return { users: rows.map(rowToAdminUser), total };
   }
 
   /**

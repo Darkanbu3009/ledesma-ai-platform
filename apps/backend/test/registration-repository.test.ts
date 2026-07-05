@@ -345,3 +345,98 @@ describe('RegistrationRepository.recordAdminAction', () => {
     expect(sql.jsonCalls).toContainEqual({ from: 'free', to: 'pro' });
   });
 });
+
+describe('RegistrationRepository.listUsers', () => {
+  // Filas tal como vienen de la base (snake_case + email del join + total_count). total_count llega como
+  // STRING porque count(*) over() es bigint: el mapeo debe convertirlo a number (toInt).
+  const adminRowA = {
+    id: 'user-1', email: 'ada@test.com', full_name: 'Ada', account_type: 'individual',
+    role: 'individual', is_admin: false, tier: 'free', identity_verified: false,
+    created_at: TS, total_count: '2',
+  };
+  const adminRowB = {
+    id: 'user-2', email: null, full_name: 'Bob', account_type: 'empresa_member',
+    role: 'org_admin', is_admin: true, tier: 'pro', identity_verified: true,
+    created_at: TS, total_count: '2',
+  };
+
+  it('lista la plataforma en UNA sola query con join a auth.users, count(*) over() y orden estable', async () => {
+    const sql = makeSql([[adminRowA, adminRowB]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    const page = await repo.listUsers({ limit: 20, offset: 0 });
+
+    // SIN N+1: UNA sola consulta para toda la pagina (jamas una query por usuario).
+    expect(sql.calls).toHaveLength(1);
+    const q = sql.calls[0];
+    // El email sale del JOIN a auth.users (no vive en profiles); el rol de servicio puede leerlo.
+    expect(q?.text).toContain('left join auth.users u on u.id = p.id');
+    // El total sale de la VENTANA en la MISMA query, no de rows.length ni de una segunda consulta.
+    expect(q?.text).toContain('count(*) over()');
+    // Orden estable: created_at desc con id desc como desempate (paginacion sin repetir ni saltar filas).
+    expect(q?.text).toContain('order by p.created_at desc, p.id desc');
+    // Columnas EXPLICITAS (nunca select * / p.*): un select * omitiria en silencio is_admin/email si
+    // faltara en la base, en vez de fallar ruidoso. Se afirman las dos columnas criticas del listado.
+    expect(q?.text).toContain('p.is_admin');
+    expect(q?.text).toContain('u.email');
+    expect(q?.text).not.toMatch(/select\s+\*/);
+    expect(q?.text).not.toContain('p.*');
+    // Sin search -> sin filtro: no hay WHERE ni ILIKE.
+    expect(q?.text).not.toContain('where');
+    expect(q?.text).not.toContain('ilike');
+    // limit/offset van PARAMETRIZADOS (valores ligados), no interpolados como texto.
+    expect(q?.values).toEqual([20, 0]);
+
+    // Mapeo camelCase: email del join (incl. null), is_admin -> isAdmin, total desde total_count (bigint
+    // string -> number).
+    expect(page.total).toBe(2);
+    expect(page.users).toHaveLength(2);
+    expect(page.users[0]).toEqual({
+      id: 'user-1', email: 'ada@test.com', fullName: 'Ada', accountType: 'individual',
+      role: 'individual', isAdmin: false, tier: 'free', identityVerified: false, createdAt: TS,
+    });
+    // Left join sin fila en auth.users -> email null se conserva; is_admin true -> isAdmin true.
+    expect(page.users[1]).toMatchObject({ id: 'user-2', email: null, isAdmin: true, tier: 'pro' });
+  });
+
+  it('pagina vacia (offset mas alla del final): total 0 y sin filas, en una sola query', async () => {
+    const sql = makeSql([[]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    const page = await repo.listUsers({ limit: 20, offset: 1000 });
+    expect(page.users).toEqual([]);
+    expect(page.total).toBe(0);
+    expect(sql.calls).toHaveLength(1);
+    expect(sql.calls[0]?.values).toEqual([20, 1000]);
+  });
+
+  it('con search: ILIKE por email/full_name PARAMETRIZADO (no inyectable) y escapando metacaracteres de LIKE', async () => {
+    const sql = makeSql([[adminRowA]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    // Termino con metacaracteres de LIKE (% _ \) y con sintaxis "peligrosa" de SQL.
+    await repo.listUsers({ limit: 10, offset: 5, search: "a%_\\'; drop table profiles; --" });
+
+    expect(sql.calls).toHaveLength(1);
+    const q = sql.calls[0];
+    // Filtra por AMBOS campos con ILIKE, sobre el mismo join.
+    expect(q?.text).toContain('u.email ilike');
+    expect(q?.text).toContain('p.full_name ilike');
+    expect(q?.text).toContain('left join auth.users u on u.id = p.id');
+
+    // PARAMETRIZADO: el termino viaja SOLO como valor ligado, JAMAS como texto SQL. La parte peligrosa
+    // NO aparece en el texto de la consulta (que solo tiene <param> en los huecos). Si la ruta/el repo
+    // concatenara el search en el SQL, este assert fallaria.
+    expect(q?.text).not.toContain('drop table');
+
+    // El patron escapa % _ \ (-> \% \_ \\) para match LITERAL y se envuelve en %...%. Se interpola dos
+    // veces (email y full_name), luego limit y offset. Si se quitara escapeLike, el % tipeado actuaria
+    // como comodin y este valor esperado no coincidiria.
+    const expectedPattern = "%a\\%\\_\\\\'; drop table profiles; --%";
+    expect(q?.values).toEqual([expectedPattern, expectedPattern, 10, 5]);
+  });
+
+  it('search vacio no llega aca como filtro: con undefined no arma WHERE (la ruta normaliza vacio -> undefined)', async () => {
+    const sql = makeSql([[adminRowA]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    await repo.listUsers({ limit: 20, offset: 0, search: undefined });
+    expect(sql.calls[0]?.text).not.toContain('ilike');
+  });
+});
