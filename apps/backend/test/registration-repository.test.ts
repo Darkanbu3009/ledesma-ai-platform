@@ -23,11 +23,14 @@ interface MockSql {
   begin<T>(cb: (tx: Sql) => Promise<T>): Promise<T>;
   json(v: unknown): unknown;
   calls: RecordedCall[];
+  /** Argumentos con los que se invoco sql.json(): prueba que una columna jsonb se serializo via json(). */
+  jsonCalls: unknown[];
 }
 
 function makeSql(results: Array<unknown[] | Error>): MockSql {
   const queue = [...results];
   const calls: RecordedCall[] = [];
+  const jsonCalls: unknown[] = [];
   const record = (tx: boolean) => (strings: TemplateStringsArray, ...values: unknown[]): Promise<unknown[]> => {
     calls.push({ text: Array.from(strings).join('<param>'), values, tx });
     const next = queue.shift();
@@ -38,8 +41,12 @@ function makeSql(results: Array<unknown[] | Error>): MockSql {
   // begin pasa un tagged template SEPARADO (tx:true) y propaga el resultado/rechazo del callback,
   // igual que el begin real reenvia el error tras hacer rollback.
   tagged.begin = <T>(cb: (tx: Sql) => Promise<T>): Promise<T> => cb(record(true) as unknown as Sql);
-  tagged.json = (v: unknown) => v;
+  // Identidad (para no alterar los valores interpolados que se afirman) pero registra cada invocacion:
+  // asi un test puede exigir que un objeto destinado a jsonb REALMENTE pase por sql.json (si se quitara
+  // el sql.json, jsonCalls quedaria vacio y el assert fallaria, en vez de un falso verde).
+  tagged.json = (v: unknown) => { jsonCalls.push(v); return v; };
   tagged.calls = calls;
+  tagged.jsonCalls = jsonCalls;
   return tagged;
 }
 
@@ -300,5 +307,41 @@ describe('RegistrationRepository.updateProfileTier', () => {
     const sql = makeSql([[]]);
     const repo = new RegistrationRepository(sql as unknown as Sql);
     expect(await repo.updateProfileTier('no-existe', 'pro')).toBeNull();
+  });
+});
+
+describe('RegistrationRepository.recordAdminAction', () => {
+  it('inserta una fila en admin_actions con actor/action/target/details', async () => {
+    const sql = makeSql([[]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    await repo.recordAdminAction({
+      actorId: 'admin-1',
+      action: 'change_tier',
+      targetId: 'user-1',
+      details: { from: 'free', to: 'autonomous' },
+    });
+
+    const insert = findCall(sql, 'insert into admin_actions');
+    expect(insert?.text).toContain('(actor_id, action, target_id, details)');
+    expect(insert?.values).toEqual(['admin-1', 'change_tier', 'user-1', { from: 'free', to: 'autonomous' }]);
+    // details DEBE serializarse via sql.json (columna jsonb): si se quitara el sql.json, jsonCalls
+    // quedaria vacio y este assert fallaria (en postgres.js un objeto plano sin json() no va a jsonb).
+    expect(sql.jsonCalls).toContainEqual({ from: 'free', to: 'autonomous' });
+  });
+
+  it('acepta actorId null (accion via x-admin-token sin identidad de actor)', async () => {
+    const sql = makeSql([[]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    await repo.recordAdminAction({
+      actorId: null,
+      action: 'change_tier',
+      targetId: 'user-1',
+      details: { from: 'free', to: 'pro' },
+    });
+
+    const insert = findCall(sql, 'insert into admin_actions');
+    expect(insert?.values?.[0]).toBeNull();
+    expect(insert?.values?.[3]).toEqual({ from: 'free', to: 'pro' });
+    expect(sql.jsonCalls).toContainEqual({ from: 'free', to: 'pro' });
   });
 });

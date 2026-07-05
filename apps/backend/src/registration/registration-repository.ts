@@ -325,4 +325,34 @@ export class RegistrationRepository {
     const row = rows[0];
     return row ? rowToProfile(row) : null;
   }
+
+  /**
+   * Registra una accion de administrador en el AUDIT LOG (tabla admin_actions, V022). Inserta UNA fila
+   * con actor + accion + objetivo + detalle + timestamp (created_at lo pone la base con default now()).
+   * Escritura suelta (rol de servicio, omite RLS), como updateProfileTier.
+   *
+   * - actorId: el sub del admin que ejecuta la accion, o null cuando el gate no lleva identidad (hoy el
+   *   cambio de tier corre bajo x-admin-token, un secreto compartido sin actor -> null). La columna es
+   *   nullable justo para este caso; el dia que el endpoint pase a gate por rol, se pasara el sub real.
+   * - details: objeto libre que se persiste como jsonb (ej. { from, to } para 'change_tier').
+   *
+   * El llamador la invoca BEST-EFFORT (try/catch): un fallo al escribir el audit NO debe revertir ni
+   * romper la accion ya realizada (ver routes/registration.ts). Por eso no envuelve nada en transaccion.
+   */
+  async recordAdminAction(input: {
+    actorId: string | null;
+    action: string;
+    targetId: string;
+    details: Record<string, unknown>;
+  }): Promise<void> {
+    await this.sql`
+      insert into admin_actions (actor_id, action, target_id, details)
+      values (
+        ${input.actorId},
+        ${input.action},
+        ${input.targetId},
+        ${this.sql.json(input.details as Parameters<Sql['json']>[0])}
+      )
+    `;
+  }
 }

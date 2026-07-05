@@ -4,6 +4,7 @@ import type { Env } from '../config/env.js';
 import { AppError } from '../errors/app-error.js';
 import { getSql } from '../db/client.js';
 import { RegistrationRepository } from '../registration/registration-repository.js';
+import type { ProfileTier } from '../registration/types.js';
 import { createSupabaseJwtVerifier, type JwtVerifier } from '../auth/jwt-verifier.js';
 import { requireUser } from '../auth/require-user.js';
 import { requireAdmin } from '../auth/require-admin.js';
@@ -97,9 +98,39 @@ export function registrationRoutes(config: Env, deps?: { verifier?: JwtVerifier 
         if (!parsed.success) {
           throw new AppError('VALIDATION_ERROR', 400, 'Invalid tier body', parsed.error.issues);
         }
-        const profile = await repo.updateProfileTier(request.params.id, parsed.data.tier);
+        const targetId = request.params.id;
+        // Captura del tier ACTUAL (el `from` del audit) ANTES de cambiarlo. Es maquinaria de
+        // auditoria y NO tiene rol funcional en el cambio de tier, por eso su lectura es BEST-EFFORT:
+        // si falla (timeout/hipo transitorio de esa consulta), el cambio de tier NO debe romperse; el
+        // audit registra from=null y se continua. Debe leerse antes del update (despues devolveria el
+        // tier nuevo). Si el perfil no existe devuelve null y el update de abajo respondera 404.
+        let fromTier: ProfileTier | null = null;
+        try {
+          fromTier = await repo.getProfileTier(targetId);
+        } catch (err) {
+          request.log.warn({ err, targetId }, 'audit log: no se pudo leer el tier previo (from)');
+        }
+        const profile = await repo.updateProfileTier(targetId, parsed.data.tier);
         if (!profile) {
           throw new AppError('NOT_FOUND', 404, 'Profile not found');
+        }
+        // AUDIT LOG (best-effort): registrar el cambio SIN alterar el comportamiento del endpoint. El
+        // cambio de tier YA se aplico; si el insert del audit falla, se loguea y se continua (la
+        // respuesta { profile } se conserva). Un cambio exitoso no debe romperse porque el log no se
+        // pudo escribir. actorId es null: este endpoint corre bajo x-admin-token (sin identidad de
+        // actor); la columna es nullable para este caso.
+        try {
+          await repo.recordAdminAction({
+            actorId: null,
+            action: 'change_tier',
+            targetId,
+            details: { from: fromTier, to: parsed.data.tier },
+          });
+        } catch (err) {
+          request.log.error(
+            { err, targetId, action: 'change_tier' },
+            'audit log: no se pudo registrar la accion de admin',
+          );
         }
         return reply.send({ profile });
       },
