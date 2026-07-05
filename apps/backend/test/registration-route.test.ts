@@ -243,8 +243,14 @@ describe('POST /v1/admin/profiles/:id/tier', () => {
     recordAdminActionMock.mockResolvedValue(undefined);
     const res = await app.inject({ method: 'POST', url: '/v1/admin/profiles/user-1/tier', headers: { 'x-admin-token': ADMIN_TOKEN }, payload: { tier: 'autonomous' } });
     expect(res.statusCode).toBe(200);
-    // Lee el tier actual (from) ANTES de actualizar.
     expect(getProfileTierMock).toHaveBeenCalledWith('user-1');
+    // Invariante: el from se lee ANTES del update (si se leyera despues, seria el tier NUEVO). Se
+    // afirma el ORDEN real de invocacion, no solo que ambos se llamaron. invocationCallOrder es 1-based,
+    // asi que 0 es un centinela de "no invocado".
+    const fromOrder = getProfileTierMock.mock.invocationCallOrder[0] ?? 0;
+    const updateOrder = updateProfileTierMock.mock.invocationCallOrder[0] ?? 0;
+    expect(fromOrder).toBeGreaterThan(0);
+    expect(updateOrder).toBeGreaterThan(fromOrder);
     // actorId null: el endpoint corre bajo x-admin-token (sin identidad de actor).
     expect(recordAdminActionMock).toHaveBeenCalledWith({
       actorId: null,
@@ -264,6 +270,24 @@ describe('POST /v1/admin/profiles/:id/tier', () => {
     expect(res.json().profile.tier).toBe('autonomous');
     expect(updateProfileTierMock).toHaveBeenCalledWith('user-1', 'autonomous');
     expect(recordAdminActionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('best-effort: si la lectura del tier previo (from) falla, el cambio de tier NO se rompe (from queda null)', async () => {
+    // getProfileTier es maquinaria de auditoria (solo para el from): su fallo no debe abortar el update.
+    getProfileTierMock.mockRejectedValue(new Error('read boom'));
+    updateProfileTierMock.mockResolvedValue(autonomousProfile);
+    recordAdminActionMock.mockResolvedValue(undefined);
+    const res = await app.inject({ method: 'POST', url: '/v1/admin/profiles/user-1/tier', headers: { 'x-admin-token': ADMIN_TOKEN }, payload: { tier: 'autonomous' } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().profile.tier).toBe('autonomous');
+    expect(updateProfileTierMock).toHaveBeenCalledWith('user-1', 'autonomous');
+    // El cambio igual se audita, con from null (la lectura fallo).
+    expect(recordAdminActionMock).toHaveBeenCalledWith({
+      actorId: null,
+      action: 'change_tier',
+      targetId: 'user-1',
+      details: { from: null, to: 'autonomous' },
+    });
   });
 });
 

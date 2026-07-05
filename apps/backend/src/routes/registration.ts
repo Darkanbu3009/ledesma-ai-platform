@@ -4,6 +4,7 @@ import type { Env } from '../config/env.js';
 import { AppError } from '../errors/app-error.js';
 import { getSql } from '../db/client.js';
 import { RegistrationRepository } from '../registration/registration-repository.js';
+import type { ProfileTier } from '../registration/types.js';
 import { createSupabaseJwtVerifier, type JwtVerifier } from '../auth/jwt-verifier.js';
 import { requireUser } from '../auth/require-user.js';
 import { requireAdmin } from '../auth/require-admin.js';
@@ -98,9 +99,17 @@ export function registrationRoutes(config: Env, deps?: { verifier?: JwtVerifier 
           throw new AppError('VALIDATION_ERROR', 400, 'Invalid tier body', parsed.error.issues);
         }
         const targetId = request.params.id;
-        // Lee el tier ACTUAL antes de cambiarlo para capturar el from->to del audit log. Lectura
-        // liviana ya existente; si el perfil no existe devuelve null (el update de abajo devolvera 404).
-        const fromTier = await repo.getProfileTier(targetId);
+        // Captura del tier ACTUAL (el `from` del audit) ANTES de cambiarlo. Es maquinaria de
+        // auditoria y NO tiene rol funcional en el cambio de tier, por eso su lectura es BEST-EFFORT:
+        // si falla (timeout/hipo transitorio de esa consulta), el cambio de tier NO debe romperse; el
+        // audit registra from=null y se continua. Debe leerse antes del update (despues devolveria el
+        // tier nuevo). Si el perfil no existe devuelve null y el update de abajo respondera 404.
+        let fromTier: ProfileTier | null = null;
+        try {
+          fromTier = await repo.getProfileTier(targetId);
+        } catch (err) {
+          request.log.warn({ err, targetId }, 'audit log: no se pudo leer el tier previo (from)');
+        }
         const profile = await repo.updateProfileTier(targetId, parsed.data.tier);
         if (!profile) {
           throw new AppError('NOT_FOUND', 404, 'Profile not found');
