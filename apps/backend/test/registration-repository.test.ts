@@ -302,3 +302,37 @@ describe('RegistrationRepository.updateProfileTier', () => {
     expect(await repo.updateProfileTier('no-existe', 'pro')).toBeNull();
   });
 });
+
+describe('RegistrationRepository.recordAdminAction', () => {
+  it('inserta una fila en admin_actions con actor/action/target/details', async () => {
+    const sql = makeSql([[]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    await repo.recordAdminAction({
+      actorId: 'admin-1',
+      action: 'change_tier',
+      targetId: 'user-1',
+      details: { from: 'free', to: 'autonomous' },
+    });
+
+    const insert = findCall(sql, 'insert into admin_actions');
+    expect(insert?.text).toContain('(actor_id, action, target_id, details)');
+    // Los tres primeros valores son escalares; el cuarto es el objeto details pasado por sql.json
+    // (el mock devuelve el objeto tal cual).
+    expect(insert?.values).toEqual(['admin-1', 'change_tier', 'user-1', { from: 'free', to: 'autonomous' }]);
+  });
+
+  it('acepta actorId null (accion via x-admin-token sin identidad de actor)', async () => {
+    const sql = makeSql([[]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    await repo.recordAdminAction({
+      actorId: null,
+      action: 'change_tier',
+      targetId: 'user-1',
+      details: { from: 'free', to: 'pro' },
+    });
+
+    const insert = findCall(sql, 'insert into admin_actions');
+    expect(insert?.values?.[0]).toBeNull();
+    expect(insert?.values?.[3]).toEqual({ from: 'free', to: 'pro' });
+  });
+});

@@ -97,9 +97,31 @@ export function registrationRoutes(config: Env, deps?: { verifier?: JwtVerifier 
         if (!parsed.success) {
           throw new AppError('VALIDATION_ERROR', 400, 'Invalid tier body', parsed.error.issues);
         }
-        const profile = await repo.updateProfileTier(request.params.id, parsed.data.tier);
+        const targetId = request.params.id;
+        // Lee el tier ACTUAL antes de cambiarlo para capturar el from->to del audit log. Lectura
+        // liviana ya existente; si el perfil no existe devuelve null (el update de abajo devolvera 404).
+        const fromTier = await repo.getProfileTier(targetId);
+        const profile = await repo.updateProfileTier(targetId, parsed.data.tier);
         if (!profile) {
           throw new AppError('NOT_FOUND', 404, 'Profile not found');
+        }
+        // AUDIT LOG (best-effort): registrar el cambio SIN alterar el comportamiento del endpoint. El
+        // cambio de tier YA se aplico; si el insert del audit falla, se loguea y se continua (la
+        // respuesta { profile } se conserva). Un cambio exitoso no debe romperse porque el log no se
+        // pudo escribir. actorId es null: este endpoint corre bajo x-admin-token (sin identidad de
+        // actor); la columna es nullable para este caso.
+        try {
+          await repo.recordAdminAction({
+            actorId: null,
+            action: 'change_tier',
+            targetId,
+            details: { from: fromTier, to: parsed.data.tier },
+          });
+        } catch (err) {
+          request.log.error(
+            { err, targetId, action: 'change_tier' },
+            'audit log: no se pudo registrar la accion de admin',
+          );
         }
         return reply.send({ profile });
       },

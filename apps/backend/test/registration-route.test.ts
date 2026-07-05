@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { registerIndividualMock, registerOrganizationMock, getStateMock, approveOrganizationMock, updateProfileTierMock } = vi.hoisted(() => ({
+const { registerIndividualMock, registerOrganizationMock, getStateMock, approveOrganizationMock, updateProfileTierMock, getProfileTierMock, recordAdminActionMock } = vi.hoisted(() => ({
   registerIndividualMock: vi.fn(),
   registerOrganizationMock: vi.fn(),
   getStateMock: vi.fn(),
   approveOrganizationMock: vi.fn(),
   updateProfileTierMock: vi.fn(),
+  getProfileTierMock: vi.fn(),
+  recordAdminActionMock: vi.fn(),
 }));
 
 vi.mock('../src/registration/registration-repository.js', () => ({
@@ -15,6 +17,8 @@ vi.mock('../src/registration/registration-repository.js', () => ({
     getState = getStateMock;
     approveOrganization = approveOrganizationMock;
     updateProfileTier = updateProfileTierMock;
+    getProfileTier = getProfileTierMock;
+    recordAdminAction = recordAdminActionMock;
   },
 }));
 vi.mock('../src/db/client.js', () => ({ getSql: vi.fn(() => ({})), setSqlForTesting: vi.fn() }));
@@ -57,6 +61,8 @@ beforeEach(async () => {
   getStateMock.mockReset();
   approveOrganizationMock.mockReset();
   updateProfileTierMock.mockReset();
+  getProfileTierMock.mockReset();
+  recordAdminActionMock.mockReset();
   app = await buildServer(parseEnv(ENV));
 });
 
@@ -219,6 +225,8 @@ describe('POST /v1/admin/profiles/:id/tier', () => {
     const res = await app.inject({ method: 'POST', url: '/v1/admin/profiles/no-existe/tier', headers: { 'x-admin-token': ADMIN_TOKEN }, payload: { tier: 'autonomous' } });
     expect(res.statusCode).toBe(404);
     expect(updateProfileTierMock).toHaveBeenCalledWith('no-existe', 'autonomous');
+    // No-regresion: un 404 NO registra ninguna accion en el audit log.
+    expect(recordAdminActionMock).not.toHaveBeenCalled();
   });
 
   it('200 actualiza el tier y devuelve el perfil', async () => {
@@ -227,6 +235,35 @@ describe('POST /v1/admin/profiles/:id/tier', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().profile.tier).toBe('autonomous');
     expect(updateProfileTierMock).toHaveBeenCalledWith('user-1', 'autonomous');
+  });
+
+  it('registra en el audit log la accion change_tier con el from->to y el target correctos', async () => {
+    getProfileTierMock.mockResolvedValue('free'); // tier ACTUAL antes del cambio (from)
+    updateProfileTierMock.mockResolvedValue(autonomousProfile);
+    recordAdminActionMock.mockResolvedValue(undefined);
+    const res = await app.inject({ method: 'POST', url: '/v1/admin/profiles/user-1/tier', headers: { 'x-admin-token': ADMIN_TOKEN }, payload: { tier: 'autonomous' } });
+    expect(res.statusCode).toBe(200);
+    // Lee el tier actual (from) ANTES de actualizar.
+    expect(getProfileTierMock).toHaveBeenCalledWith('user-1');
+    // actorId null: el endpoint corre bajo x-admin-token (sin identidad de actor).
+    expect(recordAdminActionMock).toHaveBeenCalledWith({
+      actorId: null,
+      action: 'change_tier',
+      targetId: 'user-1',
+      details: { from: 'free', to: 'autonomous' },
+    });
+  });
+
+  it('best-effort: si el registro del audit falla, el cambio de tier conserva su 200 y su { profile }', async () => {
+    getProfileTierMock.mockResolvedValue('free');
+    updateProfileTierMock.mockResolvedValue(autonomousProfile);
+    recordAdminActionMock.mockRejectedValue(new Error('audit boom'));
+    const res = await app.inject({ method: 'POST', url: '/v1/admin/profiles/user-1/tier', headers: { 'x-admin-token': ADMIN_TOKEN }, payload: { tier: 'autonomous' } });
+    // El cambio de tier NO se rompe por el fallo del audit: misma respuesta.
+    expect(res.statusCode).toBe(200);
+    expect(res.json().profile.tier).toBe('autonomous');
+    expect(updateProfileTierMock).toHaveBeenCalledWith('user-1', 'autonomous');
+    expect(recordAdminActionMock).toHaveBeenCalledTimes(1);
   });
 });
 
