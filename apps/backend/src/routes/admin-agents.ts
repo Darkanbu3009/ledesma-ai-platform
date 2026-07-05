@@ -4,6 +4,7 @@ import type { Env } from '../config/env.js';
 import { AppError } from '../errors/app-error.js';
 import { getSql } from '../db/client.js';
 import { AgentRepository } from '../agents/agent-repository.js';
+import { requireAdmin } from '../auth/require-admin.js';
 
 const StoredToolSchema = z.object({
   name: z.string().min(1),
@@ -26,13 +27,6 @@ const AgentInputSchema = z.object({
   tools: z.array(StoredToolSchema).max(50).optional(),
   ownerId: z.string().max(200).nullable().optional(),
 });
-
-function requireAdmin(request: FastifyRequest, config: Env): void {
-  const token = request.headers['x-admin-token'];
-  if (typeof token !== 'string' || token !== config.ADMIN_API_TOKEN) {
-    throw new AppError('UNAUTHORIZED', 401, 'Invalid or missing admin token');
-  }
-}
 
 export function adminAgentRoutes(config: Env) {
   return async function (app: FastifyInstance): Promise<void> {

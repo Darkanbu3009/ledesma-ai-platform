@@ -6,6 +6,7 @@ import { getSql } from '../db/client.js';
 import { RegistrationRepository } from '../registration/registration-repository.js';
 import { createSupabaseJwtVerifier, type JwtVerifier } from '../auth/jwt-verifier.js';
 import { requireUser } from '../auth/require-user.js';
+import { requireAdmin } from '../auth/require-admin.js';
 
 // Body del registro individual: identidad minima. identity_verified NO es input (lo fija el repo
 // en false; la verificacion es ligera y no bloqueante).
@@ -24,17 +25,6 @@ const OrganizationBodySchema = z.object({
 const TierBodySchema = z.object({
   tier: z.enum(['free', 'pro', 'autonomous']),
 });
-
-/**
- * Guard de super-admin: MISMO mecanismo que admin-agents.ts (header x-admin-token contra
- * ADMIN_API_TOKEN). Se replica aqui en vez de importarlo para no tocar las rutas de agents.
- */
-function requireAdmin(request: FastifyRequest, config: Env): void {
-  const token = request.headers['x-admin-token'];
-  if (typeof token !== 'string' || token !== config.ADMIN_API_TOKEN) {
-    throw new AppError('UNAUTHORIZED', 401, 'Invalid or missing admin token');
-  }
-}
 
 /**
  * Rutas de registro multi-tenant y aprobacion. Aditivo: no toca agents ni el flujo de run.
