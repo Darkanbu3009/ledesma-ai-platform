@@ -440,3 +440,77 @@ describe('RegistrationRepository.listUsers', () => {
     expect(sql.calls[0]?.text).not.toContain('ilike');
   });
 });
+
+describe('RegistrationRepository.getUserDetail', () => {
+  it('ficha de un individuo: REUSA loadState y agrega is_admin + email via join a auth.users', async () => {
+    // loadState (individuo, org_id null -> sin query de organizations): profiles, subscriptions, usage.
+    // Luego la query dedicada de is_admin + email (id objetivo distinto al del propio llamador).
+    const sql = makeSql([
+      [individualProfileRow], // loadState: profiles
+      [subRow],               // loadState: subscriptions
+      [usageRow],             // loadState: usage_counters
+      [{ is_admin: true, email: 'ada@test.com' }], // is_admin + email (join auth.users)
+    ]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    const detail = await repo.getUserDetail('user-1');
+
+    expect(detail).not.toBeNull();
+    // El profile incluye is_admin (que sale de la query dedicada, NO del modelo Profile) y solo los campos
+    // curados de la ficha (sin org_id ni updated_at).
+    expect(detail?.profile).toEqual({
+      id: 'user-1',
+      fullName: 'Ada',
+      accountType: 'individual',
+      role: 'individual',
+      isAdmin: true,
+      tier: 'free',
+      identityVerified: false,
+      createdAt: TS,
+    });
+    expect(detail?.email).toBe('ada@test.com');
+    expect(detail?.subscription).toMatchObject({ plan: 'free', status: 'active' });
+    expect(detail?.usageCounter).toMatchObject({ runsUsed: 0, runsLimit: 10, periodKind: 'lifetime' });
+    // La ficha NO expone organization (loadState la traeria para empresas, pero la ficha no la incluye).
+    expect(detail && 'organization' in detail).toBe(false);
+
+    // is_admin + email salen de UNA query con el mismo left join a auth.users que listUsers, parametrizada
+    // por el id objetivo (jamas concatenado).
+    const meta = findCall(sql, 'select p.is_admin, u.email');
+    expect(meta?.text).toContain('left join auth.users u on u.id = p.id');
+    expect(meta?.values).toEqual(['user-1']);
+    // Individuo (org_id null): loadState NO consulta organizations.
+    expect(allText(sql)).not.toContain('from organizations');
+  });
+
+  it('devuelve null si el usuario objetivo no existe (404 en el route) sin correr la query de email', async () => {
+    // loadState ve profiles vacio -> profile null -> getUserDetail corta antes de la query de is_admin/email.
+    const sql = makeSql([[]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    const detail = await repo.getUserDetail('desconocido');
+
+    expect(detail).toBeNull();
+    // Solo se consulto profiles; la query de is_admin/email NO se ejecuto (no hay a quien describir).
+    expect(sql.calls).toHaveLength(1);
+    expect(allText(sql)).not.toContain('u.email');
+  });
+
+  it('empresa: reusa loadState (incluye la query de organizations) pero la ficha no expone la org', async () => {
+    const sql = makeSql([
+      [orgProfileRow],  // loadState: profiles (org_id no nulo)
+      [pendingOrgRow],  // loadState: organizations
+      [],               // loadState: subscriptions (empresa sin plan -> null)
+      [],               // loadState: usage_counters (null)
+      [{ is_admin: false, email: 'bob@test.com' }], // is_admin + email
+    ]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    const detail = await repo.getUserDetail('user-1');
+
+    expect(detail?.profile).toMatchObject({ accountType: 'empresa_member', role: 'org_admin', isAdmin: false });
+    expect(detail?.email).toBe('bob@test.com');
+    expect(detail?.subscription).toBeNull();
+    expect(detail?.usageCounter).toBeNull();
+    // Reuso de loadState confirmado (corrio la query de organizations) aunque la ficha no la devuelva.
+    expect(allText(sql)).toContain('from organizations');
+    expect(detail && 'organization' in detail).toBe(false);
+  });
+});
