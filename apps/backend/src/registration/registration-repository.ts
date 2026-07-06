@@ -490,6 +490,33 @@ export class RegistrationRepository {
   }
 
   /**
+   * Edita el nombre del PROPIO perfil (self-service, via PATCH /v1/me/profile con requireUser). El OWNER
+   * es SIEMPRE el sub del token verificado (where id = ownerId), NUNCA un id que venga del cliente: por
+   * este camino no se puede editar el perfil de otro usuario (eso es exclusivo del admin).
+   *
+   * Es el analogo de updateProfileTier pero para el OWNER y SOLO full_name: el SET toca EXCLUSIVAMENTE
+   * full_name (+ updated_at). tier/role/account_type/identity_verified/is_admin quedan FUERA del UPDATE
+   * por construccion -> este metodo es, el mismo, la barrera de whitelist: no hay forma de que un campo
+   * sensible entre al SET aunque el llamador lo intentara. Corre con el rol de servicio (omite RLS), que
+   * es la UNICA razon por la que puede escribir profiles: el fix de V018 dejo profiles default-deny +
+   * REVOKE para el rol authenticated (sin auto-promocion de tier via PostgREST); este camino server-side
+   * NO relaja esa policy.
+   *
+   * Devuelve el perfil actualizado, o null si no existe perfil para ese owner (usuario aun sin registro
+   * completo): el route lo traduce a 404.
+   */
+  async updateOwnProfileName(ownerId: string, fullName: string): Promise<Profile | null> {
+    const rows = await this.sql<ProfileRow[]>`
+      update profiles
+      set full_name = ${fullName}, updated_at = now()
+      where id = ${ownerId}
+      returning id, org_id, account_type, role, full_name, identity_verified, tier, created_at, updated_at
+    `;
+    const row = rows[0];
+    return row ? rowToProfile(row) : null;
+  }
+
+  /**
    * Registra una accion de administrador en el AUDIT LOG (tabla admin_actions, V022). Inserta UNA fila
    * con actor + accion + objetivo + detalle + timestamp (created_at lo pone la base con default now()).
    * Escritura suelta (rol de servicio, omite RLS), como updateProfileTier.

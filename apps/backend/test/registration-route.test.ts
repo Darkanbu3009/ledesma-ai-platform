@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { registerIndividualMock, registerOrganizationMock, getStateMock, approveOrganizationMock, updateProfileTierMock, getProfileTierMock, recordAdminActionMock } = vi.hoisted(() => ({
+const { registerIndividualMock, registerOrganizationMock, getStateMock, approveOrganizationMock, updateProfileTierMock, updateOwnProfileNameMock, getProfileTierMock, recordAdminActionMock } = vi.hoisted(() => ({
   registerIndividualMock: vi.fn(),
   registerOrganizationMock: vi.fn(),
   getStateMock: vi.fn(),
   approveOrganizationMock: vi.fn(),
   updateProfileTierMock: vi.fn(),
+  updateOwnProfileNameMock: vi.fn(),
   getProfileTierMock: vi.fn(),
   recordAdminActionMock: vi.fn(),
 }));
@@ -17,6 +18,7 @@ vi.mock('../src/registration/registration-repository.js', () => ({
     getState = getStateMock;
     approveOrganization = approveOrganizationMock;
     updateProfileTier = updateProfileTierMock;
+    updateOwnProfileName = updateOwnProfileNameMock;
     getProfileTier = getProfileTierMock;
     recordAdminAction = recordAdminActionMock;
   },
@@ -62,6 +64,7 @@ beforeEach(async () => {
   getStateMock.mockReset();
   approveOrganizationMock.mockReset();
   updateProfileTierMock.mockReset();
+  updateOwnProfileNameMock.mockReset();
   getProfileTierMock.mockReset();
   recordAdminActionMock.mockReset();
   app = await buildServer(parseEnv(ENV));
@@ -183,6 +186,129 @@ describe('GET /v1/me', () => {
     // /v1/me reenvia el flag de admin tal cual lo calcula el repo (passthrough): la consola lo consume
     // para mostrar/ocultar el area de admin. La seguridad real sigue siendo server-side.
     expect(res.json().isAdmin).toBe(false);
+  });
+});
+
+describe('PATCH /v1/me/profile', () => {
+  it('401 sin Authorization (no toca el perfil)', async () => {
+    const res = await app.inject({ method: 'PATCH', url: '/v1/me/profile', payload: { fullName: 'Ada Lovelace' } });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error.code).toBe('UNAUTHORIZED');
+    expect(updateOwnProfileNameMock).not.toHaveBeenCalled();
+  });
+
+  it('200 edita full_name del PROPIO owner (sub del token) y devuelve el estado consolidado', async () => {
+    updateOwnProfileNameMock.mockResolvedValue({ ...individualState.profile, fullName: 'Ada Lovelace' });
+    getStateMock.mockResolvedValue({ ...individualState, created: undefined, profile: { ...individualState.profile, fullName: 'Ada Lovelace' } });
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/me/profile',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { fullName: 'Ada Lovelace' },
+    });
+    expect(res.statusCode).toBe(200);
+    // El OWNER es el sub del token ('user-1'), NUNCA un id del body/params. Y solo se pasa el nombre.
+    expect(updateOwnProfileNameMock).toHaveBeenCalledWith('user-1', 'Ada Lovelace');
+    // Devuelve el RegistrationState completo (misma forma que GET /v1/me) para refrescar ['me'].
+    expect(res.json().profile.fullName).toBe('Ada Lovelace');
+    expect(res.json().needsRegistration).toBe(false);
+    expect(getStateMock).toHaveBeenCalledWith('user-1');
+  });
+
+  it('400 si fullName esta vacio (validacion reusada del registro)', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/me/profile',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { fullName: '   ' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('VALIDATION_ERROR');
+    expect(updateOwnProfileNameMock).not.toHaveBeenCalled();
+  });
+
+  it('400 si falta fullName', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/me/profile',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: {},
+    });
+    expect(res.statusCode).toBe(400);
+    expect(updateOwnProfileNameMock).not.toHaveBeenCalled();
+  });
+
+  it('400 si fullName excede 200 caracteres (mismo limite que el registro)', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/me/profile',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { fullName: 'a'.repeat(201) },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(updateOwnProfileNameMock).not.toHaveBeenCalled();
+  });
+
+  it('BLINDAJE: mandar tier/role/is_admin en el body NO los cambia; solo llega full_name al UPDATE', async () => {
+    // Este es el punto del PR: aunque el cliente intente colar campos sensibles en el body, el schema
+    // estrecho los descarta y el repo se invoca con SOLO (owner, fullName). tier/role/is_admin JAMAS
+    // llegan al UPDATE -> no se reabre la escalada que cerro V018.
+    updateOwnProfileNameMock.mockResolvedValue({ ...individualState.profile, fullName: 'Malicia' });
+    getStateMock.mockResolvedValue({ ...individualState, created: undefined, profile: { ...individualState.profile, fullName: 'Malicia' } });
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/me/profile',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { fullName: 'Malicia', tier: 'autonomous', role: 'org_admin', is_admin: true, account_type: 'empresa_member', identity_verified: true, id: 'otro-usuario' },
+    });
+    expect(res.statusCode).toBe(200);
+    // La firma del repo recibe EXACTAMENTE (sub-del-token, fullName): dos argumentos, sin rastro de los
+    // campos sensibles. El owner es 'user-1' del token, NO el 'id' del body.
+    expect(updateOwnProfileNameMock).toHaveBeenCalledTimes(1);
+    expect(updateOwnProfileNameMock).toHaveBeenCalledWith('user-1', 'Malicia');
+    // Defensa extra: el objeto de args no contiene ningun campo sensible (el repo recibe solo 2 strings).
+    const callArgs = updateOwnProfileNameMock.mock.calls[0];
+    expect(callArgs).toEqual(['user-1', 'Malicia']);
+    // El tier NO viaja: el segundo argumento es el nombre, no el objeto del body.
+    expect(callArgs?.[1]).toBe('Malicia');
+    // BLINDAJE (invariante fuerte): el handler NO invoca NINGUN otro mutador sensible. Sin esto, una
+    // regresion futura que agregara una segunda escritura en la ruta (p.ej. updateProfileTier con el
+    // tier del body) dejaria el test en verde y reabriria el agujero de V018. El unico efecto permitido
+    // de este endpoint es escribir full_name via updateOwnProfileName.
+    expect(updateProfileTierMock).not.toHaveBeenCalled();
+    expect(approveOrganizationMock).not.toHaveBeenCalled();
+    expect(recordAdminActionMock).not.toHaveBeenCalled();
+    expect(registerIndividualMock).not.toHaveBeenCalled();
+    expect(registerOrganizationMock).not.toHaveBeenCalled();
+  });
+
+  it('el owner es SIEMPRE el del token: no hay parametro de id para editar el perfil de otro', async () => {
+    // No existe la ruta /v1/me/profile/:id ni similar: el unico perfil editable es el del sub del token.
+    updateOwnProfileNameMock.mockResolvedValue({ ...individualState.profile, fullName: 'Ada' });
+    getStateMock.mockResolvedValue({ ...individualState, created: undefined });
+    await app.inject({
+      method: 'PATCH',
+      url: '/v1/me/profile',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { fullName: 'Ada' },
+    });
+    // El primer argumento (owner) es el sub del token, no algo controlable por el cliente.
+    expect(updateOwnProfileNameMock.mock.calls[0]?.[0]).toBe('user-1');
+  });
+
+  it('404 si el usuario aun no tiene perfil (needsRegistration): nada que editar', async () => {
+    updateOwnProfileNameMock.mockResolvedValue(null);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/me/profile',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { fullName: 'Ada' },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error.code).toBe('NOT_FOUND');
+    expect(updateOwnProfileNameMock).toHaveBeenCalledWith('user-1', 'Ada');
+    // Sin perfil no se arma el estado consolidado (no se llama getState tras el 404).
+    expect(getStateMock).not.toHaveBeenCalled();
   });
 });
 

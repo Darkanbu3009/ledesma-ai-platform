@@ -330,6 +330,53 @@ describe('RegistrationRepository.updateProfileTier', () => {
   });
 });
 
+describe('RegistrationRepository.updateOwnProfileName', () => {
+  it('actualiza SOLO full_name del owner, toca updated_at y mapea el perfil del returning', async () => {
+    const sql = makeSql([[{ ...individualProfileRow, full_name: 'Ada Lovelace' }]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    const profile = await repo.updateOwnProfileName('user-1', 'Ada Lovelace');
+    expect(profile).toMatchObject({ id: 'user-1', fullName: 'Ada Lovelace' });
+
+    const update = findCall(sql, 'update profiles');
+    expect(update?.text).toContain('set full_name =');
+    expect(update?.text).toContain('updated_at = now()');
+    // El owner se liga por id = ${ownerId}: el nombre y el owner viajan PARAMETRIZADOS, en ese orden.
+    expect(update?.values).toEqual(['Ada Lovelace', 'user-1']);
+  });
+
+  it('BLINDAJE: el SET toca EXCLUSIVAMENTE full_name (+ updated_at), nunca tier/role/is_admin/etc.', async () => {
+    // La barrera de whitelist es el metodo mismo: aunque un llamador quisiera colar un campo sensible,
+    // el UPDATE que este metodo emite solo puede escribir full_name. Se afirma sobre el TEXTO del SQL que
+    // ninguna columna sensible aparece en el SET (si alguien agregara `set ..., tier = ...` este assert
+    // fallaria). Es la prueba de que no se reabre el agujero de escalada que cerro V018.
+    const sql = makeSql([[individualProfileRow]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    await repo.updateOwnProfileName('user-1', 'Nuevo Nombre');
+
+    const update = findCall(sql, 'update profiles');
+    const text = update?.text ?? '';
+    // El SET va desde `set` hasta el `where` (la clausula donde se listan las columnas a escribir).
+    const setClause = text.slice(text.indexOf('set '), text.indexOf('where'));
+    expect(setClause).toContain('full_name');
+    expect(setClause).toContain('updated_at');
+    // NINGUNA columna sensible en el SET (solo estarian si el metodo las escribiera).
+    expect(setClause).not.toContain('tier');
+    expect(setClause).not.toContain('role');
+    expect(setClause).not.toContain('is_admin');
+    expect(setClause).not.toContain('account_type');
+    expect(setClause).not.toContain('identity_verified');
+    expect(setClause).not.toContain('org_id');
+    // Solo se ligan dos valores: el nombre y el owner. Un tercer valor delataria otra columna en el SET.
+    expect(update?.values).toEqual(['Nuevo Nombre', 'user-1']);
+  });
+
+  it('devuelve null si no existe perfil para el owner (usuario sin registro completo)', async () => {
+    const sql = makeSql([[]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    expect(await repo.updateOwnProfileName('no-existe', 'X')).toBeNull();
+  });
+});
+
 describe('RegistrationRepository.recordAdminAction', () => {
   it('inserta una fila en admin_actions con actor/action/target/details', async () => {
     const sql = makeSql([[]]);
