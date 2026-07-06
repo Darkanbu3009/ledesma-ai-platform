@@ -9,16 +9,29 @@ import { createSupabaseJwtVerifier, type JwtVerifier } from '../auth/jwt-verifie
 import { requireUser } from '../auth/require-user.js';
 import { requireAdmin } from '../auth/require-admin.js';
 
+// Validacion de nombre compartida (full_name / org_name / fullName): requerido y de a lo sumo 200
+// caracteres tras recortar. UNICA fuente de verdad del criterio de nombre, para que el registro y la
+// edicion del propio perfil no diverjan (la consola la espeja en NAME_MAX_LENGTH/validateName).
+const FullNameSchema = z.string().trim().min(1).max(200);
+
 // Body del registro individual: identidad minima. identity_verified NO es input (lo fija el repo
 // en false; la verificacion es ligera y no bloqueante).
 const IndividualBodySchema = z.object({
-  full_name: z.string().trim().min(1).max(200),
+  full_name: FullNameSchema,
 });
 
 // Body del registro de empresa: nombre de la org + nombre del admin que la registra.
 const OrganizationBodySchema = z.object({
-  org_name: z.string().trim().min(1).max(200),
-  full_name: z.string().trim().min(1).max(200),
+  org_name: FullNameSchema,
+  full_name: FullNameSchema,
+});
+
+// Body de la edicion del PROPIO perfil (PATCH /v1/me/profile): SOLO el nombre. Schema ESTRECHO de un
+// unico campo whitelisted -> cualquier otra clave del body (tier/role/is_admin/account_type/...) se
+// DESCARTA en el parseo (zod no la incluye en data) y por tanto JAMAS puede llegar al UPDATE. Reusa la
+// MISMA validacion de nombre del registro (FullNameSchema): una sola fuente de verdad.
+const ProfileUpdateBodySchema = z.object({
+  fullName: FullNameSchema,
 });
 
 // Body del cambio de tier (super-admin): el plan al que se mueve el perfil. Mismo set de valores que
@@ -70,6 +83,29 @@ export function registrationRoutes(config: Env, deps?: { verifier?: JwtVerifier 
     // no completo registro, needsRegistration = true y el resto es null.
     app.get('/v1/me', async (request: FastifyRequest, reply: FastifyReply) => {
       const user = await requireUser(request, verifier);
+      const state = await repo.getState(user.id);
+      return reply.send(state);
+    });
+
+    // Edicion del PROPIO perfil por el usuario: SOLO full_name. requireUser -> el OWNER es SIEMPRE el sub
+    // del token (user.id), NUNCA un id del body/params (no hay :id aca: es "mi" perfil, no el de otro; el
+    // camino para editar el perfil de terceros es el admin). El body se valida con un schema ESTRECHO de
+    // un solo campo (misma validacion de nombre que el registro): cualquier campo extra del body
+    // (tier/role/is_admin/...) se descarta en el parseo y JAMAS llega al UPDATE -> este endpoint no puede
+    // tocar campos sensibles aunque el cliente los mande (no reabre la escalada que cerro V018). Escribe
+    // con el rol de servicio (como todo el repo), NO relajando la RLS de V018 (profiles sigue default-deny
+    // para authenticated). Devuelve el estado consolidado (misma forma que GET /v1/me) para que la consola
+    // refresque su cache ['me']. 404 si el usuario aun no tiene perfil (needsRegistration).
+    app.patch('/v1/me/profile', async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = await requireUser(request, verifier);
+      const parsed = ProfileUpdateBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        throw new AppError('VALIDATION_ERROR', 400, 'Invalid profile body', parsed.error.issues);
+      }
+      const updated = await repo.updateOwnProfileName(user.id, parsed.data.fullName);
+      if (!updated) {
+        throw new AppError('NOT_FOUND', 404, 'Profile not found');
+      }
       const state = await repo.getState(user.id);
       return reply.send(state);
     });
