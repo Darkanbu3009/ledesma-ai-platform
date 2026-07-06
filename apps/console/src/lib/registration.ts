@@ -87,6 +87,15 @@ export interface OrganizationInput {
 }
 
 /**
+ * Body de PATCH /v1/me/profile (editar el PROPIO nombre): SOLO el nombre, en camelCase tal como lo
+ * espera el backend (ProfileUpdateBodySchema). El endpoint whitelistea unicamente este campo: cualquier
+ * otra clave se descarta en el parseo del servidor.
+ */
+export interface UpdateProfileNameInput {
+  fullName: string;
+}
+
+/**
  * A donde corresponde enviar a un usuario autenticado segun su estado de registro:
  * - 'needs-registration': aun no completo el registro -> pantalla de Completar registro.
  * - 'pending': empresa registrada pero no aprobada -> pantalla en revision (no entra al dashboard).
@@ -138,4 +147,26 @@ export function validateName(value: string): string | undefined {
     return `Usa ${NAME_MAX_LENGTH} caracteres o menos.`;
   }
   return undefined;
+}
+
+/**
+ * Traduce el error de editar el propio nombre (PATCH /v1/me/profile) a un mensaje claro para la pantalla
+ * de perfil. El backend valida el mismo criterio de nombre (400 si el body no pasa) y exige sesion (401
+ * si el token expiro); cualquier otro caso cae a un mensaje generico reintentable. Duck-typed sobre el
+ * `status` para no acoplar este modulo puro a ApiError (que arrastra red/supabase); el shape { status }
+ * lo cumple ApiError. Espeja el estilo de changeTierErrorMessage (lib/admin.ts).
+ */
+export function updateProfileNameErrorMessage(err: unknown): string {
+  const status =
+    err && typeof err === 'object' && 'status' in err && typeof (err as { status: unknown }).status === 'number'
+      ? (err as { status: number }).status
+      : null;
+  switch (status) {
+    case 400:
+      return 'Revisa el nombre e intenta de nuevo.';
+    case 401:
+      return 'Tu sesión expiró. Vuelve a iniciar sesión.';
+    default:
+      return 'No pudimos actualizar tu nombre. Intenta de nuevo.';
+  }
 }
