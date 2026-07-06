@@ -5,6 +5,7 @@ import { healthRoutes } from './routes/health.js';
 import { agentRoutes } from './routes/agent.js';
 import { adminAgentRoutes } from './routes/admin-agents.js';
 import { adminUsersRoutes } from './routes/admin-users.js';
+import { adminUserTierRoutes } from './routes/admin-user-tier.js';
 import { agentRoutes as userAgentRoutes } from './routes/agents.js';
 import { runAgentByIdRoutes } from './routes/run-agent-by-id.js';
 import { toolCatalogRoutes } from './routes/tools.js';
@@ -72,6 +73,10 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
   // Panel de admin (solo lectura): listado de usuarios de la plataforma, gateado por ROL
   // (requireAdminRole del PR 1a). Aditivo; primer uso real del gate por rol en un endpoint.
   await app.register(adminUsersRoutes(config));
+  // Cambio de tier ATRIBUIBLE (PUT /v1/admin/users/:id/tier): la UNICA mutacion del panel, gateada por
+  // ROL, que registra en el audit log el sub REAL del admin. El endpoint viejo (POST /v1/admin/profiles/
+  // :id/tier, x-admin-token) queda como fallback. Aditivo.
+  await app.register(adminUserTierRoutes(config));
   await app.register(userAgentRoutes(config));
   await app.register(runAgentByIdRoutes(config));
   await app.register(toolCatalogRoutes(config));
