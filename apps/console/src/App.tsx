@@ -22,12 +22,18 @@ import { RegistrationGate } from './components/RegistrationGate';
 import { ConsentGate } from './components/ConsentGate';
 import { AdminGate } from './components/AdminGate';
 import { AppLayout } from './components/layout/AppLayout';
-import { AdminPage } from './pages/AdminPage';
+import { AdminUsersPage } from './pages/AdminUsersPage';
 
 // El Panel carga Recharts (pesado). Se importa de forma diferida para que su codigo NO entre al bundle
 // inicial: solo se descarga al entrar a /dashboard, dejando el resto de la consola sin ese peso.
 const DashboardPage = lazy(() =>
   import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })),
+);
+
+// La ficha de admin reusa las graficas del dashboard (Recharts), asi que tambien se difiere: su chunk
+// solo se descarga al abrir /admin/users/:id. La LISTA (/admin) no usa Recharts y va eager.
+const AdminUserDetailPage = lazy(() =>
+  import('./pages/AdminUserDetailPage').then((m) => ({ default: m.AdminUserDetailPage })),
 );
 
 /** Fallback mientras se descarga el chunk del Panel: un bloque con la altura de las tarjetas (sin salto). */
@@ -88,10 +94,19 @@ export function App() {
               <Route path="/privacidad" element={<PrivacyRightsPage />} />
               {/* Area de ADMIN: vive en el mismo layout pero detras del AdminGate, que devuelve a la
                   home a quien no es super-admin. Guard COSMETICO (UX): la autoridad real es el gate
-                  server-side (requireAdminRole) que ya protege los endpoints. En este andamiaje la
-                  ruta solo renderiza un placeholder; las pantallas reales llegan despues. */}
+                  server-side (requireAdminRole) que ya protege los endpoints. La LISTA (/admin) va
+                  eager; la FICHA (/admin/users/:id) reusa las graficas del dashboard y por eso se
+                  difiere (Suspense) para no cargar Recharts en el bundle inicial. */}
               <Route element={<AdminGate />}>
-                <Route path="/admin" element={<AdminPage />} />
+                <Route path="/admin" element={<AdminUsersPage />} />
+                <Route
+                  path="/admin/users/:id"
+                  element={
+                    <Suspense fallback={<DashboardChunkFallback />}>
+                      <AdminUserDetailPage />
+                    </Suspense>
+                  }
+                />
               </Route>
             </Route>
           </Route>
