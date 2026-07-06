@@ -22,6 +22,8 @@ import type { CreateRecipeInput, Recipe, RecipePatch, RunRecipeResult } from './
 import type {
   IndividualInput,
   OrganizationInput,
+  Profile,
+  ProfileTier,
   RegistrationResult,
   RegistrationState,
 } from './registration';
@@ -326,5 +328,27 @@ export function useDeleteCredential() {
   return useMutation({
     mutationFn: (id: string) => apiFetch<void>(`/v1/credentials/${id}`, { method: 'DELETE' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['credentials'] }),
+  });
+}
+
+/**
+ * PANEL DE ADMIN -- CAMBIO DE TIER atribuible (PUT /v1/admin/users/:id/tier): la UNICA mutacion del panel y
+ * la palanca de monetizacion (sube/baja el plan de un usuario). El backend la gatea por rol (403 a un
+ * no-admin) y la registra en el audit log con el actor real. La UI SIEMPRE la dispara tras una
+ * confirmacion explicita (accion sensible; ver ChangeTierDialog).
+ *
+ * Al exito invalida el arbol ['admin'] completo: la ficha del usuario (para reflejar el tier nuevo) y el
+ * listado (donde tambien se muestra el tier). No hace optimistic update: esperamos la respuesta real del
+ * backend antes de refrescar, para no mostrar un cambio que el gate podria rechazar.
+ */
+export function useChangeTier() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, tier }: { id: string; tier: ProfileTier }) =>
+      apiFetch<{ profile: Profile }>(`/v1/admin/users/${id}/tier`, {
+        method: 'PUT',
+        body: JSON.stringify({ tier }),
+      }).then((r) => r.profile),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['admin'] }),
   });
 }

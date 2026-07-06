@@ -13,6 +13,8 @@ import type { Recipe, RecipeSummary } from './recipes';
 import type { JobsPage, JobStatusFilter } from './jobs';
 import { JOB_PAGE_SIZE, JOBS_REFETCH_MS, buildJobsQuery, hasInFlightJobs } from './jobs';
 import type { ConsentsState, DataRequest } from './privacy';
+import type { AdminUserDetail, AdminUsersResponse } from './admin';
+import { ADMIN_USERS_PAGE_SIZE, buildAdminUsersQuery } from './admin';
 
 /** Estado de registro del usuario actual (perfil, organizacion, plan y uso). */
 export function useMe() {
@@ -151,6 +153,52 @@ export function useDashboard(range: UsageRange = {}) {
     // Al cambiar de rango la queryKey cambia: sin esto la vista se remontaria al SkeletonList (salto de
     // layout) y el indicador "Actualizando" no aparecia. keepPreviousData conserva los datos del rango
     // anterior mientras carga el nuevo, asi el refetch es silencioso (isLoading=false, isFetching=true).
+    placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * PANEL DE ADMIN -- LISTADO de usuarios de la plataforma (GET /v1/admin/users), paginado con "cargar mas"
+ * (useInfiniteQuery), mismo patron que useJobs. Cada pagina trae ADMIN_USERS_PAGE_SIZE usuarios;
+ * getNextPageParam avanza el offset mientras el backend diga hasMore. El termino de busqueda va en la
+ * queryKey: cambiarlo arranca una lista nueva (y resetea el "cargar mas"). Solo lo consume el area /admin,
+ * que ya vive detras del AdminGate; el backend igual gatea por rol (403 a un no-admin).
+ */
+export function useAdminUsers(search?: string) {
+  const term = search?.trim() ? search.trim() : undefined;
+  return useInfiniteQuery({
+    queryKey: ['admin', 'users', 'list', term ?? null],
+    queryFn: ({ pageParam }) =>
+      apiFetch<AdminUsersResponse>(
+        `/v1/admin/users${buildAdminUsersQuery({ limit: ADMIN_USERS_PAGE_SIZE, offset: pageParam, search: term })}`,
+      ),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) =>
+      lastPage.pagination.hasMore ? lastPage.pagination.offset + lastPage.pagination.limit : undefined,
+  });
+}
+
+/** PANEL DE ADMIN -- FICHA de un usuario objetivo (GET /v1/admin/users/:id). Solo corre con un id presente. */
+export function useAdminUser(id: string | undefined) {
+  return useQuery({
+    queryKey: ['admin', 'users', 'detail', id],
+    queryFn: () => apiFetch<AdminUserDetail>(`/v1/admin/users/${id}`),
+    enabled: Boolean(id),
+  });
+}
+
+/**
+ * PANEL DE ADMIN -- ACTIVIDAD de un usuario objetivo (GET /v1/admin/users/:id/activity). Devuelve el MISMO
+ * shape que el dashboard del propio usuario (DashboardSummary): los tres ejes, pero del :id objetivo. El
+ * rango (?from/?to) va en la queryKey; keepPreviousData evita el salto al skeleton al cambiar de preset
+ * (refetch silencioso), igual que useDashboard. Solo corre con un id presente.
+ */
+export function useAdminUserActivity(id: string | undefined, range: UsageRange = {}) {
+  const query = dashboardQueryString(range);
+  return useQuery({
+    queryKey: ['admin', 'users', 'activity', id, range.from ?? null, range.to ?? null],
+    queryFn: () => apiFetch<DashboardSummary>(`/v1/admin/users/${id}/activity${query}`),
+    enabled: Boolean(id),
     placeholderData: keepPreviousData,
   });
 }
