@@ -52,6 +52,7 @@ const individualState = {
   organization: null,
   subscription: { id: 's1', profileId: 'user-1', plan: 'free', status: 'active', createdAt: 'x' },
   usageCounter: { id: 'u1', profileId: 'user-1', runsUsed: 0, runsLimit: 10, periodKind: 'lifetime', createdAt: 'x' },
+  isAdmin: false,
 };
 
 let app: FastifyInstance;
@@ -179,6 +180,9 @@ describe('GET /v1/me', () => {
     expect(res.json().profile.id).toBe('user-1');
     expect(res.json().profile.tier).toBe('free');
     expect(res.json().usageCounter.periodKind).toBe('lifetime');
+    // /v1/me reenvia el flag de admin tal cual lo calcula el repo (passthrough): la consola lo consume
+    // para mostrar/ocultar el area de admin. La seguridad real sigue siendo server-side.
+    expect(res.json().isAdmin).toBe(false);
   });
 });
 

@@ -6,6 +6,7 @@ import type { AgentUsage, UsageRange } from './usage';
 import type { DashboardSummary } from './dashboard';
 import { dashboardQueryString } from './dashboard';
 import type { RegistrationState } from './registration';
+import { deriveIsAdmin } from './registration';
 import type { ScheduledTask } from './scheduled-tasks';
 import type { Trigger } from './triggers';
 import type { Recipe, RecipeSummary } from './recipes';
@@ -19,6 +20,20 @@ export function useMe() {
     queryKey: ['me'],
     queryFn: () => apiFetch<RegistrationState>('/v1/me'),
   });
+}
+
+/**
+ * Deriva de /v1/me (useMe) si el usuario actual es super-admin de plataforma, con su estado de carga.
+ * NO hace un fetch nuevo: reusa la query ['me'] que ya consumen los gates de registro/consentimiento,
+ * asi que cuando la consola llega al layout el dato ya suele estar en cache (sin parpadeo del item de
+ * admin). isAdmin es fail-closed: false mientras carga o si el backend no marca el flag.
+ *
+ * IMPORTANTE: esto es UX cosmetica (mostrar/ocultar el area de admin). La seguridad real es server-side:
+ * requireAdminRole gatea los endpoints admin y un no-admin recibe 403 aunque forzara la ruta.
+ */
+export function useIsAdmin(): { isAdmin: boolean; isLoading: boolean } {
+  const { data, isLoading } = useMe();
+  return { isAdmin: deriveIsAdmin(data), isLoading };
 }
 
 export function useAgents() {

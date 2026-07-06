@@ -61,6 +61,13 @@ export interface RegistrationState {
   organization: Organization | null;
   subscription: Subscription | null;
   usageCounter: UsageCounter | null;
+  /**
+   * Super-admin de PLATAFORMA (profiles.is_admin, V021). Eje ORTOGONAL al role de org y al tier. La
+   * consola lo usa SOLO para decidir si muestra el area de admin (UX cosmetica). La AUTORIDAD del acceso
+   * es server-side: requireAdminRole gatea los endpoints admin y un no-admin recibe 403 aunque forzara
+   * la ruta. Fail-closed: el backend lo devuelve false cuando no hay perfil.
+   */
+  isAdmin: boolean;
 }
 
 /** Respuesta de los endpoints de registro: el estado consolidado + si esta llamada creo el perfil. */
@@ -103,6 +110,16 @@ export function classifyRegistration(state: RegistrationState): Access {
     return 'pending';
   }
   return 'active';
+}
+
+/**
+ * Deriva si el usuario actual es super-admin de plataforma a partir de la respuesta de /v1/me. Pura y
+ * testeable (igual que classifyRegistration). Fail-closed: false mientras /v1/me no resuelve (state
+ * undefined) o si el backend no marca isAdmin. Recordatorio: esto solo decide la UX (mostrar/ocultar el
+ * area de admin); la seguridad real la impone el backend (requireAdminRole devuelve 403 a un no-admin).
+ */
+export function deriveIsAdmin(state: RegistrationState | undefined): boolean {
+  return state?.isAdmin === true;
 }
 
 /** Limite de longitud de nombres, alineado con los schemas zod del backend (string max 200). */

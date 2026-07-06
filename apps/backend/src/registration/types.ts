@@ -135,6 +135,13 @@ export interface RegistrationState {
   organization: Organization | null;
   subscription: Subscription | null;
   usageCounter: UsageCounter | null;
+  /**
+   * Super-admin de PLATAFORMA (profiles.is_admin, V021). Se expone aca -- eje ORTOGONAL al role de org
+   * y al tier -- solo para que la consola sepa si mostrar el area de admin (UX). La AUTORIDAD del acceso
+   * sigue siendo server-side (requireAdminRole gatea los endpoints admin y devuelve 403 a un no-admin);
+   * este flag es puramente cosmetico. Fail-closed: false cuando no hay perfil (needsRegistration).
+   */
+  isAdmin: boolean;
 }
 
 /** Resultado de un endpoint de registro: el estado + si esta llamada creo el perfil (vs idempotente). */
