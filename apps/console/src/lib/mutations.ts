@@ -26,6 +26,7 @@ import type {
   ProfileTier,
   RegistrationResult,
   RegistrationState,
+  UpdateProfileNameInput,
 } from './registration';
 import type { Consent, CreateConsentInput, CreateDataRequestInput, DataRequest } from './privacy';
 
@@ -56,6 +57,28 @@ export function useRegisterOrganization() {
       }),
     onSuccess: (result) => {
       qc.setQueryData<RegistrationState>(['me'], result);
+    },
+  });
+}
+
+/**
+ * Edita el PROPIO nombre del usuario (PATCH /v1/me/profile con { fullName }). Reusa el patron de
+ * useRegisterIndividual: el endpoint devuelve el estado consolidado (misma forma que GET /v1/me), asi que
+ * al exito refrescamos la cache ['me'] con setQueryData -- sin una segunda lectura -- y toda la consola
+ * (Sidebar, gates, pantalla de perfil) ve el nombre nuevo de inmediato. El backend valida el mismo
+ * criterio de nombre que el registro y descarta cualquier otro campo del body (no puede tocar
+ * tier/role/is_admin). Los errores (400/401/404) los mapea la UI con updateProfileNameErrorMessage.
+ */
+export function useUpdateProfileName() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateProfileNameInput) =>
+      apiFetch<RegistrationState>('/v1/me/profile', {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
+    onSuccess: (state) => {
+      qc.setQueryData<RegistrationState>(['me'], state);
     },
   });
 }

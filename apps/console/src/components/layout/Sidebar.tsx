@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Activity, Bot, CalendarClock, ChefHat, KeyRound, LayoutDashboard, LogOut, ShieldCheck, Users, Webhook } from 'lucide-react';
+import { Activity, Bot, CalendarClock, ChefHat, KeyRound, LayoutDashboard, LogOut, ShieldCheck, User, Users, Webhook } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../auth/useAuth';
 import { useIsAdmin } from '../../lib/queries';
@@ -63,10 +63,28 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
 
       <div className="border-t border-line pt-4">
-        <p className="truncate px-2 pb-2.5 text-xs text-muted-soft">{user?.email}</p>
+        {/* Acceso al perfil: el email deja de ser texto muerto y se vuelve el enlace a /perfil (con el
+            resalte de ruta activa, igual que la nav). El boton de cerrar sesion se queda debajo. */}
+        <NavLink
+          to="/perfil"
+          onClick={onNavigate}
+          className={({ isActive }) =>
+            [
+              'flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition',
+              focusRing,
+              isActive ? 'bg-brasa-soft text-brasa' : 'text-ink-soft hover:bg-line-soft',
+            ].join(' ')
+          }
+        >
+          <User className="h-[18px] w-[18px] flex-none" />
+          <span className="flex min-w-0 flex-col">
+            <span className="font-medium leading-tight">Mi cuenta</span>
+            <span className="truncate text-xs text-muted-soft">{user?.email}</span>
+          </span>
+        </NavLink>
         <button
           onClick={handleLogout}
-          className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted transition hover:bg-line-soft hover:text-ink ${focusRing}`}
+          className={`mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted transition hover:bg-line-soft hover:text-ink ${focusRing}`}
         >
           <LogOut className="h-[17px] w-[17px]" />
           Cerrar sesión

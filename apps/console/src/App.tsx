@@ -14,6 +14,7 @@ import { ActivityPage } from './pages/ActivityPage';
 import { PlaygroundPage } from './pages/PlaygroundPage';
 import { ConnectPage } from './pages/ConnectPage';
 import { UsagePage } from './pages/UsagePage';
+import { ProfilePage } from './pages/ProfilePage';
 import { PrivacyNoticePage } from './pages/PrivacyNoticePage';
 import { PrivacySimplifiedNoticePage } from './pages/PrivacySimplifiedNoticePage';
 import { PrivacyRightsPage } from './pages/PrivacyRightsPage';
@@ -90,6 +91,9 @@ export function App() {
               <Route path="/recetas" element={<RecipesPage />} />
               {/* Observabilidad: historial de ejecuciones (jobs). Solo lectura, sin gate por tier. */}
               <Route path="/actividad" element={<ActivityPage />} />
+              {/* Perfil de usuario: datos de cuenta, edicion del propio nombre, resumen de cuota y cerrar
+                  sesion. Para cualquier usuario logueado -- SIN AdminGate (no es area de admin). */}
+              <Route path="/perfil" element={<ProfilePage />} />
               {/* Ejercicio de derechos del titular (ARCO/GDPR). */}
               <Route path="/privacidad" element={<PrivacyRightsPage />} />
               {/* Area de ADMIN: vive en el mismo layout pero detras del AdminGate, que devuelve a la

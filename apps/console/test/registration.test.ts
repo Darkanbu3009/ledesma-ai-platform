@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   classifyRegistration,
   deriveIsAdmin,
+  updateProfileNameErrorMessage,
   validateName,
   NAME_MAX_LENGTH,
   type Organization,
@@ -127,5 +128,21 @@ describe('validateName', () => {
 
   it('acepta exactamente el limite de caracteres', () => {
     expect(validateName('a'.repeat(NAME_MAX_LENGTH))).toBeUndefined();
+  });
+});
+
+describe('updateProfileNameErrorMessage', () => {
+  it('mapea 400 a un mensaje de nombre invalido', () => {
+    expect(updateProfileNameErrorMessage({ status: 400 })).toMatch(/nombre/i);
+  });
+
+  it('mapea 401 a un mensaje de sesion expirada', () => {
+    expect(updateProfileNameErrorMessage({ status: 401 })).toMatch(/sesión/i);
+  });
+
+  it('cae a un mensaje generico reintentable para cualquier otro caso', () => {
+    expect(updateProfileNameErrorMessage({ status: 500 })).toMatch(/Intenta de nuevo/);
+    expect(updateProfileNameErrorMessage(null)).toMatch(/Intenta de nuevo/);
+    expect(updateProfileNameErrorMessage(new Error('boom'))).toMatch(/Intenta de nuevo/);
   });
 });
