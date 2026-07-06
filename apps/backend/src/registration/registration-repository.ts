@@ -1,8 +1,10 @@
 import type { Sql } from '../db/client.js';
 import type {
   AccountType,
+  AdminUserDetail,
   AdminUserListItem,
   AdminUserPage,
+  AdminUserProfile,
   Organization,
   Profile,
   ProfileRole,
@@ -110,6 +112,23 @@ function rowToAdminUser(row: AdminUserRow): AdminUserListItem {
  */
 function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
+/**
+ * Mapea un Profile de dominio + su flag is_admin (que Profile no lleva) a la vista curada de la FICHA de
+ * admin (AdminUserProfile). Deja fuera org_id/updated_at: la ficha expone solo lo que la UI necesita.
+ */
+function profileToAdminProfile(profile: Profile, isAdmin: boolean): AdminUserProfile {
+  return {
+    id: profile.id,
+    fullName: profile.fullName,
+    accountType: profile.accountType,
+    role: profile.role,
+    isAdmin,
+    tier: profile.tier,
+    identityVerified: profile.identityVerified,
+    createdAt: profile.createdAt,
+  };
 }
 
 function rowToProfile(row: ProfileRow): Profile {
@@ -222,6 +241,40 @@ export class RegistrationRepository {
   /** Estado de registro de un sub (para GET /v1/me). */
   async getState(sub: string): Promise<RegistrationState> {
     return this.loadState(this.sql, sub);
+  }
+
+  /**
+   * FICHA de un usuario OBJETIVO arbitrario para el panel de admin (GET /v1/admin/users/:id, gateado por
+   * requireAdminRole). Es la VARIANTE admin de getState: en vez del sub del propio llamador toma un id
+   * cualquiera, y ADEMAS del profile/subscription/usageCounter agrega el email (auth.users) y el flag
+   * is_admin (columna aparte) que la ficha necesita y que el modelo Profile no lleva. Read-only, rol de
+   * servicio (omite RLS). Devuelve null si el usuario objetivo no existe (el route responde 404).
+   *
+   * REUSA loadState para subscription/usageCounter (misma logica que /v1/me, SIN duplicar SQL) y hace UNA
+   * query dedicada para is_admin + email con el mismo left join a auth.users que listUsers. loadState/getState
+   * del usuario propio quedan intactos: esto es aditivo.
+   */
+  async getUserDetail(id: string): Promise<AdminUserDetail | null> {
+    const state = await this.loadState(this.sql, id);
+    // profile null == no existe perfil para ese id -> sin ficha (404 en el route).
+    if (state.profile === null) {
+      return null;
+    }
+    // is_admin (columna aparte, V021) y email (auth.users, no profiles) no viven en el modelo Profile: una
+    // query dedicada de 2 columnas con el mismo left join a auth.users que listUsers (rol de servicio).
+    const metaRows = await this.sql<{ is_admin: boolean; email: string | null }[]>`
+      select p.is_admin, u.email
+      from profiles p
+      left join auth.users u on u.id = p.id
+      where p.id = ${id}
+    `;
+    const meta = metaRows[0];
+    return {
+      profile: profileToAdminProfile(state.profile, meta?.is_admin === true),
+      email: meta?.email ?? null,
+      subscription: state.subscription,
+      usageCounter: state.usageCounter,
+    };
   }
 
   /**

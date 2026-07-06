@@ -60,6 +60,39 @@ export interface AdminUserPage {
   total: number;
 }
 
+/**
+ * Perfil de un usuario tal como lo consume la FICHA del panel de admin (GET /v1/admin/users/:id). Es la
+ * vista curada que necesita la UI: los campos de profiles MAS is_admin (columna aparte, V021, que el modelo
+ * Profile de dominio no lleva). El email NO va aca sino como campo hermano en AdminUserDetail (vive en
+ * auth.users, no en profiles).
+ */
+export interface AdminUserProfile {
+  /** = profiles.id = auth.users.id = sub del JWT. */
+  id: string;
+  fullName: string;
+  accountType: AccountType;
+  role: ProfileRole;
+  /** Super-admin de plataforma (profiles.is_admin, V021). */
+  isAdmin: boolean;
+  tier: ProfileTier;
+  identityVerified: boolean;
+  createdAt: string;
+}
+
+/**
+ * FICHA de un usuario para el panel de admin (GET /v1/admin/users/:id). Detalle read-only de un usuario
+ * OBJETIVO arbitrario: su perfil (con is_admin), su email (join a auth.users), su suscripcion y su contador
+ * de uso. subscription/usageCounter pueden ser null (un perfil recien creado o una empresa sin plan). Si el
+ * usuario objetivo no existe, el repo devuelve null y el route responde 404 (no hay ficha vacia).
+ */
+export interface AdminUserDetail {
+  profile: AdminUserProfile;
+  /** auth.users.email (via join). null si no se encuentra la fila de auth. */
+  email: string | null;
+  subscription: Subscription | null;
+  usageCounter: UsageCounter | null;
+}
+
 /** Organizacion (cuenta empresa). Arranca en 'pending' hasta que un super-admin la aprueba. */
 export interface Organization {
   id: string;

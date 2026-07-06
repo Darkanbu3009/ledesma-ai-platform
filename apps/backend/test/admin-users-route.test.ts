@@ -26,6 +26,9 @@ const verifier: JwtVerifier = {
 // El rol se lee server-side por sub: admin-1 es super-admin, cualquier otro NO.
 const isAdmin = vi.fn(async (sub: string) => sub === 'admin-1');
 const listUsers = vi.fn();
+// La ficha (GET /v1/admin/users/:id) usa getUserDetail; aca solo se prueba el listado, pero el tipo del
+// repo la exige, asi que se stubea (nunca se invoca en estas pruebas). Su cobertura vive en su propio test.
+const getUserDetail = vi.fn();
 
 /** Fila del listado tal como la devuelve RegistrationRepository.listUsers (camelCase, con email del join). */
 function makeUser(overrides: Record<string, unknown> = {}) {
@@ -47,7 +50,7 @@ async function makeApp(): Promise<FastifyInstance> {
   const config = parseEnv(BASE);
   const app = Fastify();
   registerErrorHandler(app, config);
-  await app.register(adminUsersRoutes(config, { verifier, repo: { isAdmin, listUsers } }));
+  await app.register(adminUsersRoutes(config, { verifier, repo: { isAdmin, listUsers, getUserDetail } }));
   return app;
 }
 
