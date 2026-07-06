@@ -32,6 +32,34 @@ export interface Profile {
   updatedAt: string;
 }
 
+/**
+ * Fila del LISTADO DE USUARIOS del panel de admin (GET /v1/admin/users). Vista a nivel PLATAFORMA
+ * (todos los usuarios), NO por owner: la proteccion es el gate de admin, no un filtro de pertenencia.
+ * Deriva de profiles pero AGREGA el email, que no vive en profiles sino en auth.users (join server-side
+ * con el rol de servicio). email es null si no hubiera fila en auth.users (left join defensivo).
+ */
+export interface AdminUserListItem {
+  /** = profiles.id = auth.users.id = sub del JWT. */
+  id: string;
+  /** auth.users.email (via join). null si no se encuentra la fila de auth. */
+  email: string | null;
+  fullName: string;
+  accountType: AccountType;
+  role: ProfileRole;
+  /** Super-admin de plataforma (profiles.is_admin, V021). */
+  isAdmin: boolean;
+  tier: ProfileTier;
+  identityVerified: boolean;
+  createdAt: string;
+}
+
+/** Pagina del listado de usuarios: las filas + el total de la plataforma (para la paginacion). */
+export interface AdminUserPage {
+  users: AdminUserListItem[];
+  /** Total de perfiles que matchean (ignora limit/offset), para calcular paginas en la UI. */
+  total: number;
+}
+
 /** Organizacion (cuenta empresa). Arranca en 'pending' hasta que un super-admin la aprueba. */
 export interface Organization {
   id: string;
