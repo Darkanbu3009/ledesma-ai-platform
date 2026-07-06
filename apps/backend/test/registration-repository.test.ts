@@ -53,11 +53,11 @@ function makeSql(results: Array<unknown[] | Error>): MockSql {
 const TS = '2026-06-28T00:00:00.000Z';
 const individualProfileRow = {
   id: 'user-1', org_id: null, account_type: 'individual', role: 'individual',
-  full_name: 'Ada', identity_verified: false, tier: 'free', created_at: TS, updated_at: TS,
+  full_name: 'Ada', identity_verified: false, tier: 'free', is_admin: false, created_at: TS, updated_at: TS,
 };
 const orgProfileRow = {
   id: 'user-1', org_id: 'org-1', account_type: 'empresa_member', role: 'org_admin',
-  full_name: 'Ada', identity_verified: false, tier: 'free', created_at: TS, updated_at: TS,
+  full_name: 'Ada', identity_verified: false, tier: 'free', is_admin: false, created_at: TS, updated_at: TS,
 };
 const subRow = { id: 's1', profile_id: 'user-1', plan: 'free', status: 'active', created_at: TS };
 const usageRow = { id: 'u1', profile_id: 'user-1', runs_used: 0, runs_limit: 10, period_kind: 'lifetime', created_at: TS };
@@ -217,7 +217,27 @@ describe('RegistrationRepository.getState', () => {
     expect(state.organization).toBeNull(); // org_id null -> no consulta organizations
     expect(state.subscription?.plan).toBe('free');
     expect(state.usageCounter?.runsLimit).toBe(10);
+    expect(state.isAdmin).toBe(false); // is_admin false en la fila -> no admin
     expect(allText(sql)).not.toContain('from organizations');
+
+    // Columnas EXPLICITAS (nunca select *): is_admin viaja en el select de perfil de loadState, si no
+    // /v1/me no podria exponer el flag de admin.
+    expect(findCall(sql, 'from profiles')?.text).toContain('is_admin');
+  });
+
+  it('expone isAdmin true cuando el perfil es super-admin (is_admin true)', async () => {
+    const adminRow = { ...individualProfileRow, is_admin: true };
+    const sql = makeSql([[adminRow], [subRow], [usageRow]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    const state = await repo.getState('user-1');
+    expect(state.isAdmin).toBe(true);
+  });
+
+  it('isAdmin false (fail-closed) cuando no hay perfil', async () => {
+    const sql = makeSql([[]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    const state = await repo.getState('user-1');
+    expect(state.isAdmin).toBe(false);
   });
 
   it('incluye la organizacion cuando el perfil tiene org_id', async () => {

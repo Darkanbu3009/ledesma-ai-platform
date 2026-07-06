@@ -27,6 +27,10 @@ interface ProfileRow {
   full_name: string;
   identity_verified: boolean;
   tier: string;
+  // Super-admin de plataforma (V021). Se selecciona para exponer isAdmin en /v1/me (UX de la consola);
+  // NO se mapea al modelo Profile de dominio (que sigue sin llevarlo), sino al campo hermano isAdmin
+  // del RegistrationState.
+  is_admin: boolean;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -196,7 +200,7 @@ export class RegistrationRepository {
    */
   private async loadState(sql: Sql, sub: string): Promise<RegistrationState> {
     const profileRows = await sql<ProfileRow[]>`
-      select id, org_id, account_type, role, full_name, identity_verified, tier, created_at, updated_at
+      select id, org_id, account_type, role, full_name, identity_verified, tier, is_admin, created_at, updated_at
       from profiles where id = ${sub}
     `;
     const profileRow = profileRows[0];
@@ -207,6 +211,8 @@ export class RegistrationRepository {
         organization: null,
         subscription: null,
         usageCounter: null,
+        // Sin perfil no hay rol posible: fail-closed en false.
+        isAdmin: false,
       };
     }
     const profile = rowToProfile(profileRow);
@@ -235,7 +241,16 @@ export class RegistrationRepository {
     const usageRow = usageRows[0];
     const usageCounter = usageRow ? rowToUsageCounter(usageRow) : null;
 
-    return { needsRegistration: false, profile, organization, subscription, usageCounter };
+    return {
+      needsRegistration: false,
+      profile,
+      organization,
+      subscription,
+      usageCounter,
+      // is_admin (V021) es ortogonal al Profile de dominio: se lee de la fila y se expone como campo
+      // hermano, solo para la UX de la consola. La autoridad del acceso es server-side (requireAdminRole).
+      isAdmin: profileRow.is_admin === true,
+    };
   }
 
   /** Estado de registro de un sub (para GET /v1/me). */

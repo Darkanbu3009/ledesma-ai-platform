@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   classifyRegistration,
+  deriveIsAdmin,
   validateName,
   NAME_MAX_LENGTH,
   type Organization,
@@ -43,6 +44,7 @@ function state(over: Partial<RegistrationState>): RegistrationState {
     organization: null,
     subscription: null,
     usageCounter: null,
+    isAdmin: false,
     ...over,
   };
 }
@@ -84,6 +86,25 @@ describe('classifyRegistration', () => {
     expect(
       classifyRegistration(state({ profile: empresaProfile, organization: org('rejected') })),
     ).toBe('pending');
+  });
+});
+
+describe('deriveIsAdmin', () => {
+  it('true cuando /v1/me marca isAdmin', () => {
+    expect(deriveIsAdmin(state({ isAdmin: true, profile: individualProfile }))).toBe(true);
+  });
+
+  it('false cuando /v1/me marca isAdmin false (usuario normal)', () => {
+    expect(deriveIsAdmin(state({ isAdmin: false, profile: individualProfile }))).toBe(false);
+  });
+
+  it('false (fail-closed) mientras /v1/me no resuelve (state undefined)', () => {
+    expect(deriveIsAdmin(undefined)).toBe(false);
+  });
+
+  it('no confunde el rol de org (org_admin) con super-admin de plataforma', () => {
+    // Un org_admin NO es admin de plataforma: el flag que manda es isAdmin, no role.
+    expect(deriveIsAdmin(state({ isAdmin: false, profile: empresaProfile }))).toBe(false);
   });
 });
 

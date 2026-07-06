@@ -20,7 +20,9 @@ import { PrivacyRightsPage } from './pages/PrivacyRightsPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { RegistrationGate } from './components/RegistrationGate';
 import { ConsentGate } from './components/ConsentGate';
+import { AdminGate } from './components/AdminGate';
 import { AppLayout } from './components/layout/AppLayout';
+import { AdminPage } from './pages/AdminPage';
 
 // El Panel carga Recharts (pesado). Se importa de forma diferida para que su codigo NO entre al bundle
 // inicial: solo se descarga al entrar a /dashboard, dejando el resto de la consola sin ese peso.
@@ -84,6 +86,13 @@ export function App() {
               <Route path="/actividad" element={<ActivityPage />} />
               {/* Ejercicio de derechos del titular (ARCO/GDPR). */}
               <Route path="/privacidad" element={<PrivacyRightsPage />} />
+              {/* Area de ADMIN: vive en el mismo layout pero detras del AdminGate, que devuelve a la
+                  home a quien no es super-admin. Guard COSMETICO (UX): la autoridad real es el gate
+                  server-side (requireAdminRole) que ya protege los endpoints. En este andamiaje la
+                  ruta solo renderiza un placeholder; las pantallas reales llegan despues. */}
+              <Route element={<AdminGate />}>
+                <Route path="/admin" element={<AdminPage />} />
+              </Route>
             </Route>
           </Route>
         </Route>

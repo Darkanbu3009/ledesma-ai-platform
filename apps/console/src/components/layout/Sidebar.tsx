@@ -1,7 +1,8 @@
 import { NavLink } from 'react-router-dom';
-import { Activity, Bot, CalendarClock, ChefHat, KeyRound, LayoutDashboard, LogOut, ShieldCheck, Webhook } from 'lucide-react';
+import { Activity, Bot, CalendarClock, ChefHat, KeyRound, LayoutDashboard, LogOut, ShieldCheck, Users, Webhook } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../auth/useAuth';
+import { useIsAdmin } from '../../lib/queries';
 import { focusRing } from '../../lib/utils';
 import { BrandMark } from '../BrandMark';
 
@@ -16,8 +17,17 @@ const navItems = [
   { to: '/privacidad', label: 'Privacidad', icon: ShieldCheck },
 ];
 
+/** Item de nav del area de admin. Solo se agrega cuando useIsAdmin() resuelve true (ver abajo). */
+const adminNavItem = { to: '/admin', label: 'Admin', icon: Users };
+
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { user } = useAuth();
+  // Item de admin CONDICIONAL: solo visible para super-admins. No parpadea porque el Sidebar se monta por
+  // dentro de RegistrationGate, que ya resolvio /v1/me antes de renderizar el layout: al montar, isAdmin ya
+  // es su valor final (un admin lo ve desde el primer paint; un usuario normal nunca). Es UX cosmetica -- el
+  // acceso real lo impone el backend (requireAdminRole), no la presencia de este item.
+  const { isAdmin } = useIsAdmin();
+  const items = isAdmin ? [...navItems, adminNavItem] : navItems;
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -31,7 +41,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </div>
 
       <nav className="mt-7 flex-1 space-y-1">
-        {navItems.map((item) => (
+        {items.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
