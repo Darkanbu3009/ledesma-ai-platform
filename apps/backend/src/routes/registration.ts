@@ -22,8 +22,10 @@ const OrganizationBodySchema = z.object({
 });
 
 // Body del cambio de tier (super-admin): el plan al que se mueve el perfil. Mismo set de valores que
-// el CHECK de profiles.tier (V007). Es la palanca manual hasta que exista facturacion.
-const TierBodySchema = z.object({
+// el CHECK de profiles.tier (V007). Es la palanca manual hasta que exista facturacion. Se EXPORTA para
+// que el camino atribuible (PUT /v1/admin/users/:id/tier, gate por rol) reuse EXACTAMENTE la misma
+// validacion del enum -> una sola fuente de verdad para los tiers validos, sin duplicar el literal.
+export const TierBodySchema = z.object({
   tier: z.enum(['free', 'pro', 'autonomous']),
 });
 
