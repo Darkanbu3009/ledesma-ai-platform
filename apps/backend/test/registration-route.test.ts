@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { registerIndividualMock, registerOrganizationMock, getStateMock, approveOrganizationMock, updateProfileTierMock, updateOwnProfileNameMock, getProfileTierMock, recordAdminActionMock } = vi.hoisted(() => ({
+const { registerIndividualMock, registerOrganizationMock, getStateMock, approveOrganizationMock, updateProfileTierMock, updateOwnProfileNameMock, getProfileTierMock, recordAdminActionMock, enviarBienvenidaMock } = vi.hoisted(() => ({
   registerIndividualMock: vi.fn(),
   registerOrganizationMock: vi.fn(),
   getStateMock: vi.fn(),
@@ -9,6 +9,7 @@ const { registerIndividualMock, registerOrganizationMock, getStateMock, approveO
   updateOwnProfileNameMock: vi.fn(),
   getProfileTierMock: vi.fn(),
   recordAdminActionMock: vi.fn(),
+  enviarBienvenidaMock: vi.fn(),
 }));
 
 vi.mock('../src/registration/registration-repository.js', () => ({
@@ -24,6 +25,13 @@ vi.mock('../src/registration/registration-repository.js', () => ({
   },
 }));
 vi.mock('../src/db/client.js', () => ({ getSql: vi.fn(() => ({})), setSqlForTesting: vi.fn() }));
+
+// Emisor del correo de bienvenida mockeado: no toca la red. crearEmisorBienvenida devuelve un emisor
+// cuyo enviarBienvenida es un mock que podemos afirmar (llamado/no-llamado) y hacer fallar para probar
+// el best-effort. No enviamos correos reales en CI.
+vi.mock('../src/email/welcome-email.js', () => ({
+  crearEmisorBienvenida: vi.fn(() => ({ enviarBienvenida: enviarBienvenidaMock })),
+}));
 
 // Mockeamos jose para verificar JWT sin red (mismo enfoque que agents-route.test.ts).
 vi.mock('jose', () => ({
@@ -67,6 +75,7 @@ beforeEach(async () => {
   updateOwnProfileNameMock.mockReset();
   getProfileTierMock.mockReset();
   recordAdminActionMock.mockReset();
+  enviarBienvenidaMock.mockReset();
   app = await buildServer(parseEnv(ENV));
 });
 
@@ -167,7 +176,114 @@ describe('POST /v1/register/organization', () => {
   });
 });
 
+describe('correo de bienvenida tras el registro (best-effort, una sola vez)', () => {
+  it('individual: tras un alta REAL (created) dispara la bienvenida con el email del token y el nombre', async () => {
+    registerIndividualMock.mockResolvedValue(individualState); // created: true
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/register/individual',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { full_name: 'Ada' },
+    });
+    expect(res.statusCode).toBe(201);
+    // El email sale del JWT (contexto del registro), no de un query extra; el nombre, del body.
+    expect(enviarBienvenidaMock).toHaveBeenCalledTimes(1);
+    expect(enviarBienvenidaMock).toHaveBeenCalledWith({ email: 'u1@test.com', fullName: 'Ada' });
+  });
+
+  it('empresa: tras un alta REAL (created) dispara la bienvenida una vez', async () => {
+    registerOrganizationMock.mockResolvedValue({
+      created: true,
+      needsRegistration: false,
+      profile: { id: 'user-1', orgId: 'org-1', accountType: 'empresa_member', role: 'org_admin', fullName: 'Ada', identityVerified: false, tier: 'free', createdAt: 'x', updatedAt: 'x' },
+      organization: { id: 'org-1', name: 'Acme', status: 'active', approvedAt: null, createdAt: 'x', updatedAt: 'x' },
+      subscription: { id: 's1', profileId: 'user-1', plan: 'free', status: 'active', createdAt: 'x' },
+      usageCounter: { id: 'u1', profileId: 'user-1', runsUsed: 0, runsLimit: 10, periodKind: 'lifetime', createdAt: 'x' },
+      isAdmin: false,
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/register/organization',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { org_name: 'Acme', full_name: 'Ada' },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(enviarBienvenidaMock).toHaveBeenCalledTimes(1);
+    expect(enviarBienvenidaMock).toHaveBeenCalledWith({ email: 'u1@test.com', fullName: 'Ada' });
+  });
+
+  it('NO se envia dos veces: en el re-registro idempotente (created=false) no dispara la bienvenida', async () => {
+    registerIndividualMock.mockResolvedValue({ ...individualState, created: false });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/register/individual',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { full_name: 'Ada' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(enviarBienvenidaMock).not.toHaveBeenCalled();
+  });
+
+  it('empresa: re-registro idempotente (created=false) tampoco dispara la bienvenida', async () => {
+    registerOrganizationMock.mockResolvedValue({
+      created: false,
+      needsRegistration: false,
+      profile: { id: 'user-1', orgId: 'org-1', accountType: 'empresa_member', role: 'org_admin', fullName: 'Ada', identityVerified: false, tier: 'free', createdAt: 'x', updatedAt: 'x' },
+      organization: { id: 'org-1', name: 'Acme', status: 'active', approvedAt: null, createdAt: 'x', updatedAt: 'x' },
+      subscription: { id: 's1', profileId: 'user-1', plan: 'free', status: 'active', createdAt: 'x' },
+      usageCounter: { id: 'u1', profileId: 'user-1', runsUsed: 0, runsLimit: 10, periodKind: 'lifetime', createdAt: 'x' },
+      isAdmin: false,
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/register/organization',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { org_name: 'Acme', full_name: 'Ada' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(enviarBienvenidaMock).not.toHaveBeenCalled();
+  });
+
+  it('best-effort: si enviarBienvenida rechaza (Resend caido), el registro conserva su 201 y su body', async () => {
+    registerIndividualMock.mockResolvedValue(individualState);
+    enviarBienvenidaMock.mockRejectedValue(new Error('resend caido'));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/register/individual',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { full_name: 'Ada' },
+    });
+    // El registro NO se rompe por el fallo del correo: mismo status y mismo efecto (profile+subscription).
+    expect(res.statusCode).toBe(201);
+    expect(res.json().created).toBe(true);
+    expect(res.json().subscription.plan).toBe('free');
+    expect(enviarBienvenidaMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('best-effort: si enviarBienvenida lanza de forma sincrona, el registro conserva su 201', async () => {
+    registerIndividualMock.mockResolvedValue(individualState);
+    enviarBienvenidaMock.mockImplementation(() => {
+      throw new Error('boom sincrono');
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/register/individual',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { full_name: 'Ada' },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().created).toBe(true);
+  });
+});
+
 describe('GET /v1/me', () => {
+  it('login normal (GET /v1/me) NO dispara ningun correo de bienvenida', async () => {
+    getStateMock.mockResolvedValue({ ...individualState, created: undefined });
+    const res = await app.inject({ method: 'GET', url: '/v1/me', headers: { authorization: 'Bearer valid-user-1' } });
+    expect(res.statusCode).toBe(200);
+    expect(enviarBienvenidaMock).not.toHaveBeenCalled();
+  });
+
   it('401 sin Authorization', async () => {
     const res = await app.inject({ method: 'GET', url: '/v1/me' });
     expect(res.statusCode).toBe(401);
