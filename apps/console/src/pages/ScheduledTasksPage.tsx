@@ -12,6 +12,7 @@ import { SkeletonList } from '../components/ui/SkeletonList';
 import { ErrorState } from '../components/ui/ErrorState';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Notice, type NoticeData } from '../components/ui/Notice';
+import { RequestUpgradeCta } from '../components/upgrade/RequestUpgradeCta';
 
 const addButtonClass =
   'inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:-translate-y-px hover:bg-brasa-hover hover:shadow-[0_2px_6px_rgba(31,30,28,0.14)]';
@@ -27,7 +28,8 @@ function SchedulingLocked() {
         </span>
       }
       title="Una funcion del plan Autonomo"
-      description="Las tareas programadas ejecutan tus agentes solos, en el horario que elijas. Estan disponibles en el plan Autonomo. Cuando lo actives, vas a poder programarlas desde aqui."
+      description="Las tareas programadas ejecutan tus agentes solos, en el horario que elijas. Estan disponibles en el plan Autonomo."
+      action={<RequestUpgradeCta featureContext="scheduled_tasks" />}
     />
   );
 }
