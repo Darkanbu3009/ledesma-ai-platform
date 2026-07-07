@@ -10,7 +10,13 @@ import type { DashboardSummary } from '../src/lib/dashboard';
 // El hook de datos se mockea para poder ejercer la maquina de estados de la pantalla (carga / error /
 // vacio) sin red, sin react-query y sin renderizar Recharts (que necesita medir el contenedor).
 const { useDashboardMock } = vi.hoisted(() => ({ useDashboardMock: vi.fn() }));
-vi.mock('../src/lib/queries', () => ({ useDashboard: useDashboardMock }));
+// DashboardPage ahora corona el Panel con <OnboardingChecklist/>, que lee useOnboardingProgress. No es el
+// foco de estos tests: se fuerza a "cargando" para que el checklist renderice null y no interfiera con los
+// estados del Panel (skeleton / error / vacio) que aqui se ejercitan.
+vi.mock('../src/lib/queries', () => ({
+  useDashboard: useDashboardMock,
+  useOnboardingProgress: () => ({ isLoading: true }),
+}));
 
 import { DashboardPage } from '../src/pages/DashboardPage';
 

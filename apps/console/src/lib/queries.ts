@@ -16,6 +16,8 @@ import type { ConsentsState, DataRequest } from './privacy';
 import type { AdminUserDetail, AdminUsersResponse } from './admin';
 import { ADMIN_USERS_PAGE_SIZE, buildAdminUsersQuery } from './admin';
 import type { MyUpgradeRequestsState } from './upgrade-requests';
+import type { OnboardingProgress } from './onboarding';
+import { deriveOnboardingProgress, hasRunFromSummary } from './onboarding';
 
 /** Estado de registro del usuario actual (perfil, organizacion, plan y uso). */
 export function useMe() {
@@ -214,6 +216,41 @@ export function useAdminUserActivity(id: string | undefined, range: UsageRange =
     enabled: Boolean(id),
     placeholderData: keepPreviousData,
   });
+}
+
+/** Progreso del onboarding derivado de datos reales, mas el estado de carga y el id del primer agente. */
+export interface OnboardingProgressResult extends OnboardingProgress {
+  /** Id del primer agente del usuario (para el CTA "Ejecutar" -> /agentes/:id/playground). null si aun no hay. */
+  firstAgentId: string | null;
+  /** true mientras ALGUNA de las tres senales aun no resolvio: la UI espera para no parpadear un "0 de 3" falso. */
+  isLoading: boolean;
+}
+
+/**
+ * SENAL DE PROGRESO del onboarding guiado, DERIVADA de datos REALES (sin persistir estado en el cliente,
+ * sin localStorage, sin backend nuevo). Combina tres hooks ya existentes:
+ *  - hasCredential <- useCredentials (GET /v1/credentials): tiene >=1 credencial.
+ *  - hasAgent      <- useAgents (GET /v1/agents): tiene >=1 agente.
+ *  - hasRun        <- useDashboard SIN rango (GET /v1/dashboard): el resumen owner-scoped de agent_runs.
+ *    Se usa la ventana por defecto (30d): es estable frente al selector de rango del Panel (no depende de
+ *    su preset) y suficiente para un usuario nuevo, cuya primera corrida es reciente. Reusa el MISMO
+ *    endpoint del Panel; una corrida del Playground ya cuenta (se registra con el owner_id del agente).
+ *
+ * `isComplete` cuando las tres son verdaderas: ahi el checklist y la bienvenida se ocultan. Veraz: un
+ * paso solo se marca hecho si su dato real lo dice.
+ */
+export function useOnboardingProgress(): OnboardingProgressResult {
+  const credentials = useCredentials();
+  const agents = useAgents();
+  const dashboard = useDashboard();
+
+  const isLoading = credentials.isLoading || agents.isLoading || dashboard.isLoading;
+  const hasCredential = (credentials.data?.length ?? 0) > 0;
+  const hasAgent = (agents.data?.length ?? 0) > 0;
+  const hasRun = dashboard.data ? hasRunFromSummary(dashboard.data) : false;
+  const progress = deriveOnboardingProgress({ hasCredential, hasAgent, hasRun });
+
+  return { ...progress, firstAgentId: agents.data?.[0]?.id ?? null, isLoading };
 }
 
 export function useAgentUsage(id: string | undefined, range: UsageRange = {}) {

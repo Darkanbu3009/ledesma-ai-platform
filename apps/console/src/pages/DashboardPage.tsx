@@ -13,6 +13,7 @@ import { ErrorState } from '../components/ui/ErrorState';
 import { EmptyState } from '../components/ui/EmptyState';
 import { RangeSelector } from '../components/dashboard/RangeSelector';
 import { DashboardSummaryView } from '../components/dashboard/DashboardSummaryView';
+import { OnboardingChecklist } from '../components/onboarding/OnboardingChecklist';
 
 /** Estado vacio: el owner aun no ejecuto nada. Guia a crear y ejecutar un agente. Reusa EmptyState. */
 function DashboardEmptyState() {
@@ -55,6 +56,10 @@ export function DashboardPage() {
 
   return (
     <div className="mx-auto flex min-h-full max-w-5xl flex-col">
+      {/* Hilo guiado de primeros pasos (bienvenida + checklist). No intrusivo: se autooculta mientras
+          carga y cuando el onboarding esta completo, asi un usuario establecido no lo ve. */}
+      <OnboardingChecklist />
+
       <PageHeader
         title="Panel"
         subtitle="Tu actividad, operaciones y gasto en un vistazo."
