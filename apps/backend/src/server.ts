@@ -21,6 +21,7 @@ import { triggerRoutes } from './routes/triggers.js';
 import { incomingTriggerRoutes } from './routes/incoming-triggers.js';
 import { sessionTokenRoutes } from './routes/session-tokens.js';
 import { registrationRoutes } from './routes/registration.js';
+import { accountRoutes } from './routes/account.js';
 import { consentRoutes } from './routes/consents.js';
 import { dataSubjectRequestRoutes } from './routes/data-requests.js';
 import { processingRecordRoutes } from './routes/processing-records.js';
@@ -102,6 +103,10 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
   await app.register(incomingTriggerRoutes(config));
   await app.register(sessionTokenRoutes(config));
   await app.register(registrationRoutes(config));
+  // Borrado self-service de la PROPIA cuenta (DELETE /v1/me): el usuario borra sus datos + identidad,
+  // con confirmacion por email. Reusa el MOTOR de borrado atomico (#151), el mismo que el erasure ARCO
+  // admin. Aislado: ruta aparte, distinto metodo que el GET/PATCH /v1/me del registro (sin colision).
+  await app.register(accountRoutes(config));
   // Andamiaje de privacidad y cumplimiento (Fase 5.6): consentimiento versionado, derechos del titular
   // (ARCO), registro de tratamiento y retencion. Aditivo: no toca los flujos anteriores.
   await app.register(consentRoutes(config));

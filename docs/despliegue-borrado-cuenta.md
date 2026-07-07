@@ -3,10 +3,11 @@
 Este documento describe el **motor de borrado de cuenta** del backend (`apps/backend`) y la variable de
 entorno que necesita para borrar la identidad del usuario (`auth.users`) via el admin API de Supabase.
 
-> **Alcance de esta pieza.** Solo el **motor** (borrado atomico de datos + borrado de `auth.users`) y su
-> **integracion con el erasure ARCO existente** (`POST /v1/admin/data-requests/:id/resolve`). El endpoint
-> self-service (`DELETE /v1/me`) y la UI **no** estan aqui (piezas siguientes). Es irreversible: la pieza
-> mas delicada del proyecto, deliberadamente aislada para auditarse con lupa.
+> **Alcance.** El **motor** (borrado atomico de datos + borrado de `auth.users`) y sus DOS vias de
+> invocacion: el **erasure ARCO admin** (`POST /v1/admin/data-requests/:id/resolve`) y el **endpoint
+> self-service** (`DELETE /v1/me`, ver [seccion abajo](#endpoint-self-service-delete-v1me)). La **UI**
+> **no** esta aqui (pieza siguiente). Es irreversible: la pieza mas delicada del proyecto, deliberadamente
+> aislada para auditarse con lupa.
 
 ## Que hace el motor
 
@@ -80,6 +81,32 @@ La `service_role` key **bypasa RLS** y da **acceso total** al proyecto. Reglas n
 - El borrado de **datos** (Postgres) funciona **exactamente igual** (atomico, 16 tablas).
 - El borrado de `auth.users` queda **desactivado**: el motor devuelve `authUser: 'not_configured'` y lo
   loguea. En **produccion** debe setearse para poder eliminar la identidad por completo.
+
+## Endpoint self-service (`DELETE /v1/me`)
+
+La via del **USUARIO** para borrar **su propia** cuenta (`src/routes/account.ts`), aislada del flujo admin
+pero reusando el **mismo motor**. A diferencia del erasure ARCO (que por default **conserva** la
+identidad), el self-service es **total**: invoca `deleteAccount(user.id, { deleteAuthUser: true })` —
+borra los datos (atomico) **y** la identidad (`auth.users`).
+
+- **Auth (`requireUser`).** Sin sesion valida → **401**. El owner que se borra es **siempre** el `sub` del
+  token, **jamas** un id del body (es "mi" cuenta; no hay id de otro usuario).
+- **Confirmacion fuerte (barrera de intencion).** El body es `{ confirmEmail: string }`. El backend
+  compara `confirmEmail` **normalizado** (trim + lowercase) contra el **email del token** (fuente de
+  verdad, del JWT), tambien normalizado. Si **no** coincide (o el token no trae email) → **400** y el
+  motor **no** se invoca: **nada** se borra. Es la barrera contra clics accidentales.
+- **Respuesta honesta** (mapea la semantica cross-sistema del motor, ver arriba): `200` con
+  `{ accountDeleted: true, authUser, data }`. `authUser` es `'deleted'` (cuenta borrada por completo),
+  `'not_configured'` o `'failed'` (datos borrados; identidad huerfana **ya logueada** para reintento
+  manual — no se finge exito total ni se revierten los datos). Si el borrado de datos **lanza** (rollback),
+  se propaga → `500` y la cuenta queda **intacta** (reintentable).
+- **Sesion.** El JWT es **stateless**: el backend **no** invalida la sesion. Tras el borrado exitoso, el
+  cliente debe cerrar sesion (`signOut`) — responsabilidad de la **UI** (pieza siguiente).
+- **Doble llamada.** Idempotente por construccion: la primera llamada borra `auth.users`, asi que la
+  segunda llega **sin** sesion valida → **401** natural, sin logica extra.
+- **`SUPABASE_SERVICE_ROLE_KEY`.** Aplica igual que en el motor: sin ella, el self-service borra los datos
+  pero devuelve `authUser: 'not_configured'` (identidad conservada). En **produccion** debe setearse para
+  el borrado total.
 
 ## Borrado concurrente y el worker en vuelo
 
