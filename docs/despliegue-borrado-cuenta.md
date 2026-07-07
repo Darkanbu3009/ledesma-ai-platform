@@ -45,6 +45,25 @@ del endpoint self-service (pieza siguiente).
 | Variable | Regla | De donde sacar el valor | Para que |
 | --- | --- | --- | --- |
 | `SUPABASE_SERVICE_ROLE_KEY` | **opcional**, no vacio | Supabase → Project Settings → API → `service_role` | Habilita `auth.admin.deleteUser`. Sin ella el borrado de datos funciona igual, pero el de `auth.users` queda desactivado (`not_configured`) |
+| `SUPABASE_URL` | **requerida** (URL) | Supabase → Project Settings → API → `Project URL` | Base del proyecto; el cliente admin la usa junto con la `service_role` para el admin API. Ya existia antes de esta pieza |
+
+### Nombre canonico de la variable (no depender de duplicados)
+
+El codigo lee **exactamente** `SUPABASE_SERVICE_ROLE_KEY` y `SUPABASE_URL` (declaradas en
+`src/config/env.ts`). Ese es el **nombre canonico** ya presente en el entorno del backend. Si en Railway
+existe ademas una variable duplicada `SERVICE_ROLE_KEY` (sin el prefijo `SUPABASE_`), el codigo **no la
+usa**: puede eliminarse para evitar confusion. No hay que crear variables nuevas; basta con que
+`SUPABASE_SERVICE_ROLE_KEY` (canonica) tenga el valor de la `service_role`.
+
+### Inicializacion perezosa (el arranque nunca depende de esta llave)
+
+El cliente admin de Supabase se crea de forma **perezosa (lazy)**: se construye la **primera vez que se
+borra un usuario** de `auth.users` (dentro de `deleteUser`), **memoizado** para reusarse despues, y
+**nunca** al cargar el modulo ni al registrar la ruta. `createClient` lanza de forma **sincrona** si la
+URL o la key faltan; hacerlo en el arranque (eager) tumbaria el registro del plugin y **todo el arranque**
+del servidor (el health check nunca pasa). Con la inicializacion perezosa, un problema de config del
+cliente admin **no afecta el arranque**: el servidor **siempre** arranca y el fallo (con mensaje claro,
+sin la llave) solo aparece en **tiempo de uso**, al intentar borrar la identidad.
 
 ### Es una llave MUY poderosa: tratarla como secreto maximo
 
