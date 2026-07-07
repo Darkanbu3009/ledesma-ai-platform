@@ -126,28 +126,6 @@ describe('RetentionRepository', () => {
     });
   });
 
-  describe('eraseOwnerOperationalData', () => {
-    it('borra los datos operativos del titular acotados por owner_id y devuelve el conteo por tabla', async () => {
-      const sql = makeSqlReturning([{ id: 'x' }]);
-      const result = await new RetentionRepository(sql).eraseOwnerOperationalData('user-1');
-      expect(result).toEqual({
-        agentRuns: 1,
-        jobs: 1,
-        scheduledTasks: 1,
-        triggers: 1,
-        recipes: 1,
-        processingRecords: 1,
-      });
-      const calls = (sql as unknown as { mock: { calls: unknown[] } }).mock.calls;
-      expect(calls).toHaveLength(6);
-      // Cada borrado apunta a su tabla y acota por owner_id.
-      const tables = ['agent_runs', 'jobs', 'scheduled_tasks', 'triggers', 'recipes', 'processing_records'];
-      tables.forEach((table, i) => {
-        const text = sqlText(sql, i);
-        expect(text).toContain(`delete from ${table}`);
-        expect(text).toContain('where owner_id = ');
-        expect(sqlValues(sql, i)).toEqual(['user-1']);
-      });
-    });
-  });
+  // El erasure ARCO ya no vive en RetentionRepository: se movio al MOTOR DE BORRADO ATOMICO
+  // (account/account-deletion-repository.ts). Sus tests estan en account-deletion-repository.test.ts.
 });

@@ -43,6 +43,22 @@ describe('parseEnv', () => {
     expect(() => parseEnv({ DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', VAULT_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', WEB_WORKER_SECRET: 'corto' })).toThrow();
   });
 
+  // SUPABASE_SERVICE_ROLE_KEY es OPCIONAL (como WEB_WORKER_*): sin ella el borrado de datos funciona, solo
+  // se desactiva el borrado de auth.users. Ausente -> undefined; presente pero vacio -> falla.
+  it('SUPABASE_SERVICE_ROLE_KEY es opcional (ausente = undefined)', () => {
+    const env = parseEnv({ DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', VAULT_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' });
+    expect(env.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined();
+  });
+
+  it('acepta un SUPABASE_SERVICE_ROLE_KEY valido', () => {
+    const env = parseEnv({ DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', VAULT_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', SUPABASE_SERVICE_ROLE_KEY: 'service-role-key-xyz' });
+    expect(env.SUPABASE_SERVICE_ROLE_KEY).toBe('service-role-key-xyz');
+  });
+
+  it('falla con SUPABASE_SERVICE_ROLE_KEY presente pero vacio', () => {
+    expect(() => parseEnv({ DATABASE_URL: 'postgres://x', ADMIN_API_TOKEN: 'test-admin-token-1234567890', SUPABASE_URL: 'https://x.supabase.co', SESSION_TOKEN_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', VAULT_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', SUPABASE_SERVICE_ROLE_KEY: '' })).toThrow();
+  });
+
   // VAULT_SECRET es REQUERIDO (la boveda de credenciales no funciona sin el): a diferencia de
   // WEB_WORKER_*, su ausencia debe abortar el arranque, no degradar una feature opcional.
   it('falla si falta VAULT_SECRET (es requerido)', () => {
