@@ -8,6 +8,7 @@ import type { ProfileTier } from '../registration/types.js';
 import { createSupabaseJwtVerifier, type JwtVerifier } from '../auth/jwt-verifier.js';
 import { requireUser } from '../auth/require-user.js';
 import { requireAdmin } from '../auth/require-admin.js';
+import { crearEmisorBienvenida } from '../email/welcome-email.js';
 
 // Validacion de nombre compartida (full_name / org_name / fullName): requerido y de a lo sumo 200
 // caracteres tras recortar. UNICA fuente de verdad del criterio de nombre, para que el registro y la
@@ -52,6 +53,35 @@ export function registrationRoutes(config: Env, deps?: { verifier?: JwtVerifier 
     const repo = new RegistrationRepository(getSql(config));
     const verifier = deps?.verifier ?? createSupabaseJwtVerifier(config);
 
+    // Emisor del correo de BIENVENIDA (onboarding, aditivo, best-effort). Reusa el patron de Resend de
+    // las alertas del worker (helper propio del backend, ver email/welcome-email.ts). Se construye una
+    // vez con la config; si faltan las env vars de Resend, enviarBienvenida loguea y no envia (nunca
+    // rompe el registro). Con `logger: app.log` para trazar el best-effort en los logs del backend.
+    const emisorBienvenida = crearEmisorBienvenida({
+      ...(config.RESEND_API_KEY !== undefined ? { resendApiKey: config.RESEND_API_KEY } : {}),
+      ...(config.RESEND_WELCOME_FROM_EMAIL !== undefined ? { fromEmail: config.RESEND_WELCOME_FROM_EMAIL } : {}),
+      ...(config.CONSOLE_BASE_URL !== undefined ? { consoleBaseUrl: config.CONSOLE_BASE_URL } : {}),
+      logger: app.log,
+    });
+
+    /**
+     * Dispara la bienvenida SIN bloquear ni condicionar la respuesta del registro (fire-and-forget): el
+     * correo es un efecto secundario, jamas parte del exito del registro, y no le agrega latencia (no se
+     * hace await). Solo se llama tras un alta REAL (created === true), nunca en re-registro idempotente
+     * ni en login -> se envia una sola vez. enviarBienvenida ya es best-effort (nunca lanza); el
+     * Promise.resolve(...).catch() y el try/catch son redes de seguridad extra que atrapan una promesa
+     * rechazada y un throw sincrono, respectivamente, por si algo cambiara.
+     */
+    const dispararBienvenida = (email: string | null, fullName: string): void => {
+      try {
+        void Promise.resolve(emisorBienvenida.enviarBienvenida({ email, fullName })).catch((err: unknown) => {
+          app.log.error({ err }, 'no se pudo enviar el correo de bienvenida (best-effort)');
+        });
+      } catch (err) {
+        app.log.error({ err }, 'no se pudo disparar el correo de bienvenida (best-effort)');
+      }
+    };
+
     // INDIVIDUAL: queda activo de inmediato (perfil + suscripcion free + usage_counter).
     app.post('/v1/register/individual', async (request: FastifyRequest, reply: FastifyReply) => {
       const user = await requireUser(request, verifier);
@@ -60,6 +90,10 @@ export function registrationRoutes(config: Env, deps?: { verifier?: JwtVerifier 
         throw new AppError('VALIDATION_ERROR', 400, 'Invalid registration body', parsed.error.issues);
       }
       const result = await repo.registerIndividual({ sub: user.id, fullName: parsed.data.full_name });
+      // Bienvenida best-effort SOLO en el alta real (created): no en el re-registro idempotente.
+      if (result.created) {
+        dispararBienvenida(user.email, parsed.data.full_name);
+      }
       // 201 si esta llamada creo el perfil; 200 si ya existia (idempotente).
       return reply.status(result.created ? 201 : 200).send(result);
     });
@@ -77,6 +111,10 @@ export function registrationRoutes(config: Env, deps?: { verifier?: JwtVerifier 
         orgName: parsed.data.org_name,
         fullName: parsed.data.full_name,
       });
+      // Bienvenida best-effort SOLO en el alta real (created): no en el re-registro idempotente.
+      if (result.created) {
+        dispararBienvenida(user.email, parsed.data.full_name);
+      }
       return reply.status(result.created ? 201 : 200).send(result);
     });
 

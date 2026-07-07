@@ -40,6 +40,19 @@ const EnvSchema = z.object({
   // run. Ambos numeros positivos (coercion de string como PORT).
   RUN_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(DEFAULT_RUN_TIMEOUT_SECONDS),
   RUN_MAX_TOKENS: z.coerce.number().int().positive().default(DEFAULT_RUN_MAX_TOKENS),
+  // CORREO DE BIENVENIDA por Resend (onboarding, aditivo, best-effort). Las TRES son OPCIONALES: si
+  // falta cualquiera, el registro funciona IGUAL y solo se loguea que no se envio la bienvenida (el
+  // correo es una mejora de retencion, no una dependencia dura). Reusan el MISMO patron de fetch a
+  // Resend que las alertas del worker; se agregan a mano al servicio del backend en Railway. Un valor
+  // PRESENTE pero mal formado (email/url invalido) si lanza al arrancar (es error de config, no "falta
+  // la feature"), igual que WEB_WORKER_URL.
+  //   RESEND_API_KEY:            key de la API de Resend (la MISMA cuenta que las alertas del worker).
+  //   RESEND_WELCOME_FROM_EMAIL: remitente verificado para la bienvenida (ej. hola@send.ledesma-ai-labs.com),
+  //                              distinto del remitente de alertas del worker (alertas@...).
+  //   CONSOLE_BASE_URL:          base de la consola para el enlace al panel del correo (ej. https://app.ledesma-ai-labs.com).
+  RESEND_API_KEY: z.string().min(1).optional(),
+  RESEND_WELCOME_FROM_EMAIL: z.string().email().optional(),
+  CONSOLE_BASE_URL: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
