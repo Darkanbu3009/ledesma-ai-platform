@@ -14,6 +14,7 @@ import { Field, inputClass } from '../components/ui/Field';
 import { Notice, type NoticeData } from '../components/ui/Notice';
 import { SkeletonList } from '../components/ui/SkeletonList';
 import { ErrorState } from '../components/ui/ErrorState';
+import { DangerZoneSection } from '../components/account/DangerZoneSection';
 import { focusRing } from '../lib/utils';
 
 /** Titulo de seccion consistente con la ficha de admin (h2 + descripcion). */
@@ -228,6 +229,10 @@ export function ProfilePage() {
           <EditNameSection currentName={data.profile.fullName} />
           <UsageSection usageCounter={data.usageCounter} />
           <SessionSection />
+          {/* Zona de peligro: separada visualmente (acento de advertencia) al final del perfil. Abre el
+              modal de confirmacion fuerte (escribir el email) y, tras el borrado, cierra sesion y redirige.
+              El email esperado sale de useAuth().user?.email (mismo origen que la seccion de datos). */}
+          <DangerZoneSection email={user?.email} />
         </div>
       )}
     </div>

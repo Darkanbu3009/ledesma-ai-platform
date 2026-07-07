@@ -7,14 +7,18 @@ import type { RegistrationState } from '../src/lib/registration';
 
 // Los hooks de datos, la mutation, el email (Supabase) y el cliente Supabase se mockean: asi se ejerce la
 // pantalla y el flujo del form sin red, sin react-query y sin leer las env (supabase.ts lanza sin ellas).
-const { useMeMock, useAuthMock, useUpdateProfileNameMock } = vi.hoisted(() => ({
+const { useMeMock, useAuthMock, useUpdateProfileNameMock, useDeleteAccountMock } = vi.hoisted(() => ({
   useMeMock: vi.fn(),
   useAuthMock: vi.fn(),
   useUpdateProfileNameMock: vi.fn(),
+  useDeleteAccountMock: vi.fn(),
 }));
 vi.mock('../src/lib/queries', () => ({ useMe: useMeMock }));
 vi.mock('../src/auth/useAuth', () => ({ useAuth: useAuthMock }));
 vi.mock('../src/lib/mutations', () => ({ useUpdateProfileName: useUpdateProfileNameMock }));
+// La Zona de peligro usa useDeleteAccount (arrastra supabase + react-router): se mockea para ejercer la
+// pantalla sin QueryClient ni Router real; su comportamiento propio se testea en danger-zone.dom.test.tsx.
+vi.mock('../src/lib/account-mutations', () => ({ useDeleteAccount: useDeleteAccountMock }));
 vi.mock('../src/lib/supabase', () => ({ supabase: { auth: { signOut: vi.fn() } } }));
 
 import { ProfilePage } from '../src/pages/ProfilePage';
@@ -57,6 +61,14 @@ function mockMutation() {
     isError: false,
     error: null,
   });
+  // La Zona de peligro (DangerZoneSection) tambien consume una mutacion: se le da un stub inerte.
+  useDeleteAccountMock.mockReturnValue({
+    mutate: vi.fn(),
+    reset: vi.fn(),
+    isPending: false,
+    isError: false,
+    error: null,
+  });
   return mutate;
 }
 
@@ -78,6 +90,7 @@ afterEach(() => {
   useMeMock.mockReset();
   useAuthMock.mockReset();
   useUpdateProfileNameMock.mockReset();
+  useDeleteAccountMock.mockReset();
 });
 
 describe('ProfilePage', () => {
@@ -141,6 +154,15 @@ describe('ProfilePage', () => {
     renderPage();
 
     expect(screen.getByRole('button', { name: /Cerrar sesión/ })).toBeInTheDocument();
+  });
+
+  it('incluye la Zona de peligro con el boton para eliminar la cuenta', () => {
+    mockData(state());
+    mockMutation();
+    renderPage();
+
+    expect(screen.getByRole('heading', { name: /Zona de peligro/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Eliminar mi cuenta/i })).toBeInTheDocument();
   });
 
   it('muestra un estado de error con reintento si /v1/me falla', () => {
