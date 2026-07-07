@@ -29,6 +29,7 @@ import type {
   UpdateProfileNameInput,
 } from './registration';
 import type { Consent, CreateConsentInput, CreateDataRequestInput, DataRequest } from './privacy';
+import type { CreateUpgradeRequestInput, CreateUpgradeRequestResult } from './upgrade-requests';
 
 /** Registra al usuario actual como individuo: queda activo de inmediato. */
 export function useRegisterIndividual() {
@@ -373,5 +374,24 @@ export function useChangeTier() {
         body: JSON.stringify({ tier }),
       }).then((r) => r.profile),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['admin'] }),
+  });
+}
+
+/**
+ * SOLICITAR ACCESO a un plan superior desde un gate de tier (POST /v1/upgrade-requests). Registra el interes
+ * del usuario 'free' por una feature premium (requestedTier + featureContext); el backend es idempotente
+ * (una 'pending' por owner+tier: un segundo click devuelve la existente con created:false). NO sube el tier
+ * -- la conversion la gestiona el admin; el enforcement server-side queda intacto. Al exito invalida
+ * ['upgrade-requests','me'] para que el CTA pase a "Solicitud enviada".
+ */
+export function useRequestUpgrade() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateUpgradeRequestInput) =>
+      apiFetch<CreateUpgradeRequestResult>('/v1/upgrade-requests', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['upgrade-requests', 'me'] }),
   });
 }

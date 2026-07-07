@@ -15,6 +15,7 @@ import { JOB_PAGE_SIZE, JOBS_REFETCH_MS, buildJobsQuery, hasInFlightJobs } from 
 import type { ConsentsState, DataRequest } from './privacy';
 import type { AdminUserDetail, AdminUsersResponse } from './admin';
 import { ADMIN_USERS_PAGE_SIZE, buildAdminUsersQuery } from './admin';
+import type { MyUpgradeRequestsState } from './upgrade-requests';
 
 /** Estado de registro del usuario actual (perfil, organizacion, plan y uso). */
 export function useMe() {
@@ -121,6 +122,18 @@ export function useConsents() {
   return useQuery({
     queryKey: ['consents'],
     queryFn: () => apiFetch<ConsentsState>('/v1/consents/me'),
+  });
+}
+
+/**
+ * Solicitudes de upgrade del usuario actual (GET /v1/upgrade-requests/me), mas nuevas primero. La usa el CTA
+ * de los gates de tier para saber si el usuario YA pidio acceso (y mostrar "Solicitud enviada" en vez de
+ * re-ofrecer el boton). Devuelve [] si nunca solicito.
+ */
+export function useMyUpgradeRequests() {
+  return useQuery({
+    queryKey: ['upgrade-requests', 'me'],
+    queryFn: () => apiFetch<MyUpgradeRequestsState>('/v1/upgrade-requests/me'),
   });
 }
 

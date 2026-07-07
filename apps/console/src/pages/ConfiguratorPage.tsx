@@ -18,6 +18,7 @@ import { useMe } from '../lib/queries';
 import { CredentialSessionForm } from '../components/configurator/CredentialSessionForm';
 import { ConfiguratorChat } from '../components/configurator/ConfiguratorChat';
 import { AgentPreview } from '../components/configurator/AgentPreview';
+import { RequestUpgradeCta } from '../components/upgrade/RequestUpgradeCta';
 
 /** Traduce el error de un turno del Configurador a un mensaje en espanol para el chat. */
 function turnErrorMessage(error: unknown): string {
@@ -211,14 +212,19 @@ export function ConfiguratorPage() {
             </button>
           </div>
 
-          {/* Selector de modo: solo para tier autonomous. El resto ve una nota discreta (no un paywall). */}
+          {/* Selector de modo: solo para tier autonomous. El resto ve la nota del gate + el CTA para
+              solicitar acceso (mismo componente que los otros gates de tier; no sube el tier, registra
+              el interes). El modo asistente sigue disponible para 'free': esto solo gatea el autonomo. */}
           {canUseAutonomous ? (
             <ModeSelector mode={mode} onChange={setMode} disabled={loading} />
           ) : (
-            <p className="mt-4 inline-flex items-center gap-1.5 text-xs text-muted-soft">
-              <Lock className="h-3.5 w-3.5" />
-              El modo autonomo, que crea el agente sin confirmacion, es parte del plan superior.
-            </p>
+            <div className="mt-4 flex flex-col items-start gap-3">
+              <p className="inline-flex items-center gap-1.5 text-xs text-muted-soft">
+                <Lock className="h-3.5 w-3.5" />
+                El modo autonomo, que crea el agente sin confirmacion, es parte del plan superior.
+              </p>
+              <RequestUpgradeCta featureContext="configurator" className="items-start text-left" />
+            </div>
           )}
 
           {/* Tabs en pantallas chicas: chat y preview se apilan detras de una pestana cada uno. */}
