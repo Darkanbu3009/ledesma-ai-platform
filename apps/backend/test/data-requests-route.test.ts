@@ -30,7 +30,7 @@ const updateStatus = vi.fn();
 const listConsentsByOwner = vi.fn();
 const listRecordsByOwner = vi.fn();
 const getState = vi.fn();
-const eraseOwnerOperationalData = vi.fn();
+const deleteAccount = vi.fn();
 
 function makeRequestRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -57,7 +57,7 @@ async function makeApp(): Promise<FastifyInstance> {
       consentRepo: { listConsentsByOwner },
       processingRepo: { listRecordsByOwner },
       registrationRepo: { getState },
-      retentionRepo: { eraseOwnerOperationalData },
+      accountDeletion: { deleteAccount },
     }),
   );
   return app;
@@ -154,14 +154,16 @@ describe('POST /v1/admin/data-requests/:id/resolve', () => {
     });
     expect(res.statusCode).toBe(200);
     // erase=true pero el tipo NO es erasure: no se borra nada.
-    expect(eraseOwnerOperationalData).not.toHaveBeenCalled();
+    expect(deleteAccount).not.toHaveBeenCalled();
     expect(updateStatus).toHaveBeenCalledWith(REQ_ID, 'completed', 'corregido');
   });
 
-  it('con erase=true sobre una solicitud de erasure, borra datos operativos del titular', async () => {
+  it('con erase=true sobre una solicitud de erasure, dispara el motor atomico sobre el titular', async () => {
     getRequestById.mockResolvedValue(makeRequestRow({ requestType: 'erasure', ownerId: 'user-9' }));
-    eraseOwnerOperationalData.mockResolvedValue({ agentRuns: 3, jobs: 2, scheduledTasks: 1, triggers: 0, recipes: 0, processingRecords: 1 });
-    updateStatus.mockResolvedValue(makeRequestRow({ requestType: 'erasure', status: 'completed' }));
+    deleteAccount.mockResolvedValue({
+      data: { agents: 1, agentRuns: 3, jobs: 2, scheduledTasks: 1, triggers: 0, recipes: 0, processingRecords: 1, providerCredentials: 1, consents: 1, dataSubjectRequests: 1, upgradeRequests: 0, adminActionsAnonymized: 0, subscriptions: 1, usageCounters: 1, profiles: 1, organization: 'none' },
+      authUser: 'skipped',
+    });
     const res = await app.inject({
       method: 'POST',
       url: `/v1/admin/data-requests/${REQ_ID}/resolve`,
@@ -169,12 +171,30 @@ describe('POST /v1/admin/data-requests/:id/resolve', () => {
       payload: { status: 'completed', erase: true },
     });
     expect(res.statusCode).toBe(200);
-    // borra los datos del OWNER de la solicitud (user-9), no del admin
-    expect(eraseOwnerOperationalData).toHaveBeenCalledWith('user-9');
+    // borra los datos del OWNER de la solicitud (user-9), no del admin; por default NO borra auth.users.
+    expect(deleteAccount).toHaveBeenCalledWith('user-9', { deleteAuthUser: false });
+    expect(res.json().requestErased).toBe(true);
     expect(res.json().erased.agentRuns).toBe(3);
-    // la nota de resolucion incluye el resumen del borrado
-    const note = updateStatus.mock.calls[0]?.[2] as string;
-    expect(note).toContain('datos operativos borrados');
+    expect(res.json().authUser).toBe('skipped');
+    // El path de borrado NO llama updateStatus (la solicitud se borro con el resto: una sola op atomica).
+    expect(updateStatus).not.toHaveBeenCalled();
+  });
+
+  it('con delete_auth_user=true propaga la opcion al motor (borra tambien la identidad)', async () => {
+    getRequestById.mockResolvedValue(makeRequestRow({ requestType: 'erasure', ownerId: 'user-9' }));
+    deleteAccount.mockResolvedValue({
+      data: { agents: 0, agentRuns: 0, jobs: 0, scheduledTasks: 0, triggers: 0, recipes: 0, processingRecords: 0, providerCredentials: 0, consents: 0, dataSubjectRequests: 1, upgradeRequests: 0, adminActionsAnonymized: 0, subscriptions: 1, usageCounters: 1, profiles: 1, organization: 'deleted' },
+      authUser: 'deleted',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/admin/data-requests/${REQ_ID}/resolve`,
+      headers: adminHeaders,
+      payload: { status: 'completed', erase: true, delete_auth_user: true },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(deleteAccount).toHaveBeenCalledWith('user-9', { deleteAuthUser: true });
+    expect(res.json().authUser).toBe('deleted');
   });
 
   it('solicitud inexistente -> 404', async () => {

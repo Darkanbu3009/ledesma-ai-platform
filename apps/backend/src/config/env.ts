@@ -22,6 +22,16 @@ const EnvSchema = z.object({
   // (rotar el de la boveda no invalida los session-tokens en vuelo y viceversa). Debe setearse en el
   // entorno con 32+ caracteres.
   VAULT_SECRET: z.string().min(32),
+  // SERVICE_ROLE_KEY de Supabase: llave del rol de servicio que BYPASEA RLS y habilita el ADMIN API de
+  // auth (supabase.auth.admin.deleteUser), usado por el MOTOR DE BORRADO DE CUENTA para eliminar la fila
+  // de auth.users tras borrar los datos de negocio. Es una llave MUY poderosa (acceso total, ignora RLS):
+  // se trata como SECRETO DE BOVEDA -> NUNCA se loguea, ni se devuelve por HTTP, ni aparece en errores.
+  // OPCIONAL a proposito (mismo patron que WEB_WORKER_* / RESEND_*): si falta, el borrado de DATOS
+  // (Postgres, atomico) funciona igual, pero el borrado de auth.users queda DESACTIVADO y el motor lo
+  // reporta como 'not_configured' (no rompe: el erasure ARCO por default no borra auth.users). En
+  // produccion DEBE setearse para poder eliminar la identidad por completo (endpoint self-service, pieza
+  // siguiente). Un valor presente pero vacio (min 1) falla al arrancar (error de config explicito).
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   // URL base PUBLICA del backend, para construir la URL del webhook ENTRANTE de un trigger (Fase 5.4)
   // que se le muestra al usuario al crear/rotar (p.ej. https://api.ledesma-ai-labs.com). Opcional: si
   // falta, la ruta la deriva del request (protocolo + host). Setearla en prod es lo robusto cuando el
