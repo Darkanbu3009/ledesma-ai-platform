@@ -13,6 +13,8 @@ import { configuratorRoutes } from './routes/configurator.js';
 import { credentialRoutes } from './routes/credentials.js';
 import { scheduledTaskRoutes } from './routes/scheduled-tasks.js';
 import { recipeRoutes } from './routes/recipes.js';
+import { upgradeRequestRoutes } from './routes/upgrade-requests.js';
+import { adminUpgradeRequestsRoutes } from './routes/admin-upgrade-requests.js';
 import { jobsRoutes } from './routes/jobs.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { triggerRoutes } from './routes/triggers.js';
@@ -77,6 +79,9 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
   // ROL, que registra en el audit log el sub REAL del admin. El endpoint viejo (POST /v1/admin/profiles/
   // :id/tier, x-admin-token) queda como fallback. Aditivo.
   await app.register(adminUserTierRoutes(config));
+  // Panel de admin (solo lectura): los leads de upgrade (solicitudes de acceso a features premium),
+  // gateado por ROL (requireAdminRole). Read-only, no muta -> sin audit log. Aditivo.
+  await app.register(adminUpgradeRequestsRoutes(config));
   await app.register(userAgentRoutes(config));
   await app.register(runAgentByIdRoutes(config));
   await app.register(toolCatalogRoutes(config));
@@ -84,6 +89,10 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
   await app.register(credentialRoutes(config));
   await app.register(scheduledTaskRoutes(config));
   await app.register(recipeRoutes(config));
+  // Captura de DEMANDA de upgrade (Fase 1 de monetizacion): un usuario 'free' que se topa con una feature
+  // premium puede registrar su interes (POST /v1/upgrade-requests, GET /me). Aditivo: NO sube el tier (solo
+  // registra el interes; subir el tier sigue siendo del admin), el enforcement de tier queda intacto.
+  await app.register(upgradeRequestRoutes(config));
   // Observabilidad de la ejecucion autonoma (solo lectura): historial de jobs del owner. Aditivo.
   await app.register(jobsRoutes(config));
   // Resumen AGREGADO del dashboard (solo lectura): los tres ejes (actividad, operaciones, gasto) por
