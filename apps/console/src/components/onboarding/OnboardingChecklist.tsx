@@ -46,7 +46,7 @@ function StepRow({ step }: { step: OnboardingStep }) {
         <p className={step.done ? 'text-sm font-medium text-muted' : 'text-sm font-semibold text-ink'}>
           {step.title}
         </p>
-        {!step.done && <p className="mt-0.5 text-[12.5px] leading-snug text-muted-soft">{step.description}</p>}
+        {!step.done && <p className="mt-0.5 text-[12.5px] leading-snug text-muted">{step.description}</p>}
       </div>
       {step.done ? (
         <span className="inline-flex flex-none items-center gap-1.5 text-[12.5px] font-semibold text-ok">
@@ -63,16 +63,10 @@ function StepRow({ step }: { step: OnboardingStep }) {
           <ArrowRight className="h-[15px] w-[15px]" />
         </Link>
       ) : (
-        // Paso sin destino todavia (p. ej. "Ejecutar" antes de crear un agente): CTA presente pero
-        // deshabilitado, veraz -- no promete una pantalla que aun no existe para este usuario.
-        <button
-          type="button"
-          disabled
-          title="Crea un agente primero"
-          className="inline-flex flex-none cursor-not-allowed items-center gap-1.5 rounded-[10px] border border-line bg-field px-3 py-2 text-[13px] font-semibold text-muted-soft opacity-70"
-        >
-          {step.cta}
-        </button>
+        // Paso sin destino todavia (p. ej. "Ejecutar" antes de crear un agente): en vez de un CTA muerto
+        // se muestra el motivo como texto VISIBLE (accesible por teclado y lector), veraz -- no promete
+        // una pantalla que aun no existe para este usuario.
+        <span className="flex-none text-[12.5px] font-medium text-muted">Crea un agente primero</span>
       )}
     </li>
   );
@@ -87,11 +81,12 @@ function StepRow({ step }: { step: OnboardingStep }) {
  * No bloquea la navegacion: es una tarjeta mas del Panel que el usuario puede ignorar.
  */
 export function OnboardingChecklist(): ReactNode {
-  const { hasCredential, hasAgent, hasRun, completedCount, isComplete, firstAgentId, isLoading } =
+  const { hasCredential, hasAgent, hasRun, completedCount, isComplete, firstAgentId, isLoading, isError } =
     useOnboardingProgress();
 
-  // Sin datos aun (evita parpadear "0 de 3") o ya completo (no molestar a establecidos): no se muestra.
-  if (isLoading || isComplete) return null;
+  // No se muestra: mientras carga (evita parpadear "0 de 3"), ante error (no afirmar un estado sin
+  // confirmar por el dato real) o cuando ya esta completo (no molestar a usuarios establecidos).
+  if (isLoading || isError || isComplete) return null;
 
   const steps: OnboardingStep[] = [
     {
@@ -132,8 +127,8 @@ export function OnboardingChecklist(): ReactNode {
 
   return (
     <section
-      aria-label="Primeros pasos"
-      className="mb-8 overflow-hidden rounded-2xl border border-line bg-surface shadow-card"
+      aria-labelledby="onboarding-title"
+      className="mt-6 overflow-hidden rounded-2xl border border-line bg-surface shadow-card"
     >
       {showWelcome && (
         <div className="flex flex-col gap-4 border-b border-line-soft bg-brasa-soft px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
@@ -164,7 +159,9 @@ export function OnboardingChecklist(): ReactNode {
 
       <div className="px-6 py-5">
         <div className="flex items-center justify-between gap-4">
-          <h3 className="font-display text-[15px] font-bold text-ink">Primeros pasos</h3>
+          <h2 id="onboarding-title" className="font-display text-[15px] font-bold text-ink">
+            Primeros pasos
+          </h2>
           <span className="flex-none text-[12.5px] font-semibold text-muted">
             {completedCount} de {ONBOARDING_STEP_COUNT}
           </span>

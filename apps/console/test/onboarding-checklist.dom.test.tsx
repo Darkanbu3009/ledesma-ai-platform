@@ -31,6 +31,7 @@ function progress(over: Partial<OnboardingProgressResult> = {}): OnboardingProgr
     isComplete: completedCount === 3,
     firstAgentId: over.firstAgentId ?? null,
     isLoading: over.isLoading ?? false,
+    isError: over.isError ?? false,
     ...over,
   };
 }
@@ -57,6 +58,11 @@ describe('OnboardingChecklist', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it('no renderiza nada ante error (no afirma un estado sin confirmar por el dato real)', () => {
+    const { container } = renderChecklist(progress({ isError: true }));
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it('usuario nuevo (0/3): muestra bienvenida, 3 pasos pendientes y CTAs a las pantallas correctas', () => {
     renderChecklist(progress());
     // Bienvenida presente.
@@ -65,8 +71,9 @@ describe('OnboardingChecklist', () => {
     // Paso 1 y 2 con CTA a su pantalla.
     expect(screen.getByRole('link', { name: 'Poner credencial' })).toHaveAttribute('href', '/credenciales');
     expect(screen.getByRole('link', { name: 'Crear agente' })).toHaveAttribute('href', '/configurador');
-    // Paso 3 sin agente aun: CTA deshabilitado (no promete un Playground inexistente).
-    expect(screen.getByRole('button', { name: 'Ejecutar' })).toBeDisabled();
+    // Paso 3 sin agente aun: no hay CTA a un Playground inexistente; se explica el motivo con texto visible.
+    expect(screen.queryByRole('link', { name: 'Ejecutar' })).not.toBeInTheDocument();
+    expect(screen.getByText('Crea un agente primero')).toBeInTheDocument();
     // La bienvenida lleva al primer paso pendiente (la credencial).
     expect(screen.getByRole('link', { name: /Empezar/ })).toHaveAttribute('href', '/credenciales');
     // Nada marcado como hecho.
