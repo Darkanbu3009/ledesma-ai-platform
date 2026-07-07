@@ -12,9 +12,17 @@ import { emailConfirmationMatches } from '../../lib/account';
  * IMPOSIBLE el borrado accidental: exige una accion deliberada. Es UX que COMPLEMENTA la validacion
  * server-side (que ya revalida el email); nunca la reemplaza.
  *
+ * El email objetivo se muestra SIEMPRE como texto visible y persistente (no solo como placeholder, que
+ * desaparece al teclear): el usuario tiene la referencia exacta a la vista mientras escribe y cuando falla.
+ *
  * Se monta CONDICIONALMENTE (el padre lo renderiza solo cuando abre), asi el input arranca vacio cada vez.
  * Accesible via useDialog: trampa de foco, cierra con Escape o click en el fondo, enfoca "Cancelar" al abrir
- * (la salida facil, nunca el boton destructivo) y devuelve el foco al disparador al cerrar.
+ * (la salida facil, nunca el boton destructivo) y devuelve el foco al disparador al cerrar. El dialogo
+ * describe sus consecuencias (aria-describedby) para que un lector de pantalla las anuncie al abrir.
+ *
+ * BLOQUEO DURANTE EL BORRADO: mientras la peticion esta en curso (busy) el modal NO se puede cerrar (Escape,
+ * fondo ni Cancelar). El borrado es IRREVERSIBLE y la peticion no se puede abortar, asi que permitir
+ * "cancelar" a mitad seria enganoso: la cuenta se borra igual y el usuario seria deslogueado por sorpresa.
  */
 export function DeleteAccountDialog({
   expectedEmail,
@@ -32,7 +40,15 @@ export function DeleteAccountDialog({
   onCancel: () => void;
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useDialog({ onClose: onCancel, initialFocus: cancelRef });
+
+  // Cierre GUARDADO por `busy`: no se cierra mientras el borrado corre. useDialog lee onClose por ref en
+  // cada render, asi que este guard siempre ve el `busy` actual (aplica a Escape, al fondo y a Cancelar).
+  function handleClose() {
+    if (busy) return;
+    onCancel();
+  }
+
+  const dialogRef = useDialog({ onClose: handleClose, initialFocus: cancelRef });
   const [typed, setTyped] = useState('');
 
   const matches = emailConfirmationMatches(typed, expectedEmail);
@@ -47,12 +63,13 @@ export function DeleteAccountDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-      <div className="absolute inset-0 bg-ink/40" onClick={onCancel} aria-hidden="true" />
+      <div className="absolute inset-0 bg-ink/40" onClick={handleClose} aria-hidden="true" />
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="delete-account-title"
+        aria-describedby="delete-account-desc"
         className="relative w-full max-w-md rounded-2xl border border-brasa-line bg-surface p-6 shadow-card-hover"
       >
         <div className="flex items-start gap-3">
@@ -63,7 +80,7 @@ export function DeleteAccountDialog({
             <h2 id="delete-account-title" className="font-display text-lg font-bold text-ink">
               Eliminar tu cuenta
             </h2>
-            <p className="mt-1 text-sm text-muted">
+            <p id="delete-account-desc" className="mt-1 text-sm text-muted">
               Esta acción es <span className="font-semibold text-ink">permanente e irreversible</span>. Se
               borrará <span className="font-semibold text-ink">todo</span>: tus agentes, credenciales,
               recetas, tareas programadas, triggers e historial de actividad. No podremos recuperarlo.
@@ -72,6 +89,13 @@ export function DeleteAccountDialog({
         </div>
 
         <form onSubmit={handleSubmit} noValidate className="mt-5">
+          {/* El email objetivo SIEMPRE visible (no solo placeholder): referencia exacta mientras se escribe. */}
+          <div className="mb-3 rounded-xl border border-line bg-field px-4 py-3 text-sm">
+            <span className="text-muted">Email de tu cuenta: </span>
+            <span className="select-all break-all font-mono font-medium text-ink">
+              {expectedEmail ?? '—'}
+            </span>
+          </div>
           <Field
             label="Para confirmar, escribe tu email"
             hint={
@@ -108,8 +132,9 @@ export function DeleteAccountDialog({
             <button
               ref={cancelRef}
               type="button"
-              onClick={onCancel}
-              className="rounded-[10px] border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
+              onClick={handleClose}
+              disabled={busy}
+              className="rounded-[10px] border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-60"
             >
               Cancelar
             </button>

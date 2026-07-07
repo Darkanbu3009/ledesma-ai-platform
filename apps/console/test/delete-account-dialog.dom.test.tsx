@@ -71,6 +71,29 @@ describe('DeleteAccountDialog (confirmacion fuerte por escritura del email)', ()
     expect(screen.getByRole('button', { name: /Eliminando/ })).toBeDisabled();
   });
 
+  it('muestra el email de la cuenta como texto visible persistente (no solo placeholder)', () => {
+    setup();
+    // Visible al abrir...
+    expect(screen.getByText('ada@example.com')).toBeInTheDocument();
+    // ...y sigue visible tras teclear algo (el placeholder ya desaparecio, la referencia no).
+    fireEvent.change(emailInput(), { target: { value: 'a' } });
+    expect(screen.getByText('ada@example.com')).toBeInTheDocument();
+  });
+
+  it('bloquea el cierre mientras el borrado esta en curso: Cancelar deshabilitado y Escape no cierra', () => {
+    const { onCancel } = setup({ busy: true });
+    expect(screen.getByRole('button', { name: 'Cancelar' })).toBeDisabled();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it('describe sus consecuencias via aria-describedby (se anuncian al abrir en un lector de pantalla)', () => {
+    setup();
+    const descId = screen.getByRole('dialog').getAttribute('aria-describedby');
+    expect(descId).toBeTruthy();
+    expect(document.getElementById(descId!)).toHaveTextContent(/permanente e irreversible/i);
+  });
+
   it('la salida siempre visible: Cancelar llama onCancel', () => {
     const { onCancel } = setup();
     fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
