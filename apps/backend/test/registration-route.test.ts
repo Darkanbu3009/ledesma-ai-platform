@@ -116,10 +116,11 @@ describe('POST /v1/register/organization', () => {
   const orgState = {
     created: true,
     needsRegistration: false,
-    profile: { id: 'user-1', orgId: 'org-1', accountType: 'empresa_member', role: 'org_admin', fullName: 'Ada', identityVerified: false, createdAt: 'x', updatedAt: 'x' },
-    organization: { id: 'org-1', name: 'Acme', status: 'pending', approvedAt: null, createdAt: 'x', updatedAt: 'x' },
-    subscription: null,
-    usageCounter: null,
+    profile: { id: 'user-1', orgId: 'org-1', accountType: 'empresa_member', role: 'org_admin', fullName: 'Ada', identityVerified: false, tier: 'free', createdAt: 'x', updatedAt: 'x' },
+    organization: { id: 'org-1', name: 'Acme', status: 'active', approvedAt: null, createdAt: 'x', updatedAt: 'x' },
+    subscription: { id: 's1', profileId: 'user-1', plan: 'free', status: 'active', createdAt: 'x' },
+    usageCounter: { id: 'u1', profileId: 'user-1', runsUsed: 0, runsLimit: 10, periodKind: 'lifetime', createdAt: 'x' },
+    isAdmin: false,
   };
 
   it('401 sin Authorization', async () => {
@@ -134,7 +135,7 @@ describe('POST /v1/register/organization', () => {
     expect(registerOrganizationMock).not.toHaveBeenCalled();
   });
 
-  it('201 crea org en pending y org_admin, sin suscripcion', async () => {
+  it('201 crea org ACTIVA + org_admin + plan free (entra directo, sin muro de aprobacion)', async () => {
     registerOrganizationMock.mockResolvedValue(orgState);
     const res = await app.inject({
       method: 'POST',
@@ -144,9 +145,13 @@ describe('POST /v1/register/organization', () => {
     });
     expect(res.statusCode).toBe(201);
     expect(registerOrganizationMock).toHaveBeenCalledWith({ sub: 'user-1', orgName: 'Acme', fullName: 'Ada' });
-    expect(res.json().organization.status).toBe('pending');
+    // La empresa entra 'active' (no 'pending'): no cae en el muro "en revision".
+    expect(res.json().organization.status).toBe('active');
     expect(res.json().profile.role).toBe('org_admin');
-    expect(res.json().subscription).toBeNull();
+    // Ambos tipos entran como free: la empresa ahora recibe suscripcion free + usage_counter, igual que Persona.
+    expect(res.json().profile.tier).toBe('free');
+    expect(res.json().subscription.plan).toBe('free');
+    expect(res.json().usageCounter.runsLimit).toBe(10);
   });
 
   it('200 (no 201) cuando es idempotente: el perfil/empresa ya existia', async () => {

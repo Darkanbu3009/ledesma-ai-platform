@@ -18,11 +18,14 @@
 
 create extension if not exists pgcrypto;
 
--- organizations: cuenta empresa. Arranca en 'pending' hasta que un super-admin la aprueba.
+-- organizations: cuenta empresa. Entra DIRECTO en 'active' (sin muro de aprobacion manual); el
+-- super-admin todavia puede marcarla 'approved' (endpoint legado), pero el acceso lo gatea el TIER
+-- del perfil, no el status de la org. El registro fija el status explicitamente ('active'); el default
+-- solo aplica a un insert que lo omita.
 create table if not exists organizations (
   id          uuid primary key default gen_random_uuid(),
   name        text not null,
-  status      text not null default 'pending',
+  status      text not null default 'active',
   approved_at timestamptz,
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
@@ -44,7 +47,7 @@ create table if not exists profiles (
 alter table profiles add column if not exists created_at timestamptz not null default now();
 alter table profiles add column if not exists updated_at timestamptz not null default now();
 
--- subscriptions: suscripcion del perfil (el individuo arranca en 'free'). Sin updated_at (ver nota).
+-- subscriptions: suscripcion del perfil (individuo y empresa arrancan en 'free'). Sin updated_at (ver nota).
 create table if not exists subscriptions (
   id         uuid primary key default gen_random_uuid(),
   profile_id uuid not null references profiles(id),

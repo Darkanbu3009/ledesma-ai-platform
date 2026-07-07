@@ -65,28 +65,30 @@ describe('classifyRegistration', () => {
     expect(classifyRegistration(state({ profile: individualProfile }))).toBe('active');
   });
 
-  it('pending para una empresa con organizacion pendiente', () => {
+  // Sin muro de aprobacion: una empresa entra DIRECTO igual que una persona. El estado de la org
+  // (active/approved/otro/ausente) YA NO cambia el enrutado: cualquier perfil con registro -> active.
+  it('active para una empresa con organizacion activa (alta directa)', () => {
     expect(
-      classifyRegistration(state({ profile: empresaProfile, organization: org('pending') })),
-    ).toBe('pending');
+      classifyRegistration(state({ profile: empresaProfile, organization: org('active') })),
+    ).toBe('active');
   });
 
-  it('active para una empresa con organizacion aprobada', () => {
+  it('active para una empresa con organizacion aprobada (legado admin)', () => {
     expect(
       classifyRegistration(state({ profile: empresaProfile, organization: org('approved') })),
     ).toBe('active');
   });
 
-  it('pending para una empresa sin organizacion cargada (defensivo)', () => {
+  it('active para una empresa aunque su organizacion no venga cargada', () => {
     expect(classifyRegistration(state({ profile: empresaProfile, organization: null }))).toBe(
-      'pending',
+      'active',
     );
   });
 
-  it('pending para una empresa con cualquier estado distinto de approved', () => {
+  it('active para una empresa con cualquier estado de organizacion (el status ya no gatea)', () => {
     expect(
-      classifyRegistration(state({ profile: empresaProfile, organization: org('rejected') })),
-    ).toBe('pending');
+      classifyRegistration(state({ profile: empresaProfile, organization: org('pending') })),
+    ).toBe('active');
   });
 });
 
