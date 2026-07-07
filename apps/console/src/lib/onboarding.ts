@@ -1,4 +1,5 @@
 import type { DashboardSummary } from './dashboard';
+import type { UsageRange } from './usage';
 
 /**
  * Estado del ONBOARDING guiado (primeros pasos) DERIVADO de datos reales -- nunca de checkboxes
@@ -22,6 +23,26 @@ export interface OnboardingProgress {
 
 /** Total de pasos del hilo guiado. */
 export const ONBOARDING_STEP_COUNT = 3;
+
+/**
+ * Ventana amplia para la senal de EJECUCION: 365 dias, alineada con la retencion de agent_runs
+ * (DashboardRetention.agentRunsDays). El resumen del dashboard acota ACTIVIDAD por rango, asi que si se
+ * consultara con la ventana por defecto (30d) `hasRun` NO seria durable: un usuario establecido que ya
+ * ejecuto pero estuvo inactivo >30d volveria a ver el paso 3 como pendiente (estado falso). Pedir 365d
+ * hace `hasRun` monotono en la practica ("ejecuto en el ultimo ano"), sin tocar el backend.
+ */
+export const ONBOARDING_RUN_WINDOW_DAYS = 365;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Rango para la senal de ejecucion del onboarding: `from` = hace ONBOARDING_RUN_WINDOW_DAYS dias (el
+ * backend completa `to` con "ahora"). `now` se inyecta para tests deterministas, igual que
+ * dashboardRangeFromPreset.
+ */
+export function onboardingRunWindow(now: Date = new Date()): UsageRange {
+  return { from: new Date(now.getTime() - ONBOARDING_RUN_WINDOW_DAYS * MS_PER_DAY).toISOString() };
+}
 
 /** Las tres senales crudas (booleans ya derivados de cada fuente real). */
 export interface OnboardingSignals {
@@ -52,7 +73,9 @@ export function deriveOnboardingProgress(signals: OnboardingSignals): Onboarding
  * owner-scoped de agent_runs: `activity.totals.runs` cuenta las corridas del rango -- una corrida del
  * Playground YA cuenta, porque el backend la registra con el owner_id del agente -- y
  * `operations.jobs.total` cubre las ejecuciones encoladas (recetas/tareas/triggers). Cualquiera de las
- * dos > 0 significa que ya hubo una ejecucion. Pura: solo lee el resumen.
+ * dos > 0 significa que ya hubo una ejecucion. El hook consulta el resumen con la ventana amplia
+ * (onboardingRunWindow) para que la senal sea durable y no reaparezca para un usuario establecido. Pura:
+ * solo lee el resumen.
  */
 export function hasRunFromSummary(summary: DashboardSummary): boolean {
   return summary.activity.totals.runs > 0 || summary.operations.jobs.total > 0;

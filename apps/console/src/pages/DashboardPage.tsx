@@ -56,10 +56,6 @@ export function DashboardPage() {
 
   return (
     <div className="mx-auto flex min-h-full max-w-5xl flex-col">
-      {/* Hilo guiado de primeros pasos (bienvenida + checklist). No intrusivo: se autooculta mientras
-          carga y cuando el onboarding esta completo, asi un usuario establecido no lo ve. */}
-      <OnboardingChecklist />
-
       <PageHeader
         title="Panel"
         subtitle="Tu actividad, operaciones y gasto en un vistazo."
@@ -80,6 +76,11 @@ export function DashboardPage() {
           </span>
         }
       />
+
+      {/* Hilo guiado de primeros pasos (bienvenida + checklist), justo debajo del titulo del Panel. No
+          intrusivo: se autooculta (devuelve null) mientras carga, ante error y cuando el onboarding esta
+          completo, asi un usuario establecido no lo ve ni deja hueco (el margen vive en el propio componente). */}
+      <OnboardingChecklist />
 
       <div className="mt-5">
         <RangeSelector value={preset} onChange={setPreset} />

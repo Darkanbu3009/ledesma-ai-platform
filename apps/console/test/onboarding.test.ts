@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ONBOARDING_RUN_WINDOW_DAYS,
   ONBOARDING_STEP_COUNT,
   deriveOnboardingProgress,
   hasRunFromSummary,
+  onboardingRunWindow,
 } from '../src/lib/onboarding';
 import type { DashboardSummary } from '../src/lib/dashboard';
 
@@ -70,5 +72,17 @@ describe('hasRunFromSummary', () => {
 
   it('false cuando no hay ni corridas ni jobs', () => {
     expect(hasRunFromSummary(summary({ runs: 0, jobsTotal: 0 }))).toBe(false);
+  });
+});
+
+describe('onboardingRunWindow', () => {
+  it('pide una ventana amplia (365d hacia atras) para que hasRun sea durable', () => {
+    const now = new Date('2026-07-07T00:00:00.000Z');
+    const range = onboardingRunWindow(now);
+    expect(range.to).toBeUndefined(); // el backend completa `to` con "ahora"
+    const from = new Date(range.from as string);
+    const days = (now.getTime() - from.getTime()) / (24 * 60 * 60 * 1000);
+    expect(days).toBe(ONBOARDING_RUN_WINDOW_DAYS);
+    expect(ONBOARDING_RUN_WINDOW_DAYS).toBe(365);
   });
 });
