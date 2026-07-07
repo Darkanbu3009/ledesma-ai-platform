@@ -293,6 +293,25 @@ export class RegistrationRepository {
   }
 
   /**
+   * Alta del plan FREE de un perfil dentro de una transaccion: su suscripcion 'free'/'active' y su
+   * usage_counter (0/10, lifetime). UNICA fuente de verdad del plan de arranque, compartida por el
+   * registro de individuo y de empresa: ambos entran DIRECTO a free con exactamente la misma cuota,
+   * asi no divergen (si manana cambia el limite gratis, se toca aqui una sola vez). Recibe el `tx` de
+   * begin (casteado a Sql, mismo patron que loadState): las escrituras corren dentro de la transaccion
+   * del llamador (atomicidad todo-o-nada).
+   */
+  private async insertFreePlan(tx: Sql, sub: string): Promise<void> {
+    await tx`
+      insert into subscriptions (profile_id, plan, status)
+      values (${sub}, 'free', 'active')
+    `;
+    await tx`
+      insert into usage_counters (profile_id, runs_used, runs_limit, period_kind)
+      values (${sub}, 0, 10, 'lifetime')
+    `;
+  }
+
+  /**
    * Registra un individuo. Crea perfil (individual/individual, sin org, identity_verified false),
    * su suscripcion 'free' y su usage_counter (0/10, lifetime) en UNA transaccion: o se crean los
    * tres o ninguno. Idempotente por sub: si el perfil ya existe (conflicto en la PK profiles.id)
@@ -311,24 +330,20 @@ export class RegistrationRepository {
         const state = await this.loadState(tx as unknown as Sql, input.sub);
         return { created: false, ...state };
       }
-      await tx`
-        insert into subscriptions (profile_id, plan, status)
-        values (${input.sub}, 'free', 'active')
-      `;
-      await tx`
-        insert into usage_counters (profile_id, runs_used, runs_limit, period_kind)
-        values (${input.sub}, 0, 10, 'lifetime')
-      `;
+      await this.insertFreePlan(tx as unknown as Sql, input.sub);
       const state = await this.loadState(tx as unknown as Sql, input.sub);
       return { created: true, ...state };
     });
   }
 
   /**
-   * Registra una empresa. Crea la organization en 'pending' y el perfil del usuario que registra
-   * (empresa_member/org_admin, org_id = la nueva org), en UNA transaccion. NO crea suscripcion
-   * (se asigna al aprobar/comprar). Idempotente por sub: si el perfil ya existe, devuelve el estado
-   * actual sin crear otra organizacion.
+   * Registra una empresa. Crea la organization en 'active', el perfil del usuario que registra
+   * (empresa_member/org_admin, org_id = la nueva org) y su plan FREE (suscripcion + usage_counter,
+   * via insertFreePlan) en UNA transaccion. La empresa entra DIRECTO, igual que un individuo: NO hay
+   * muro de aprobacion manual. El control de acceso real es el TIER (profiles.tier, gateado
+   * server-side), no el estado de la organizacion; una empresa nueva es free y no puede usar features
+   * autonomas hasta que un admin le suba el tier. Idempotente por sub: si el perfil ya existe, devuelve
+   * el estado actual sin crear otra organizacion.
    *
    * El SELECT inicial cubre el caso comun (re-registro) sin insertar una org de mas. Pero el
    * SELECT-then-INSERT tiene una ventana TOCTOU bajo concurrencia (doble submit / dos requests del
@@ -351,7 +366,7 @@ export class RegistrationRepository {
         }
         const orgRows = await tx<{ id: string }[]>`
           insert into organizations (name, status)
-          values (${input.orgName}, 'pending')
+          values (${input.orgName}, 'active')
           returning id
         `;
         const orgId = orgRows[0]?.id;
@@ -362,6 +377,7 @@ export class RegistrationRepository {
           insert into profiles (id, org_id, account_type, role, full_name, identity_verified)
           values (${input.sub}, ${orgId}, 'empresa_member', 'org_admin', ${input.fullName}, false)
         `;
+        await this.insertFreePlan(tx as unknown as Sql, input.sub);
         const state = await this.loadState(tx as unknown as Sql, input.sub);
         return { created: true, ...state };
       });

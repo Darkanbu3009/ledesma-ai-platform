@@ -64,7 +64,8 @@ export function registrationRoutes(config: Env, deps?: { verifier?: JwtVerifier 
       return reply.status(result.created ? 201 : 200).send(result);
     });
 
-    // EMPRESA: crea la org en 'pending'; el usuario queda org_admin pero NO opera hasta aprobacion.
+    // EMPRESA: crea la org en 'active' + plan free; el usuario queda org_admin y entra DIRECTO (sin
+    // muro de aprobacion). El acceso a features autonomas lo gatea el TIER server-side, no el registro.
     app.post('/v1/register/organization', async (request: FastifyRequest, reply: FastifyReply) => {
       const user = await requireUser(request, verifier);
       const parsed = OrganizationBodySchema.safeParse(request.body);

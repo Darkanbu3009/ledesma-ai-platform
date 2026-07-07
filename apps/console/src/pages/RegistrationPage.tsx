@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Clock, RefreshCw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { AuthScreen, SubmitButton, authInputClass, authLabelClass } from '../components/AuthScreen';
 import { useMe } from '../lib/queries';
@@ -23,7 +23,9 @@ function SignOutLink() {
 }
 
 function RegistrationForm() {
-  const [mode, setMode] = useState<Mode>('empresa');
+  // Default 'individual' (Persona): el camino sin friccion que entra directo. El usuario puede
+  // cambiar a Empresa si aplica -- ambos entran igual de directo, pero el default es el mas simple.
+  const [mode, setMode] = useState<Mode>('individual');
   const [orgName, setOrgName] = useState('');
   const [fullName, setFullName] = useState('');
   const [errors, setErrors] = useState<{ orgName?: string; fullName?: string }>({});
@@ -135,7 +137,7 @@ function RegistrationForm() {
 
       <p className="text-center text-xs text-muted-soft">
         {mode === 'empresa'
-          ? 'Tu empresa quedara en revision hasta ser aprobada.'
+          ? 'Tu empresa queda activa de inmediato.'
           : 'Tu cuenta queda activa de inmediato.'}
       </p>
     </form>
@@ -144,8 +146,7 @@ function RegistrationForm() {
 
 /**
  * Hub de onboarding tras el login OTP. Lee GET /v1/me y, segun el estado:
- * - activo (individuo o empresa aprobada) -> redirige al dashboard.
- * - empresa en revision -> pantalla "en revision" (no entra al dashboard).
+ * - activo (individuo o empresa) -> redirige al dashboard. Ambos tipos entran directo (sin muro).
  * - sin registro -> formulario de Completar registro (empresa o persona).
  */
 export function RegistrationPage() {
@@ -182,32 +183,6 @@ export function RegistrationPage() {
 
   if (access === 'active') {
     return <Navigate to="/agentes" replace />;
-  }
-
-  if (access === 'pending') {
-    const orgName = data.organization?.name;
-    return (
-      <AuthScreen footer={<SignOutLink />}>
-        <div className="flex flex-col items-center text-center">
-          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-brasa-soft text-brasa">
-            <Clock className="h-5 w-5" aria-hidden="true" />
-          </span>
-          <p className="mt-4 font-display text-lg font-semibold text-ink">
-            Tu registro de empresa esta en revision
-          </p>
-          <p className="mt-2 text-sm leading-relaxed text-muted">
-            {orgName ? (
-              <>
-                Estamos revisando <span className="font-medium text-ink">{orgName}</span>. Te
-                avisaremos en cuanto sea aprobada para que puedas entrar.
-              </>
-            ) : (
-              'Estamos revisando tu empresa. Te avisaremos en cuanto sea aprobada para que puedas entrar.'
-            )}
-          </p>
-        </div>
-      </AuthScreen>
-    );
   }
 
   return (

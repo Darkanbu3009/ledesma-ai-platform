@@ -62,6 +62,7 @@ const orgProfileRow = {
 const subRow = { id: 's1', profile_id: 'user-1', plan: 'free', status: 'active', created_at: TS };
 const usageRow = { id: 'u1', profile_id: 'user-1', runs_used: 0, runs_limit: 10, period_kind: 'lifetime', created_at: TS };
 const pendingOrgRow = { id: 'org-1', name: 'Acme', status: 'pending', approved_at: null, created_at: TS, updated_at: TS };
+const activeOrgRow = { id: 'org-1', name: 'Acme', status: 'active', approved_at: null, created_at: TS, updated_at: TS };
 
 const allText = (sql: MockSql): string => sql.calls.map((c) => c.text).join('\n---\n');
 const findCall = (sql: MockSql, needle: string): RecordedCall | undefined =>
@@ -132,48 +133,80 @@ describe('RegistrationRepository.registerIndividual', () => {
 });
 
 describe('RegistrationRepository.registerOrganization', () => {
-  it('crea org en pending y perfil org_admin sin suscripcion', async () => {
+  it('crea org ACTIVA + perfil org_admin + plan free (entra directo, sin muro de aprobacion)', async () => {
     const sql = makeSql([
       [],                 // select profiles existente -> no existe
       [{ id: 'org-1' }],  // insert organizations
       [],                 // insert profiles
+      [],                 // insert subscriptions (plan free)
+      [],                 // insert usage_counters
       [orgProfileRow],    // loadState: profiles
-      [pendingOrgRow],    // loadState: organizations
-      [],                 // loadState: subscriptions
-      [],                 // loadState: usage_counters
+      [activeOrgRow],     // loadState: organizations
+      [subRow],           // loadState: subscriptions
+      [usageRow],         // loadState: usage_counters
     ]);
     const repo = new RegistrationRepository(sql as unknown as Sql);
     const result = await repo.registerOrganization({ sub: 'user-1', orgName: 'Acme', fullName: 'Ada' });
 
     expect(result.created).toBe(true);
-    expect(result.organization).toMatchObject({ name: 'Acme', status: 'pending', approvedAt: null });
+    // La org entra 'active' (no 'pending'): la empresa opera de inmediato, igual que un individuo.
+    expect(result.organization).toMatchObject({ name: 'Acme', status: 'active', approvedAt: null });
     expect(result.profile).toMatchObject({ accountType: 'empresa_member', role: 'org_admin', orgId: 'org-1' });
-    expect(result.subscription).toBeNull();
-    expect(result.usageCounter).toBeNull();
+    // Ahora la empresa SI recibe plan free + usage_counter al registrarse (mismo alta que Persona).
+    expect(result.subscription).toMatchObject({ plan: 'free' });
+    expect(result.usageCounter).toMatchObject({ runsUsed: 0, runsLimit: 10, periodKind: 'lifetime' });
 
-    expect(findCall(sql, 'insert into organizations')?.text).toContain("'pending'");
+    expect(findCall(sql, 'insert into organizations')?.text).toContain("'active'");
+    expect(findCall(sql, 'insert into organizations')?.text).not.toContain("'pending'");
     expect(findCall(sql, 'insert into organizations')?.values).toEqual(['Acme']);
     const insertProfile = findCall(sql, 'insert into profiles');
     expect(insertProfile?.text).toContain("'empresa_member', 'org_admin'");
     expect(insertProfile?.values).toEqual(['user-1', 'org-1', 'Ada']);
-    // NO crea suscripcion al registrar empresa (se asigna al aprobar/comprar).
-    expect(allText(sql)).not.toContain('insert into subscriptions');
-    expect(allText(sql)).not.toContain('insert into usage_counters');
+    // Plan free: crea suscripcion 'free' + usage_counter (0/10, lifetime), igual que registerIndividual.
+    expect(findCall(sql, 'insert into subscriptions')?.text).toContain("'free'");
+    expect(findCall(sql, 'insert into usage_counters')?.text).toContain("'lifetime'");
+    expect(findCall(sql, 'insert into usage_counters')?.text).toContain('10');
+
+    // Atomicidad: las CUATRO escrituras (org, perfil, suscripcion, usage_counter) corren dentro de la
+    // transaccion (tx:true). Todo o nada: si una falla, la empresa no queda a medio crear.
+    const inserts = sql.calls.filter((c) => /insert into (organizations|profiles|subscriptions|usage_counters)/.test(c.text));
+    expect(inserts).toHaveLength(4);
+    expect(inserts.every((c) => c.tx)).toBe(true);
   });
 
-  it('es idempotente: si el perfil ya existe no crea otra organizacion (created=false)', async () => {
+  it('es idempotente: si el perfil ya existe no crea otra organizacion ni otro plan (created=false)', async () => {
     const sql = makeSql([
       [{ id: 'user-1' }], // select profiles existente -> existe
       [orgProfileRow],    // loadState: profiles
-      [pendingOrgRow],    // loadState: organizations
-      [],                 // loadState: subscriptions
-      [],                 // loadState: usage_counters
+      [activeOrgRow],     // loadState: organizations
+      [subRow],           // loadState: subscriptions
+      [usageRow],         // loadState: usage_counters
     ]);
     const repo = new RegistrationRepository(sql as unknown as Sql);
     const result = await repo.registerOrganization({ sub: 'user-1', orgName: 'Acme', fullName: 'Ada' });
 
     expect(result.created).toBe(false);
+    // Ni org, ni perfil, ni suscripcion, ni contador nuevos: re-registro no duplica nada.
     expect(allText(sql)).not.toContain('insert into organizations');
+    expect(allText(sql)).not.toContain('insert into subscriptions');
+    expect(allText(sql)).not.toContain('insert into usage_counters');
+  });
+
+  it('aborta sin plan si una insercion falla (todo o nada): la org no queda sin suscripcion', async () => {
+    const sql = makeSql([
+      [],                 // select profiles -> no existe
+      [{ id: 'org-1' }],  // insert organizations -> ok
+      [],                 // insert profiles -> ok
+      new Error('boom subscriptions'), // insert subscriptions -> falla
+    ]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    await expect(repo.registerOrganization({ sub: 'user-1', orgName: 'Acme', fullName: 'Ada' })).rejects.toThrow('boom subscriptions');
+    // El error se propaga (la transaccion real haria rollback): no se intenta el usage_counter ni se
+    // lee el estado final. La org NO queda creada sin su plan (todo dentro de la misma transaccion).
+    // Nota: 'from profiles' no sirve como centinela aqui (el chequeo de existencia inicial ya lo emite);
+    // 'from subscriptions' solo aparece en loadState, asi que su ausencia prueba que el estado no se leyo.
+    expect(sql.calls.some((c) => c.text.includes('insert into usage_counters'))).toBe(false);
+    expect(sql.calls.some((c) => c.text.includes('from subscriptions'))).toBe(false);
   });
 
   it('bajo carrera (TOCTOU): si el insert de perfil choca (23505) devuelve estado actual, no 500', async () => {
@@ -184,16 +217,16 @@ describe('RegistrationRepository.registerOrganization', () => {
       uniqueViolation,     // insert profiles (tx) -> unique_violation, la tx hace rollback
       // getState (fuera de tx) tras el rollback, ve lo que dejo el request ganador:
       [orgProfileRow],     // profiles
-      [pendingOrgRow],     // organizations
-      [],                  // subscriptions
-      [],                  // usage_counters
+      [activeOrgRow],      // organizations
+      [subRow],            // subscriptions
+      [usageRow],          // usage_counters
     ]);
     const repo = new RegistrationRepository(sql as unknown as Sql);
     const result = await repo.registerOrganization({ sub: 'user-1', orgName: 'Acme', fullName: 'Ada' });
 
     expect(result.created).toBe(false);
     expect(result.profile?.role).toBe('org_admin');
-    // El estado idempotente se lee fuera de la transaccion abortada (tx:false).
+    // El insert de perfil choca ANTES de tocar el plan: el rollback deja el estado del request ganador.
     const stateRead = sql.calls.filter((c) => c.text.includes('from profiles'));
     expect(stateRead.some((c) => c.tx === false)).toBe(true);
   });

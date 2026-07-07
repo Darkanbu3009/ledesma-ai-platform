@@ -5,9 +5,10 @@ import { classifyRegistration } from '../lib/registration';
 
 /**
  * Compuerta de registro: se monta por dentro de ProtectedRoute (la sesion ya esta garantizada) y
- * consulta GET /v1/me. Solo deja pasar al dashboard a quien tiene el registro activo; a los demas
- * los manda a /registro (formulario o pantalla de revision, segun su estado). Aditivo: no toca el
- * flujo de login OTP, solo decide el enrutado posterior.
+ * consulta GET /v1/me. Solo deja pasar al dashboard a quien tiene el registro activo; a quien aun no
+ * completo el registro lo manda a /registro (formulario). Ambos tipos (persona y empresa) entran
+ * directo: ya no hay pantalla de revision. Aditivo: no toca el flujo de login OTP, solo decide el
+ * enrutado posterior.
  */
 export function RegistrationGate() {
   const { data, isLoading, isError, refetch } = useMe();

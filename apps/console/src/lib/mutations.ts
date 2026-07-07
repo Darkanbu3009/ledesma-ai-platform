@@ -46,7 +46,7 @@ export function useRegisterIndividual() {
   });
 }
 
-/** Registra una empresa: crea la organizacion en 'pending'; el usuario queda org_admin a la espera. */
+/** Registra una empresa: crea la organizacion activa + plan free; el usuario queda org_admin y entra directo. */
 export function useRegisterOrganization() {
   const qc = useQueryClient();
   return useMutation({

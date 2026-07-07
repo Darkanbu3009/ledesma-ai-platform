@@ -26,11 +26,11 @@ export interface Profile {
   updatedAt: string;
 }
 
-/** Organizacion (cuenta empresa). Arranca en 'pending' hasta que un super-admin la aprueba. */
+/** Organizacion (cuenta empresa). Entra DIRECTO en 'active'; el acceso lo decide el tier, no el status. */
 export interface Organization {
   id: string;
   name: string;
-  /** 'pending' | 'approved' (el backend puede definir mas estados; llega tal cual). */
+  /** 'active' (alta directa) | 'approved' (via admin, legado). Llega tal cual del backend. */
   status: string;
   approvedAt: string | null;
   createdAt: string;
@@ -98,26 +98,21 @@ export interface UpdateProfileNameInput {
 /**
  * A donde corresponde enviar a un usuario autenticado segun su estado de registro:
  * - 'needs-registration': aun no completo el registro -> pantalla de Completar registro.
- * - 'pending': empresa registrada pero no aprobada -> pantalla en revision (no entra al dashboard).
- * - 'active': individuo, o empresa ya aprobada -> dashboard/playground.
+ * - 'active': ya tiene perfil (individuo o empresa) -> dashboard/playground.
+ *
+ * Ya NO existe un estado 'pending' de onboarding: ambos tipos (persona y empresa) entran DIRECTO. El
+ * control de acceso real es el TIER (profiles.tier, gateado server-side), no el estado de la
+ * organizacion; el muro de aprobacion manual se elimino.
  */
-export type Access = 'needs-registration' | 'pending' | 'active';
-
-const APPROVED_STATUS = 'approved';
+export type Access = 'needs-registration' | 'active';
 
 /** Clasifica el estado de /v1/me en una decision de enrutado. Pura y testeable. */
 export function classifyRegistration(state: RegistrationState): Access {
   if (state.needsRegistration || state.profile === null) {
     return 'needs-registration';
   }
-  // Una empresa solo entra al dashboard cuando su organizacion esta aprobada; cualquier otro estado
-  // (o una organizacion ausente) la mantiene en revision.
-  if (
-    state.profile.accountType === 'empresa_member' &&
-    state.organization?.status !== APPROVED_STATUS
-  ) {
-    return 'pending';
-  }
+  // Cualquier perfil (persona o empresa) entra al dashboard: no hay muro de aprobacion. Lo que puede
+  // HACER un usuario lo decide el tier server-side, no este enrutado.
   return 'active';
 }
 

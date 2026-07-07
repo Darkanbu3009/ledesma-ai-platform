@@ -93,19 +93,23 @@ export interface AdminUserDetail {
   usageCounter: UsageCounter | null;
 }
 
-/** Organizacion (cuenta empresa). Arranca en 'pending' hasta que un super-admin la aprueba. */
+/**
+ * Organizacion (cuenta empresa). Las orgs nuevas entran DIRECTO en 'active' (sin aprobacion manual);
+ * el super-admin todavia puede marcarla 'approved' (endpoint legado), pero el acceso NO depende del
+ * status: lo gatea el TIER del perfil.
+ */
 export interface Organization {
   id: string;
   name: string;
-  /** 'pending' | 'approved' (la base puede definir mas estados; se devuelve tal cual). */
+  /** 'active' (alta directa) | 'approved' (via admin, legado). La base puede definir mas estados. */
   status: string;
-  /** ISO del momento de aprobacion; null mientras este pendiente. */
+  /** ISO del momento de aprobacion via admin; null si nunca se aprobo (alta directa). */
   approvedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-/** Suscripcion del perfil. El individuo arranca en 'free'; la empresa no recibe una al registrarse. */
+/** Suscripcion del perfil. Individuo y empresa arrancan en 'free' (ambos entran directo al registrarse). */
 export interface Subscription {
   id: string;
   profileId: string;
