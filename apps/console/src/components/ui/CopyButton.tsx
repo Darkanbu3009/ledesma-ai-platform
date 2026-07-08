@@ -10,7 +10,7 @@ const VARIANT_CLASSES: Record<CopyButtonVariant, string> = {
     'gap-1.5 rounded-lg border border-grafito-border px-3 py-1.5 text-xs font-medium text-hueso-muted hover:border-hueso-muted hover:text-hueso',
   // Prominente: para el secreto critico del modal "copia esto ahora". Boton lleno, imposible de ignorar.
   primary:
-    'gap-2 rounded-xl bg-brasa px-4 py-2.5 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] hover:bg-brasa-hover',
+    'gap-2 rounded-[10px] bg-brasa px-4 py-2.5 text-sm font-medium text-white hover:bg-brasa-hover',
 };
 
 /**

@@ -6,23 +6,27 @@ import {
 } from 'react';
 import { cn } from '../../lib/utils';
 
-type ButtonVariant = 'default' | 'secondary' | 'ghost' | 'outline' | 'link';
+type ButtonVariant = 'default' | 'secondary' | 'ghost';
 type ButtonSize = 'default' | 'sm' | 'lg' | 'icon';
 
+// Sistema plano de 3 variantes: sin box-shadow en reposo/hover/active (el unico permitido es el
+// ring de focus-visible). Los estados hover/active van tras :not(:disabled) para que un boton
+// deshabilitado (opacity 0.5 + cursor not-allowed) no reaccione al mouse; el `!` de los actives
+// resuelve el empate de especificidad con las reglas de hover mientras se mantiene presionado.
 const BASE_CLASSES =
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50';
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[10px] text-sm font-medium transition-[background-color,color,border-color,transform] duration-[120ms] ease-[ease] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brasa focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 [&:active:not(:disabled)]:scale-[0.97]';
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
-  default: 'bg-accent text-white hover:bg-accent-hover',
+  default:
+    'bg-brasa text-white [&:hover:not(:disabled)]:bg-brasa-hover [&:active:not(:disabled)]:!bg-brasa-active',
   secondary:
-    'border border-border bg-background-secondary text-foreground hover:bg-background-tertiary',
-  ghost: 'text-foreground hover:bg-background-secondary',
-  outline: 'border border-border bg-transparent hover:bg-background-secondary',
-  link: 'text-accent underline-offset-4 hover:underline',
+    'border border-brasa bg-transparent text-brasa [&:hover:not(:disabled)]:border-brasa-hover [&:hover:not(:disabled)]:bg-[#FAECE7] [&:hover:not(:disabled)]:text-brasa-hover [&:active:not(:disabled)]:!border-brasa-active [&:active:not(:disabled)]:!bg-[#F5D9CE] [&:active:not(:disabled)]:!text-brasa-active',
+  ghost:
+    'text-ink [&:hover:not(:disabled)]:bg-ink/[0.06] [&:active:not(:disabled)]:!bg-ink/10',
 };
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
-  default: 'h-10 px-4 py-2',
+  default: 'px-6 py-[11px]',
   sm: 'h-9 px-3',
   lg: 'h-11 px-8',
   icon: 'h-10 w-10',

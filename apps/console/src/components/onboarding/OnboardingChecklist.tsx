@@ -5,6 +5,7 @@ import { useOnboardingProgress } from '../../lib/queries';
 import { ONBOARDING_STEP_COUNT } from '../../lib/onboarding';
 import { playgroundPath } from '../../lib/agents';
 import { focusRing } from '../../lib/utils';
+import { Button } from '../ui/button';
 
 /** Nombre del producto, alineado con el sidebar. */
 const PRODUCT_NAME = 'Ledesma AI Labs';
@@ -146,13 +147,12 @@ export function OnboardingChecklist(): ReactNode {
             </div>
           </div>
           {firstPending?.href && (
-            <Link
-              to={firstPending.href}
-              className={`inline-flex flex-none items-center gap-2 self-start rounded-xl bg-brasa px-4 py-2.5 text-sm font-semibold text-white shadow-brasa transition hover:bg-brasa-hover sm:self-auto ${focusRing}`}
-            >
-              Empezar
-              <ArrowRight className="h-[17px] w-[17px]" />
-            </Link>
+            <Button asChild className="flex-none self-start sm:self-auto">
+              <Link to={firstPending.href}>
+                Empezar
+                <ArrowRight className="h-[17px] w-[17px]" />
+              </Link>
+            </Button>
           )}
         </div>
       )}

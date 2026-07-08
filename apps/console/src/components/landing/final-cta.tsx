@@ -28,7 +28,7 @@ export function FinalCTA(): JSX.Element {
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </Button>
-            <Button asChild variant="outline" size="lg" className="border-foreground/20">
+            <Button asChild variant="secondary" size="lg">
               <a href={WHATSAPP_URL}>
                 <MessageCircle className="h-4 w-4" />
                 Escríbenos por WhatsApp

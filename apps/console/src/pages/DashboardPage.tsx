@@ -7,6 +7,7 @@ import {
   hasDashboardData,
   type DashboardRangePreset,
 } from '../lib/dashboard';
+import { Button } from '../components/ui/button';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SkeletonList } from '../components/ui/SkeletonList';
 import { ErrorState } from '../components/ui/ErrorState';
@@ -28,12 +29,9 @@ function DashboardEmptyState() {
       title="Aun no hay actividad"
       description="Cuando crees un agente y lo ejecutes —desde el Playground, una receta, una tarea programada o un trigger— vas a ver aqui tu actividad, el estado de tus operaciones y el gasto estimado."
       action={
-        <Link
-          to="/agentes"
-          className="inline-flex items-center gap-2 rounded-xl bg-brasa px-4 py-2 text-sm font-semibold text-white shadow-brasa transition hover:bg-brasa-hover"
-        >
-          Crear un agente
-        </Link>
+        <Button asChild>
+          <Link to="/agentes">Crear un agente</Link>
+        </Button>
       }
     />
   );
