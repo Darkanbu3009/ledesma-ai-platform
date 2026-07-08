@@ -36,7 +36,7 @@ export function RangeSelector({
             className={[
               'rounded-lg px-3 py-1.5 text-[13px] font-medium transition',
               focusRing,
-              active ? 'bg-brasa-soft text-brasa' : 'text-muted hover:text-ink',
+              active ? 'bg-brasa-soft text-brasa-active' : 'text-muted hover:text-ink',
             ].join(' ')}
           >
             {option.label}

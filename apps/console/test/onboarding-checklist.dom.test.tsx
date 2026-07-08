@@ -68,9 +68,10 @@ describe('OnboardingChecklist', () => {
     // Bienvenida presente.
     expect(screen.getByRole('heading', { name: /Bienvenido a Ledesma AI Labs/ })).toBeInTheDocument();
     expect(screen.getByText('0 de 3')).toBeInTheDocument();
-    // Paso 1 y 2 con CTA a su pantalla.
+    // Paso 1 (el activo) con CTA a su pantalla; paso 2 bloqueado SIN boton, con la nota del orden.
     expect(screen.getByRole('link', { name: 'Poner credencial' })).toHaveAttribute('href', '/credenciales');
-    expect(screen.getByRole('link', { name: 'Crear agente' })).toHaveAttribute('href', '/configurador');
+    expect(screen.queryByRole('link', { name: 'Crear agente' })).not.toBeInTheDocument();
+    expect(screen.getByText('Despues del paso 1')).toBeInTheDocument();
     // Paso 3 sin agente aun: no hay CTA a un Playground inexistente; se explica el motivo con texto visible.
     expect(screen.queryByRole('link', { name: 'Ejecutar' })).not.toBeInTheDocument();
     expect(screen.getByText('Crea un agente primero')).toBeInTheDocument();

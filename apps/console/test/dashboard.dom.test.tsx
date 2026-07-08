@@ -117,6 +117,10 @@ describe('DashboardPage', () => {
     });
     renderPage();
     expect(screen.getByRole('heading', { name: /Aun no hay actividad/ })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Crear un agente/ })).toBeInTheDocument();
+    // El CTA "Crear un agente" ya no se duplica en el estado vacio: la accion vive en el checklist.
+    expect(screen.queryByRole('link', { name: /Crear un agente/ })).not.toBeInTheDocument();
+    // La fila de metricas en cero acompana al estado vacio.
+    expect(screen.getByText('Corridas')).toBeInTheDocument();
+    expect(screen.getByText('Gasto estimado')).toBeInTheDocument();
   });
 });

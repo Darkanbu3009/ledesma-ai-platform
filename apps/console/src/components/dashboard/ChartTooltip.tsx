@@ -17,7 +17,7 @@ export function ChartTooltip({ active, label, payload, format }: ChartTooltipPro
   const numeric = typeof raw === 'number' ? raw : Number(raw);
   const value = Number.isFinite(numeric) ? numeric : 0;
   return (
-    <div className="pointer-events-none rounded-xl border border-line bg-surface px-3 py-2 shadow-card">
+    <div className="pointer-events-none rounded-[10px] border border-line bg-surface px-3 py-2">
       <p className="text-[11px] font-medium text-muted">{String(label ?? '')}</p>
       <p className="mt-0.5 text-sm font-semibold text-ink">{format(value)}</p>
     </div>

@@ -1,42 +1,63 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { LayoutDashboard, Loader2 } from 'lucide-react';
+import { BarChart3, Loader2 } from 'lucide-react';
 import { useDashboard } from '../lib/queries';
 import {
   dashboardRangeFromPreset,
   hasDashboardData,
   type DashboardRangePreset,
+  type DashboardSummary,
 } from '../lib/dashboard';
-import { Button } from '../components/ui/button';
+import { formatUSD } from '../lib/usage';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SkeletonList } from '../components/ui/SkeletonList';
 import { ErrorState } from '../components/ui/ErrorState';
-import { EmptyState } from '../components/ui/EmptyState';
 import { RangeSelector } from '../components/dashboard/RangeSelector';
 import { DashboardSummaryView } from '../components/dashboard/DashboardSummaryView';
 import { OnboardingChecklist } from '../components/onboarding/OnboardingChecklist';
 
-/** Estado vacio: el owner aun no ejecuto nada. Guia a crear y ejecutar un agente. Reusa EmptyState.
- * Va en modo `compact` porque convive con la bienvenida + checklist: todo el estado inicial del Panel
- * debe caber sin scroll en un viewport de laptop (1366x768). */
+/** Tarjeta de metrica del estado inicial: etiqueta muted + valor compacto, sin sombra. */
+function ZeroMetricCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[10px] border-[0.5px] border-line bg-surface px-4 py-3">
+      <p className="text-[12px] text-muted">{label}</p>
+      <p className="mt-0.5 text-[20px] font-medium tabular-nums text-ink">{value}</p>
+    </div>
+  );
+}
+
+/**
+ * Fila de metricas del estado inicial (todo en cero), entre el selector de rango y el estado vacio.
+ * Corridas y gasto salen del resumen que esta pantalla YA recibe (GET /v1/dashboard); el conteo de
+ * agentes activos no viaja en ese resumen, asi que se muestra 0 estatico de presentacion.
+ */
+function ZeroMetricsRow({ summary }: { summary: DashboardSummary }) {
+  return (
+    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <ZeroMetricCard label="Corridas" value={summary.activity.totals.runs.toLocaleString('es-MX')} />
+      {/* TODO: conectar a GET /v1/dashboard */}
+      <ZeroMetricCard label="Agentes activos" value="0" />
+      <ZeroMetricCard label="Gasto estimado" value={formatUSD(summary.spend.totalCostUsd)} />
+    </div>
+  );
+}
+
+/** Estado vacio compacto y horizontal: el owner aun no ejecuto nada. La accion de crear un agente ya
+ * vive en el paso 2 del checklist (y en /agentes), asi que aqui no se repite el CTA. Todo el estado
+ * inicial del Panel debe caber sin scroll en un viewport de laptop (1366x768). */
 function DashboardEmptyState() {
   return (
-    <EmptyState
-      variant="centered"
-      compact
-      media={
-        <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-brasa-soft text-brasa">
-          <LayoutDashboard className="h-5 w-5" />
-        </span>
-      }
-      title="Aun no hay actividad"
-      description="Cuando crees un agente y lo ejecutes —desde el Playground, una receta, una tarea programada o un trigger— vas a ver aqui tu actividad, el estado de tus operaciones y el gasto estimado."
-      action={
-        <Button asChild>
-          <Link to="/agentes">Crear un agente</Link>
-        </Button>
-      }
-    />
+    <div className="mt-3 flex items-center gap-3.5 rounded-[10px] border-[0.5px] border-dashed border-line p-4">
+      <span className="flex h-9 w-9 flex-none items-center justify-center rounded-[10px] bg-brasa-soft text-brasa">
+        <BarChart3 className="h-[18px] w-[18px]" />
+      </span>
+      <div className="min-w-0">
+        <h2 className="text-[13.5px] font-medium text-ink">Aun no hay actividad</h2>
+        <p className="mt-0.5 text-[12.5px] leading-snug text-muted">
+          Cuando crees un agente y lo ejecutes, aqui vas a ver tu actividad, tus operaciones y el gasto
+          estimado.
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -44,8 +65,9 @@ function DashboardEmptyState() {
  * Pantalla PANEL (/dashboard): la vista que un owner usa para rastrear su ACTIVIDAD (ejecuciones),
  * OPERACIONES (estado de cola + recursos activos) y GASTO (tokens + su equivalente en dinero BYOK),
  * leyendo GET /v1/dashboard. Solo lectura, SIN gate por tier: cada quien ve su propio panel. Maneja los
- * estados de carga (SkeletonList), error (ErrorState con reintento) y vacio (EmptyState que guia). El
- * contenido con datos lo pinta DashboardSummaryView (compartido con la ficha de admin).
+ * estados de carga (SkeletonList), error (ErrorState con reintento) y vacio (fila de metricas en cero +
+ * estado vacio compacto). El contenido con datos lo pinta DashboardSummaryView (compartido con la ficha
+ * de admin).
  */
 export function DashboardPage() {
   const [preset, setPreset] = useState<DashboardRangePreset>('30d');
@@ -83,7 +105,9 @@ export function DashboardPage() {
           completo, asi un usuario establecido no lo ve ni deja hueco (el margen vive en el propio componente). */}
       <OnboardingChecklist />
 
-      <div className="mt-2.5">
+      {/* Titulo de la zona de actividad a la izquierda, selector de rango alineado a la derecha. */}
+      <div className="mt-4 flex items-center justify-between gap-4">
+        <h2 className="text-[14px] font-medium text-ink">Actividad</h2>
         <RangeSelector value={preset} onChange={setPreset} />
       </div>
 
@@ -92,7 +116,10 @@ export function DashboardPage() {
       ) : isError || !data ? (
         <ErrorState title="No pudimos cargar tu panel" onRetry={() => void refetch()} />
       ) : !hasDashboardData(data) ? (
-        <DashboardEmptyState />
+        <>
+          <ZeroMetricsRow summary={data} />
+          <DashboardEmptyState />
+        </>
       ) : (
         <div className="mt-6">
           <DashboardSummaryView summary={data} />
