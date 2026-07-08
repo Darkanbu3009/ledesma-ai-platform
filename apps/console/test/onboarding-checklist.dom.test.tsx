@@ -75,17 +75,17 @@ describe('OnboardingChecklist', () => {
     // Paso 3 sin agente aun: no hay CTA a un Playground inexistente; se explica el motivo con texto visible.
     expect(screen.queryByRole('link', { name: 'Ejecutar' })).not.toBeInTheDocument();
     expect(screen.getByText('Crea un agente primero')).toBeInTheDocument();
-    // La bienvenida lleva al primer paso pendiente (la credencial).
-    expect(screen.getByRole('link', { name: /Empezar/ })).toHaveAttribute('href', '/credenciales');
+    // La bienvenida ya no lleva un "Empezar" propio: el CTA del paso activo es la unica accion.
+    expect(screen.queryByRole('link', { name: /Empezar/ })).not.toBeInTheDocument();
     // Nada marcado como hecho.
-    expect(screen.queryByText('Hecho')).not.toBeInTheDocument();
+    expect(screen.queryByText('Completado')).not.toBeInTheDocument();
   });
 
   it('con avance (1/3): oculta la bienvenida y marca hecho el paso cumplido', () => {
     renderChecklist(progress({ hasCredential: true }));
     expect(screen.queryByText(/Bienvenido a Ledesma AI Labs/)).not.toBeInTheDocument();
     expect(screen.getByText('1 de 3')).toBeInTheDocument();
-    expect(screen.getByText('Hecho')).toBeInTheDocument();
+    expect(screen.getByText('Completado')).toBeInTheDocument();
     // El paso de credencial ya no ofrece su CTA (esta hecho).
     expect(screen.queryByRole('link', { name: 'Poner credencial' })).not.toBeInTheDocument();
   });

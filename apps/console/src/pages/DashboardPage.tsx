@@ -46,8 +46,9 @@ function ZeroMetricsRow({ summary }: { summary: DashboardSummary }) {
  * inicial del Panel debe caber sin scroll en un viewport de laptop (1366x768). */
 function DashboardEmptyState() {
   return (
-    <div className="mt-3 flex items-center gap-3.5 rounded-[10px] border-[0.5px] border-dashed border-line p-4">
-      <span className="flex h-9 w-9 flex-none items-center justify-center rounded-[10px] bg-brasa-soft text-brasa">
+    <div className="mt-3 flex items-center gap-3.5 rounded-[10px] border-[0.5px] border-dashed border-[#D3D1C7] bg-[#FAF9F5] p-4">
+      {/* Icono neutro: la firma brasa de la pagina es el spark del banner, no este badge. */}
+      <span className="flex h-9 w-9 flex-none items-center justify-center rounded-[10px] bg-[#F1EFE8] text-[#8A8880]">
         <BarChart3 className="h-[18px] w-[18px]" />
       </span>
       <div className="min-w-0">

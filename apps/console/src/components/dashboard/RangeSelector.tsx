@@ -8,8 +8,8 @@ const OPTIONS: Array<{ value: DashboardRangePreset; label: string }> = [
 ];
 
 /**
- * Selector de rango del dashboard (7d / 30d / 90d) como control segmentado, con el mismo lenguaje visual
- * que las barras de filtro de la consola (brasa-soft para el activo). Todos los presets caben dentro de
+ * Selector de rango del dashboard (7d / 30d / 90d) como control segmentado, neutro: greige para el
+ * activo (el brasa del Panel queda para spark, CTA y progreso). Todos los presets caben dentro de
  * la retencion de datos, asi que no hay que acotar la seleccion. Estado en React (sin localStorage).
  */
 export function RangeSelector({
@@ -36,7 +36,7 @@ export function RangeSelector({
             className={[
               'rounded-lg px-3 py-1.5 text-[13px] font-medium transition',
               focusRing,
-              active ? 'bg-brasa-soft text-brasa-active' : 'text-muted hover:text-ink',
+              active ? 'bg-[#F1EFE8] text-ink' : 'text-[#8A8880] hover:text-ink',
             ].join(' ')}
           >
             {option.label}
