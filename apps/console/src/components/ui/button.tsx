@@ -6,7 +6,7 @@ import {
 } from 'react';
 import { cn } from '../../lib/utils';
 
-type ButtonVariant = 'default' | 'secondary' | 'ghost';
+type ButtonVariant = 'default' | 'secondary' | 'secondary-neutral' | 'ghost';
 type ButtonSize = 'default' | 'sm' | 'lg' | 'icon';
 
 // Sistema plano de 3 variantes: sin box-shadow en reposo/hover/active (el unico permitido es el
@@ -21,6 +21,10 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
     'bg-brasa text-white [&:hover:not(:disabled)]:bg-brasa-hover [&:active:not(:disabled)]:!bg-brasa-active',
   secondary:
     'border border-brasa bg-transparent text-brasa [&:hover:not(:disabled)]:border-brasa-hover [&:hover:not(:disabled)]:bg-[#FAECE7] [&:hover:not(:disabled)]:text-brasa-hover [&:active:not(:disabled)]:!border-brasa-active [&:active:not(:disabled)]:!bg-[#F5D9CE] [&:active:not(:disabled)]:!text-brasa-active',
+  // Secundario neutro: para superficies calidas donde el acento brasa esta reservado a un unico
+  // CTA primario y el boton secundario debe quedarse en la escala de neutros.
+  'secondary-neutral':
+    'border border-[#B4B2A9] bg-transparent text-ink [&:hover:not(:disabled)]:bg-[#F1EFE8] [&:active:not(:disabled)]:!bg-[#E9E7DF]',
   ghost:
     'text-ink [&:hover:not(:disabled)]:bg-ink/[0.06] [&:active:not(:disabled)]:!bg-ink/10',
 };
