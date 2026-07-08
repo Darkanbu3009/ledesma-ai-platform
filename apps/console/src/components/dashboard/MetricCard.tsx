@@ -18,7 +18,7 @@ export interface MetricCardProps {
 
 export function MetricCard({ label, value, hint, icon, emphasis, compact }: MetricCardProps) {
   return (
-    <div className="rounded-2xl border border-line bg-surface p-4 shadow-card">
+    <div className="rounded-xl border border-line bg-surface p-4">
       <div className="flex items-center gap-2 text-muted">
         {icon}
         <p className="text-[13px] font-medium">{label}</p>
