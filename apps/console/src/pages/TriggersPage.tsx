@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Plus, Sparkles, Webhook } from 'lucide-react';
+import { ArrowRight, Lock, Plus, Webhook } from 'lucide-react';
 import { useAgents, useCredentials, useMe, useTriggers } from '../lib/queries';
 import { useDeleteTrigger, useUpdateTrigger } from '../lib/mutations';
 import {
@@ -21,6 +21,7 @@ import { ErrorState } from '../components/ui/ErrorState';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Notice, type NoticeData } from '../components/ui/Notice';
 import { RequestUpgradeCta } from '../components/upgrade/RequestUpgradeCta';
+import { GateTriggersInspector } from '../components/upgrade/GateTriggersInspector';
 
 const addButtonClass =
   'inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:-translate-y-px hover:bg-brasa-hover hover:shadow-[0_2px_6px_rgba(31,30,28,0.14)]';
@@ -28,20 +29,34 @@ const addButtonClass =
 /** Material de auth a mostrar una vez, con el origen (crear o rotar) para el copy del modal. */
 type Reveal = { data: TriggerReveal; context: 'created' | 'rotated' };
 
-/** Aviso: los triggers son del plan Autonomo. Sobrio, no un paywall agresivo (espejo del gate server-side). */
+/**
+ * Gate del plan Autonomo para Triggers: hero centrado + inspector de webhook estatico como prueba
+ * visual (GateTriggersInspector). Reemplaza al PageHeader y al empty state viejo en el estado
+ * bloqueado. El CTA es el RequestUpgradeCta existente sin cambios: mismo flujo upgrade_requests,
+ * mismo estado post-solicitud ("Solicitud enviada") y mismo disclaimer. El hero duplica al de
+ * Tareas (SchedulingLocked lo tiene inline); extraerlo a un sub-componente queda como deuda.
+ */
 function TriggersLocked() {
   return (
-    <EmptyState
-      variant="centered"
-      media={
-        <span className="flex h-[52px] w-[52px] items-center justify-center rounded-2xl bg-brasa-soft text-brasa">
-          <Sparkles className="h-6 w-6" />
+    <div className="flex flex-col gap-4">
+      <section className="mx-auto flex w-full max-w-[520px] flex-col items-center pb-12 pt-14 text-center">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-[#F1EFE8] px-3 py-[5px]">
+          <Lock className="h-3 w-3 flex-none text-[#5F5E5A]" aria-hidden="true" />
+          <span className="text-[11px] uppercase tracking-[0.08em] text-[#5F5E5A]">
+            Plan Autonomo
+          </span>
         </span>
-      }
-      title="Una funcion del plan Autonomo"
-      description="Los triggers dejan que un evento externo dispare tus agentes a traves de una URL de webhook. Estan disponibles en el plan Autonomo."
-      action={<RequestUpgradeCta featureContext="triggers" />}
-    />
+        <h1 className="mt-5 text-[26px] font-medium leading-[1.15] tracking-[-0.02em] text-ink">
+          Una funcion del plan Autonomo
+        </h1>
+        <p className="mt-3 text-[14px] leading-[1.6] text-[#5F5E5A]">
+          Los triggers dejan que un evento externo dispare tus agentes a traves de una URL de
+          webhook. Estan disponibles en el plan Autonomo.
+        </p>
+        <RequestUpgradeCta featureContext="triggers" className="mt-6" />
+      </section>
+      <GateTriggersInspector />
+    </div>
   );
 }
 
@@ -197,19 +212,22 @@ export function TriggersPage() {
 
   return (
     <div className="mx-auto flex min-h-full max-w-4xl flex-col">
-      <PageHeader
-        title="Triggers"
-        subtitle="Crea URLs de webhook que ejecutan un agente cuando un evento externo las llama."
-        action={
-          isAutonomous &&
-          hasTriggers && (
-            <button type="button" onClick={() => setFormOpen(true)} className={addButtonClass}>
-              <Plus className="h-[17px] w-[17px]" />
-              Crear trigger
-            </button>
-          )
-        }
-      />
+      {/* En el estado bloqueado el hero del gate reemplaza al titulo y subtitulo de la pagina. */}
+      {(me.isLoading || isAutonomous) && (
+        <PageHeader
+          title="Triggers"
+          subtitle="Crea URLs de webhook que ejecutan un agente cuando un evento externo las llama."
+          action={
+            isAutonomous &&
+            hasTriggers && (
+              <button type="button" onClick={() => setFormOpen(true)} className={addButtonClass}>
+                <Plus className="h-[17px] w-[17px]" />
+                Crear trigger
+              </button>
+            )
+          }
+        />
+      )}
 
       <Notice notice={notice} />
 
