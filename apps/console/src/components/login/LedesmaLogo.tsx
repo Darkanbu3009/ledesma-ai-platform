@@ -2,15 +2,22 @@
  * Logo apilado oficial de Ledesma AI Labs para la pantalla de acceso: isotipo
  * "L" vectorial (barra vertical ink 12x56 + base horizontal 34x8 + cuadro
  * naranja 10x10 arriba a la derecha de la barra) con el wordmark "Ledesma /
- * AI LABS" debajo. `compact` reduce el lockup para el header movil.
+ * AI LABS" debajo. `compact` reduce el lockup para el header movil y
+ * `large` lo agranda para placements centrados (gate de consentimiento).
  */
-export function LedesmaLogo({ compact = false }: { compact?: boolean }) {
+export function LedesmaLogo({
+  compact = false,
+  large = false,
+}: {
+  compact?: boolean;
+  large?: boolean;
+}) {
   return (
-    <div className={compact ? 'flex flex-col items-center text-center' : ''}>
+    <div className={compact || large ? 'flex flex-col items-center text-center' : ''}>
       <svg
         viewBox="0 0 34 56"
-        width={compact ? 20 : 27}
-        height={compact ? 33 : 44.5}
+        width={compact ? 20 : large ? 40 : 27}
+        height={compact ? 33 : large ? 66 : 44.5}
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
         role="img"
@@ -21,12 +28,12 @@ export function LedesmaLogo({ compact = false }: { compact?: boolean }) {
         <rect x="18" y="0" width="10" height="10" fill="#F55B1F" />
       </svg>
       <p
-        className={`font-display font-medium text-ink ${compact ? 'mt-2.5 text-lg' : 'mt-3.5 text-2xl'}`}
+        className={`font-display font-medium text-ink ${compact ? 'mt-2.5 text-lg' : large ? 'mt-4 text-3xl' : 'mt-3.5 text-2xl'}`}
       >
         Ledesma
       </p>
       <p
-        className={`uppercase text-[#7A7D85] ${compact ? 'mt-0.5 text-[10px] tracking-[4px]' : 'mt-1 text-xs tracking-[5px]'}`}
+        className={`uppercase text-[#7A7D85] ${compact ? 'mt-0.5 text-[10px] tracking-[4px]' : large ? 'mt-1.5 text-sm tracking-[6px]' : 'mt-1 text-xs tracking-[5px]'}`}
       >
         AI LABS
       </p>
