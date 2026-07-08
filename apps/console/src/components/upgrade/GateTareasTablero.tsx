@@ -94,16 +94,21 @@ export function GateTareasTablero() {
                     {tarea.horario}
                   </span>
                 </div>
-                {tarea.marcas.map((marca, dia) => (
-                  <div
-                    key={dia}
-                    className={`flex items-center justify-center py-3 ${borde} ${
-                      DIAS[dia].finde ? 'bg-[#FAF9F5]' : ''
-                    }`}
-                  >
-                    {marca && <span className={`h-[9px] w-[9px] rounded-[3px] ${marcaClass[marca]}`} />}
-                  </div>
-                ))}
+                {DIAS.map((dia, col) => {
+                  const marca = tarea.marcas[col] ?? null;
+                  return (
+                    <div
+                      key={dia.label}
+                      className={`flex items-center justify-center py-3 ${borde} ${
+                        dia.finde ? 'bg-[#FAF9F5]' : ''
+                      }`}
+                    >
+                      {marca && (
+                        <span className={`h-[9px] w-[9px] rounded-[3px] ${marcaClass[marca]}`} />
+                      )}
+                    </div>
+                  );
+                })}
               </Fragment>
             );
           })}
