@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { BrandMark } from '../BrandMark';
+import { LedesmaLogo } from '../login/LedesmaLogo';
 import { useAcceptConsents } from '../../lib/mutations';
 import {
   SIMPLIFIED_NOTICE,
@@ -39,7 +39,7 @@ export function ConsentScreen({ state }: { state: ConsentsState }) {
     <div className="flex min-h-screen items-center justify-center bg-cream px-4 py-10">
       <div className="w-full max-w-lg">
         <div className="mb-8 flex flex-col items-center text-center">
-          <BrandMark className="h-[46px] w-[46px]" />
+          <LedesmaLogo />
           <h1
             ref={headingRef}
             tabIndex={-1}
