@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, ListChecks, Plus, Sparkles } from 'lucide-react';
+import { ArrowRight, ListChecks, Plus } from 'lucide-react';
 import { ApiError } from '../lib/api';
 import { useAgents, useCredentials, useMe, useRecipes } from '../lib/queries';
 import { useDeleteRecipe, useRunRecipe, useUpdateRecipe } from '../lib/mutations';
@@ -12,7 +12,7 @@ import { SkeletonList } from '../components/ui/SkeletonList';
 import { ErrorState } from '../components/ui/ErrorState';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Notice, type NoticeData } from '../components/ui/Notice';
-import { RequestUpgradeCta } from '../components/upgrade/RequestUpgradeCta';
+import { GatePlanAutonomo } from '../components/upgrade/GatePlanAutonomo';
 
 const addButtonClass =
   'inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:-translate-y-px hover:bg-brasa-hover hover:shadow-[0_2px_6px_rgba(31,30,28,0.14)]';
@@ -27,19 +27,26 @@ function runErrorMessage(error: unknown): string {
   return 'No pudimos encolar la receta. Intenta de nuevo.';
 }
 
-/** Aviso: las recetas son del plan Autonomo. Sobrio, no un paywall agresivo. Espeja SchedulingLocked. */
+/** Gate del plan Autonomo: demo estatica de una receta corriendo + tarjeta de acceso. */
 function RecipesLocked() {
   return (
-    <EmptyState
-      variant="centered"
-      media={
-        <span className="flex h-[52px] w-[52px] items-center justify-center rounded-2xl bg-brasa-soft text-brasa">
-          <Sparkles className="h-6 w-6" />
-        </span>
-      }
-      title="Una funcion del plan Autonomo"
-      description="Las recetas encadenan varios pasos y tu agente los ejecuta en orden, solo. Estan disponibles en el plan Autonomo."
-      action={<RequestUpgradeCta featureContext="recipes" />}
+    <GatePlanAutonomo
+      featureContext="recipes"
+      nombreReceta="cierre-semanal-facturas"
+      demoMeta="3 pasos · auto"
+      pasos={[
+        { num: '01', titulo: 'Recolectar facturas del correo', badge: 'done · 3.2s', estado: 'done' },
+        { num: '02', titulo: 'Extraer proveedor, monto, fecha', badge: 'done · 6.8s', estado: 'done' },
+        { num: '03', titulo: 'Registrar via HTTP y avisar', badge: 'running', estado: 'running' },
+      ]}
+      footerItems={['trigger: lunes 8:00', 'retry: 2', 'alertas: email']}
+      titular={['Tu agente trabaja', 'sin ti.']}
+      bullets={[
+        'Recetas multi-paso',
+        'Tareas programadas',
+        'Triggers por webhook',
+        'Alertas de fallo',
+      ]}
     />
   );
 }
@@ -180,7 +187,7 @@ export function RecipesPage() {
     <div className="mx-auto flex min-h-full max-w-4xl flex-col">
       <PageHeader
         title="Recetas"
-        subtitle="Encadena varios pasos en un flujo y ejecutalo cuando quieras, en segundo plano."
+        subtitle="Encadena pasos en un flujo. Corre solo, en segundo plano."
         action={
           isAutonomous &&
           hasRecipes && (
