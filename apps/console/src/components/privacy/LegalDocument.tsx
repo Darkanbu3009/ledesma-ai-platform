@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { BrandMark } from '../BrandMark';
+import { Logo } from '../brand/logo';
 import type { PrivacyDocument } from '../../lib/privacy';
 
 /**
@@ -29,9 +29,8 @@ export function LegalDocument({ doc, footer }: { doc: PrivacyDocument; footer?: 
     <div className="min-h-screen bg-cream px-4 py-10">
       <div className="mx-auto w-full max-w-3xl">
         <header className="mb-8">
-          <Link to="/" className="inline-flex items-center gap-2.5">
-            <BrandMark className="h-9 w-9" />
-            <span className="font-display text-[15px] font-bold text-ink">Ledesma AI Labs</span>
+          <Link to="/" className="inline-flex items-center">
+            <Logo className="h-8 w-auto" />
           </Link>
           <h1 className="mt-7 font-display text-3xl font-extrabold tracking-tight text-ink">
             {doc.title}

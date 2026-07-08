@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../auth/useAuth';
 import { useIsAdmin } from '../../lib/queries';
 import { focusRing } from '../../lib/utils';
-import { BrandMark } from '../BrandMark';
+import { Logo } from '../brand/logo';
 
 const navItems = [
   { to: '/dashboard', label: 'Panel', icon: LayoutDashboard },
@@ -35,9 +35,8 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <aside className="flex h-full w-64 flex-col border-r border-line bg-sidebar px-4 py-5">
-      <div className="flex items-center gap-3 px-2 py-1">
-        <BrandMark className="h-9 w-9" />
-        <span className="font-display text-[15px] font-bold text-ink">Ledesma AI Labs</span>
+      <div className="flex items-center px-2 py-1">
+        <Logo className="h-8 w-auto" />
       </div>
 
       <nav className="mt-7 flex-1 space-y-1">
