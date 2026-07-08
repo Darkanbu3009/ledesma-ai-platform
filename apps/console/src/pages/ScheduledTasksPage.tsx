@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, CalendarClock, Plus, Sparkles } from 'lucide-react';
+import { ArrowRight, CalendarClock, Lock, Plus } from 'lucide-react';
 import { useAgents, useCredentials, useMe, useScheduledTasks } from '../lib/queries';
 import { useDeleteScheduledTask, useUpdateScheduledTask } from '../lib/mutations';
 import type { ScheduledTask } from '../lib/scheduled-tasks';
@@ -13,24 +13,38 @@ import { ErrorState } from '../components/ui/ErrorState';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Notice, type NoticeData } from '../components/ui/Notice';
 import { RequestUpgradeCta } from '../components/upgrade/RequestUpgradeCta';
+import { GateTareasTablero } from '../components/upgrade/GateTareasTablero';
 
 const addButtonClass =
   'inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:-translate-y-px hover:bg-brasa-hover hover:shadow-[0_2px_6px_rgba(31,30,28,0.14)]';
 
-/** Aviso: las tareas programadas son del plan Autonomo. Sobrio, no un paywall agresivo. */
+/**
+ * Gate del plan Autonomo para Tareas: hero centrado con el copy original + tablero semanal estatico
+ * como prueba visual (GateTareasTablero). Reemplaza al PageHeader y al empty state viejo en el estado
+ * bloqueado. El CTA es el RequestUpgradeCta existente sin cambios: mismo flujo upgrade_requests,
+ * mismo estado post-solicitud ("Solicitud enviada") y mismo disclaimer.
+ */
 function SchedulingLocked() {
   return (
-    <EmptyState
-      variant="centered"
-      media={
-        <span className="flex h-[52px] w-[52px] items-center justify-center rounded-2xl bg-brasa-soft text-brasa">
-          <Sparkles className="h-6 w-6" />
+    <div className="flex flex-col gap-4">
+      <section className="mx-auto flex w-full max-w-[520px] flex-col items-center pb-12 pt-14 text-center">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-[#F1EFE8] px-3 py-[5px]">
+          <Lock className="h-3 w-3 flex-none text-[#5F5E5A]" aria-hidden="true" />
+          <span className="text-[11px] uppercase tracking-[0.08em] text-[#5F5E5A]">
+            Plan Autonomo
+          </span>
         </span>
-      }
-      title="Una funcion del plan Autonomo"
-      description="Las tareas programadas ejecutan tus agentes solos, en el horario que elijas. Estan disponibles en el plan Autonomo."
-      action={<RequestUpgradeCta featureContext="scheduled_tasks" />}
-    />
+        <h1 className="mt-5 text-[26px] font-medium leading-[1.15] tracking-[-0.02em] text-ink">
+          Una funcion del plan Autonomo
+        </h1>
+        <p className="mt-3 text-[14px] leading-[1.6] text-[#5F5E5A]">
+          Las tareas programadas ejecutan tus agentes solos, en el horario que elijas. Estan
+          disponibles en el plan Autonomo.
+        </p>
+        <RequestUpgradeCta featureContext="scheduled_tasks" className="mt-6" />
+      </section>
+      <GateTareasTablero />
+    </div>
   );
 }
 
@@ -152,19 +166,22 @@ export function ScheduledTasksPage() {
 
   return (
     <div className="mx-auto flex min-h-full max-w-4xl flex-col">
-      <PageHeader
-        title="Tareas programadas"
-        subtitle="Programa a tus agentes para que se ejecuten solos, en el horario que elijas."
-        action={
-          isAutonomous &&
-          hasTasks && (
-            <button type="button" onClick={() => setFormOpen(true)} className={addButtonClass}>
-              <Plus className="h-[17px] w-[17px]" />
-              Programar tarea
-            </button>
-          )
-        }
-      />
+      {/* En el estado bloqueado el hero del gate reemplaza al titulo y subtitulo de la pagina. */}
+      {(me.isLoading || isAutonomous) && (
+        <PageHeader
+          title="Tareas programadas"
+          subtitle="Programa a tus agentes para que se ejecuten solos, en el horario que elijas."
+          action={
+            isAutonomous &&
+            hasTasks && (
+              <button type="button" onClick={() => setFormOpen(true)} className={addButtonClass}>
+                <Plus className="h-[17px] w-[17px]" />
+                Programar tarea
+              </button>
+            )
+          }
+        />
+      )}
 
       <Notice notice={notice} />
 
