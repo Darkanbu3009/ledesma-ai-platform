@@ -6,6 +6,13 @@ interface LogoProps {
    * proporcion via viewBox, asi que normalmente solo se ajusta el alto.
    */
   className?: string;
+  /**
+   * Recorta el margen interno del lienzo para que la tinta llene el alto
+   * dado por className (la consola lo usa en el sidebar y el aviso). Sin
+   * esta prop se conserva el lienzo original con margen, que es del que
+   * dependen los tamanos de la landing (h-8/h-9/h-10).
+   */
+  tight?: boolean;
 }
 
 /**
@@ -31,11 +38,11 @@ interface LogoProps {
  * "AI LABS" sea facil de poner blanco + bold + tracking y se vea nitido a
  * cualquier escala.
  */
-export function Logo({ className = 'h-10 w-auto' }: LogoProps): JSX.Element {
+export function Logo({ className = 'h-10 w-auto', tight = false }: LogoProps): JSX.Element {
   return (
     <svg
       className={className}
-      viewBox="0 0 280 160"
+      viewBox={tight ? '8 40 250 80' : '0 0 280 160'}
       role="img"
       aria-label="Ledesma AI Labs"
       xmlns="http://www.w3.org/2000/svg"

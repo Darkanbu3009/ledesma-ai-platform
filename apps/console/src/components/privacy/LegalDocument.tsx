@@ -30,7 +30,7 @@ export function LegalDocument({ doc, footer }: { doc: PrivacyDocument; footer?: 
       <div className="mx-auto w-full max-w-3xl">
         <header className="mb-8">
           <Link to="/" className="inline-flex items-center">
-            <Logo className="h-16 w-auto" />
+            <Logo tight className="h-10 w-auto" />
           </Link>
           <h1 className="mt-7 font-display text-3xl font-extrabold tracking-tight text-ink">
             {doc.title}

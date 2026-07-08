@@ -39,7 +39,7 @@ export function ConsentScreen({ state }: { state: ConsentsState }) {
     <div className="flex min-h-screen items-center justify-center bg-cream px-4 py-10">
       <div className="w-full max-w-lg">
         <div className="mb-8 flex flex-col items-center text-center">
-          <LedesmaLogo />
+          <LedesmaLogo large />
           <h1
             ref={headingRef}
             tabIndex={-1}
