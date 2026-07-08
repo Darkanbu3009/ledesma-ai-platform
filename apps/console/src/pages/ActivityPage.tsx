@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Activity, Loader2, RefreshCw } from 'lucide-react';
 import { useAgents, useJobs } from '../lib/queries';
+import { playgroundPath } from '../lib/agents';
 import { JOB_STATUS_FILTERS, type JobStatusFilter } from '../lib/jobs';
+import { ActivityGhostTable } from '../components/activity/ActivityGhostTable';
 import { JobActivityCard } from '../components/activity/JobActivityCard';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SkeletonList } from '../components/ui/SkeletonList';
@@ -41,8 +43,14 @@ function StatusFilterBar({
   );
 }
 
-/** Estado vacio. El texto depende de si hay un filtro activo. */
-function ActivityEmptyState({ filtered }: { filtered: boolean }) {
+/**
+ * Estado vacio. Sin filtro activo muestra la tabla fantasma con velo y CTA (ActivityGhostTable);
+ * con filtro activo conserva el estado centrado que invita a quitar el filtro.
+ */
+function ActivityEmptyState({ filtered, ctaTo }: { filtered: boolean; ctaTo: string }) {
+  if (!filtered) {
+    return <ActivityGhostTable ctaTo={ctaTo} />;
+  }
   return (
     <EmptyState
       variant="centered"
@@ -51,12 +59,8 @@ function ActivityEmptyState({ filtered }: { filtered: boolean }) {
           <Activity className="h-6 w-6" />
         </span>
       }
-      title={filtered ? 'Sin ejecuciones con este estado' : 'Aun no hay ejecuciones'}
-      description={
-        filtered
-          ? 'Prueba con otro estado o quita el filtro para ver todo el historial.'
-          : 'Cuando tus recetas, tareas programadas o triggers ejecuten a un agente, vas a ver aqui cada corrida: que agente, cuando y en que estado termino.'
-      }
+      title="Sin ejecuciones con este estado"
+      description="Prueba con otro estado o quita el filtro para ver todo el historial."
     />
   );
 }
@@ -88,6 +92,10 @@ export function ActivityPage() {
   );
 
   const jobs = useMemo(() => data?.pages.flatMap((page) => page.jobs) ?? [], [data]);
+  // Destino del CTA del estado vacio: el Playground pide un agente existente, asi que va al del
+  // primer agente si ya hay alguno (useAgents ya esta cargado arriba) y a /agentes si no.
+  const [firstAgent] = agents ?? [];
+  const emptyCtaTo = firstAgent ? playgroundPath(firstAgent.id) : '/agentes';
   const hasJobs = jobs.length > 0;
   const listLoading = isLoading || agentsLoading;
   // Refetch silencioso en curso (auto-refresh o cambio de filtro) con datos ya visibles.
@@ -119,7 +127,7 @@ export function ActivityPage() {
       ) : isError ? (
         <ErrorState title="No pudimos cargar tu actividad" onRetry={() => void refetch()} />
       ) : !hasJobs ? (
-        <ActivityEmptyState filtered={status !== 'all'} />
+        <ActivityEmptyState filtered={status !== 'all'} ctaTo={emptyCtaTo} />
       ) : (
         <div className="mt-6 space-y-3">
           {jobs.map((job) => (
