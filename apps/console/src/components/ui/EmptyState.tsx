@@ -10,9 +10,13 @@ import { cn } from '../../lib/utils';
  *  - `editorial` (default): estados vacios con badge y CTA (Agentes, Credenciales, Recetas, Tareas,
  *    Triggers).
  *  - `centered`: estados centrados sin CTA (los "Locked" de plan y el vacio de Actividad).
+ *
+ * `compact` (opt-in, aditivo) comprime solo los margenes verticales -- mismas fuentes y contenido --
+ * para pantallas donde el estado vacio convive con mas bloques y debe caber sin scroll (el Panel).
  */
 export function EmptyState({
   variant = 'editorial',
+  compact = false,
   media,
   eyebrow,
   title,
@@ -22,6 +26,7 @@ export function EmptyState({
   className,
 }: {
   variant?: 'editorial' | 'centered';
+  compact?: boolean;
   media?: ReactNode;
   eyebrow?: string;
   title: string;
@@ -35,7 +40,7 @@ export function EmptyState({
     <div
       className={cn(
         'flex flex-1 flex-col items-center justify-center text-center',
-        centered && 'mt-10',
+        centered && (compact ? 'mt-5' : 'mt-10'),
         className,
       )}
     >
@@ -48,17 +53,21 @@ export function EmptyState({
       <h2
         className={cn(
           'max-w-md font-display text-[22px] font-bold leading-[1.2] text-ink',
-          centered ? 'mt-5' : 'mt-4',
+          compact ? 'mt-3' : centered ? 'mt-5' : 'mt-4',
         )}
       >
         {title}
       </h2>
       <p
-        className={cn('mt-3 max-w-md text-[13px] text-muted', centered ? 'leading-[1.6]' : 'leading-[1.5]')}
+        className={cn(
+          'text-[13px] text-muted',
+          compact ? 'mt-2 max-w-lg leading-[1.5]' : 'mt-3 max-w-md',
+          !compact && (centered ? 'leading-[1.6]' : 'leading-[1.5]'),
+        )}
       >
         {description}
       </p>
-      {action && <div className="mt-7">{action}</div>}
+      {action && <div className={compact ? 'mt-4' : 'mt-7'}>{action}</div>}
       {footer}
     </div>
   );

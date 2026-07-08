@@ -16,14 +16,17 @@ import { RangeSelector } from '../components/dashboard/RangeSelector';
 import { DashboardSummaryView } from '../components/dashboard/DashboardSummaryView';
 import { OnboardingChecklist } from '../components/onboarding/OnboardingChecklist';
 
-/** Estado vacio: el owner aun no ejecuto nada. Guia a crear y ejecutar un agente. Reusa EmptyState. */
+/** Estado vacio: el owner aun no ejecuto nada. Guia a crear y ejecutar un agente. Reusa EmptyState.
+ * Va en modo `compact` porque convive con la bienvenida + checklist: todo el estado inicial del Panel
+ * debe caber sin scroll en un viewport de laptop (1366x768). */
 function DashboardEmptyState() {
   return (
     <EmptyState
       variant="centered"
+      compact
       media={
-        <span className="flex h-[52px] w-[52px] items-center justify-center rounded-2xl bg-brasa-soft text-brasa">
-          <LayoutDashboard className="h-6 w-6" />
+        <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-brasa-soft text-brasa">
+          <LayoutDashboard className="h-5 w-5" />
         </span>
       }
       title="Aun no hay actividad"
@@ -80,7 +83,7 @@ export function DashboardPage() {
           completo, asi un usuario establecido no lo ve ni deja hueco (el margen vive en el propio componente). */}
       <OnboardingChecklist />
 
-      <div className="mt-5">
+      <div className="mt-2.5">
         <RangeSelector value={preset} onChange={setPreset} />
       </div>
 
