@@ -37,11 +37,18 @@ function ConfiguratorButton() {
 }
 
 // Estilos compartidos entre las dos tarjetas del estado vacio: label uppercase de la fila
-// superior y chip/pill neutro sobre greige.
+// superior y titulo.
 const cardLabelClass =
   'text-[11.5px] font-medium uppercase tracking-[0.12em]';
-const neutralChipClass =
-  'inline-flex items-center rounded-full bg-[#F1EFE8] px-[10px] py-1 text-xs text-[#5F5E5A]';
+const cardTitleClass = 'mt-4 text-[19px] font-medium tracking-[-0.01em] text-ink';
+
+// Filas del mini-formulario estatico de la tarjeta Manual: puro contenido de muestra.
+const manualFormRows: Array<[label: string, value: string]> = [
+  ['Modelo', 'Claude Sonnet'],
+  ['System prompt', 'Tu definición'],
+  ['Herramientas', 'HTTP · web · archivos'],
+  ['Límites', 'Presupuesto y pasos'],
+];
 
 // Estado vacio: dos vias de creacion lado a lado. La tarjeta A (Configurador) es la
 // protagonista y lleva el unico acento brasa de la pagina (su CTA); la tarjeta B (manual)
@@ -53,25 +60,29 @@ function AgentsEmptyState() {
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {/* Tarjeta A — Configurador (protagonista). La jerarquia sobre la tarjeta B es solo
             de superficie: fondo blanco y borde un punto mas firme. */}
-        <div className="flex flex-col rounded-xl border border-[#D3D1C7] bg-white p-5">
+        <div className="flex flex-col rounded-[14px] border border-[#D3D1C7] bg-white p-[22px]">
           <div className="flex flex-wrap items-center gap-2">
-            <Sparkles className="h-[18px] w-[18px] text-[#5F5E5A]" aria-hidden="true" />
+            <Sparkles className="h-[17px] w-[17px] text-[#5F5E5A]" aria-hidden="true" />
             <span className={`${cardLabelClass} text-[#5F5E5A]`}>Configurador</span>
             <span className="inline-flex items-center rounded-full bg-[#F1EFE8] px-[10px] py-1 text-[11px] font-medium text-[#444441]">
               Recomendado
             </span>
           </div>
-          <h3 className="mt-4 text-[17px] font-medium text-ink">
-            Descríbelo. Nosotros lo armamos.
-          </h3>
+          <h3 className={cardTitleClass}>Descríbelo. Nosotros lo armamos.</h3>
           <p className="mt-2 text-[13px] leading-[1.5] text-[#5F5E5A]">
-            Cuenta en tus palabras qué proceso quieres automatizar y el Configurador construye
-            el agente conversando contigo.
+            Cuenta qué proceso quieres automatizar y el Configurador construye el agente
+            conversando contigo.
           </p>
-          <div className="mt-4 rounded-[10px] border-[0.5px] border-[#E9E7DF] bg-[#FAF9F5] px-3 py-[11px]">
-            <p className="text-[13px] italic leading-[1.5] text-[#5F5E5A]">
-              “Quiero un agente que revise las facturas que llegan a mi correo y las registre
-              en mi sistema...”
+          {/* Mini-conversacion estatica: una burbuja del usuario y la respuesta del
+              Configurador, como muestra del flujo. Sin estado ni animaciones. */}
+          <div className="mt-4 flex flex-col gap-2">
+            <p className="max-w-[85%] self-end rounded-[12px_12px_3px_12px] bg-[#F1EFE8] px-[13px] py-[9px] text-[12.5px] leading-[1.5] text-[#444441]">
+              Quiero un agente que revise las facturas que llegan a mi correo y las registre
+              en mi sistema
+            </p>
+            <p className="max-w-[85%] self-start rounded-[12px_12px_12px_3px] border-[0.5px] border-[#E9E7DF] bg-[#FAF9F5] px-[13px] py-[9px] text-[12.5px] leading-[1.5] text-[#5F5E5A]">
+              Entendido. ¿Las facturas llegan como PDF adjunto o como enlace? Con eso armo la
+              extracción…
             </p>
           </div>
           <div className="mt-auto pt-5">
@@ -85,23 +96,31 @@ function AgentsEmptyState() {
         </div>
 
         {/* Tarjeta B — Manual (secundaria): superficie marfil y borde suave. */}
-        <div className="flex flex-col rounded-xl border-[0.5px] border-[#E9E7DF] bg-[#FAF9F5] p-5">
+        <div className="flex flex-col rounded-[14px] border-[0.5px] border-[#E9E7DF] bg-[#FAF9F5] p-[22px]">
           <div className="flex items-center gap-2">
-            <SlidersHorizontal className="h-[18px] w-[18px] text-[#8A8880]" aria-hidden="true" />
+            <SlidersHorizontal className="h-[17px] w-[17px] text-[#8A8880]" aria-hidden="true" />
             <span className={`${cardLabelClass} text-[#8A8880]`}>Manual</span>
           </div>
-          <h3 className="mt-4 text-[17px] font-medium text-ink">
-            Configúralo tú, campo por campo
-          </h3>
+          <h3 className={cardTitleClass}>Configúralo tú, campo por campo</h3>
           <p className="mt-2 text-[13px] leading-[1.5] text-[#8A8880]">
-            Define modelo, system prompt, herramientas y límites con control total. Para cuando
-            ya sabes exactamente qué quieres.
+            Control total sobre cada parámetro. Para cuando ya sabes exactamente qué quieres.
           </p>
-          <div className="mt-4 flex flex-wrap gap-1.5">
-            <span className={neutralChipClass}>modelo</span>
-            <span className={neutralChipClass}>system prompt</span>
-            <span className={neutralChipClass}>tools</span>
-            <span className={neutralChipClass}>límites</span>
+          {/* Mini-formulario estatico: tarjeta blanca interna con filas campo/valor
+              separadas por hairlines, como muestra de lo que se configura. */}
+          <div className="mt-4 rounded-[10px] border-[0.5px] border-[#E9E7DF] bg-white px-[14px] py-[6px]">
+            {manualFormRows.map(([label, value], index) => (
+              <div
+                key={label}
+                className={`flex items-baseline justify-between gap-3 py-[6px] ${
+                  index < manualFormRows.length - 1
+                    ? 'border-b-[0.5px] border-[#F1EFE8]'
+                    : ''
+                }`}
+              >
+                <span className="text-[12.5px] text-[#8A8880]">{label}</span>
+                <span className="text-right text-[12.5px] font-medium text-ink">{value}</span>
+              </div>
+            ))}
           </div>
           <div className="mt-auto pt-5">
             <Button variant="secondary-neutral" asChild>
@@ -111,34 +130,30 @@ function AgentsEmptyState() {
         </div>
       </div>
 
-      {/* Fila "Como funciona un agente": tres pasos estaticos en linea, sin tarjeta
-          contenedora. En pantallas angostas se apilan y las flechas se ocultan. */}
-      <div className="mt-10 border-t-[0.5px] border-[#E3E1D9] pt-8">
-        <div className="grid grid-cols-1 gap-6 md:[grid-template-columns:1fr_auto_1fr_auto_1fr] md:items-start md:gap-5">
-          <HowItWorksStep
-            number="01"
-            title="Lo defines"
-            description="Qué hace, con qué modelo y con qué herramientas."
-          />
-          <HowItWorksArrow />
-          <HowItWorksStep
-            number="02"
-            title="Lo pruebas"
-            description="En el Playground, con tu propia API key."
-          />
-          <HowItWorksArrow />
-          <HowItWorksStep
-            number="03"
-            title="Lo sueltas"
-            description="Corre solo con tareas, triggers y recetas — o embebido en tu sistema."
-          />
-        </div>
+      {/* Fila "Como funciona": tres mini-cards estaticas, sin flechas ni separador.
+          En pantallas angostas se apilan a una columna. */}
+      <div className="mt-3 grid grid-cols-1 gap-2.5 md:grid-cols-3">
+        <HowItWorksCard
+          number="01"
+          title="Lo defines"
+          description="Qué hace, modelo y herramientas."
+        />
+        <HowItWorksCard
+          number="02"
+          title="Lo pruebas"
+          description="En el Playground, con tu API key."
+        />
+        <HowItWorksCard
+          number="03"
+          title="Lo sueltas"
+          description="Tareas, triggers, recetas o embebido."
+        />
       </div>
     </div>
   );
 }
 
-function HowItWorksStep({
+function HowItWorksCard({
   number,
   title,
   description,
@@ -148,20 +163,15 @@ function HowItWorksStep({
   description: string;
 }) {
   return (
-    <div>
-      <span className="text-[13px] font-medium text-[#8A8880]">{number}</span>
-      <h4 className="mt-1 text-[13px] font-medium text-ink">{title}</h4>
-      <p className="mt-1 text-[12.5px] leading-[1.5] text-[#8A8880]">{description}</p>
+    <div className="flex items-baseline gap-3 rounded-[10px] border-[0.5px] border-[#E9E7DF] bg-white px-4 py-3">
+      <span className="text-[13px] font-medium text-[#B4B2A9] [font-variant-numeric:tabular-nums]">
+        {number}
+      </span>
+      <div>
+        <h4 className="text-[13px] font-medium text-ink">{title}</h4>
+        <p className="mt-0.5 text-[12px] leading-[1.5] text-[#8A8880]">{description}</p>
+      </div>
     </div>
-  );
-}
-
-function HowItWorksArrow() {
-  return (
-    <ArrowRight
-      className="mt-6 hidden h-4 w-4 text-[#D3D1C7] md:block"
-      aria-hidden="true"
-    />
   );
 }
 
