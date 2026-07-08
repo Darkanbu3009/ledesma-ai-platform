@@ -41,7 +41,7 @@ export function Hero(): JSX.Element {
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </Button>
-            <Button asChild variant="outline" size="lg" className="border-foreground/20">
+            <Button asChild variant="secondary" size="lg">
               <a href={DEMO_WHATSAPP_URL} target="_blank" rel="noopener noreferrer">
                 Solicitar demo guiada
               </a>

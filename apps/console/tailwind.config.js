@@ -14,7 +14,8 @@ export default {
         muted: { DEFAULT: '#6B6A66', soft: '#8A8984' }, // texto secundario / terciario
         brasa: {
           DEFAULT: '#E5511E',
-          hover: '#D2481A',
+          hover: '#C94317',
+          active: '#B23E14', // brasa oscuro: estado presionado de los botones planos
           soft: 'rgba(229,81,30,0.10)',
           line: 'rgba(229,81,30,0.26)',
         },
