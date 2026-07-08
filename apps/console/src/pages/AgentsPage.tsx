@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Plus, SlidersHorizontal, Sparkles } from 'lucide-react';
 import { useAgents } from '../lib/queries';
 import { AgentCard } from '../components/agents/AgentCard';
+import { ChatDemoConfigurador } from '../components/agents/ChatDemoConfigurador';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SkeletonList } from '../components/ui/SkeletonList';
 import { ErrorState } from '../components/ui/ErrorState';
@@ -73,18 +74,8 @@ function AgentsEmptyState() {
             Cuenta qué proceso quieres automatizar y el Configurador construye el agente
             conversando contigo.
           </p>
-          {/* Mini-conversacion estatica: una burbuja del usuario y la respuesta del
-              Configurador, como muestra del flujo. Sin estado ni animaciones. */}
-          <div className="mt-4 flex flex-col gap-2">
-            <p className="max-w-[85%] self-end rounded-[12px_12px_3px_12px] bg-[#F1EFE8] px-[13px] py-[9px] text-[12.5px] leading-[1.5] text-[#444441]">
-              Quiero un agente que revise las facturas que llegan a mi correo y las registre
-              en mi sistema
-            </p>
-            <p className="max-w-[85%] self-start rounded-[12px_12px_12px_3px] border-[0.5px] border-[#E9E7DF] bg-[#FAF9F5] px-[13px] py-[9px] text-[12.5px] leading-[1.5] text-[#5F5E5A]">
-              Entendido. ¿Las facturas llegan como PDF adjunto o como enlace? Con eso armo la
-              extracción…
-            </p>
-          </div>
+          {/* Mini-conversacion animada (decorativa) que muestra el flujo del Configurador. */}
+          <ChatDemoConfigurador />
           <div className="mt-auto pt-5">
             <Button asChild>
               <Link to="/configurador">
