@@ -36,7 +36,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <aside className="flex h-full w-64 flex-col border-r border-line bg-sidebar px-4 py-5">
       <div className="flex items-center px-2 py-1">
-        <Logo className="h-8 w-auto" />
+        <Logo className="h-16 w-auto" />
       </div>
 
       <nav className="mt-7 flex-1 space-y-1">
