@@ -37,10 +37,10 @@ const SCRIPT: readonly { role: Role; text: string }[] = [
   },
 ];
 
-// azul de la demo de chat (landing): mismo hex que las burbujas de usuario del widget
-// animado de la seccion de integracion (integration-chat-widget, agente Sales Analysis).
+// tinte brasa de la demo de chat: excepcion suave declarada a la regla "brasa solo en el
+// CTA" de esta pagina (el brasa solido #E5511E sigue reservado al boton del Configurador).
 // Es un color de la demo de chat, NO un acento de la consola: no usarlo fuera de aqui.
-const AZUL_DEMO_CHAT = '#2D6FB3';
+const TINTE_BRASA_DEMO_CHAT = '#FAECE7';
 
 /** Tiempos de la animacion (en ms, salvo perChar que es ms por caracter). */
 const TIMING = {
@@ -63,15 +63,15 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-/** Burbuja de la mini-conversacion: azul solido para el usuario, greige para el Configurador. */
+/** Burbuja de la mini-conversacion: tinte brasa para el usuario, greige para el Configurador. */
 function Burbuja({ role, children }: { role: Role; children: ReactNode }): JSX.Element {
   const base =
     'max-w-[85%] px-[13px] py-[9px] text-[12.5px] leading-[1.45] motion-safe:[animation:cdc-pop_0.3s_ease_both]';
   if (role === 'user') {
     return (
       <p
-        className={`${base} self-end rounded-[12px_12px_3px_12px] text-white`}
-        style={{ backgroundColor: AZUL_DEMO_CHAT }}
+        className={`${base} self-end rounded-[12px_12px_3px_12px] text-[#712B13]`}
+        style={{ backgroundColor: TINTE_BRASA_DEMO_CHAT }}
       >
         {children}
       </p>
