@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowRight, KeyRound, Plus } from 'lucide-react';
+import { KeyRound, Plus } from 'lucide-react';
 import { useCredentials } from '../lib/queries';
 import { useDeleteCredential } from '../lib/mutations';
 import type { ProviderCredential } from '../lib/credentials';
@@ -9,54 +9,112 @@ import { DeleteCredentialDialog } from '../components/credentials/DeleteCredenti
 import { PageHeader } from '../components/ui/PageHeader';
 import { SkeletonList } from '../components/ui/SkeletonList';
 import { ErrorState } from '../components/ui/ErrorState';
-import { EmptyState } from '../components/ui/EmptyState';
 import { Notice } from '../components/ui/Notice';
+import { focusRing } from '../lib/utils';
 
 const addButtonClass =
   'inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:-translate-y-px hover:bg-brasa-hover hover:shadow-[0_2px_6px_rgba(31,30,28,0.14)]';
 
+/** Las tres garantias de la franja inferior de la tarjeta de ejemplo. */
+const GARANTIAS = [
+  {
+    titulo: 'Cifrada al guardar',
+    texto: 'AES-256-GCM en la boveda. Ni el equipo puede leerla.',
+  },
+  {
+    titulo: 'Nunca se vuelve a mostrar',
+    texto: 'Solo veras la mascara. Tus agentes la usan al ejecutar.',
+  },
+  {
+    titulo: 'Tuya, siempre',
+    texto: 'Es tu key y tu gasto. La borras cuando quieras.',
+  },
+] as const;
+
+/**
+ * Estado vacio de Credenciales: encabezado propio (titulo + subtitulo + CTA a la derecha,
+ * reemplaza al PageHeader en este estado) y una tarjeta con una credencial de EJEMPLO
+ * enmascarada mas la franja de garantias de seguridad. La fila de ejemplo es estatica y
+ * ficticia (sin fetching, sin estado, aria-hidden) y anticipa la anatomia de CredentialCard:
+ * badge de icono + nombre + badge de estado + metadata.
+ *
+ * Paleta: brasa solo en el CTA; verde solo en el badge "cifrada" (#0F6E56 sobre #E1F5EE).
+ * Resto neutros calidos. Sin box-shadow.
+ */
 function CredentialsEmptyState({ onAdd }: { onAdd: () => void }) {
   return (
-    <EmptyState
-      media={
-        // Maqueta decorativa de "asi se vera tu credencial". No interactiva; ancla el bloque centrado.
-        <div className="mb-10 hidden md:block">
-          <div
-            aria-hidden="true"
-            className="w-[230px] rounded-2xl border border-line-soft bg-surface p-[18px] shadow-card"
-          >
-            <div className="flex items-center gap-3">
-              <span className="flex h-[38px] w-[38px] flex-none items-center justify-center rounded-[10px] bg-brasa-soft text-brasa">
-                <KeyRound className="h-5 w-5" />
-              </span>
-              <div className="min-w-0 flex-1 space-y-2">
-                <span className="block h-2.5 w-[90px] rounded-full bg-line" />
-                <span className="block h-2 w-[60px] rounded-full bg-line-soft" />
-              </div>
-            </div>
-            <div className="mt-[18px] flex items-center gap-2">
-              <span className="block h-[22px] w-[64px] rounded-full bg-brasa-soft" />
-              <span className="block h-[22px] w-[44px] rounded-full bg-line-soft" />
-            </div>
-          </div>
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
+        <div className="max-w-[520px]">
+          <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">
+            Credenciales
+          </h1>
+          <p className="mt-1.5 text-[13.5px] leading-[1.55] text-[#5F5E5A]">
+            Guarda las API keys de tus proveedores una sola vez. Tus agentes las usan desde la
+            boveda, sin volver a pegarlas.
+          </p>
         </div>
-      }
-      eyebrow="EMPIEZA AQUI"
-      title="Tus llaves, en un solo lugar"
-      description="Guarda las API keys de tus proveedores de IA, cifradas, para reutilizarlas en tus agentes sin volver a pegarlas."
-      action={
         <button
           type="button"
           onClick={onAdd}
-          className="group inline-flex h-11 items-center gap-3 rounded-full bg-brasa pl-6 pr-[7px] text-sm font-medium text-white transition hover:bg-brasa-hover"
+          className={`inline-flex flex-none items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white transition hover:bg-brasa-hover ${focusRing}`}
         >
+          <Plus className="h-[17px] w-[17px]" />
           Agregar credencial
-          <span className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-white text-brasa transition group-hover:translate-x-0.5">
-            <ArrowRight className="h-[18px] w-[18px]" />
-          </span>
         </button>
-      }
-    />
+      </div>
+
+      <div className="overflow-hidden rounded-[14px] border-[0.5px] border-[#E9E7DF] bg-white">
+        {/* Header de la tarjeta: label + badge delineado "Ejemplo" (mismo estilo que los gates). */}
+        <div className="flex items-center justify-between gap-3 border-b-[0.5px] border-[#F1EFE8] px-[18px] py-[12px]">
+          <span className="text-[11px] uppercase tracking-[0.07em] text-[#B4B2A9]">
+            Asi se guarda tu llave
+          </span>
+          <span className="flex-none rounded-full border-[0.5px] border-[#E9E7DF] px-[9px] py-[2px] text-[11px] uppercase tracking-[0.07em] text-[#B4B2A9]">
+            Ejemplo
+          </span>
+        </div>
+
+        {/* Fila de credencial de ejemplo: estatica, ficticia y decorativa. */}
+        <div
+          aria-hidden="true"
+          className="flex flex-wrap items-center gap-[14px] border-b-[0.5px] border-[#F1EFE8] px-[18px] py-[14px] opacity-[0.55]"
+        >
+          <span className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] bg-[#F1EFE8] text-[#5F5E5A]">
+            <KeyRound className="h-4 w-4" />
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-[13.5px] font-medium text-ink">
+              Anthropic · produccion
+            </span>
+            <span className="block truncate font-mono text-[11.5px] text-[#8A8880]">
+              sk-ant-••••••••••••••••••••7Kq2
+            </span>
+          </span>
+          <span className="flex-none rounded-full bg-[#E1F5EE] px-2 py-[2px] font-mono text-[11px] text-[#0F6E56]">
+            cifrada
+          </span>
+          <span className="flex-none font-mono text-[11px] text-[#B4B2A9]">3 agentes la usan</span>
+        </div>
+
+        {/* Franja de garantias: 3 columnas en desktop, apilada en angosto. */}
+        <div className="grid grid-cols-1 bg-[#FAF9F5] sm:grid-cols-3">
+          {GARANTIAS.map((garantia) => (
+            <div
+              key={garantia.titulo}
+              className="border-[#F1EFE8] px-[18px] py-[14px] [&:not(:last-child)]:border-b-[0.5px] sm:[&:not(:last-child)]:border-b-0 sm:[&:not(:last-child)]:border-r-[0.5px]"
+            >
+              <h3 className="text-[12.5px] font-medium text-ink">{garantia.titulo}</h3>
+              <p className="mt-1 text-[12px] leading-[1.5] text-[#8A8880]">{garantia.texto}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <p className="text-center text-[12px] text-[#8A8880]">
+        Compatible con Anthropic, OpenAI y proveedores con API compatible.
+      </p>
+    </div>
   );
 }
 
@@ -76,6 +134,9 @@ export function CredentialsPage() {
   }, [notice]);
 
   const hasCredentials = Array.isArray(credentials) && credentials.length > 0;
+  // El estado vacio trae su propio encabezado (titulo + subtitulo + CTA): en ese caso el
+  // PageHeader compartido no se renderiza, igual que en los gates de Tareas y Triggers.
+  const showEmpty = !isLoading && !isError && !hasCredentials;
 
   function openDelete(credential: ProviderCredential) {
     deleteCredential.reset();
@@ -94,18 +155,20 @@ export function CredentialsPage() {
 
   return (
     <div className="mx-auto flex min-h-full max-w-4xl flex-col">
-      <PageHeader
-        title="Credenciales"
-        subtitle="Guarda las API keys de tus proveedores de IA para reutilizarlas en tus agentes."
-        action={
-          hasCredentials && (
-            <button type="button" onClick={() => setFormOpen(true)} className={addButtonClass}>
-              <Plus className="h-[17px] w-[17px]" />
-              Agregar credencial
-            </button>
-          )
-        }
-      />
+      {!showEmpty && (
+        <PageHeader
+          title="Credenciales"
+          subtitle="Guarda las API keys de tus proveedores de IA para reutilizarlas en tus agentes."
+          action={
+            hasCredentials && (
+              <button type="button" onClick={() => setFormOpen(true)} className={addButtonClass}>
+                <Plus className="h-[17px] w-[17px]" />
+                Agregar credencial
+              </button>
+            )
+          }
+        />
+      )}
 
       <Notice notice={notice ? { kind: 'ok', text: notice } : null} />
 
