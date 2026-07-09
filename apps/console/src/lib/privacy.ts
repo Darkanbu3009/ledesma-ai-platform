@@ -91,17 +91,20 @@ export interface CreateDataRequestInput {
   details?: string;
 }
 
-/** Opciones del formulario de ejercicio de derechos (etiqueta + descripcion en espanol). */
+/**
+ * Opciones del formulario de ejercicio de derechos (etiqueta + descripcion corta para el radio group).
+ * Solo los 4 derechos ARCO: la supresion GDPR se atiende via `cancellation` en el formulario, aunque
+ * `erasure` sigue existiendo como tipo (el backend lo acepta y el historial lo etiqueta).
+ */
 export const DATA_REQUEST_OPTIONS: ReadonlyArray<{
   type: DataRequestType;
   label: string;
   description: string;
 }> = [
-  { type: 'access', label: 'Acceso', description: 'Conocer que datos tuyos tratamos.' },
-  { type: 'rectification', label: 'Rectificacion', description: 'Corregir datos inexactos o incompletos.' },
-  { type: 'cancellation', label: 'Cancelacion', description: 'Que dejemos de tratar tus datos.' },
-  { type: 'opposition', label: 'Oposicion', description: 'Oponerte al tratamiento de tus datos.' },
-  { type: 'erasure', label: 'Supresion (erasure)', description: 'Eliminar tus datos (GDPR).' },
+  { type: 'access', label: 'Acceso', description: 'Saber que datos tratamos y para que.' },
+  { type: 'rectification', label: 'Rectificacion', description: 'Corregir datos incompletos o inexactos.' },
+  { type: 'cancellation', label: 'Cancelacion', description: 'Eliminar tus datos de nuestros registros.' },
+  { type: 'opposition', label: 'Oposicion', description: 'Detener usos especificos de tus datos.' },
 ];
 
 const REQUEST_TYPE_LABELS: Record<DataRequestType, string> = {
