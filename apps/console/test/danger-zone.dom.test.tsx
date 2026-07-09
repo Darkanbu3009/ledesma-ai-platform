@@ -33,18 +33,18 @@ describe('DangerZoneSection', () => {
     mockMutation();
     render(<DangerZoneSection email="ada@example.com" />);
 
-    expect(screen.getByRole('heading', { name: /Zona de peligro/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Eliminar mi cuenta/i })).toBeInTheDocument();
     expect(screen.getByText(/no se puede deshacer/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Eliminar mi cuenta/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Eliminar cuenta' })).toBeInTheDocument();
     // El modal no esta montado hasta abrir.
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('abre el modal (reseteando la mutacion) al pulsar "Eliminar mi cuenta"', () => {
+  it('abre el modal (reseteando la mutacion) al pulsar "Eliminar cuenta"', () => {
     const { reset } = mockMutation();
     render(<DangerZoneSection email="ada@example.com" />);
 
-    fireEvent.click(screen.getByRole('button', { name: /Eliminar mi cuenta/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminar cuenta' }));
 
     expect(reset).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('dialog')).toBeInTheDocument();
@@ -54,7 +54,7 @@ describe('DangerZoneSection', () => {
     const { mutate } = mockMutation();
     render(<DangerZoneSection email="ada@example.com" />);
 
-    fireEvent.click(screen.getByRole('button', { name: /Eliminar mi cuenta/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminar cuenta' }));
     fireEvent.change(screen.getByLabelText(/escribe tu email/i), {
       target: { value: 'ada@example.com' },
     });
@@ -68,7 +68,7 @@ describe('DangerZoneSection', () => {
     mockMutation({ isError: true, error: { status: 400 } });
     render(<DangerZoneSection email="ada@example.com" />);
 
-    fireEvent.click(screen.getByRole('button', { name: /Eliminar mi cuenta/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminar cuenta' }));
     expect(screen.getByRole('alert')).toHaveTextContent(/no coincide/i);
   });
 
@@ -76,7 +76,7 @@ describe('DangerZoneSection', () => {
     const { mutate } = mockMutation();
     render(<DangerZoneSection email="ada@example.com" />);
 
-    fireEvent.click(screen.getByRole('button', { name: /Eliminar mi cuenta/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminar cuenta' }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();

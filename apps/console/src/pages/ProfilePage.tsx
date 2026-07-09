@@ -1,6 +1,6 @@
-import { type FormEvent, type ReactNode, useState } from 'react';
+import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, LogOut } from 'lucide-react';
+import { ArrowRight, LogOut, Pencil, Wand2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/useAuth';
 import { useMe } from '../lib/queries';
@@ -8,41 +8,37 @@ import { useUpdateProfileName } from '../lib/mutations';
 import { updateProfileNameErrorMessage, validateName } from '../lib/registration';
 import type { Profile, Subscription, UsageCounter } from '../lib/registration';
 import { accountTypeLabel, formatUserDate } from '../lib/admin';
-import { TierBadge } from '../components/admin/UserBadges';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Field, inputClass } from '../components/ui/Field';
 import { Notice, type NoticeData } from '../components/ui/Notice';
 import { SkeletonList } from '../components/ui/SkeletonList';
 import { ErrorState } from '../components/ui/ErrorState';
+import { Button } from '../components/ui/button';
 import { DangerZoneSection } from '../components/account/DangerZoneSection';
 import { focusRing } from '../lib/utils';
 
-/** Titulo de seccion consistente con la ficha de admin (h2 + descripcion). */
-function SectionHeading({ title, description }: { title: string; description?: string }) {
-  return (
-    <div className="mb-4">
-      <h2 className="font-display text-lg font-bold text-ink">{title}</h2>
-      {description && <p className="mt-0.5 text-[13px] text-muted">{description}</p>}
-    </div>
-  );
-}
+/** Tarjeta base de los elementos del perfil: superficie blanca plana, hairline y radio comun. */
+const cardClass = 'rounded-[14px] border-[0.5px] border-[#E9E7DF] bg-surface';
 
-/** Fila etiqueta -> valor de una lista de definiciones (dl), igual que la ficha de admin. */
-function DataRow({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-0.5 border-t border-line-soft py-3 first:border-t-0 first:pt-0 sm:flex-row sm:gap-4">
-      <dt className="text-[13px] text-muted sm:w-44 sm:flex-none">{label}</dt>
-      <dd className="text-sm text-ink">{value}</dd>
-    </div>
-  );
+/**
+ * Iniciales para el avatar: primera letra del primer y del ultimo termino del nombre (una sola
+ * letra si el nombre tiene un unico termino). Pura; opera sobre el fullName que ya llega en ['me'].
+ */
+function nameInitials(fullName: string): string {
+  const terms = fullName.trim().split(/\s+/).filter(Boolean);
+  const first = terms.at(0)?.charAt(0) ?? '';
+  const last = terms.length > 1 ? (terms.at(-1)?.charAt(0) ?? '') : '';
+  return (first + last).toUpperCase();
 }
 
 /**
- * SECCION DATOS DE CUENTA (solo lectura): email (del cliente Supabase, no de /v1/me), tipo de cuenta,
- * plan/tier (badge), estado de suscripcion (si aplica) y fecha de registro. El tier NO se edita aqui: lo
- * ajusta un administrador (la palanca de monetizacion vive en el panel de admin, no en el perfil).
+ * ENCABEZADO DE IDENTIDAD: absorbe las viejas cards "Datos de cuenta" y "Nombre". Avatar de
+ * iniciales con dot de suscripcion, nombre con edicion INLINE (el mismo form del PATCH de nombre:
+ * misma validacion validateName, mismo payload { fullName } via useUpdateProfileName, mismo
+ * deshabilitado por isPending/sin-cambios) y a la derecha los pills de tipo de cuenta y plan mas
+ * la fecha de alta. El unico estado nuevo es `editing` (mostrar texto vs mostrar el form).
  */
-function AccountDataSection({
+function IdentityHeader({
   profile,
   email,
   subscription,
@@ -51,36 +47,8 @@ function AccountDataSection({
   email: string | undefined;
   subscription: Subscription | null;
 }) {
-  return (
-    <section>
-      <SectionHeading
-        title="Datos de cuenta"
-        description="Tu información de cuenta. Para cambiar de plan lo ajusta un administrador."
-      />
-      <div className="rounded-2xl border border-line bg-surface p-5 shadow-card">
-        <dl>
-          <DataRow label="Email" value={email ?? 'Sin email'} />
-          <DataRow label="Tipo de cuenta" value={accountTypeLabel(profile.accountType)} />
-          <DataRow label="Plan" value={<TierBadge tier={profile.tier} />} />
-          {subscription && <DataRow label="Suscripción" value={subscription.status} />}
-          <DataRow label="Miembro desde" value={formatUserDate(profile.createdAt)} />
-        </dl>
-      </div>
-    </section>
-  );
-}
-
-const saveButtonClass =
-  'inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:-translate-y-px hover:bg-brasa-hover hover:shadow-[0_2px_6px_rgba(31,30,28,0.14)] disabled:pointer-events-none disabled:opacity-50';
-
-/**
- * SECCION EDITAR NOMBRE: lo UNICO editable del perfil. Form controlado precargado con el nombre actual
- * de ['me'], validado con la MISMA validateName del registro (una sola fuente de verdad) y que al enviar
- * llama al PATCH /v1/me/profile (useUpdateProfileName). Feedback con Notice (aria-live) al exito y al
- * error. El boton se deshabilita mientras corre el PATCH y cuando no hay cambios (evita un PATCH inutil).
- * Estado 100% en React/react-query (sin localStorage).
- */
-function EditNameSection({ currentName }: { currentName: string }) {
+  const currentName = profile.fullName;
+  const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(currentName);
   const [error, setError] = useState<string | undefined>(undefined);
   const [notice, setNotice] = useState<NoticeData | null>(null);
@@ -88,6 +56,20 @@ function EditNameSection({ currentName }: { currentName: string }) {
 
   const trimmed = value.trim();
   const unchanged = trimmed === currentName.trim();
+  const subscriptionActive = subscription?.status === 'active';
+
+  function startEditing() {
+    setValue(currentName);
+    setError(undefined);
+    setNotice(null);
+    setEditing(true);
+  }
+
+  function cancelEditing() {
+    setValue(currentName);
+    setError(undefined);
+    setEditing(false);
+  }
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -98,72 +80,193 @@ function EditNameSection({ currentName }: { currentName: string }) {
     mutation.mutate(
       { fullName: trimmed },
       {
-        onSuccess: () => setNotice({ kind: 'ok', text: 'Nombre actualizado.' }),
+        onSuccess: () => {
+          setNotice({ kind: 'ok', text: 'Nombre actualizado.' });
+          setEditing(false);
+        },
         onError: (err) => setNotice({ kind: 'error', text: updateProfileNameErrorMessage(err) }),
       },
     );
   }
 
   return (
-    <section>
-      <SectionHeading
-        title="Nombre"
-        description="Actualiza el nombre asociado a tu cuenta. Es lo único editable aquí."
-      />
-      <form
-        onSubmit={handleSubmit}
-        noValidate
-        className="rounded-2xl border border-line bg-surface p-5 shadow-card"
-      >
-        <Field label="Nombre completo" error={error}>
-          <input
-            value={value}
-            onChange={(e) => {
-              setValue(e.target.value);
-              if (error) setError(undefined);
-            }}
-            autoComplete="name"
-            placeholder="Ada Lovelace"
-            className={inputClass}
-          />
-        </Field>
-        <div className="mt-4">
-          <button type="submit" disabled={mutation.isPending || unchanged} className={saveButtonClass}>
-            {mutation.isPending ? 'Guardando...' : 'Guardar nombre'}
-          </button>
+    <section className={`${cardClass} flex flex-wrap items-center gap-[18px] p-[22px]`}>
+      <div className="relative flex-none">
+        <span
+          aria-hidden="true"
+          className="flex h-14 w-14 items-center justify-center rounded-full bg-ink text-[19px] font-medium tracking-[0.02em] text-cream"
+        >
+          {nameInitials(currentName)}
+        </span>
+        {/* Dot de suscripcion: verde solo cuando la suscripcion esta activa. El texto sr-only
+            anuncia el estado a lectores de pantalla (el title solo cubre el hover). */}
+        <span
+          title={subscriptionActive ? 'Suscripción activa' : 'Sin suscripción activa'}
+          className={`absolute -bottom-px -right-px h-[13px] w-[13px] rounded-full border-[2.5px] border-white ${
+            subscriptionActive ? 'bg-[#1D9E75]' : 'bg-[#B4B2A9]'
+          }`}
+        >
+          <span className="sr-only">
+            {subscriptionActive ? 'Suscripción activa' : 'Sin suscripción activa'}
+          </span>
+        </span>
+      </div>
+
+      <div className="min-w-0 flex-1">
+        {editing ? (
+          <form onSubmit={handleSubmit} noValidate className="max-w-sm">
+            <Field label="Nombre completo" error={error}>
+              <input
+                value={value}
+                onChange={(e) => {
+                  setValue(e.target.value);
+                  if (error) setError(undefined);
+                }}
+                autoComplete="name"
+                placeholder="Ada Lovelace"
+                autoFocus
+                className={inputClass}
+              />
+            </Field>
+            <div className="mt-3 flex gap-2">
+              <Button
+                type="submit"
+                variant="secondary-neutral"
+                size="sm"
+                disabled={mutation.isPending || unchanged}
+              >
+                {mutation.isPending ? 'Guardando...' : 'Guardar'}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={cancelEditing}
+                disabled={mutation.isPending}
+              >
+                Cancelar
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <h2 className="truncate text-lg font-medium tracking-[-0.01em] text-ink">
+              {currentName}
+            </h2>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              title="Editar nombre"
+              aria-label="Editar nombre"
+              onClick={startEditing}
+              className="h-7 w-7 flex-none rounded-lg text-[#8A8880]"
+            >
+              <Pencil className="h-[14px] w-[14px]" />
+            </Button>
+          </div>
+        )}
+        <p className="mt-0.5 truncate text-[13px] text-[#8A8880]">{email ?? 'Sin email'}</p>
+        <Notice notice={notice} className="mt-3" />
+      </div>
+
+      <div className="flex flex-col items-end gap-1.5">
+        <div className="flex items-center gap-1.5">
+          <span className="rounded-full bg-[#F1EFE8] px-2.5 py-1 text-[11.5px] text-[#444441]">
+            {accountTypeLabel(profile.accountType)}
+          </span>
+          <span className="rounded-full bg-[#F1EFE8] px-2.5 py-1 font-mono text-[11px] text-[#444441]">
+            {profile.tier}
+            {/* El link de upgrade lleva al gate del plan Autonomo (flujo upgrade_requests existente). */}
+            {profile.tier !== 'autonomous' && (
+              <>
+                {' · '}
+                <Link
+                  to="/recetas"
+                  className={`rounded-sm text-brasa-active underline-offset-2 hover:underline ${focusRing}`}
+                >
+                  upgrade
+                </Link>
+              </>
+            )}
+          </span>
         </div>
-        <Notice notice={notice} className="mt-4" />
-      </form>
+        <p className="font-mono text-[11px] text-[#B4B2A9]">
+          miembro desde {formatUserDate(profile.createdAt)}
+        </p>
+      </div>
     </section>
   );
 }
 
+/** Umbral del medidor segmentado: por encima, un bloque por ejecucion deja de leerse. */
+const MAX_SEGMENTS = 30;
+
 /**
- * SECCION USO / CUOTA: resumen minimo desde usageCounter (runsUsed / runsLimit; maneja null) mas un enlace
- * al Panel. NO reconstruye el dashboard: solo el numero y el enlace a "ver mas".
+ * USO DEL PERIODO: mismos datos de siempre (usageCounter.runsUsed / runsLimit de ['me'], cero
+ * fetching nuevo) presentados como medidor segmentado (un bloque por ejecucion). Si el limite no
+ * es segmentable (no entero, <= 0 o > MAX_SEGMENTS) cae a una barra continua proporcional. El
+ * enlace de actividad conserva su destino actual (/dashboard).
  */
-function UsageSection({ usageCounter }: { usageCounter: UsageCounter | null }) {
+function UsageSection({ usageCounter, tier }: { usageCounter: UsageCounter | null; tier: string }) {
+  const limit = usageCounter?.runsLimit ?? 0;
+  const used = usageCounter?.runsUsed ?? 0;
+  const segmentable = Number.isInteger(limit) && limit > 0 && limit <= MAX_SEGMENTS;
+
   return (
-    <section>
-      <SectionHeading title="Uso" description="Un resumen de tus ejecuciones." />
-      <div className="rounded-2xl border border-line bg-surface p-5 shadow-card">
-        {usageCounter ? (
-          <>
-            <p className="font-display text-2xl font-bold tabular-nums text-ink">
-              {usageCounter.runsUsed.toLocaleString('es-MX')}
-              <span className="text-muted"> / {usageCounter.runsLimit.toLocaleString('es-MX')}</span>
-            </p>
-            <p className="mt-0.5 text-xs text-muted">Ejecuciones usadas</p>
-          </>
-        ) : (
-          <p className="text-sm text-muted">Aún no hay datos de uso.</p>
+    <section className={`${cardClass} px-[22px] py-[18px]`}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <div>
+          <h2 className="text-[13.5px] font-medium text-ink">Uso del periodo</h2>
+          <p className="text-xs text-[#8A8880]">Ejecuciones de tus agentes en el plan {tier}.</p>
+        </div>
+        {usageCounter && (
+          <p className="text-[22px] font-medium tabular-nums text-ink">
+            {used.toLocaleString('es-MX')}
+            <span className="text-[13px] font-normal text-[#B4B2A9]">
+              {' '}
+              de {limit.toLocaleString('es-MX')}
+            </span>
+          </p>
+        )}
+      </div>
+
+      {usageCounter ? (
+        <div role="img" aria-label={`${used} de ${limit} ejecuciones usadas`} className="mt-3.5">
+          {segmentable ? (
+            <div className="flex gap-[5px]">
+              {Array.from({ length: limit }, (_, i) => (
+                <span
+                  key={i}
+                  className={`h-2.5 flex-1 rounded-[3px] ${
+                    i < used ? 'bg-ink' : 'border-[0.5px] border-[#E9E7DF] bg-[#F1EFE8]'
+                  }`}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="h-1.5 overflow-hidden rounded-full bg-[#F1EFE8]">
+              <span
+                className="block h-full rounded-full bg-ink"
+                style={{ width: `${limit > 0 ? Math.min(100, (used / limit) * 100) : 0}%` }}
+              />
+            </div>
+          )}
+        </div>
+      ) : (
+        <p className="mt-3.5 text-sm text-[#8A8880]">Aún no hay datos de uso.</p>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        {segmentable && (
+          <p className="text-[11.5px] text-[#B4B2A9]">Cada bloque es una ejecución</p>
         )}
         <Link
           to="/dashboard"
-          className={`mt-4 inline-flex items-center gap-1.5 rounded-md text-sm font-medium text-brasa transition hover:text-brasa-hover ${focusRing}`}
+          className={`ml-auto inline-flex items-center gap-1 rounded-md text-[12.5px] font-medium text-brasa-active transition hover:underline hover:underline-offset-2 ${focusRing}`}
         >
-          Ver mi actividad completa
-          <ArrowRight className="h-4 w-4" />
+          Ver actividad
+          <ArrowRight className="h-3.5 w-3.5" />
         </Link>
       </div>
     </section>
@@ -171,38 +274,43 @@ function UsageSection({ usageCounter }: { usageCounter: UsageCounter | null }) {
 }
 
 /**
- * SECCION SESION (minima y honesta): como el login es passwordless (enlace magico), NO hay cambio de
- * contrasena. Se ofrece cerrar sesion reusando el patron del Sidebar (supabase.auth.signOut()); el
- * AuthProvider detecta el cambio y ProtectedRoute redirige a /login. NO incluye eliminar-cuenta (pieza
- * aparte). NO incluye cambiar email (dispararia el flujo de verificacion de Supabase; fuera del minimo).
+ * SESION: fila con icono. El acceso es passwordless (enlace magico), asi que no hay contrasena que
+ * administrar; solo cerrar sesion, con el MISMO handler de siempre (supabase.auth.signOut()).
  */
 function SessionSection() {
   return (
-    <section>
-      <SectionHeading
-        title="Sesión"
-        description="Tu acceso es por enlace mágico (sin contraseña): no hay contraseña que cambiar."
-      />
-      <div className="rounded-2xl border border-line bg-surface p-5 shadow-card">
-        <button
-          type="button"
-          onClick={() => void supabase.auth.signOut()}
-          className={`inline-flex items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2.5 text-sm font-medium text-muted transition hover:border-brasa-line hover:text-brasa ${focusRing}`}
-        >
-          <LogOut className="h-[17px] w-[17px]" />
-          Cerrar sesión
-        </button>
+    <section className={`${cardClass} flex flex-wrap items-center gap-3.5 px-[22px] py-4`}>
+      <span
+        aria-hidden="true"
+        className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] bg-[#F1EFE8] text-[#5F5E5A]"
+      >
+        <Wand2 className="h-4 w-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <h2 className="text-[13.5px] font-medium text-ink">Sesión por enlace mágico</h2>
+        <p className="text-xs text-[#8A8880]">
+          Sin contraseña que recordar ni cambiar. Entras con tu correo.
+        </p>
       </div>
+      <Button
+        type="button"
+        variant="secondary-neutral"
+        size="sm"
+        onClick={() => void supabase.auth.signOut()}
+      >
+        Cerrar sesión
+        <LogOut className="h-[15px] w-[15px]" />
+      </Button>
     </section>
   );
 }
 
 /**
  * PANTALLA DE PERFIL (/perfil): el usuario ve sus datos de cuenta (email de Supabase + campos de /v1/me),
- * edita SOLO su nombre (PATCH /v1/me/profile via useUpdateProfileName), ve un resumen de su cuota con
- * enlace al Panel y puede cerrar sesion. Vive dentro del AppLayout (ProtectedRoute + RegistrationGate +
- * ConsentGate), SIN AdminGate: es para cualquier usuario logueado. Mayormente MUESTRA datos existentes;
- * lo unico que muta es el nombre. Reusa las primitivas y patrones de la consola.
+ * edita SOLO su nombre (PATCH /v1/me/profile via useUpdateProfileName), ve su cuota con enlace al Panel
+ * y puede cerrar sesion. Vive dentro del AppLayout (ProtectedRoute + RegistrationGate + ConsentGate),
+ * SIN AdminGate: es para cualquier usuario logueado. Cuatro elementos apilados: encabezado de identidad,
+ * uso del periodo, sesion y zona de peligro (que abre el modal de confirmacion fuerte de borrado).
  */
 export function ProfilePage() {
   const { data, isLoading, isError, refetch } = useMe();
@@ -220,18 +328,17 @@ export function ProfilePage() {
       ) : isError || !data || !data.profile ? (
         <ErrorState title="No pudimos cargar tu cuenta" onRetry={() => void refetch()} />
       ) : (
-        <div className="mt-8 space-y-10">
-          <AccountDataSection
+        <div className="mt-8 space-y-3">
+          <IdentityHeader
             profile={data.profile}
             email={user?.email}
             subscription={data.subscription}
           />
-          <EditNameSection currentName={data.profile.fullName} />
-          <UsageSection usageCounter={data.usageCounter} />
+          <UsageSection usageCounter={data.usageCounter} tier={data.profile.tier} />
           <SessionSection />
-          {/* Zona de peligro: separada visualmente (acento de advertencia) al final del perfil. Abre el
-              modal de confirmacion fuerte (escribir el email) y, tras el borrado, cierra sesion y redirige.
-              El email esperado sale de useAuth().user?.email (mismo origen que la seccion de datos). */}
+          {/* Zona de peligro: fila punteada al final del perfil. Abre el modal de confirmacion fuerte
+              (escribir el email) y, tras el borrado, cierra sesion y redirige. El email esperado sale
+              de useAuth().user?.email (mismo origen que el encabezado). */}
           <DangerZoneSection email={user?.email} />
         </div>
       )}

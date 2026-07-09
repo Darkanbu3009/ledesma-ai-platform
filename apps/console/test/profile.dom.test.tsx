@@ -103,10 +103,14 @@ describe('ProfilePage', () => {
     // Email tomado de useAuth().user?.email, no de /v1/me.
     expect(screen.getByText('ada@example.com')).toBeInTheDocument();
     expect(screen.getByText('Individual')).toBeInTheDocument();
-    // Plan mostrado como badge de tier (no editable aqui).
-    expect(screen.getByText('Free')).toBeInTheDocument();
-    expect(screen.getByText('Miembro desde')).toBeInTheDocument();
-    // El form del nombre viene precargado con el valor actual de ['me'].
+    // Plan mostrado como pill mono con el tier real (no editable aqui) + link al flujo de upgrade.
+    expect(
+      screen.getByText((_, el) => el?.tagName === 'SPAN' && el.textContent === 'free · upgrade'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'upgrade' })).toHaveAttribute('href', '/recetas');
+    expect(screen.getByText(/miembro desde/)).toBeInTheDocument();
+    // La edicion del nombre es inline: el form aparece al pulsar el lapiz, precargado desde ['me'].
+    fireEvent.click(screen.getByRole('button', { name: 'Editar nombre' }));
     expect(screen.getByLabelText('Nombre completo')).toHaveValue('Ada Lovelace');
   });
 
@@ -115,10 +119,11 @@ describe('ProfilePage', () => {
     mockMutation();
     renderPage();
 
-    expect(screen.getByText('Ejecuciones usadas')).toBeInTheDocument();
-    // El numero va partido en un nodo de texto ("3") y un span (" / 10"): se afirma la linea completa.
-    expect(screen.getByText((_, el) => el?.textContent === '3 / 10')).toBeInTheDocument();
-    const link = screen.getByRole('link', { name: /Ver mi actividad completa/ });
+    // El medidor segmentado expone la cuota como imagen accesible con la cifra completa.
+    expect(screen.getByRole('img', { name: '3 de 10 ejecuciones usadas' })).toBeInTheDocument();
+    // El numero va partido en un nodo de texto ("3") y un span (" de 10"): se afirma la linea completa.
+    expect(screen.getByText((_, el) => el?.textContent === '3 de 10')).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: /Ver actividad/ });
     expect(link).toHaveAttribute('href', '/dashboard');
   });
 
@@ -127,9 +132,10 @@ describe('ProfilePage', () => {
     const mutate = mockMutation();
     renderPage();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Editar nombre' }));
     const input = screen.getByLabelText('Nombre completo');
     fireEvent.change(input, { target: { value: '  Ada Nueva  ' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Guardar nombre' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }));
 
     expect(mutate).toHaveBeenCalledTimes(1);
     expect(mutate.mock.calls[0]?.[0]).toEqual({ fullName: 'Ada Nueva' });
@@ -140,9 +146,10 @@ describe('ProfilePage', () => {
     const mutate = mockMutation();
     renderPage();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Editar nombre' }));
     const input = screen.getByLabelText('Nombre completo');
     fireEvent.change(input, { target: { value: '   ' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Guardar nombre' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }));
 
     expect(mutate).not.toHaveBeenCalled();
     expect(screen.getByRole('alert')).toHaveTextContent(/obligatorio/);
@@ -161,8 +168,8 @@ describe('ProfilePage', () => {
     mockMutation();
     renderPage();
 
-    expect(screen.getByRole('heading', { name: /Zona de peligro/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Eliminar mi cuenta/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Eliminar mi cuenta/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Eliminar cuenta/i })).toBeInTheDocument();
   });
 
   it('muestra un estado de error con reintento si /v1/me falla', () => {
