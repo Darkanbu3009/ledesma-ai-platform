@@ -6,10 +6,10 @@ import {
 } from 'react';
 import { cn } from '../../lib/utils';
 
-type ButtonVariant = 'default' | 'secondary' | 'secondary-neutral' | 'ghost';
+type ButtonVariant = 'default' | 'secondary' | 'secondary-neutral' | 'ghost' | 'destructive';
 type ButtonSize = 'default' | 'sm' | 'lg' | 'icon';
 
-// Sistema plano de 3 variantes: sin box-shadow en reposo/hover/active (el unico permitido es el
+// Sistema plano de variantes: sin box-shadow en reposo/hover/active (el unico permitido es el
 // ring de focus-visible). Los estados hover/active van tras :not(:disabled) para que un boton
 // deshabilitado (opacity 0.5 + cursor not-allowed) no reaccione al mouse; el `!` de los actives
 // resuelve el empate de especificidad con las reglas de hover mientras se mantiene presionado.
@@ -27,6 +27,10 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
     'border border-[#B4B2A9] bg-transparent text-ink [&:hover:not(:disabled)]:bg-[#F1EFE8] [&:active:not(:disabled)]:!bg-[#E9E7DF]',
   ghost:
     'text-ink [&:hover:not(:disabled)]:bg-ink/[0.06] [&:active:not(:disabled)]:!bg-ink/10',
+  // Destructiva: outline rojo para acciones irreversibles (eliminar cuenta). Fuera de la escala
+  // brasa a proposito: el rojo queda reservado a lo destructivo. Sin sombra, como todo el sistema.
+  destructive:
+    'border border-[#A32D2D] bg-transparent text-[#A32D2D] [&:hover:not(:disabled)]:bg-[#FCEBEB] [&:active:not(:disabled)]:!bg-[#F5D9D9]',
 };
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
