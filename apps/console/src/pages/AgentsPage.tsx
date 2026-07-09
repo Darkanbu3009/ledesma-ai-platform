@@ -52,7 +52,8 @@ const manualFormRows: Array<[label: string, value: string]> = [
 ];
 
 // Estado vacio: dos vias de creacion lado a lado. La tarjeta A (Configurador) es la
-// protagonista y lleva el unico acento brasa de la pagina (su CTA); la tarjeta B (manual)
+// protagonista y concentra el brasa de la pagina (su CTA, el icono sparkles y el tinte
+// de las burbujas de usuario de la demo); la tarjeta B (manual)
 // queda en neutros. Ambos CTAs navegan a los mismos destinos que siempre:
 // /configurador y /agentes/nuevo.
 function AgentsEmptyState() {
@@ -63,7 +64,7 @@ function AgentsEmptyState() {
             de superficie: fondo blanco y borde un punto mas firme. */}
         <div className="flex flex-col rounded-[14px] border border-[#D3D1C7] bg-white p-[22px]">
           <div className="flex flex-wrap items-center gap-2">
-            <Sparkles className="h-[17px] w-[17px] text-[#5F5E5A]" aria-hidden="true" />
+            <Sparkles className="h-[17px] w-[17px] text-brasa" aria-hidden="true" />
             <span className={`${cardLabelClass} text-[#5F5E5A]`}>Configurador</span>
             <span className="inline-flex items-center rounded-full bg-[#F1EFE8] px-[10px] py-1 text-[11px] font-medium text-[#444441]">
               Recomendado
