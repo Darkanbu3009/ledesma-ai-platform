@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import { useConsents } from '../lib/queries';
 import { hasPendingConsents } from '../lib/privacy';
 import { ConsentScreen } from './privacy/ConsentScreen';
+import { SplashCarga } from './SplashCarga';
 
 /**
  * Compuerta de CONSENTIMIENTO (Fase 5.6). Se monta por dentro de RegistrationGate (sesion + registro ya
@@ -20,11 +21,7 @@ export function ConsentGate() {
   const { data, isLoading, isError, refetch } = useConsents();
 
   if (isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-cream">
-        <span className="text-sm text-muted">Cargando...</span>
-      </div>
-    );
+    return <SplashCarga />;
   }
 
   if (isError || !data) {
