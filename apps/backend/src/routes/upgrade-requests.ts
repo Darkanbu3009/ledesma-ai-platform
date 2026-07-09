@@ -6,6 +6,7 @@ import { getSql } from '../db/client.js';
 import { createSupabaseJwtVerifier, type JwtVerifier } from '../auth/jwt-verifier.js';
 import { requireUser } from '../auth/require-user.js';
 import { UpgradeRequestsRepository } from '../upgrade/upgrade-requests-repository.js';
+import { crearEmisorAlertaUpgrade, type EmisorAlertaUpgrade } from '../email/upgrade-alert-email.js';
 
 // Planes SOLICITABLES: el universo de profiles.tier (V007) MENOS 'free' (el estado actual / un downgrade,
 // no se 'solicita'). Hoy 'autonomous' es el unico que desbloquea las features premium; 'pro' se admite
@@ -50,11 +51,41 @@ export function upgradeRequestRoutes(
       UpgradeRequestsRepository,
       'findPendingByOwnerAndTier' | 'createRequest' | 'listByOwner'
     >;
+    emisorAlertaUpgrade?: EmisorAlertaUpgrade;
   },
 ) {
   return async function (app: FastifyInstance): Promise<void> {
     const verifier = deps?.verifier ?? createSupabaseJwtVerifier(config);
     const upgradeRepo = deps?.upgradeRepo ?? new UpgradeRequestsRepository(getSql(config));
+
+    // Emisor de la ALERTA AL OPERADOR por Resend (aditivo, best-effort; ver email/upgrade-alert-email.ts).
+    // Destinatario: UPGRADE_ALERTS_EMAIL; remitente y key: los MISMOS ya configurados para la bienvenida.
+    // Si falta cualquier env var, enviarAlertaUpgrade loguea y no envia (nunca rompe el registro del lead).
+    const emisorAlertaUpgrade =
+      deps?.emisorAlertaUpgrade ??
+      crearEmisorAlertaUpgrade({
+        ...(config.RESEND_API_KEY !== undefined ? { resendApiKey: config.RESEND_API_KEY } : {}),
+        ...(config.RESEND_WELCOME_FROM_EMAIL !== undefined ? { fromEmail: config.RESEND_WELCOME_FROM_EMAIL } : {}),
+        ...(config.UPGRADE_ALERTS_EMAIL !== undefined ? { alertsEmail: config.UPGRADE_ALERTS_EMAIL } : {}),
+        logger: app.log,
+      });
+
+    /**
+     * Dispara la alerta SIN bloquear ni condicionar la respuesta del endpoint (fire-and-forget, mismo
+     * patron que dispararBienvenida en registration.ts): el correo es un efecto secundario, va DESPUES
+     * del insert exitoso y jamas participa del resultado ni le agrega latencia (no se hace await).
+     * enviarAlertaUpgrade ya es best-effort (nunca lanza); el .catch() y el try/catch son redes de
+     * seguridad extra que atrapan una promesa rechazada y un throw sincrono, por si algo cambiara.
+     */
+    const dispararAlertaUpgrade = (params: Parameters<EmisorAlertaUpgrade['enviarAlertaUpgrade']>[0]): void => {
+      try {
+        void Promise.resolve(emisorAlertaUpgrade.enviarAlertaUpgrade(params)).catch((err: unknown) => {
+          app.log.error({ err }, 'no se pudo enviar la alerta de upgrade (best-effort)');
+        });
+      } catch (err) {
+        app.log.error({ err }, 'no se pudo disparar la alerta de upgrade (best-effort)');
+      }
+    };
 
     // Registra la DEMANDA. owner = sub del token, NUNCA del body. NO sube el tier (solo registra interes).
     app.post('/v1/upgrade-requests', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -80,6 +111,18 @@ export function upgradeRequestRoutes(
         requestedTier: parsed.data.requestedTier,
         featureContext: parsed.data.featureContext ?? null,
       });
+      // ALERTA AL OPERADOR solo en el insert REAL (created:true): no en el anti-duplicado de arriba ni
+      // en la carrera perdida (created:false), asi un reintento no genera correos repetidos. Va DESPUES
+      // del insert y es fire-and-forget: la respuesta de abajo no depende del correo en absoluto.
+      if (result.created) {
+        dispararAlertaUpgrade({
+          ownerId: user.id,
+          ownerEmail: user.email,
+          requestedTier: result.upgradeRequest.requestedTier,
+          featureContext: result.upgradeRequest.featureContext,
+          createdAt: result.upgradeRequest.createdAt,
+        });
+      }
       // created del repo: 201 si esta llamada inserto la fila, 200 si recupero una existente (carrera
       // concurrente perdida contra el indice unico parcial) -> la respuesta nunca miente sobre el created.
       return reply

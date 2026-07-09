@@ -63,6 +63,14 @@ const EnvSchema = z.object({
   RESEND_API_KEY: z.string().min(1).optional(),
   RESEND_WELCOME_FROM_EMAIL: z.string().email().optional(),
   CONSOLE_BASE_URL: z.string().url().optional(),
+  // ALERTA DE NUEVAS SOLICITUDES DE UPGRADE por Resend (monetizacion, aditivo, best-effort): correo
+  // del OPERADOR que recibe el aviso cuando POST /v1/upgrade-requests inserta una fila nueva (no en
+  // reintentos deduplicados). OPCIONAL, mismo patron que la bienvenida: si falta, el endpoint funciona
+  // IGUAL y solo se loguea (una vez) que la alerta esta desactivada. Reusa RESEND_API_KEY y el
+  // remitente RESEND_WELCOME_FROM_EMAIL ya configurados; se agrega a mano al servicio del backend en
+  // Railway (ver docs/despliegue-backend-alerta-upgrade.md). Un valor presente pero mal formado
+  // (email invalido) si lanza al arrancar (error de config explicito), igual que las otras.
+  UPGRADE_ALERTS_EMAIL: z.string().email().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

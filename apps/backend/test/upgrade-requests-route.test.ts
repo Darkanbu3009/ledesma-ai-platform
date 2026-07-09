@@ -28,6 +28,8 @@ const verifier: JwtVerifier = {
 const findPendingByOwnerAndTier = vi.fn();
 const createRequest = vi.fn();
 const listByOwner = vi.fn();
+// Emisor de la ALERTA AL OPERADOR (mock): la ruta lo dispara fire-and-forget SOLO en el insert real.
+const enviarAlertaUpgrade = vi.fn();
 
 function makeRequestRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -43,7 +45,7 @@ function makeRequestRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-async function makeApp(): Promise<FastifyInstance> {
+async function makeApp(opts?: { sinEmisorInyectado?: boolean }): Promise<FastifyInstance> {
   const config = parseEnv(BASE);
   const app = Fastify();
   registerErrorHandler(app, config);
@@ -51,6 +53,10 @@ async function makeApp(): Promise<FastifyInstance> {
     upgradeRequestRoutes(config, {
       verifier,
       upgradeRepo: { findPendingByOwnerAndTier, createRequest, listByOwner },
+      // Por default se inyecta el emisor mockeado (jamas un correo real en tests). Con
+      // sinEmisorInyectado la ruta construye el emisor REAL desde la config (que en BASE no trae
+      // UPGRADE_ALERTS_EMAIL): cubre el camino "env var ausente -> el endpoint funciona sin enviar".
+      ...(opts?.sinEmisorInyectado ? {} : { emisorAlertaUpgrade: { enviarAlertaUpgrade } }),
     }),
   );
   return app;
@@ -62,6 +68,7 @@ beforeEach(async () => {
   // Default feliz: no hay solicitud previa -> se crea una nueva (created:true).
   findPendingByOwnerAndTier.mockResolvedValue(null);
   createRequest.mockImplementation(async (input) => ({ upgradeRequest: makeRequestRow(input), created: true }));
+  enviarAlertaUpgrade.mockResolvedValue(undefined);
   app = await makeApp();
 });
 
@@ -296,6 +303,109 @@ describe('POST /v1/upgrade-requests: anti-duplicado', () => {
     expect(res.statusCode).toBe(201);
     expect(createRequest).toHaveBeenCalledTimes(1);
     expect(createRequest.mock.calls[0]?.[0].requestedTier).toBe('pro');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// ALERTA AL OPERADOR: se dispara SOLO en el insert real y JAMAS afecta la respuesta del endpoint
+// ---------------------------------------------------------------------------------------------------
+
+describe('POST /v1/upgrade-requests: alerta al operador', () => {
+  it('lead registrado (created:true) -> dispara la alerta con los datos del solicitante', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/upgrade-requests',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(201);
+    expect(enviarAlertaUpgrade).toHaveBeenCalledTimes(1);
+    expect(enviarAlertaUpgrade).toHaveBeenCalledWith({
+      ownerId: 'user-1',
+      ownerEmail: 'u1@test.com', // el email del JWT verificado, sin queries nuevas
+      requestedTier: 'autonomous',
+      featureContext: 'scheduled_tasks',
+      createdAt: '2026-07-01T00:00:00.000Z',
+    });
+  });
+
+  it('la alerta va DESPUES del insert: si createRequest falla, no se dispara nada', async () => {
+    createRequest.mockRejectedValue(new Error('db caida'));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/upgrade-requests',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(500);
+    expect(enviarAlertaUpgrade).not.toHaveBeenCalled();
+  });
+
+  it('el correo NUNCA rompe el registro: el emisor rechaza y el endpoint responde 201 igual', async () => {
+    enviarAlertaUpgrade.mockRejectedValue(new Error('resend caido'));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/upgrade-requests',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: validBody,
+    });
+    // El lead ya quedo en la tabla y la respuesta no cambia: mismo 201/created que sin correo.
+    expect(res.statusCode).toBe(201);
+    expect(res.json().created).toBe(true);
+    expect(res.json().upgradeRequest.ownerId).toBe('user-1');
+  });
+
+  it('el correo NUNCA rompe el registro: el emisor lanza SINCRONO y el endpoint responde 201 igual', async () => {
+    enviarAlertaUpgrade.mockImplementation(() => {
+      throw new Error('throw sincrono');
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/upgrade-requests',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().created).toBe(true);
+  });
+
+  it('reintento deduplicado (pending existente, 200): NO se dispara la alerta', async () => {
+    findPendingByOwnerAndTier.mockResolvedValue(makeRequestRow({ id: 'existing-id' }));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/upgrade-requests',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(enviarAlertaUpgrade).not.toHaveBeenCalled();
+  });
+
+  it('carrera perdida (created:false del repo): NO se dispara la alerta', async () => {
+    createRequest.mockResolvedValue({ upgradeRequest: makeRequestRow(), created: false });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/upgrade-requests',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(enviarAlertaUpgrade).not.toHaveBeenCalled();
+  });
+
+  it('UPGRADE_ALERTS_EMAIL ausente (emisor real, sin inyectar): el endpoint funciona igual, 201', async () => {
+    // Sin emisor inyectado, la ruta construye el real desde la config BASE (sin UPGRADE_ALERTS_EMAIL
+    // ni RESEND_*): el emisor se apaga solo (loguea una vez, no envia) y el registro no se ve afectado.
+    const appReal = await makeApp({ sinEmisorInyectado: true });
+    const res = await appReal.inject({
+      method: 'POST',
+      url: '/v1/upgrade-requests',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().created).toBe(true);
+    expect(enviarAlertaUpgrade).not.toHaveBeenCalled(); // el mock no participa en este app
   });
 });
 
