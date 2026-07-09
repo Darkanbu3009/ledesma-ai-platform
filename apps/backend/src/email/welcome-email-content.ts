@@ -8,29 +8,19 @@
  * llevan) y con la casa.
  */
 
+import { escapeHtml } from './escape-html.js';
+import type { CorreoSaliente } from './resend-client.js';
+
 /** Nombre del producto para el asunto y el cuerpo. */
 export const PRODUCTO = 'Ledesma AI Labs';
-
-/** Escapa los caracteres especiales de HTML (el nombre del usuario es un dato de usuario). */
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
 
 /** Normaliza la base de la consola (quita barras finales) y arma el enlace al panel (checklist de onboarding). */
 function urlPanel(consoleBaseUrl: string): string {
   return `${consoleBaseUrl.replace(/\/+$/, '')}/dashboard`;
 }
 
-export interface CorreoBienvenida {
-  subject: string;
-  text: string;
-  html: string;
-}
+/** Alias del tipo compartido de correo saliente (resend-client.ts): una sola forma canonica. */
+export type CorreoBienvenida = CorreoSaliente;
 
 /**
  * Arma el correo de bienvenida. Si hay `fullName` (recortado no vacio) personaliza el saludo; si no,

@@ -15,28 +15,14 @@
  */
 
 import { construirCorreoBienvenida } from './welcome-email-content.js';
-
-/** Endpoint de la API de Resend para enviar correos (mismo que usa el worker en sus alertas). */
-const RESEND_ENDPOINT = 'https://api.resend.com/emails';
-
-/** Timeout de pared del POST a Resend (ms). Best-effort: no bloquea ni demora la respuesta del registro. */
-const RESEND_TIMEOUT_MS = 5_000;
+import { enviarViaResend, type EmailLogger } from './resend-client.js';
 
 /**
- * Logger minimo que necesita el emisor (compatible con el logger de Fastify/pino: `(meta, msg)`). Se
- * define aca para no acoplar el modulo de email a los tipos de Fastify y para poder mockearlo en tests.
+ * Logger minimo que necesita el emisor. Alias del EmailLogger compartido (resend-client.ts), que se
+ * extrajo de aca cuando la alerta de upgrade paso a reusar el mismo envio; se conserva el nombre para
+ * no tocar a los consumidores existentes.
  */
-export interface WelcomeLogger {
-  info(meta: Record<string, unknown>, msg: string): void;
-  warn(meta: Record<string, unknown>, msg: string): void;
-  error(meta: Record<string, unknown>, msg: string): void;
-}
-
-/** Trunca un texto a `max` caracteres (para no volcar respuestas largas de Resend en los logs). */
-function truncar(texto: string, max = 200): string {
-  const s = texto.trim();
-  return s.length <= max ? s : `${s.slice(0, max)}...`;
-}
+export type WelcomeLogger = EmailLogger;
 
 export interface EmisorBienvenidaDeps {
   /** Key de la API de Resend. Si falta (undefined), no se puede enviar: se loguea y se omite. */
@@ -98,7 +84,18 @@ export function crearEmisorBienvenida(deps: EmisorBienvenidaDeps): EmisorBienven
         ...(deps.consoleBaseUrl !== undefined ? { consoleBaseUrl: deps.consoleBaseUrl } : {}),
       });
 
-      await enviarViaResend(fetchImpl, deps.resendApiKey, deps.fromEmail, email, correo, deps.logger);
+      const enviado = await enviarViaResend(
+        fetchImpl,
+        deps.resendApiKey,
+        deps.fromEmail,
+        email,
+        correo,
+        deps.logger,
+        'el correo de bienvenida',
+      );
+      if (enviado) {
+        deps.logger.info({}, 'correo de bienvenida enviado al usuario');
+      }
     } catch (err) {
       // BEST-EFFORT TOTAL: cualquier fallo (red, Resend, armado) se loguea y se traga. El correo es un
       // efecto secundario; jamas debe romper el registro.
@@ -110,51 +107,4 @@ export function crearEmisorBienvenida(deps: EmisorBienvenidaDeps): EmisorBienven
   }
 
   return { enviarBienvenida };
-}
-
-/**
- * POST a la API de Resend con timeout de pared (AbortController + setTimeout). No lanza en el camino
- * feliz ni ante un status no-2xx (loguea); una excepcion de red se propaga al try/catch de
- * enviarBienvenida. Mismo patron que enviarViaResend del worker.
- */
-async function enviarViaResend(
-  fetchImpl: typeof fetch,
-  apiKey: string,
-  from: string,
-  to: string,
-  correo: { subject: string; text: string; html: string },
-  logger: WelcomeLogger,
-): Promise<void> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), RESEND_TIMEOUT_MS);
-  try {
-    const res = await fetchImpl(RESEND_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        from,
-        to,
-        subject: correo.subject,
-        text: correo.text,
-        html: correo.html,
-      }),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      const detalle = await res.text().catch(() => '');
-      logger.error(
-        { status: res.status, detalle: truncar(detalle) },
-        'Resend respondio con error al enviar el correo de bienvenida',
-      );
-      return;
-    }
-    // Consumir el cuerpo libera la conexion del pool de fetch de inmediato (simetrico con la rama de error).
-    await res.text().catch(() => undefined);
-    logger.info({}, 'correo de bienvenida enviado al usuario');
-  } finally {
-    clearTimeout(timer);
-  }
 }
