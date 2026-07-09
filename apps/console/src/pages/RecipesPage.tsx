@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, ListChecks, Plus } from 'lucide-react';
+import { ArrowRight, ListChecks, Lock, Plus } from 'lucide-react';
 import { ApiError } from '../lib/api';
 import { useAgents, useCredentials, useMe, useRecipes } from '../lib/queries';
 import { useDeleteRecipe, useRunRecipe, useUpdateRecipe } from '../lib/mutations';
@@ -12,7 +12,8 @@ import { SkeletonList } from '../components/ui/SkeletonList';
 import { ErrorState } from '../components/ui/ErrorState';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Notice, type NoticeData } from '../components/ui/Notice';
-import { GatePlanAutonomo } from '../components/upgrade/GatePlanAutonomo';
+import { RequestUpgradeCta } from '../components/upgrade/RequestUpgradeCta';
+import { GateRecetasPipeline } from '../components/upgrade/GateRecetasPipeline';
 
 const addButtonClass =
   'inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:-translate-y-px hover:bg-brasa-hover hover:shadow-[0_2px_6px_rgba(31,30,28,0.14)]';
@@ -27,27 +28,35 @@ function runErrorMessage(error: unknown): string {
   return 'No pudimos encolar la receta. Intenta de nuevo.';
 }
 
-/** Gate del plan Autonomo: demo estatica de una receta corriendo + tarjeta de acceso. */
+/**
+ * Gate del plan Autonomo para Recetas: hero centrado + pipeline estatico de una receta corriendo
+ * como prueba visual (GateRecetasPipeline). Reemplaza al PageHeader y al layout viejo de dos
+ * columnas en el estado bloqueado. El CTA es el RequestUpgradeCta existente sin cambios: mismo
+ * flujo upgrade_requests, mismo estado post-solicitud ("Solicitud enviada") y mismo disclaimer.
+ * El hero duplica al de Tareas y Triggers (lo tienen inline); extraerlo a un sub-componente queda
+ * como deuda.
+ */
 function RecipesLocked() {
   return (
-    <GatePlanAutonomo
-      featureContext="recipes"
-      nombreReceta="cierre-semanal-facturas"
-      demoMeta="3 pasos · auto"
-      pasos={[
-        { num: '01', titulo: 'Recolectar facturas del correo', badge: 'done · 3.2s', estado: 'done' },
-        { num: '02', titulo: 'Extraer proveedor, monto, fecha', badge: 'done · 6.8s', estado: 'done' },
-        { num: '03', titulo: 'Registrar via HTTP y avisar', badge: 'running', estado: 'running' },
-      ]}
-      footerItems={['trigger: lunes 8:00', 'retry: 2', 'alertas: email']}
-      titular={['Tu agente trabaja', 'sin ti.']}
-      bullets={[
-        'Recetas multi-paso',
-        'Tareas programadas',
-        'Triggers por webhook',
-        'Alertas de fallo',
-      ]}
-    />
+    <div className="flex flex-col gap-4">
+      <section className="mx-auto flex w-full max-w-[520px] flex-col items-center pb-12 pt-14 text-center">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-[#F1EFE8] px-3 py-[5px]">
+          <Lock className="h-3 w-3 flex-none text-[#5F5E5A]" aria-hidden="true" />
+          <span className="text-[11px] uppercase tracking-[0.08em] text-[#5F5E5A]">
+            Plan Autonomo
+          </span>
+        </span>
+        <h1 className="mt-5 text-[26px] font-medium leading-[1.15] tracking-[-0.02em] text-ink">
+          Una funcion del plan Autonomo
+        </h1>
+        <p className="mt-3 text-[14px] leading-[1.6] text-[#5F5E5A]">
+          Las recetas encadenan varios pasos y tu agente los ejecuta en orden, solo. Estan
+          disponibles en el plan Autonomo.
+        </p>
+        <RequestUpgradeCta featureContext="recipes" className="mt-6" />
+      </section>
+      <GateRecetasPipeline />
+    </div>
   );
 }
 
@@ -185,19 +194,22 @@ export function RecipesPage() {
 
   return (
     <div className="mx-auto flex min-h-full max-w-4xl flex-col">
-      <PageHeader
-        title="Recetas"
-        subtitle="Encadena pasos en un flujo. Corre solo, en segundo plano."
-        action={
-          isAutonomous &&
-          hasRecipes && (
-            <button type="button" onClick={openNew} className={addButtonClass}>
-              <Plus className="h-[17px] w-[17px]" />
-              Nueva receta
-            </button>
-          )
-        }
-      />
+      {/* En el estado bloqueado el hero del gate reemplaza al titulo y subtitulo de la pagina. */}
+      {(me.isLoading || isAutonomous) && (
+        <PageHeader
+          title="Recetas"
+          subtitle="Encadena pasos en un flujo. Corre solo, en segundo plano."
+          action={
+            isAutonomous &&
+            hasRecipes && (
+              <button type="button" onClick={openNew} className={addButtonClass}>
+                <Plus className="h-[17px] w-[17px]" />
+                Nueva receta
+              </button>
+            )
+          }
+        />
+      )}
 
       <Notice notice={notice} />
 
