@@ -16,16 +16,7 @@
  */
 
 import { enviarViaResend, type EmailLogger, type CorreoSaliente } from './resend-client.js';
-
-/** Escapa los caracteres especiales de HTML (el email del solicitante es un dato de usuario). */
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+import { escapeHtml } from './escape-html.js';
 
 export interface EmisorAlertaUpgradeDeps {
   /** Key de la API de Resend. Si falta, no se puede enviar: se loguea y se omite. */
@@ -59,31 +50,30 @@ export interface AlertaUpgradeParams {
  * tabla ya guarda mas el email ya disponible en el request, sin queries nuevas.
  */
 export function construirCorreoAlertaUpgrade(params: AlertaUpgradeParams): CorreoSaliente {
-  const identificador = params.ownerEmail?.trim() || params.ownerId;
-  const email = params.ownerEmail?.trim() || 'sin email en el token';
+  // Email normalizado UNA vez; de el derivan el identificador del asunto y la fila del cuerpo.
+  const email = params.ownerEmail?.trim() || null;
+  const identificador = email ?? params.ownerId;
   const feature = params.featureContext ?? 'sin feature especifica (CTA generico)';
 
   const subject = `Nueva solicitud de upgrade: ${identificador}`;
 
-  const text = [
-    'Un usuario solicito acceso a un plan superior.',
-    '',
-    `Email del usuario: ${email}`,
-    `Owner ID: ${params.ownerId}`,
-    `Plan solicitado: ${params.requestedTier}`,
-    `Origen (feature): ${feature}`,
-    `Fecha: ${params.createdAt}`,
-    '',
-    'La solicitud quedo registrada como pending en upgrade_requests (panel de admin).',
-  ].join('\n');
-
+  // UNICA fuente de los campos del correo: el texto plano y la tabla HTML se derivan de estas filas,
+  // asi un campo nuevo aparece en ambos formatos (o en ninguno), nunca en uno solo.
   const filas: Array<[string, string]> = [
-    ['Email del usuario', email],
+    ['Email del usuario', email ?? 'sin email en el token'],
     ['Owner ID', params.ownerId],
     ['Plan solicitado', params.requestedTier],
     ['Origen (feature)', feature],
     ['Fecha', params.createdAt],
   ];
+
+  const text = [
+    'Un usuario solicito acceso a un plan superior.',
+    '',
+    ...filas.map(([k, v]) => `${k}: ${v}`),
+    '',
+    'La solicitud quedo registrada como pending en upgrade_requests (panel de admin).',
+  ].join('\n');
   const html = [
     '<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1f2937;line-height:1.5;max-width:560px;">',
     '<h2 style="font-size:18px;margin:0 0 12px;">Nueva solicitud de upgrade</h2>',
@@ -111,12 +101,14 @@ export interface EmisorAlertaUpgrade {
 }
 
 /**
- * Crea el emisor de la alerta de upgrade. Con estado minimo: recuerda si ya aviso que falta
- * UPGRADE_ALERTS_EMAIL para loguearlo UNA sola vez (y no en cada solicitud).
+ * Crea el emisor de la alerta de upgrade. Con estado minimo: recuerda si ya aviso cada config faltante
+ * (destino u otras env vars de Resend) para loguearlo UNA sola vez y no en cada solicitud -- una config
+ * ausente es una condicion fija del proceso, no un evento por request.
  */
 export function crearEmisorAlertaUpgrade(deps: EmisorAlertaUpgradeDeps): EmisorAlertaUpgrade {
   const fetchImpl = deps.fetchImpl ?? fetch;
   let avisoDestinoFaltante = false;
+  let avisoResendFaltante = false;
 
   async function enviarAlertaUpgrade(params: AlertaUpgradeParams): Promise<void> {
     try {
@@ -132,18 +124,22 @@ export function crearEmisorAlertaUpgrade(deps: EmisorAlertaUpgradeDeps): EmisorA
         return;
       }
 
-      // 2. Config de Resend: sin key o sin remitente no se puede enviar. No es un error: se loguea.
+      // 2. Config de Resend: sin key o sin remitente no se puede enviar. Tambien es una condicion fija
+      // del proceso -> se avisa UNA vez (mismo criterio que el destino), no en cada lead.
       if (!deps.resendApiKey || !deps.fromEmail) {
-        deps.logger.warn(
-          {},
-          'alerta de upgrade omitida: falta configuracion de email (RESEND_API_KEY / RESEND_WELCOME_FROM_EMAIL)',
-        );
+        if (!avisoResendFaltante) {
+          avisoResendFaltante = true;
+          deps.logger.warn(
+            {},
+            'alerta de upgrade omitida: falta configuracion de email (RESEND_API_KEY / RESEND_WELCOME_FROM_EMAIL); se avisa una sola vez',
+          );
+        }
         return;
       }
 
       // 3. Armar el correo (puro, sin red) y enviarlo con el envio compartido de Resend.
       const correo = construirCorreoAlertaUpgrade(params);
-      await enviarViaResend(
+      const enviado = await enviarViaResend(
         fetchImpl,
         deps.resendApiKey,
         deps.fromEmail,
@@ -152,6 +148,10 @@ export function crearEmisorAlertaUpgrade(deps: EmisorAlertaUpgradeDeps): EmisorA
         deps.logger,
         'la alerta de upgrade',
       );
+      if (enviado) {
+        // Sin PII en el log: ni el email del lead ni el del operador.
+        deps.logger.info({}, 'alerta de upgrade enviada al operador');
+      }
     } catch (err) {
       // BEST-EFFORT TOTAL: cualquier fallo (red, Resend, armado) se loguea y se traga. La alerta es
       // un efecto secundario; jamas debe romper el registro del lead (que ya quedo en la tabla).

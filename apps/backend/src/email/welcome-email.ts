@@ -84,7 +84,7 @@ export function crearEmisorBienvenida(deps: EmisorBienvenidaDeps): EmisorBienven
         ...(deps.consoleBaseUrl !== undefined ? { consoleBaseUrl: deps.consoleBaseUrl } : {}),
       });
 
-      await enviarViaResend(
+      const enviado = await enviarViaResend(
         fetchImpl,
         deps.resendApiKey,
         deps.fromEmail,
@@ -93,6 +93,9 @@ export function crearEmisorBienvenida(deps: EmisorBienvenidaDeps): EmisorBienven
         deps.logger,
         'el correo de bienvenida',
       );
+      if (enviado) {
+        deps.logger.info({}, 'correo de bienvenida enviado al usuario');
+      }
     } catch (err) {
       // BEST-EFFORT TOTAL: cualquier fallo (red, Resend, armado) se loguea y se traga. El correo es un
       // efecto secundario; jamas debe romper el registro.

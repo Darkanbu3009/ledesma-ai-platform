@@ -6,7 +6,11 @@ import { getSql } from '../db/client.js';
 import { createSupabaseJwtVerifier, type JwtVerifier } from '../auth/jwt-verifier.js';
 import { requireUser } from '../auth/require-user.js';
 import { UpgradeRequestsRepository } from '../upgrade/upgrade-requests-repository.js';
-import { crearEmisorAlertaUpgrade, type EmisorAlertaUpgrade } from '../email/upgrade-alert-email.js';
+import {
+  crearEmisorAlertaUpgrade,
+  type AlertaUpgradeParams,
+  type EmisorAlertaUpgrade,
+} from '../email/upgrade-alert-email.js';
 
 // Planes SOLICITABLES: el universo de profiles.tier (V007) MENOS 'free' (el estado actual / un downgrade,
 // no se 'solicita'). Hoy 'autonomous' es el unico que desbloquea las features premium; 'pro' se admite
@@ -77,7 +81,7 @@ export function upgradeRequestRoutes(
      * enviarAlertaUpgrade ya es best-effort (nunca lanza); el .catch() y el try/catch son redes de
      * seguridad extra que atrapan una promesa rechazada y un throw sincrono, por si algo cambiara.
      */
-    const dispararAlertaUpgrade = (params: Parameters<EmisorAlertaUpgrade['enviarAlertaUpgrade']>[0]): void => {
+    const dispararAlertaUpgrade = (params: AlertaUpgradeParams): void => {
       try {
         void Promise.resolve(emisorAlertaUpgrade.enviarAlertaUpgrade(params)).catch((err: unknown) => {
           app.log.error({ err }, 'no se pudo enviar la alerta de upgrade (best-effort)');

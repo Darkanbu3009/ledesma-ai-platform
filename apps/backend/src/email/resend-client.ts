@@ -4,9 +4,10 @@
  * envio en vez de replicarlo por tercera vez (la replica worker -> backend fue forzada porque el worker
  * no es importable; dentro del backend no hay excusa para duplicar). Sin SDK nuevo: fetch + AbortController.
  *
- * Contrato del emisor: NO lanza en el camino feliz ni ante un status no-2xx (loguea y retorna); una
- * excepcion de red/timeout SI se propaga, para que el try/catch best-effort del llamador la trague y
- * la loguee con su propio contexto. Mismo comportamiento que tenia enviarViaResend en welcome-email.ts.
+ * Contrato del emisor: NO lanza en el camino feliz ni ante un status no-2xx (loguea el error y devuelve
+ * false); una excepcion de red/timeout SI se propaga, para que el try/catch best-effort del llamador la
+ * trague y la loguee con su propio contexto. Devuelve true solo si Resend acepto el correo: el log de
+ * EXITO es del llamador (cada emisor conserva su mensaje historico; el de error, comun, vive aca).
  */
 
 /** Endpoint de la API de Resend para enviar correos (mismo que usa el worker en sus alertas). */
@@ -41,7 +42,7 @@ function truncar(texto: string, max = 200): string {
 
 /**
  * POST a la API de Resend con timeout de pared (AbortController + setTimeout). `descripcion` es el
- * nombre del correo para los logs (p.ej. 'el correo de bienvenida', 'la alerta de upgrade').
+ * nombre del correo para el log de error (p.ej. 'el correo de bienvenida', 'la alerta de upgrade').
  */
 export async function enviarViaResend(
   fetchImpl: typeof fetch,
@@ -51,7 +52,7 @@ export async function enviarViaResend(
   correo: CorreoSaliente,
   logger: EmailLogger,
   descripcion: string,
-): Promise<void> {
+): Promise<boolean> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), RESEND_TIMEOUT_MS);
   try {
@@ -76,11 +77,11 @@ export async function enviarViaResend(
         { status: res.status, detalle: truncar(detalle) },
         `Resend respondio con error al enviar ${descripcion}`,
       );
-      return;
+      return false;
     }
     // Consumir el cuerpo libera la conexion del pool de fetch de inmediato (simetrico con la rama de error).
     await res.text().catch(() => undefined);
-    logger.info({}, `${descripcion} se envio correctamente`);
+    return true;
   } finally {
     clearTimeout(timer);
   }

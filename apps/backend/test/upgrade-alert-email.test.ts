@@ -104,11 +104,13 @@ describe('crearEmisorAlertaUpgrade: sin UPGRADE_ALERTS_EMAIL', () => {
 });
 
 describe('crearEmisorAlertaUpgrade: sin config de Resend', () => {
-  it('sin RESEND_API_KEY no envia (loguea y sigue)', async () => {
+  it('sin RESEND_API_KEY no envia y avisa UNA sola vez (loguea y sigue)', async () => {
     const fetchImpl = okFetch();
     const emisor = crearEmisorAlertaUpgrade({ ...DEPS, resendApiKey: undefined, fetchImpl });
     await emisor.enviarAlertaUpgrade(PARAMS);
+    await emisor.enviarAlertaUpgrade(PARAMS);
     expect(fetchImpl).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledTimes(1); // condicion fija del proceso: no se repite por lead
     expect(logger.warn).toHaveBeenCalledWith({}, expect.stringContaining('falta configuracion de email'));
   });
 
