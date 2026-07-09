@@ -1,14 +1,11 @@
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/useAuth';
+import { SplashCarga } from './SplashCarga';
 
 export function ProtectedRoute() {
   const { session, loading } = useAuth();
   if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <span className="text-sm text-hueso-muted">Cargando...</span>
-      </div>
-    );
+    return <SplashCarga />;
   }
   if (!session) {
     return <Navigate to="/login" replace />;

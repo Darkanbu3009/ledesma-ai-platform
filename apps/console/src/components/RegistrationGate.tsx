@@ -2,6 +2,7 @@ import { Navigate, Outlet } from 'react-router-dom';
 import { RefreshCw } from 'lucide-react';
 import { useMe } from '../lib/queries';
 import { classifyRegistration } from '../lib/registration';
+import { SplashCarga } from './SplashCarga';
 
 /**
  * Compuerta de registro: se monta por dentro de ProtectedRoute (la sesion ya esta garantizada) y
@@ -14,11 +15,7 @@ export function RegistrationGate() {
   const { data, isLoading, isError, refetch } = useMe();
 
   if (isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <span className="text-sm text-hueso-muted">Cargando...</span>
-      </div>
-    );
+    return <SplashCarga />;
   }
 
   if (isError || !data) {

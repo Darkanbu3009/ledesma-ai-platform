@@ -63,6 +63,22 @@ export default {
         grotesk: ['"Hanken Grotesk"', 'system-ui', 'sans-serif'],
         jetbrains: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
       },
+      // Animaciones del SplashCarga (splash inicial de marca). CSS puro: el cuadrito
+      // brasa del isotipo pulsa y el segmento de la barra indeterminada recorre la pista.
+      keyframes: {
+        'splash-pulso': {
+          '0%, 100%': { opacity: '1', transform: 'scale(1)' },
+          '50%': { opacity: '0.35', transform: 'scale(0.82)' },
+        },
+        'splash-barra': {
+          '0%': { left: '-35%' },
+          '100%': { left: '100%' },
+        },
+      },
+      animation: {
+        'splash-pulso': 'splash-pulso 1.6s ease-in-out infinite',
+        'splash-barra': 'splash-barra 1.3s ease-in-out infinite',
+      },
       boxShadow: {
         card: '0 1px 2px rgba(31,30,28,0.04)',
         'card-hover': '0 14px 32px rgba(31,30,28,0.10)',

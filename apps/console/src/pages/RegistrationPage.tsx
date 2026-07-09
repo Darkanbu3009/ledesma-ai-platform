@@ -6,6 +6,7 @@ import { AuthScreen, SubmitButton, authInputClass, authLabelClass } from '../com
 import { useMe } from '../lib/queries';
 import { useRegisterIndividual, useRegisterOrganization } from '../lib/mutations';
 import { classifyRegistration, validateName } from '../lib/registration';
+import { SplashCarga } from '../components/SplashCarga';
 
 type Mode = 'empresa' | 'individual';
 
@@ -153,11 +154,7 @@ export function RegistrationPage() {
   const { data, isLoading, isError, refetch } = useMe();
 
   if (isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-cream">
-        <span className="text-sm text-muted">Cargando...</span>
-      </div>
-    );
+    return <SplashCarga />;
   }
 
   if (isError || !data) {
