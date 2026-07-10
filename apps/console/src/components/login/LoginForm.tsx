@@ -1,5 +1,6 @@
 import type { FormEvent, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { GoogleAuthButton } from './GoogleAuthButton';
 
 export type LoginStatus = 'idle' | 'submitting' | 'error';
 
@@ -22,9 +23,10 @@ interface LoginFormProps {
 
 /**
  * Formulario de acceso del panel derecho: campos de correo y contrasena,
- * boton unico brasa, link de recuperacion (/recuperar) y link a crear cuenta
- * (/crear-cuenta). Presentacional: el estado y el signInWithPassword viven en
- * LoginPage y llegan por props.
+ * boton brasa, link de recuperacion (/recuperar), boton "Continuar con
+ * Google" bajo el divisor "o" y link a crear cuenta (/crear-cuenta).
+ * Presentacional: el estado y el signInWithPassword viven en LoginPage y
+ * llegan por props; el flujo OAuth vive en GoogleAuthButton.
  */
 export function LoginForm({
   status,
@@ -89,6 +91,8 @@ export function LoginForm({
           Iniciar sesión
         </SubmitButton>
       </form>
+
+      <GoogleAuthButton />
 
       <p className="mt-7 text-center text-sm text-muted">
         ¿No tienes cuenta?{' '}
