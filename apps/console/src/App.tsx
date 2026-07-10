@@ -3,6 +3,8 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
 import { SignUpPage } from './pages/SignUpPage';
+import { PasswordRecoveryPage } from './pages/PasswordRecoveryPage';
+import { NewPasswordPage } from './pages/NewPasswordPage';
 import { RegistrationPage } from './pages/RegistrationPage';
 import { AgentsPage } from './pages/AgentsPage';
 import { AgentFormPage } from './pages/AgentFormPage';
@@ -57,6 +59,10 @@ export function App() {
       <Route path="/" element={<HomePage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/crear-cuenta" element={<SignUpPage />} />
+      {/* Recuperacion de contrasena: solicitar el enlace (publica) y elegir la nueva
+          contrasena (destino del redirectTo del correo de reset de Supabase). */}
+      <Route path="/recuperar" element={<PasswordRecoveryPage />} />
+      <Route path="/nueva-contrasena" element={<NewPasswordPage />} />
       {/* Avisos de privacidad PUBLICOS (sin sesion): enlazables desde la landing, el widget y el flujo
           de consentimiento. Estructura legal + placeholders [REVISION LEGAL PENDIENTE]. */}
       <Route path="/aviso-de-privacidad" element={<PrivacyNoticePage />} />
