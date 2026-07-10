@@ -8,7 +8,6 @@ import { useUpdateProfileName } from '../lib/mutations';
 import { updateProfileNameErrorMessage, validateName } from '../lib/registration';
 import type { Profile, Subscription, UsageCounter } from '../lib/registration';
 import { accountTypeLabel, formatUserDate } from '../lib/admin';
-import { PageHeader } from '../components/ui/PageHeader';
 import { Field, inputClass } from '../components/ui/Field';
 import { Notice, type NoticeData } from '../components/ui/Notice';
 import { SkeletonList } from '../components/ui/SkeletonList';
@@ -306,23 +305,20 @@ function SessionSection() {
 }
 
 /**
- * PANTALLA DE PERFIL (/perfil): el usuario ve sus datos de cuenta (email de Supabase + campos de /v1/me),
- * edita SOLO su nombre (PATCH /v1/me/profile via useUpdateProfileName), ve su cuota con enlace al Panel
- * y puede cerrar sesion. Vive dentro del AppLayout (ProtectedRoute + RegistrationGate + ConsentGate),
- * SIN AdminGate: es para cualquier usuario logueado. Cuatro elementos apilados: encabezado de identidad,
- * uso del periodo, sesion y zona de peligro (que abre el modal de confirmacion fuerte de borrado).
+ * PANTALLA DE PERFIL (/configuracion/cuenta, antes /perfil): el usuario ve sus datos de cuenta (email
+ * de Supabase + campos de /v1/me), edita SOLO su nombre (PATCH /v1/me/profile via useUpdateProfileName),
+ * ve su cuota con enlace al Panel y puede cerrar sesion. Vive como sub-vista del shell de Configuracion
+ * (SettingsLayout pone el titulo de seccion y los tabs; por eso ya no trae PageHeader propio), dentro
+ * del AppLayout (ProtectedRoute + RegistrationGate + ConsentGate), SIN AdminGate: es para cualquier
+ * usuario logueado. Cuatro elementos apilados: encabezado de identidad, uso del periodo, sesion y zona
+ * de peligro (que abre el modal de confirmacion fuerte de borrado).
  */
 export function ProfilePage() {
   const { data, isLoading, isError, refetch } = useMe();
   const { user } = useAuth();
 
   return (
-    <div className="mx-auto flex min-h-full max-w-3xl flex-col">
-      <PageHeader
-        title="Mi cuenta"
-        subtitle="Consulta los datos de tu cuenta, edita tu nombre y administra tu sesión."
-      />
-
+    <div className="max-w-3xl">
       {isLoading ? (
         <SkeletonList count={3} cardClassName="h-40" className="mt-8 space-y-4" />
       ) : isError || !data || !data.profile ? (

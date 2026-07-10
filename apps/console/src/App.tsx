@@ -15,6 +15,8 @@ import { PlaygroundPage } from './pages/PlaygroundPage';
 import { ConnectPage } from './pages/ConnectPage';
 import { UsagePage } from './pages/UsagePage';
 import { ProfilePage } from './pages/ProfilePage';
+import { SettingsLayout } from './pages/SettingsLayout';
+import { PlansPage } from './pages/PlansPage';
 import { PrivacyNoticePage } from './pages/PrivacyNoticePage';
 import { PrivacySimplifiedNoticePage } from './pages/PrivacySimplifiedNoticePage';
 import { PrivacyRightsPage } from './pages/PrivacyRightsPage';
@@ -91,9 +93,16 @@ export function App() {
               <Route path="/recetas" element={<RecipesPage />} />
               {/* Observabilidad: historial de ejecuciones (jobs). Solo lectura, sin gate por tier. */}
               <Route path="/actividad" element={<ActivityPage />} />
-              {/* Perfil de usuario: datos de cuenta, edicion del propio nombre, resumen de cuota y cerrar
-                  sesion. Para cualquier usuario logueado -- SIN AdminGate (no es area de admin). */}
-              <Route path="/perfil" element={<ProfilePage />} />
+              {/* Configuracion: shell con dos sub-vistas. "Mi cuenta" es la pantalla de perfil de
+                  siempre (reubicada, sin cambios funcionales) y "Paquetes" el catalogo de planes.
+                  Para cualquier usuario logueado -- SIN AdminGate (no es area de admin). */}
+              <Route path="/configuracion" element={<SettingsLayout />}>
+                <Route index element={<Navigate to="/configuracion/cuenta" replace />} />
+                <Route path="cuenta" element={<ProfilePage />} />
+                <Route path="paquetes" element={<PlansPage />} />
+              </Route>
+              {/* Compat: /perfil era la URL historica de Mi cuenta; redirige para no romper enlaces. */}
+              <Route path="/perfil" element={<Navigate to="/configuracion/cuenta" replace />} />
               {/* Ejercicio de derechos del titular (ARCO/GDPR). */}
               <Route path="/privacidad" element={<PrivacyRightsPage />} />
               {/* Area de ADMIN: vive en el mismo layout pero detras del AdminGate, que devuelve a la
