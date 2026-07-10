@@ -88,12 +88,12 @@ export function LandingFooter(): JSX.Element {
               </p>
               <ul className="mt-4 space-y-3 text-sm">
                 <li>
-                  <Link to="/login?modo=registro" className={linkClass}>
+                  <Link to="/crear-cuenta" className={linkClass}>
                     Crear cuenta
                   </Link>
                 </li>
                 <li>
-                  <Link to="/login?modo=acceso" className={linkClass}>
+                  <Link to="/login" className={linkClass}>
                     Iniciar sesión
                   </Link>
                 </li>
