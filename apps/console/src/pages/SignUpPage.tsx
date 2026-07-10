@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { isValidEmail } from '../lib/email';
 import { MIN_PASSWORD_LENGTH } from '../lib/password';
 import { useAuth } from '../auth/useAuth';
 import { BrandPanel, BrandCopy } from '../components/login/BrandPanel';
@@ -46,7 +47,7 @@ export function SignUpPage() {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     const trimmed = email.trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+    if (!isValidEmail(trimmed)) {
       fail('Ingresa un correo válido.');
       return;
     }

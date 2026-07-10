@@ -1,21 +1,22 @@
 import { useState, type FormEvent } from 'react';
 import { supabase } from '../lib/supabase';
-import { BrandPanel, BrandCopy } from '../components/login/BrandPanel';
+import { isValidEmail } from '../lib/email';
+import { AuthLayout } from '../components/login/AuthLayout';
 import {
   PasswordRecoveryForm,
   type RecoveryStatus,
 } from '../components/login/PasswordRecoveryForm';
-import { LedesmaLogo } from '../components/login/LedesmaLogo';
 
 /**
  * Pantalla de solicitar restablecimiento de contrasena (/recuperar) con el
- * mismo layout de marca del login: panel izquierdo con la nube ditherizada en
- * desktop y columna unica en movil.
+ * layout de marca compartido.
  *
  * Envia el correo de reset via supabase.auth.resetPasswordForEmail; Supabase
  * genera y maneja el token, y el enlace del correo regresa a
  * /nueva-contrasena (redirectTo), donde detectSessionInUrl establece la
- * sesion de recuperacion. Aqui nunca se toca el token.
+ * sesion de recuperacion. Aqui nunca se toca el token. La URL de redirectTo
+ * debe estar en la allowlist de Redirect URLs del proyecto Supabase para cada
+ * origen desplegado; si falta, GoTrue cae en silencio al Site URL.
  *
  * La confirmacion es NEUTRA: el mismo mensaje exista o no el correo, para no
  * filtrar si una cuenta existe. Por eso tampoco se distingue el error de
@@ -33,7 +34,7 @@ export function PasswordRecoveryPage() {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     const trimmed = email.trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+    if (!isValidEmail(trimmed)) {
       setStatus('error');
       setErrorMsg('Ingresa un correo válido.');
       return;
@@ -52,36 +53,14 @@ export function PasswordRecoveryPage() {
   }
 
   return (
-    <div className="min-h-screen bg-cream lg:flex">
-      {/* Panel izquierdo de marca (solo desktop), separado por hairline de 0.5px. */}
-      <aside
-        className="hidden lg:block lg:w-[52%]"
-        style={{ borderRight: '0.5px solid rgba(31,30,28,0.14)' }}
-      >
-        <BrandPanel sent={status === 'sent'} />
-      </aside>
-
-      {/* Panel derecho: formulario centrado. En movil, columna unica con header
-          compacto arriba y el bloque de marca bajo el formulario. */}
-      <div className="flex min-h-screen flex-1 flex-col lg:min-h-0">
-        <header className="flex justify-center pt-12 lg:hidden">
-          <LedesmaLogo compact />
-        </header>
-        <main className="flex flex-1 items-center justify-center px-6 py-10">
-          <div className="w-full max-w-[400px]">
-            <PasswordRecoveryForm
-              status={status}
-              errorMsg={errorMsg}
-              email={email}
-              onEmailChange={setEmail}
-              onSubmit={handleSubmit}
-            />
-          </div>
-        </main>
-        <footer className="flex justify-center px-6 pb-12 lg:hidden">
-          <BrandCopy />
-        </footer>
-      </div>
-    </div>
+    <AuthLayout sent={status === 'sent'}>
+      <PasswordRecoveryForm
+        status={status}
+        errorMsg={errorMsg}
+        email={email}
+        onEmailChange={setEmail}
+        onSubmit={handleSubmit}
+      />
+    </AuthLayout>
   );
 }
