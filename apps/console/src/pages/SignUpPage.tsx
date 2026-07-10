@@ -1,18 +1,12 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { isValidEmail } from '../lib/email';
+import { MIN_PASSWORD_LENGTH } from '../lib/password';
 import { useAuth } from '../auth/useAuth';
 import { BrandPanel, BrandCopy } from '../components/login/BrandPanel';
 import { SignUpForm, type SignUpStatus } from '../components/login/SignUpForm';
 import { LedesmaLogo } from '../components/login/LedesmaLogo';
-
-/**
- * Longitud minima de contrasena validada en cliente. Es el minimo que Supabase
- * Auth aplica por defecto en el servidor; si el proyecto configura una regla
- * mas estricta, el error del servidor (weak_password) se muestra tal cual en
- * vez de prometer aqui una regla distinta.
- */
-const MIN_PASSWORD_LENGTH = 6;
 
 /**
  * Pantalla de crear cuenta (/crear-cuenta) con el mismo layout de marca del
@@ -53,7 +47,7 @@ export function SignUpPage() {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     const trimmed = email.trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+    if (!isValidEmail(trimmed)) {
       fail('Ingresa un correo válido.');
       return;
     }

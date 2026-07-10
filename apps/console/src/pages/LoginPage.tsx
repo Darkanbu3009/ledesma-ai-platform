@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { isValidEmail } from '../lib/email';
 import { useAuth } from '../auth/useAuth';
 import { BrandPanel, BrandCopy } from '../components/login/BrandPanel';
 import { LoginForm, type LoginStatus } from '../components/login/LoginForm';
@@ -34,7 +35,7 @@ export function LoginPage() {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     const trimmed = email.trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+    if (!isValidEmail(trimmed)) {
       setStatus('error');
       setErrorMsg('Ingresa un correo válido.');
       return;
