@@ -99,7 +99,9 @@ describe('ProfilePage', () => {
     mockMutation();
     renderPage();
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Mi cuenta' })).toBeInTheDocument();
+    // El titulo de seccion ("Configuración" + tabs) lo pone SettingsLayout; la pantalla arranca con
+    // el encabezado de identidad (nombre como heading).
+    expect(screen.getByRole('heading', { name: 'Ada Lovelace' })).toBeInTheDocument();
     // Email tomado de useAuth().user?.email, no de /v1/me.
     expect(screen.getByText('ada@example.com')).toBeInTheDocument();
     expect(screen.getByText('Individual')).toBeInTheDocument();

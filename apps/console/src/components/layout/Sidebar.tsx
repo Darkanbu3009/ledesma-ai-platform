@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { Activity, Bot, CalendarClock, ChefHat, KeyRound, LayoutDashboard, LogOut, ShieldCheck, User, Users, Webhook } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../auth/useAuth';
@@ -28,6 +28,8 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   // acceso real lo impone el backend (requireAdminRole), no la presencia de este item.
   const { isAdmin } = useIsAdmin();
   const items = isAdmin ? [...navItems, adminNavItem] : navItems;
+  const { pathname } = useLocation();
+  const settingsActive = pathname.startsWith('/configuracion');
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -62,18 +64,17 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
 
       <div className="border-t border-line pt-4">
-        {/* Acceso al perfil: el email deja de ser texto muerto y se vuelve el enlace a /perfil (con el
-            resalte de ruta activa, igual que la nav). El boton de cerrar sesion se queda debajo. */}
+        {/* Acceso a Configuracion: el enlace lleva a la sub-vista de cuenta, pero el resalte cubre
+            toda la seccion /configuracion (cuenta y paquetes), por eso se calcula sobre pathname en
+            vez del isActive del NavLink. El boton de cerrar sesion se queda debajo. */}
         <NavLink
-          to="/perfil"
+          to="/configuracion/cuenta"
           onClick={onNavigate}
-          className={({ isActive }) =>
-            [
-              'flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition',
-              focusRing,
-              isActive ? 'bg-brasa-soft text-brasa' : 'text-ink-soft hover:bg-line-soft',
-            ].join(' ')
-          }
+          className={[
+            'flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition',
+            focusRing,
+            settingsActive ? 'bg-brasa-soft text-brasa' : 'text-ink-soft hover:bg-line-soft',
+          ].join(' ')}
         >
           <User className="h-[18px] w-[18px] flex-none" />
           <span className="flex min-w-0 flex-col">
