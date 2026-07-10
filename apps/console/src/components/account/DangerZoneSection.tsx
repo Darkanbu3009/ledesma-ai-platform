@@ -7,7 +7,7 @@ import { Button } from '../ui/button';
 
 /**
  * ZONA DE PELIGRO del perfil: fila visualmente SEPARADA (borde punteado rojizo, unico lugar de la
- * pagina con rojo destructivo) al final de /perfil. Explica que eliminar la cuenta es PERMANENTE e
+ * pagina con rojo destructivo) al final de Mi cuenta (/configuracion/cuenta). Explica que eliminar la cuenta es PERMANENTE e
  * IRREVERSIBLE y ofrece un unico boton (variante destructiva) que abre el modal de confirmacion fuerte
  * (DeleteAccountDialog), donde el usuario debe escribir su email para habilitar el borrado.
  *
