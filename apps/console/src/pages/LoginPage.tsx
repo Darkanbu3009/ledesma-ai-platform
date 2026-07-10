@@ -1,36 +1,34 @@
 import { useState, type FormEvent } from 'react';
-import { Navigate, useSearchParams } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/useAuth';
 import { BrandPanel, BrandCopy } from '../components/login/BrandPanel';
-import { LoginForm, type Modo, type LoginStatus } from '../components/login/LoginForm';
+import { LoginForm, type LoginStatus } from '../components/login/LoginForm';
 import { LedesmaLogo } from '../components/login/LedesmaLogo';
 
 /**
- * Pantalla de login/registro con layout de panel dividido estilo laboratorio:
- * panel izquierdo de marca con la nube ditherizada (solo desktop >=1024px) y
- * panel derecho con el formulario. En movil colapsa a columna unica: header
- * compacto con el logo, formulario centrado y el bloque de marca como texto
- * bajo el formulario, sin canvas.
+ * Pantalla de login con layout de panel dividido estilo laboratorio: panel
+ * izquierdo de marca con la nube ditherizada (solo desktop >=1024px) y panel
+ * derecho con el formulario. En movil colapsa a columna unica: header compacto
+ * con el logo, formulario centrado y el bloque de marca como texto bajo el
+ * formulario, sin canvas.
  *
- * El flujo de autenticacion es el de siempre y no cambia: magic link via
- * supabase.auth.signInWithOtp, identico en ambos modos (?modo=acceso |
- * ?modo=registro); solo cambia la presentacion.
+ * Autenticacion por correo y contrasena via supabase.auth.signInWithPassword.
+ * Las contrasenas viven exclusivamente en Supabase Auth (auth.users); aqui
+ * solo se pasan al cliente supabase-js, nunca a la API propia ni a tablas del
+ * esquema. Tras autenticar, AuthProvider recibe la sesion por
+ * onAuthStateChange y el <Navigate> de arriba redirige; el flujo post-login
+ * (GET /v1/me, needsRegistration -> /registro) no cambia.
  */
 export function LoginPage() {
   const { session, loading } = useAuth();
-  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [status, setStatus] = useState<LoginStatus>('idle');
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Default razonable: cualquier valor distinto de `registro` (ausente o desconocido) se trata
-  // como acceso, de modo que `/login` a secas siga funcionando igual que hoy.
-  const modo: Modo = searchParams.get('modo') === 'registro' ? 'registro' : 'acceso';
-
   if (loading) return null;
-  // Con `/` ahora publica (landing de marketing), un usuario ya autenticado va directo al
-  // dashboard en vez de caer en marketing.
+  // Con `/` publica (landing de marketing), un usuario ya autenticado va directo al dashboard.
   if (session) return <Navigate to="/agentes" replace />;
 
   async function handleSubmit(event: FormEvent) {
@@ -38,21 +36,30 @@ export function LoginPage() {
     const trimmed = email.trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
       setStatus('error');
-      setErrorMsg('Ingresa un correo valido.');
+      setErrorMsg('Ingresa un correo válido.');
+      return;
+    }
+    if (!password) {
+      setStatus('error');
+      setErrorMsg('Ingresa tu contraseña.');
       return;
     }
     setStatus('submitting');
     setErrorMsg('');
-    const { error } = await supabase.auth.signInWithOtp({
-      email: trimmed,
-      options: { emailRedirectTo: window.location.origin },
-    });
+    const { error } = await supabase.auth.signInWithPassword({ email: trimmed, password });
     if (error) {
       setStatus('error');
-      setErrorMsg('No pudimos enviar el enlace. Intenta de nuevo.');
+      if (error.code === 'email_not_confirmed') {
+        setErrorMsg('Confirma tu correo antes de iniciar sesión. Revisa tu bandeja.');
+      } else if (error.status === 400) {
+        // Mismo mensaje exista o no el correo: no se filtra si una cuenta existe.
+        setErrorMsg('Correo o contraseña incorrectos.');
+      } else {
+        setErrorMsg('No pudimos iniciar sesión. Intenta de nuevo.');
+      }
       return;
     }
-    setStatus('sent');
+    // Sin error hay sesion: AuthProvider la propaga y el <Navigate> superior redirige.
   }
 
   return (
@@ -62,7 +69,7 @@ export function LoginPage() {
         className="hidden lg:block lg:w-[52%]"
         style={{ borderRight: '0.5px solid rgba(31,30,28,0.14)' }}
       >
-        <BrandPanel sent={status === 'sent'} />
+        <BrandPanel sent={false} />
       </aside>
 
       {/* Panel derecho: formulario centrado. En movil, columna unica con header
@@ -74,11 +81,12 @@ export function LoginPage() {
         <main className="flex flex-1 items-center justify-center px-6 py-10">
           <div className="w-full max-w-[400px]">
             <LoginForm
-              modo={modo}
               status={status}
               errorMsg={errorMsg}
               email={email}
+              password={password}
               onEmailChange={setEmail}
+              onPasswordChange={setPassword}
               onSubmit={handleSubmit}
             />
           </div>

@@ -2,6 +2,7 @@ import { Suspense, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
+import { SignUpPage } from './pages/SignUpPage';
 import { RegistrationPage } from './pages/RegistrationPage';
 import { AgentsPage } from './pages/AgentsPage';
 import { AgentFormPage } from './pages/AgentFormPage';
@@ -52,9 +53,10 @@ export function App() {
   return (
     <Routes>
       {/* Landing publica de marketing: unica vista sin sesion requerida. Si hay sesion activa,
-          HomePage redirige a /agentes (incluido el retorno del magic-link OTP al origen). */}
+          HomePage redirige a /agentes. */}
       <Route path="/" element={<HomePage />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/crear-cuenta" element={<SignUpPage />} />
       {/* Avisos de privacidad PUBLICOS (sin sesion): enlazables desde la landing, el widget y el flujo
           de consentimiento. Estructura legal + placeholders [REVISION LEGAL PENDIENTE]. */}
       <Route path="/aviso-de-privacidad" element={<PrivacyNoticePage />} />

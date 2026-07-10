@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, LogOut, Pencil, Wand2 } from 'lucide-react';
+import { ArrowRight, KeyRound, LogOut, Pencil } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/useAuth';
 import { useMe } from '../lib/queries';
@@ -273,8 +273,8 @@ function UsageSection({ usageCounter, tier }: { usageCounter: UsageCounter | nul
 }
 
 /**
- * SESION: fila con icono. El acceso es passwordless (enlace magico), asi que no hay contrasena que
- * administrar; solo cerrar sesion, con el MISMO handler de siempre (supabase.auth.signOut()).
+ * SESION: fila con icono. El acceso es por correo y contrasena (Supabase Auth); aqui solo se cierra
+ * sesion, con el MISMO handler de siempre (supabase.auth.signOut()).
  */
 function SessionSection() {
   return (
@@ -283,12 +283,12 @@ function SessionSection() {
         aria-hidden="true"
         className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] bg-[#F1EFE8] text-[#5F5E5A]"
       >
-        <Wand2 className="h-4 w-4" />
+        <KeyRound className="h-4 w-4" />
       </span>
       <div className="min-w-0 flex-1">
-        <h2 className="text-[13.5px] font-medium text-ink">Sesión por enlace mágico</h2>
+        <h2 className="text-[13.5px] font-medium text-ink">Sesión</h2>
         <p className="text-xs text-[#8A8880]">
-          Sin contraseña que recordar ni cambiar. Entras con tu correo.
+          Entras con tu correo y contraseña. Aquí puedes cerrar la sesión activa.
         </p>
       </div>
       <Button

@@ -21,8 +21,7 @@ import { PixelAgent } from '../components/landing/pixel-agent';
  * viven en su valor claro en :root (ver index.css) y los componentes se renderizan en claro.
  *
  * Si hay sesion activa redirige a /agentes, de modo que un usuario autenticado no caiga en la
- * pagina de marketing. Esto cubre tambien el retorno del magic-link OTP, que vuelve al origen
- * (`/`) tras autenticar.
+ * pagina de marketing.
  */
 export function HomePage(): JSX.Element | null {
   const { session, loading } = useAuth();

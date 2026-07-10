@@ -1,89 +1,47 @@
 import type { FormEvent, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { Mail } from 'lucide-react';
 
-/**
- * Modo desde el que se llega a la pantalla, leido del query param `modo`:
- * - `registro`: el usuario viene de "Crear cuenta".
- * - `acceso`: el usuario viene de "Iniciar sesion" (default si el parametro falta o es desconocido).
- *
- * El mecanismo de acceso es IDENTICO en ambos modos (magic link via signInWithOtp); lo unico que
- * cambia es el texto de la pantalla (titulo, subtitulo, boton y link de alternancia).
- */
-export type Modo = 'registro' | 'acceso';
+export type LoginStatus = 'idle' | 'submitting' | 'error';
 
-export type LoginStatus = 'idle' | 'submitting' | 'sent' | 'error';
-
-const COPY: Record<
-  Modo,
-  { title: string; subtitle: string; submit: string; togglePrompt: string; toggleLabel: string; toggleTo: Modo }
-> = {
-  registro: {
-    title: 'Crear tu cuenta',
-    subtitle: 'Te enviamos un enlace para empezar.',
-    submit: 'Crear cuenta',
-    togglePrompt: '¿Ya tienes cuenta?',
-    toggleLabel: 'Iniciar sesión',
-    toggleTo: 'acceso',
-  },
-  acceso: {
-    title: 'Iniciar sesión',
-    subtitle: 'Te enviamos un enlace de acceso.',
-    submit: 'Enviar enlace de acceso',
-    togglePrompt: '¿No tienes cuenta?',
-    toggleLabel: 'Crear cuenta',
-    toggleTo: 'registro',
-  },
-};
-
-/** Estilo del input de correo: fondo blanco, hairline calida, foco brasa. */
-const inputClass =
+/** Estilo del input de credenciales: fondo blanco, hairline calida, foco brasa. */
+export const inputClass =
   'h-10 w-full rounded-lg border-[0.5px] border-[rgba(31,30,28,0.22)] bg-white px-3.5 text-sm text-ink outline-none transition placeholder:text-muted-soft focus:border-brasa focus:ring-2 focus:ring-brasa/25';
 
-/** Label monospace estilo laboratorio (CORREO, divisores). */
-const monoLabelClass = 'font-mono text-[11px] uppercase text-muted';
+/** Label monospace estilo laboratorio (CORREO, CONTRASENA). */
+export const monoLabelClass = 'font-mono text-[11px] uppercase text-muted';
 
 interface LoginFormProps {
-  modo: Modo;
   status: LoginStatus;
   errorMsg: string;
   email: string;
+  password: string;
   onEmailChange: (value: string) => void;
+  onPasswordChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
 }
 
 /**
- * Formulario de acceso del panel derecho: heading segun modo, campo de correo,
- * boton unico brasa, divisor "acceso solo por invitacion" y link de
- * alternancia entre ?modo=acceso y ?modo=registro (navegacion SPA via Link,
- * sin recarga). Presentacional: el estado y el envio del magic link viven en
- * LoginPage y llegan por props sin cambios de comportamiento.
- *
- * En estado `sent` reemplaza el formulario por la confirmacion "Revisa tu
- * correo". No hay boton de reenvio porque la logica actual no tiene reenvio.
+ * Formulario de acceso del panel derecho: campos de correo y contrasena,
+ * boton unico brasa, link de recuperacion (/recuperar) y link a crear cuenta
+ * (/crear-cuenta). Presentacional: el estado y el signInWithPassword viven en
+ * LoginPage y llegan por props.
  */
-export function LoginForm({ modo, status, errorMsg, email, onEmailChange, onSubmit }: LoginFormProps) {
-  const copy = COPY[modo];
-
-  if (status === 'sent') {
-    return (
-      <div className="flex flex-col items-center text-center">
-        <span className="flex h-11 w-11 items-center justify-center rounded-full bg-brasa-soft text-brasa">
-          <Mail className="h-5 w-5" aria-hidden="true" />
-        </span>
-        <h1 className="mt-4 font-display text-[22px] font-medium text-ink">Revisa tu correo</h1>
-        <p className="mt-2 text-sm leading-relaxed text-muted">
-          Enviamos un enlace a <span className="font-medium text-ink">{email.trim()}</span>.
-        </p>
-      </div>
-    );
-  }
-
+export function LoginForm({
+  status,
+  errorMsg,
+  email,
+  password,
+  onEmailChange,
+  onPasswordChange,
+  onSubmit,
+}: LoginFormProps) {
   return (
     <div>
       <div className="mb-7">
-        <h1 className="font-display text-[22px] font-medium text-ink">{copy.title}</h1>
-        <p className="mt-1.5 text-sm leading-relaxed text-muted">{copy.subtitle}</p>
+        <h1 className="font-display text-[22px] font-medium text-ink">Iniciar sesión</h1>
+        <p className="mt-1.5 text-sm leading-relaxed text-muted">
+          Entra con tu correo y contraseña.
+        </p>
       </div>
 
       <form onSubmit={onSubmit} className="space-y-4">
@@ -97,7 +55,28 @@ export function LoginForm({ modo, status, errorMsg, email, onEmailChange, onSubm
             autoComplete="email"
             value={email}
             onChange={(e) => onEmailChange(e.target.value)}
-            placeholder="tu@empresa.com"
+            placeholder="tu@correo.com"
+            className={inputClass}
+          />
+        </div>
+        <div>
+          <div className="mb-2 flex items-baseline justify-between">
+            <label htmlFor="password" className={`${monoLabelClass} block tracking-[3px]`}>
+              Contraseña
+            </label>
+            <Link
+              to="/recuperar"
+              className="text-xs font-medium text-brasa transition hover:text-brasa-hover"
+            >
+              ¿Olvidaste tu contraseña?
+            </Link>
+          </div>
+          <input
+            id="password"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => onPasswordChange(e.target.value)}
             className={inputClass}
           />
         </div>
@@ -106,24 +85,18 @@ export function LoginForm({ modo, status, errorMsg, email, onEmailChange, onSubm
             {errorMsg}
           </p>
         )}
-        <SubmitButton pending={status === 'submitting'} pendingLabel="Enviando...">
-          {copy.submit}
+        <SubmitButton pending={status === 'submitting'} pendingLabel="Entrando...">
+          Iniciar sesión
         </SubmitButton>
       </form>
 
-      <div className="mt-7 flex items-center gap-3">
-        <span className="h-px flex-1 bg-[rgba(31,30,28,0.14)]" aria-hidden="true" />
-        <span className={`${monoLabelClass} tracking-[2px]`}>Acceso solo por invitación</span>
-        <span className="h-px flex-1 bg-[rgba(31,30,28,0.14)]" aria-hidden="true" />
-      </div>
-
-      <p className="mt-5 text-center text-sm text-muted">
-        {copy.togglePrompt}{' '}
+      <p className="mt-7 text-center text-sm text-muted">
+        ¿No tienes cuenta?{' '}
         <Link
-          to={{ search: `?modo=${copy.toggleTo}` }}
+          to="/crear-cuenta"
           className="font-medium text-brasa transition hover:text-brasa-hover"
         >
-          {copy.toggleLabel}
+          Crear cuenta
         </Link>
       </p>
     </div>
@@ -131,10 +104,10 @@ export function LoginForm({ modo, status, errorMsg, email, onEmailChange, onSubm
 }
 
 /**
- * Boton primario del login: ancho completo, 42px, brasa sobre hueso, con
- * spinner y disabled mientras envia (mismo comportamiento de siempre).
+ * Boton primario de las pantallas de acceso: ancho completo, 42px, brasa
+ * sobre hueso, con spinner y disabled mientras envia. Lo reusa SignUpForm.
  */
-function SubmitButton({
+export function SubmitButton({
   pending = false,
   pendingLabel = 'Enviando...',
   children,
