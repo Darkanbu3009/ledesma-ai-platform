@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { tierAllowsAutonomy } from '@ledesma-platform/shared';
 import type { AgentSpec, ProviderId } from '@ledesma-platform/shared';
 import type { Env } from '../config/env.js';
 import { AppError } from '../errors/app-error.js';
@@ -90,17 +91,17 @@ export function configuratorRoutes(
 
         const autonomous = parsed.data.mode === 'autonomous';
 
-        // GATE SERVER-SIDE: el modo autonomo exige tier 'autonomous', verificado leyendo
-        // profiles.tier (NUNCA se confia en el cliente). Corre ANTES de llamar al modelo: un usuario
-        // sin el plan no gasta una llamada y recibe un 403 claro. El modo asistente no lee el tier
-        // (cero cambios de comportamiento para todos los tiers).
+        // GATE SERVER-SIDE: el modo autonomo exige un plan con AUTONOMIA, capacidad derivada del
+        // modulo central de planes (tierAllowsAutonomy) sobre profiles.tier (NUNCA se confia en el
+        // cliente). Corre ANTES de llamar al modelo: un usuario sin el plan no gasta una llamada y
+        // recibe un 403 claro. El modo asistente no lee el tier (cero cambios para todos los tiers).
         if (autonomous) {
           const tier = await registrationRepo.getProfileTier(user.id);
-          if (tier !== 'autonomous') {
+          if (!tierAllowsAutonomy(tier)) {
             throw new AppError(
               'FORBIDDEN',
               403,
-              'El modo autonomo requiere el plan correspondiente (tier autonomous)',
+              'El modo autonomo requiere un plan con autonomia (Pro o Business)',
             );
           }
         }

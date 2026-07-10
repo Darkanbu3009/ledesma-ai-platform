@@ -127,8 +127,8 @@ describe('POST /v1/recipes', () => {
     expect(res.json().recipe.id).toBe(RECIPE_ID);
   });
 
-  it('GATE POR TIER: sin tier autonomous -> 403 (no crea nada)', async () => {
-    getProfileTier.mockResolvedValue('pro');
+  it('GATE POR PLAN: un tier sin autonomia (free) -> 403 (no crea nada)', async () => {
+    getProfileTier.mockResolvedValue('free');
     const res = await app.inject({
       method: 'POST',
       url: '/v1/recipes',
@@ -138,6 +138,18 @@ describe('POST /v1/recipes', () => {
     expect(res.statusCode).toBe(403);
     expect(res.json().error.code).toBe('FORBIDDEN');
     expect(createRecipe).not.toHaveBeenCalled();
+  });
+
+  it('tier pro (plan con autonomia) tambien crea: el gate deriva del modulo central, 201', async () => {
+    getProfileTier.mockResolvedValue('pro');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/recipes',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: validBody,
+    });
+    expect(res.statusCode).toBe(201);
+    expect(createRecipe).toHaveBeenCalledTimes(1);
   });
 
   it('tier free (sin registro) -> 403', async () => {

@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { JobsRepository, buildRecipeJobPayload } from '@ledesma-platform/shared';
+import { JobsRepository, buildRecipeJobPayload, tierAllowsAutonomy } from '@ledesma-platform/shared';
 import type { Env } from '../config/env.js';
 import { AppError } from '../errors/app-error.js';
 import { getSql } from '../db/client.js';
@@ -124,11 +124,12 @@ export function recipeRoutes(
         throw new AppError('VALIDATION_ERROR', 400, 'Invalid recipe', parsed.error.issues);
       }
 
-      // GATE SERVER-SIDE: crear una receta exige tier 'autonomous'. Corre antes de tocar la DB de
-      // recetas: un usuario sin el plan recibe un 403 claro y no crea nada.
+      // GATE SERVER-SIDE: crear una receta exige un plan con AUTONOMIA. La capacidad se deriva del
+      // modulo central de planes (tierAllowsAutonomy) sobre profiles.tier, nunca del cliente. Corre
+      // antes de tocar la DB de recetas: un usuario sin el plan recibe un 403 claro y no crea nada.
       const tier = await registrationRepo.getProfileTier(user.id);
-      if (tier !== 'autonomous') {
-        throw new AppError('FORBIDDEN', 403, 'Recipes require the autonomous plan (tier autonomous)');
+      if (!tierAllowsAutonomy(tier)) {
+        throw new AppError('FORBIDDEN', 403, 'Recipes require a plan with autonomy (Pro or Business)');
       }
 
       // PERTENENCIA: el agente y la credencial deben ser del owner. Una referencia ajena/inexistente se
@@ -247,10 +248,11 @@ export function recipeRoutes(
           throw new AppError('VALIDATION_ERROR', 400, 'Invalid recipe id', params.error.issues);
         }
 
-        // GATE SERVER-SIDE: ejecutar exige tier 'autonomous'. Antes de tocar la DB de recetas.
+        // GATE SERVER-SIDE: ejecutar exige un plan con AUTONOMIA (capacidad derivada del modulo
+        // central de planes). Antes de tocar la DB de recetas.
         const tier = await registrationRepo.getProfileTier(user.id);
-        if (tier !== 'autonomous') {
-          throw new AppError('FORBIDDEN', 403, 'Recipes require the autonomous plan (tier autonomous)');
+        if (!tierAllowsAutonomy(tier)) {
+          throw new AppError('FORBIDDEN', 403, 'Recipes require a plan with autonomy (Pro or Business)');
         }
 
         // Carga la receta del owner. Ajena/inexistente -> 404 (no revela recursos de otros).
