@@ -5,10 +5,15 @@ import '@testing-library/jest-dom/vitest';
 import type { RegistrationState } from '../src/lib/registration';
 import type { ProfileTier } from '../src/lib/registration';
 
-// Solo se mockea useMe: el catalogo es estatico (lib/plans.ts) y NO dispara mutaciones ni red; el
-// tier de ['me'] se usa unicamente para marcar el plan actual y deshabilitar su CTA.
-const { useMeMock } = vi.hoisted(() => ({ useMeMock: vi.fn() }));
+// Se mockean useMe (tier actual) y useSelectPlan (la mutacion real): asi el test cubre el cableado
+// del catalogo (CTA -> mutate, carga, confirmacion de downgrade, error visible) sin red.
+const { useMeMock, useSelectPlanMock, mutateMock } = vi.hoisted(() => ({
+  useMeMock: vi.fn(),
+  useSelectPlanMock: vi.fn(),
+  mutateMock: vi.fn(),
+}));
 vi.mock('../src/lib/queries', () => ({ useMe: useMeMock }));
+vi.mock('../src/lib/mutations', () => ({ useSelectPlan: useSelectPlanMock }));
 
 import { PlansPage } from '../src/pages/PlansPage';
 import { LAUNCH_NOTICE } from '../src/lib/plans';
@@ -43,14 +48,21 @@ function mockTier(tier: ProfileTier) {
   });
 }
 
+function mockSelectPlan({ isPending = false } = {}) {
+  useSelectPlanMock.mockReturnValue({ mutate: mutateMock, isPending });
+}
+
 afterEach(() => {
   cleanup();
   useMeMock.mockReset();
+  useSelectPlanMock.mockReset();
+  mutateMock.mockReset();
 });
 
 describe('PlansPage', () => {
   it('muestra los tres planes con el aviso de lanzamiento y el recomendado', () => {
     mockTier('free');
+    mockSelectPlan();
     render(<PlansPage />);
 
     expect(screen.getByText(LAUNCH_NOTICE)).toBeInTheDocument();
@@ -62,17 +74,18 @@ describe('PlansPage', () => {
 
   it('marca el plan actual del usuario y deshabilita su CTA', () => {
     mockTier('free');
+    mockSelectPlan();
     render(<PlansPage />);
 
     expect(screen.getByText('Tu plan')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Plan actual' })).toBeDisabled();
-    // Los otros dos planes ofrecen el CTA de eleccion (accion real en el PR de contratacion).
     expect(screen.getByRole('button', { name: 'Elegir Pro' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Elegir Business' })).toBeEnabled();
   });
 
   it('mapea el tier autonomous al plan Business', () => {
     mockTier('autonomous');
+    mockSelectPlan();
     render(<PlansPage />);
 
     expect(screen.getByRole('button', { name: 'Plan actual' })).toBeDisabled();
@@ -80,17 +93,87 @@ describe('PlansPage', () => {
     expect(screen.getByRole('button', { name: 'Elegir Pro' })).toBeEnabled();
   });
 
-  it('el CTA de eleccion es un stub: clickearlo no rompe ni dispara nada', () => {
+  it('UPGRADE directo: elegir Pro desde Free dispara la seleccion sin confirmacion', () => {
     mockTier('free');
+    mockSelectPlan();
     render(<PlansPage />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Elegir Pro' }));
-    // Sin mutaciones ni navegacion: la pantalla sigue intacta.
-    expect(screen.getByText(LAUNCH_NOTICE)).toBeInTheDocument();
+    expect(mutateMock).toHaveBeenCalledTimes(1);
+    expect(mutateMock.mock.calls[0]?.[0]).toBe('pro');
+    // Sin dialogo de confirmacion para un upgrade.
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('DOWNGRADE: elegir Free desde Pro pide confirmacion (con las capacidades que se pierden) y solo confirma al aceptar', () => {
+    mockTier('pro');
+    mockSelectPlan();
+    render(<PlansPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Elegir Free' }));
+    // Aun no se dispara nada: primero la confirmacion.
+    expect(mutateMock).not.toHaveBeenCalled();
+    const dialog = screen.getByRole('dialog', { name: 'Cambiar de plan' });
+    expect(dialog).toHaveTextContent('Vas a cambiar al plan Free');
+    expect(dialog).toHaveTextContent('autonomia');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cambiar a Free' }));
+    expect(mutateMock).toHaveBeenCalledTimes(1);
+    expect(mutateMock.mock.calls[0]?.[0]).toBe('free');
+  });
+
+  it('DOWNGRADE cancelado: cerrar la confirmacion no dispara la seleccion', () => {
+    mockTier('autonomous');
+    mockSelectPlan();
+    render(<PlansPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Elegir Free' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+    expect(mutateMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('muestra estado de carga en el boton elegido y bloquea los demas CTAs mientras esta en vuelo', () => {
+    mockTier('free');
+    mockSelectPlan({ isPending: true });
+    render(<PlansPage />);
+
+    // Con la mutacion en vuelo, los CTAs de eleccion quedan deshabilitados (no se encadenan cambios).
+    expect(screen.getByRole('button', { name: 'Elegir Pro' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Elegir Business' })).toBeDisabled();
+  });
+
+  it('ERROR visible y no destructivo: un fallo muestra el aviso y el catalogo sigue intacto', () => {
+    mockTier('free');
+    mockSelectPlan();
+    mutateMock.mockImplementation((_planId: unknown, opts?: { onError?: (e: unknown) => void; onSettled?: () => void }) => {
+      opts?.onError?.({ status: 500 });
+      opts?.onSettled?.();
+    });
+    render(<PlansPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Elegir Pro' }));
+    expect(screen.getByText('No pudimos cambiar tu plan. Intenta de nuevo.')).toBeInTheDocument();
+    // No destructivo: el CTA sigue disponible para reintentar.
+    expect(screen.getByRole('button', { name: 'Elegir Pro' })).toBeEnabled();
+  });
+
+  it('EXITO: confirma con un aviso (la cache de ["me"] la refresca la mutacion real)', () => {
+    mockTier('free');
+    mockSelectPlan();
+    mutateMock.mockImplementation((_planId: unknown, opts?: { onSuccess?: () => void; onSettled?: () => void }) => {
+      opts?.onSuccess?.();
+      opts?.onSettled?.();
+    });
+    render(<PlansPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Elegir Pro' }));
+    expect(screen.getByText('Listo. Tu plan ya esta activo.')).toBeInTheDocument();
   });
 
   it('sin tier resuelto no marca ningun plan como actual', () => {
     useMeMock.mockReturnValue({ data: undefined, isLoading: true, isError: false, refetch: vi.fn() });
+    mockSelectPlan();
     render(<PlansPage />);
 
     expect(screen.queryByText('Tu plan')).not.toBeInTheDocument();

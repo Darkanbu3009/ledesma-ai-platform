@@ -105,11 +105,11 @@ describe('ProfilePage', () => {
     // Email tomado de useAuth().user?.email, no de /v1/me.
     expect(screen.getByText('ada@example.com')).toBeInTheDocument();
     expect(screen.getByText('Individual')).toBeInTheDocument();
-    // Plan mostrado como pill mono con el tier real (no editable aqui) + link al flujo de upgrade.
+    // Plan mostrado como pill mono con el tier real (no editable aqui) + link al catalogo self-service.
     expect(
       screen.getByText((_, el) => el?.tagName === 'SPAN' && el.textContent === 'free · upgrade'),
     ).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'upgrade' })).toHaveAttribute('href', '/recetas');
+    expect(screen.getByRole('link', { name: 'upgrade' })).toHaveAttribute('href', '/configuracion/paquetes');
     expect(screen.getByText(/miembro desde/)).toBeInTheDocument();
     // La edicion del nombre es inline: el form aparece al pulsar el lapiz, precargado desde ['me'].
     fireEvent.click(screen.getByRole('button', { name: 'Editar nombre' }));

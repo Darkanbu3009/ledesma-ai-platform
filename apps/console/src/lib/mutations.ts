@@ -30,6 +30,7 @@ import type {
 } from './registration';
 import type { Consent, CreateConsentInput, CreateDataRequestInput, DataRequest } from './privacy';
 import type { CreateUpgradeRequestInput, CreateUpgradeRequestResult } from './upgrade-requests';
+import type { PlanId } from './plans';
 
 /** Registra al usuario actual como individuo: queda activo de inmediato. */
 export function useRegisterIndividual() {
@@ -374,6 +375,28 @@ export function useChangeTier() {
         body: JSON.stringify({ tier }),
       }).then((r) => r.profile),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['admin'] }),
+  });
+}
+
+/**
+ * SELECCION SELF-SERVICE DE PLAN (POST /v1/subscription/select): activa el plan elegido AL INSTANTE
+ * para el owner autenticado (lanzamiento gratuito, sin cobro; Stripe gobernara esto despues). El
+ * backend escribe subscriptions.plan/status + profiles.tier y devuelve el estado consolidado (misma
+ * forma que GET /v1/me): al exito refrescamos la cache ['me'] con setQueryData, igual que
+ * useUpdateProfileName, asi los gates de Recetas/Tareas/Triggers (que leen useMe) se desbloquean o
+ * re-bloquean SIN recargar la pagina. Idempotente en el backend: reelegir el plan actual responde ok.
+ */
+export function useSelectPlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (planId: PlanId) =>
+      apiFetch<RegistrationState>('/v1/subscription/select', {
+        method: 'POST',
+        body: JSON.stringify({ planId }),
+      }),
+    onSuccess: (state) => {
+      qc.setQueryData<RegistrationState>(['me'], state);
+    },
   });
 }
 
