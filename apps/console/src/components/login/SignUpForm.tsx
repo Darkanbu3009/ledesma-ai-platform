@@ -2,6 +2,7 @@ import type { FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { Mail } from 'lucide-react';
 import { inputClass, monoLabelClass, SubmitButton } from './LoginForm';
+import { GoogleAuthButton } from './GoogleAuthButton';
 
 export type SignUpStatus = 'idle' | 'submitting' | 'sent' | 'error';
 
@@ -21,8 +22,9 @@ interface SignUpFormProps {
 
 /**
  * Formulario de crear cuenta del panel derecho: correo, contrasena y su
- * confirmacion, boton unico brasa y link a iniciar sesion. Presentacional:
- * el estado y el signUp viven en SignUpPage y llegan por props.
+ * confirmacion, boton brasa, boton "Continuar con Google" bajo el divisor
+ * "o" y link a iniciar sesion. Presentacional: el estado y el signUp viven
+ * en SignUpPage y llegan por props; el flujo OAuth vive en GoogleAuthButton.
  *
  * En estado `sent` (proyecto con confirmacion de correo activa) reemplaza el
  * formulario por la confirmacion "Revisa tu correo".
@@ -129,6 +131,8 @@ export function SignUpForm({
           Crear cuenta
         </SubmitButton>
       </form>
+
+      <GoogleAuthButton />
 
       <p className="mt-7 text-center text-sm text-muted">
         ¿Ya tienes cuenta?{' '}
