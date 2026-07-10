@@ -2,8 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
-import type { RegistrationState } from '../src/lib/registration';
-import type { ProfileTier } from '../src/lib/registration';
+import type { ProfileTier, RegistrationState } from '../src/lib/registration';
 
 // Solo se mockea useMe: el catalogo es estatico (lib/plans.ts) y NO dispara mutaciones ni red; el
 // tier de ['me'] se usa unicamente para marcar el plan actual y deshabilitar su CTA.

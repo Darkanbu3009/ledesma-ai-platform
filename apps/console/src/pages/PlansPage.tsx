@@ -21,10 +21,20 @@ const pillClass =
  * Tarjeta de un plan: superficie blanca plana con hairline; el recomendado (Pro) lleva borde firme
  * de 1px y pill "Recomendado". El plan que el usuario YA tiene se marca con el pill "Tu plan" (check
  * verde, unico verde de la tarjeta) y su CTA queda deshabilitado; en el resto, el CTA brasa es el
- * unico acento brasa de la tarjeta.
+ * unico acento brasa de la tarjeta. Recibe onSelect como prop: PR 2 solo cambia el handler que la
+ * pagina inyecta (hooks de mutacion incluidos), sin tocar la tarjeta.
  */
-function PlanCard({ plan, currentTier }: { plan: Plan; currentTier: ProfileTier | undefined }) {
-  const isCurrent = currentTier !== undefined && plan.tier === currentTier;
+function PlanCard({
+  plan,
+  currentTier,
+  onSelect,
+}: {
+  plan: Plan;
+  currentTier: ProfileTier | undefined;
+  onSelect: (planId: PlanId) => void;
+}) {
+  // Mientras ['me'] no resuelve, currentTier es undefined y no matchea ningun tier: sin plan actual.
+  const isCurrent = plan.tier === currentTier;
 
   return (
     <section
@@ -67,12 +77,7 @@ function PlanCard({ plan, currentTier }: { plan: Plan; currentTier: ProfileTier 
             Plan actual
           </Button>
         ) : (
-          <Button
-            type="button"
-            size="sm"
-            className="w-full"
-            onClick={() => onSelectPlan(plan.id)}
-          >
+          <Button type="button" size="sm" className="w-full" onClick={() => onSelect(plan.id)}>
             Elegir {plan.name}
           </Button>
         )}
@@ -96,7 +101,7 @@ export function PlansPage() {
       <p className="text-xs text-[#8A8880]">{LAUNCH_NOTICE}</p>
       <div className="mt-4 grid gap-4 md:grid-cols-3">
         {PLANS.map((plan) => (
-          <PlanCard key={plan.id} plan={plan} currentTier={currentTier} />
+          <PlanCard key={plan.id} plan={plan} currentTier={currentTier} onSelect={onSelectPlan} />
         ))}
       </div>
     </div>
