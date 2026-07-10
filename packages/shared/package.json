@@ -9,10 +9,15 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./plans": {
+      "types": "./dist/plans/plans.d.ts",
+      "import": "./src/plans/plans.ts"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "src"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
