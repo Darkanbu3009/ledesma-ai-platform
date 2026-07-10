@@ -531,6 +531,10 @@ export class RegistrationRepository {
     plan: Pick<PlanDefinition, 'id' | 'tier'>,
   ): Promise<RegistrationState | null> {
     return this.sql.begin(async (tx) => {
+      // Este UPDATE va PRIMERO a proposito: toma el row lock de profiles del owner, que actua como
+      // mutex por usuario para toda la transaccion. Dos selecciones concurrentes del mismo owner se
+      // serializan aqui, asi el update-then-insert de subscriptions de abajo no puede duplicar filas
+      // (la segunda transaccion ve la fila que la primera dejo al commitear).
       const profileRows = await tx<{ id: string }[]>`
         update profiles
         set tier = ${plan.tier}, updated_at = now()

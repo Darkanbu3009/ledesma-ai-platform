@@ -158,6 +158,21 @@ describe('PlansPage', () => {
     expect(screen.getByRole('button', { name: 'Elegir Pro' })).toBeEnabled();
   });
 
+  it('ERROR en downgrade confirmado: cierra el dialogo para que el aviso quede visible', () => {
+    mockTier('pro');
+    mockSelectPlan();
+    mutateMock.mockImplementation((_planId: unknown, opts?: { onError?: (e: unknown) => void }) => {
+      opts?.onError?.({ status: 500 });
+    });
+    render(<PlansPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Elegir Free' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cambiar a Free' }));
+    // El dialogo se cierra (el overlay taparia el aviso) y el error queda a la vista.
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('No pudimos cambiar tu plan. Intenta de nuevo.')).toBeInTheDocument();
+  });
+
   it('EXITO: confirma con un aviso (la cache de ["me"] la refresca la mutacion real)', () => {
     mockTier('free');
     mockSelectPlan();

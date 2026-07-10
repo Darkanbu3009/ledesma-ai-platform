@@ -40,7 +40,7 @@ export interface Plan extends PlanDefinition {
   price: string;
   /** Sufijo gris junto al precio. */
   priceSuffix: string;
-  /** Linea mono bajo el precio con el limite de ejecuciones del plan. */
+  /** Linea mono bajo el precio con el limite de ejecuciones del plan (derivada de runsPerMonth). */
   runsLine: string;
   /** Un solo plan recomendado: lleva borde firme y pill "Recomendado". */
   recommended: boolean;
@@ -51,13 +51,23 @@ export interface Plan extends PlanDefinition {
 export const LAUNCH_NOTICE =
   'Durante el lanzamiento, todos los planes son gratuitos mientras habilitamos los medios de pago.';
 
+/**
+ * Linea de ejecuciones de la tarjeta, DERIVADA de runsPerMonth del modulo central (unica fuente del
+ * numero): si el limite de un plan cambia alli, el catalogo lo refleja sin tocar copys. null = plan
+ * a medida (Business).
+ */
+function runsLineFor(runsPerMonth: number | null): string {
+  if (runsPerMonth === null) return 'Ejecuciones ampliadas para equipos';
+  return `${runsPerMonth.toLocaleString('en-US')} ejecuciones al mes`;
+}
+
 export const PLANS: Plan[] = [
   {
     ...getPlanById('free'),
     name: 'Free',
     price: 'Gratis',
     priceSuffix: '/mes',
-    runsLine: '10 ejecuciones al mes',
+    runsLine: runsLineFor(getPlanById('free').runsPerMonth),
     recommended: false,
     features: [
       { term: 'Agentes', text: '1 agente' },
@@ -71,7 +81,7 @@ export const PLANS: Plan[] = [
     name: 'Pro',
     price: 'Gratis',
     priceSuffix: '/mes',
-    runsLine: '1,000 ejecuciones al mes',
+    runsLine: runsLineFor(getPlanById('pro').runsPerMonth),
     recommended: true,
     features: [
       { term: 'Agentes', text: 'Agentes ilimitados' },
@@ -85,7 +95,7 @@ export const PLANS: Plan[] = [
     name: 'Business',
     price: 'Gratis',
     priceSuffix: '/mes',
-    runsLine: 'Ejecuciones ampliadas para equipos',
+    runsLine: runsLineFor(getPlanById('business').runsPerMonth),
     recommended: false,
     features: [
       { term: 'Agentes', text: 'Agentes ilimitados' },

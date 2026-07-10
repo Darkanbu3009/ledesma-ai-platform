@@ -3,7 +3,7 @@
 //  - el GATING server-side (backend y worker): los gates de Recetas/Tareas/Triggers/Configurador ya
 //    NO comparan un tier string suelto, sino que derivan la capacidad de aqui (tierAllowsAutonomy).
 //  - el ENDPOINT de seleccion self-service (POST /v1/subscription/select): valida el planId contra
-//    la lista cerrada (isPlanId) y escribe el tier que define el plan elegido.
+//    la lista cerrada (z.enum(PLAN_IDS)) y escribe el tier que define el plan elegido.
 //  - el CATALOGO de la consola (/configuracion/paquetes): arma sus tarjetas sobre estas definiciones
 //    y deriva la confirmacion de downgrade de las capacidades que se pierden.
 //
@@ -74,7 +74,10 @@ export const PLAN_DEFINITIONS: readonly PlanDefinition[] = [
 /** Lista cerrada de ids, en el mismo orden de rango. Para validar planId (zod enum / isPlanId). */
 export const PLAN_IDS = ['free', 'pro', 'business'] as const;
 
-/** True solo si value es uno de los 3 planes. Cero confianza en el planId como texto libre. */
+/**
+ * True solo si value es uno de los 3 planes. Cero confianza en el planId como texto libre: es el
+ * validador runtime para consumidores sin zod (la ruta del backend usa z.enum(PLAN_IDS), equivalente).
+ */
 export function isPlanId(value: unknown): value is PlanId {
   return typeof value === 'string' && (PLAN_IDS as readonly string[]).includes(value);
 }

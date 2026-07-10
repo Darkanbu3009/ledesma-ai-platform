@@ -118,20 +118,24 @@ export function PlansPage() {
   const [notice, setNotice] = useState<NoticeData | null>(null);
   // Plan cuyo downgrade espera confirmacion en el dialogo (null = dialogo cerrado).
   const [pendingDowngrade, setPendingDowngrade] = useState<PlanId | null>(null);
-  // Plan cuya activacion esta en vuelo, para el estado de carga de SU boton.
-  const [selectingId, setSelectingId] = useState<PlanId | null>(null);
+  // Plan cuya activacion esta en vuelo (para el estado de carga de SU boton): react-query ya lo
+  // expone como `variables` de la mutacion pendiente, sin duplicar estado propio.
+  const selectingId = selectPlan.isPending ? selectPlan.variables : null;
 
   function activate(planId: PlanId) {
     setNotice(null);
-    setSelectingId(planId);
     selectPlan.mutate(planId, {
       onSuccess: () => {
         setPendingDowngrade(null);
         setNotice({ kind: 'ok', text: 'Listo. Tu plan ya esta activo.' });
       },
-      // Error visible y NO destructivo: el catalogo queda intacto y el CTA vuelve a estar disponible.
-      onError: (err) => setNotice({ kind: 'error', text: selectPlanErrorMessage(err) }),
-      onSettled: () => setSelectingId(null),
+      // Error visible y NO destructivo: se CIERRA el dialogo de confirmacion (si estaba abierto)
+      // para que el aviso no quede tapado por el overlay; el catalogo queda intacto y el CTA vuelve
+      // a estar disponible para reintentar.
+      onError: (err) => {
+        setPendingDowngrade(null);
+        setNotice({ kind: 'error', text: selectPlanErrorMessage(err) });
+      },
     });
   }
 

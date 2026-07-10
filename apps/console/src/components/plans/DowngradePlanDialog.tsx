@@ -27,13 +27,19 @@ export function DowngradePlanDialog({
   onCancel: () => void;
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useDialog({ open, onClose: onCancel, initialFocus: cancelRef });
+  // Con la mutacion EN VUELO no se permite descartar (ni Escape ni click en el fondo): cerrar en ese
+  // momento pareceria una cancelacion, pero el cambio de plan ya viajo y se aplicaria igual.
+  const dismiss = () => {
+    if (busy) return;
+    onCancel();
+  };
+  const dialogRef = useDialog({ open, onClose: dismiss, initialFocus: cancelRef });
 
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-      <div className="absolute inset-0 bg-ink/40" onClick={onCancel} aria-hidden="true" />
+      <div className="absolute inset-0 bg-ink/40" onClick={dismiss} aria-hidden="true" />
       <div
         ref={dialogRef}
         role="dialog"
