@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isRecipeJobPayload, parseRecipeJobPayload } from '@ledesma-platform/shared';
+import { isRecipeJobPayload, parseRecipeJobPayload, tierAllowsAutonomy } from '@ledesma-platform/shared';
 import type {
   AgentEvent,
   Job,
@@ -454,11 +454,12 @@ export async function processClaimedJob(
   let attribution: { providerId: string; model: string } | null = null;
   let stopReason: string | null = null;
   try {
-    // 1. GATE POR TIER (server-side, antes de gastar nada): la ejecucion autonoma es premium. Un owner
-    //    que no es 'autonomous' no debe seguir corriendo jobs -> fallo permanente, no transitorio.
+    // 1. GATE POR TIER (server-side, antes de gastar nada): la ejecucion autonoma es premium. La
+    //    capacidad se deriva del modulo central de planes (tierAllowsAutonomy): un owner cuyo plan no
+    //    incluye autonomia no debe seguir corriendo jobs -> fallo permanente, no transitorio.
     const tier = await deps.getProfileTier(job.ownerId);
-    if (tier !== 'autonomous') {
-      throw new PermanentExecutionError('autonomous execution requires the autonomous plan');
+    if (!tierAllowsAutonomy(tier)) {
+      throw new PermanentExecutionError('autonomous execution requires a plan with autonomy');
     }
 
     // 2. Cargar el agente (config autoritativa: provider/model/tools/...).

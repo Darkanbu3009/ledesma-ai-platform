@@ -1,17 +1,20 @@
+import { useState } from 'react';
 import { Check } from 'lucide-react';
 import { useMe } from '../lib/queries';
-import { LAUNCH_NOTICE, PLANS, type Plan, type PlanId } from '../lib/plans';
+import { useSelectPlan } from '../lib/mutations';
+import {
+  LAUNCH_NOTICE,
+  PLANS,
+  downgradeLossSummary,
+  isDowngrade,
+  selectPlanErrorMessage,
+  type Plan,
+  type PlanId,
+} from '../lib/plans';
 import type { ProfileTier } from '../lib/registration';
 import { Button } from '../components/ui/button';
-
-/**
- * STUB DELIBERADO: la contratacion/cambio de plan (escrituras a subscriptions/tier) se implementa en
- * el PR de medios de pago. Este catalogo es solo lectura: el CTA queda cableado a este handler para
- * que ese PR lo sustituya sin tocar la estructura de las tarjetas.
- */
-function onSelectPlan(planId: PlanId): void {
-  void planId;
-}
+import { Notice, type NoticeData } from '../components/ui/Notice';
+import { DowngradePlanDialog } from '../components/plans/DowngradePlanDialog';
 
 /** Pill greige compartida por "Recomendado" y "Tu plan" (misma escala que los pills del perfil). */
 const pillClass =
@@ -21,16 +24,23 @@ const pillClass =
  * Tarjeta de un plan: superficie blanca plana con hairline; el recomendado (Pro) lleva borde firme
  * de 1px y pill "Recomendado". El plan que el usuario YA tiene se marca con el pill "Tu plan" (check
  * verde, unico verde de la tarjeta) y su CTA queda deshabilitado; en el resto, el CTA brasa es el
- * unico acento brasa de la tarjeta. Recibe onSelect como prop: PR 2 solo cambia el handler que la
- * pagina inyecta (hooks de mutacion incluidos), sin tocar la tarjeta.
+ * unico acento brasa de la tarjeta. Recibe onSelect como prop (la pagina inyecta el handler real de
+ * seleccion) y muestra su propio estado de carga mientras la seleccion esta en vuelo (los demas CTAs
+ * quedan deshabilitados para no encadenar dos cambios).
  */
 function PlanCard({
   plan,
   currentTier,
+  busy,
+  disabled,
   onSelect,
 }: {
   plan: Plan;
   currentTier: ProfileTier | undefined;
+  /** true mientras la seleccion de ESTE plan esta en vuelo. */
+  busy: boolean;
+  /** true mientras cualquier seleccion esta en vuelo (bloquea los otros CTAs). */
+  disabled: boolean;
   onSelect: (planId: PlanId) => void;
 }) {
   // Mientras ['me'] no resuelve, currentTier es undefined y no matchea ningun tier: sin plan actual.
@@ -77,8 +87,14 @@ function PlanCard({
             Plan actual
           </Button>
         ) : (
-          <Button type="button" size="sm" className="w-full" onClick={() => onSelect(plan.id)}>
-            Elegir {plan.name}
+          <Button
+            type="button"
+            size="sm"
+            className="w-full"
+            disabled={disabled}
+            onClick={() => onSelect(plan.id)}
+          >
+            {busy ? 'Activando...' : `Elegir ${plan.name}`}
           </Button>
         )}
       </div>
@@ -88,22 +104,82 @@ function PlanCard({
 
 /**
  * CATALOGO DE PAQUETES (/configuracion/paquetes): los tres planes en grid de 3 columnas (apilados en
- * angosto), leyendo el tier real de ['me'] SOLO para marcar el plan actual. Vive dentro del shell de
- * Configuracion (SettingsLayout pone titulo y tabs). Sin escrituras: el CTA llama al stub onSelectPlan.
+ * angosto). Lee el tier real de ['me'] para marcar el plan actual y dispara la SELECCION SELF-SERVICE
+ * (useSelectPlan -> POST /v1/subscription/select): el backend activa el plan al instante (lanzamiento
+ * gratuito) y devuelve el estado consolidado, que refresca la cache ['me'] -> el plan elegido pasa a
+ * "Tu plan" y los gates de Recetas/Tareas/Triggers se desbloquean sin recargar. Un DOWNGRADE pide
+ * confirmacion antes (puede desactivar la autonomia); un upgrade se aplica directo. Vive dentro del
+ * shell de Configuracion (SettingsLayout pone titulo y tabs).
  */
 export function PlansPage() {
   const { data } = useMe();
+  const selectPlan = useSelectPlan();
   // Mientras ['me'] no resuelve, el catalogo se muestra sin marca de plan actual (sin bloquear la vista).
   const currentTier = data?.profile?.tier;
+
+  const [notice, setNotice] = useState<NoticeData | null>(null);
+  // Plan cuyo downgrade espera confirmacion en el dialogo (null = dialogo cerrado).
+  const [pendingDowngrade, setPendingDowngrade] = useState<PlanId | null>(null);
+  // Plan cuya activacion esta en vuelo (para el estado de carga de SU boton): react-query ya lo
+  // expone como `variables` de la mutacion pendiente, sin duplicar estado propio.
+  const selectingId = selectPlan.isPending ? selectPlan.variables : null;
+
+  function activate(planId: PlanId) {
+    setNotice(null);
+    selectPlan.mutate(planId, {
+      onSuccess: () => {
+        setPendingDowngrade(null);
+        setNotice({ kind: 'ok', text: 'Listo. Tu plan ya esta activo.' });
+      },
+      // Error visible y NO destructivo: se CIERRA el dialogo de confirmacion (si estaba abierto)
+      // para que el aviso no quede tapado por el overlay; el catalogo queda intacto y el CTA vuelve
+      // a estar disponible para reintentar.
+      onError: (err) => {
+        setPendingDowngrade(null);
+        setNotice({ kind: 'error', text: selectPlanErrorMessage(err) });
+      },
+    });
+  }
+
+  function onSelectPlan(planId: PlanId) {
+    // DOWNGRADE: confirmar antes (puede desactivar autonomia). Upgrade o cambio lateral: directo.
+    if (currentTier !== undefined && isDowngrade(currentTier, planId)) {
+      setNotice(null);
+      setPendingDowngrade(planId);
+      return;
+    }
+    activate(planId);
+  }
+
+  const downgradePlan = PLANS.find((plan) => plan.id === pendingDowngrade);
 
   return (
     <div className="mt-8">
       <p className="text-xs text-[#8A8880]">{LAUNCH_NOTICE}</p>
+      <Notice notice={notice} />
       <div className="mt-4 grid gap-4 md:grid-cols-3">
         {PLANS.map((plan) => (
-          <PlanCard key={plan.id} plan={plan} currentTier={currentTier} onSelect={onSelectPlan} />
+          <PlanCard
+            key={plan.id}
+            plan={plan}
+            currentTier={currentTier}
+            busy={selectingId === plan.id}
+            disabled={selectPlan.isPending}
+            onSelect={onSelectPlan}
+          />
         ))}
       </div>
+
+      {downgradePlan && (
+        <DowngradePlanDialog
+          open
+          planName={downgradePlan.name}
+          losses={currentTier ? downgradeLossSummary(currentTier, downgradePlan.id) : []}
+          busy={selectPlan.isPending}
+          onConfirm={() => activate(downgradePlan.id)}
+          onCancel={() => setPendingDowngrade(null)}
+        />
+      )}
     </div>
   );
 }

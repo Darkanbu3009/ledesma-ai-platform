@@ -14,6 +14,7 @@ import { credentialRoutes } from './routes/credentials.js';
 import { scheduledTaskRoutes } from './routes/scheduled-tasks.js';
 import { recipeRoutes } from './routes/recipes.js';
 import { upgradeRequestRoutes } from './routes/upgrade-requests.js';
+import { subscriptionRoutes } from './routes/subscription.js';
 import { adminUpgradeRequestsRoutes } from './routes/admin-upgrade-requests.js';
 import { jobsRoutes } from './routes/jobs.js';
 import { dashboardRoutes } from './routes/dashboard.js';
@@ -94,6 +95,10 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
   // premium puede registrar su interes (POST /v1/upgrade-requests, GET /me). Aditivo: NO sube el tier (solo
   // registra el interes; subir el tier sigue siendo del admin), el enforcement de tier queda intacto.
   await app.register(upgradeRequestRoutes(config));
+  // Seleccion SELF-SERVICE de plan (lanzamiento gratuito): activa el plan elegido al instante
+  // escribiendo subscriptions.plan/status + profiles.tier (la fuente de verdad que leen los gates).
+  // El desbloqueo de features ya NO pasa por upgrade_requests. Stripe gobernara el status despues.
+  await app.register(subscriptionRoutes(config));
   // Observabilidad de la ejecucion autonoma (solo lectura): historial de jobs del owner. Aditivo.
   await app.register(jobsRoutes(config));
   // Resumen AGREGADO del dashboard (solo lectura): los tres ejes (actividad, operaciones, gasto) por

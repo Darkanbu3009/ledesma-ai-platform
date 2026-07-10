@@ -20,8 +20,9 @@ import { SkeletonList } from '../components/ui/SkeletonList';
 import { ErrorState } from '../components/ui/ErrorState';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Notice, type NoticeData } from '../components/ui/Notice';
-import { RequestUpgradeCta } from '../components/upgrade/RequestUpgradeCta';
+import { ChoosePlanCta } from '../components/upgrade/ChoosePlanCta';
 import { GateTriggersInspector } from '../components/upgrade/GateTriggersInspector';
+import { tierAllowsAutonomy } from '../lib/plans';
 
 const addButtonClass =
   'inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:-translate-y-px hover:bg-brasa-hover hover:shadow-[0_2px_6px_rgba(31,30,28,0.14)]';
@@ -30,11 +31,11 @@ const addButtonClass =
 type Reveal = { data: TriggerReveal; context: 'created' | 'rotated' };
 
 /**
- * Gate del plan Autonomo para Triggers: hero centrado + inspector de webhook estatico como prueba
- * visual (GateTriggersInspector). Reemplaza al PageHeader y al empty state viejo en el estado
- * bloqueado. El CTA es el RequestUpgradeCta existente sin cambios: mismo flujo upgrade_requests,
- * mismo estado post-solicitud ("Solicitud enviada") y mismo disclaimer. El hero duplica al de
- * Tareas (SchedulingLocked lo tiene inline); extraerlo a un sub-componente queda como deuda.
+ * Gate de autonomia para Triggers: hero centrado + inspector de webhook estatico como prueba visual
+ * (GateTriggersInspector). Reemplaza al PageHeader y al empty state viejo en el estado bloqueado. El
+ * CTA es "Elegir plan" (ChoosePlanCta): lleva al catalogo self-service, donde el plan se activa al
+ * instante; el desbloqueo ya no pasa por upgrade_requests. El hero duplica al de Tareas
+ * (SchedulingLocked lo tiene inline); extraerlo a un sub-componente queda como deuda.
  */
 function TriggersLocked() {
   return (
@@ -43,17 +44,17 @@ function TriggersLocked() {
         <span className="inline-flex items-center gap-1.5 rounded-full bg-[#F1EFE8] px-3 py-[5px]">
           <Lock className="h-3 w-3 flex-none text-[#5F5E5A]" aria-hidden="true" />
           <span className="text-[11px] uppercase tracking-[0.08em] text-[#5F5E5A]">
-            Plan Autonomo
+            Planes Pro y Business
           </span>
         </span>
         <h1 className="mt-5 text-[26px] font-medium leading-[1.15] tracking-[-0.02em] text-ink">
-          Una funcion del plan Autonomo
+          Una funcion de los planes con autonomia
         </h1>
         <p className="mt-3 text-[14px] leading-[1.6] text-[#5F5E5A]">
           Los triggers dejan que un evento externo dispare tus agentes a traves de una URL de
-          webhook. Estan disponibles en el plan Autonomo.
+          webhook. Estan disponibles en los planes Pro y Business.
         </p>
-        <RequestUpgradeCta featureContext="triggers" className="mt-6" />
+        <ChoosePlanCta className="mt-6" />
       </section>
       <GateTriggersInspector />
     </div>
@@ -106,7 +107,8 @@ function TriggersEmptyState({ onAdd }: { onAdd: () => void }) {
 
 export function TriggersPage() {
   const me = useMe();
-  const isAutonomous = me.data?.profile?.tier === 'autonomous';
+  // Capacidad derivada del modulo central de planes (Pro y Business la tienen), no de un tier literal.
+  const isAutonomous = tierAllowsAutonomy(me.data?.profile?.tier);
 
   const { data: triggers, isLoading, isError, refetch } = useTriggers();
   const { data: agents, isLoading: agentsLoading } = useAgents();

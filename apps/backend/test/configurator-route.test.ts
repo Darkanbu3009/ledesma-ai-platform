@@ -286,7 +286,7 @@ describe('POST /v1/configurator/message (modo autonomo)', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it('tier pro intentando modo autonomo -> 403', async () => {
+  it('tier pro (plan con autonomia) ya PASA el gate del modo autonomo y crea el agente', async () => {
     const { app, create } = await makeAutoApp(strictOutput, 'pro');
     const res = await app.inject({
       method: 'POST',
@@ -294,8 +294,9 @@ describe('POST /v1/configurator/message (modo autonomo)', () => {
       headers: { authorization: 'Bearer valid-user-1', 'x-provider-key': PROVIDER_KEY },
       payload: autonomousBody,
     });
-    expect(res.statusCode).toBe(403);
-    expect(create).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(200);
+    expect(res.json().autonomous.created).toBe(true);
+    expect(create).toHaveBeenCalledTimes(1);
   });
 
   it('sin perfil (tier null) intentando modo autonomo -> 403', async () => {

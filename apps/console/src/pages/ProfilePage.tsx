@@ -176,12 +176,12 @@ function IdentityHeader({
           </span>
           <span className="rounded-full bg-[#F1EFE8] px-2.5 py-1 font-mono text-[11px] text-[#444441]">
             {profile.tier}
-            {/* El link de upgrade lleva al gate del plan Autonomo (flujo upgrade_requests existente). */}
+            {/* El link de upgrade lleva al catalogo self-service (el plan se activa al instante). */}
             {profile.tier !== 'autonomous' && (
               <>
                 {' · '}
                 <Link
-                  to="/recetas"
+                  to="/configuracion/paquetes"
                   className={`rounded-sm text-brasa-active underline-offset-2 hover:underline ${focusRing}`}
                 >
                   upgrade

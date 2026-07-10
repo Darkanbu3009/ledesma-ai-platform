@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { tierAllowsAutonomy } from '@ledesma-platform/shared';
 import type { Env } from '../config/env.js';
 import { AppError } from '../errors/app-error.js';
 import { getSql } from '../db/client.js';
@@ -95,11 +96,12 @@ export function scheduledTaskRoutes(
         throw new AppError('VALIDATION_ERROR', 400, 'Invalid scheduled task', parsed.error.issues);
       }
 
-      // GATE SERVER-SIDE: programar ejecucion autonoma exige tier 'autonomous'. Corre antes de tocar
-      // la DB de tareas: un usuario sin el plan recibe un 403 claro y no crea nada.
+      // GATE SERVER-SIDE: programar ejecucion autonoma exige un plan con AUTONOMIA. La capacidad se
+      // deriva del modulo central de planes (tierAllowsAutonomy) sobre profiles.tier, nunca del
+      // cliente. Corre antes de tocar la DB de tareas: sin el plan se recibe 403 y no se crea nada.
       const tier = await registrationRepo.getProfileTier(user.id);
-      if (tier !== 'autonomous') {
-        throw new AppError('FORBIDDEN', 403, 'Scheduling requires the autonomous plan (tier autonomous)');
+      if (!tierAllowsAutonomy(tier)) {
+        throw new AppError('FORBIDDEN', 403, 'Scheduling requires a plan with autonomy (Pro or Business)');
       }
 
       // PERTENENCIA: el agente y la credencial deben ser del owner. Una referencia ajena/inexistente

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { LAUNCH_NOTICE, PLANS } from '../src/lib/plans';
+import {
+  LAUNCH_NOTICE,
+  PLANS,
+  downgradeLossSummary,
+  planName,
+  selectPlanErrorMessage,
+  tierAllowsAutonomy,
+} from '../src/lib/plans';
 import { TIER_ORDER } from '../src/lib/admin';
 
 // El catalogo es la fuente de verdad de copys del frontend: estos tests fijan sus invariantes
@@ -33,5 +40,49 @@ describe('PLANS', () => {
     const allCopy = JSON.stringify(PLANS) + LAUNCH_NOTICE;
     expect(allCopy).not.toMatch(/[–—]/);
     expect(allCopy).not.toMatch(/[!¡]/);
+  });
+
+  it('deriva las capacidades del modulo central: autonomia en Pro y Business, no en Free', () => {
+    // La misma funcion que consumen los gates de Recetas/Tareas/Triggers/Configurador.
+    expect(tierAllowsAutonomy('free')).toBe(false);
+    expect(tierAllowsAutonomy('pro')).toBe(true);
+    expect(tierAllowsAutonomy('autonomous')).toBe(true);
+    expect(tierAllowsAutonomy(undefined)).toBe(false);
+  });
+});
+
+describe('downgradeLossSummary', () => {
+  it('bajar de un plan con autonomia a Free advierte autonomia y embebido', () => {
+    for (const from of ['pro', 'autonomous'] as const) {
+      const losses = downgradeLossSummary(from, 'free');
+      expect(losses.join(' ')).toContain('autonomia');
+      expect(losses.join(' ')).toContain('embebido');
+    }
+  });
+
+  it('bajar de Business a Pro no pierde capacidades booleanas', () => {
+    expect(downgradeLossSummary('autonomous', 'pro')).toEqual([]);
+  });
+
+  it('los copys de perdida cumplen las reglas editoriales (sin guiones largos ni exclamaciones)', () => {
+    const copy = downgradeLossSummary('autonomous', 'free').join(' ');
+    expect(copy).not.toMatch(/[–—]/);
+    expect(copy).not.toMatch(/[!¡]/);
+  });
+});
+
+describe('planName y selectPlanErrorMessage', () => {
+  it('planName devuelve el nombre comercial', () => {
+    expect(planName('free')).toBe('Free');
+    expect(planName('pro')).toBe('Pro');
+    expect(planName('business')).toBe('Business');
+  });
+
+  it('mapea los errores del endpoint a mensajes claros y reintenta en el resto', () => {
+    expect(selectPlanErrorMessage({ status: 400 })).toContain('No reconocimos ese plan');
+    expect(selectPlanErrorMessage({ status: 401 })).toContain('sesión');
+    expect(selectPlanErrorMessage({ status: 404 })).toContain('registro');
+    expect(selectPlanErrorMessage({ status: 500 })).toContain('Intenta de nuevo');
+    expect(selectPlanErrorMessage(new Error('x'))).toContain('Intenta de nuevo');
   });
 });

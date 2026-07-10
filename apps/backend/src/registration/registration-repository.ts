@@ -1,3 +1,4 @@
+import type { PlanDefinition } from '@ledesma-platform/shared';
 import type { Sql } from '../db/client.js';
 import type {
   AccountType,
@@ -503,6 +504,62 @@ export class RegistrationRepository {
     `;
     const row = rows[0];
     return row ? rowToProfile(row) : null;
+  }
+
+  /**
+   * SELECCION SELF-SERVICE de plan (via POST /v1/subscription/select con requireUser): escribe el plan
+   * elegido en la MISMA fuente de verdad que leen los gates y que el cobro real usara despues, en UNA
+   * transaccion (consistencia todo-o-nada):
+   *  - profiles.tier = plan.tier (lo que leen getProfileTier y los gates de Recetas/Tareas/Triggers).
+   *  - subscriptions.plan = plan.id, status = 'active' (actualiza la fila del perfil; si el perfil aun
+   *    no tiene suscripcion, la crea). status 'active' porque durante el LANZAMIENTO el acceso es
+   *    inmediato y gratuito.
+   *
+   * PUNTO DE EXTENSION STRIPE: este metodo es el "activador gratuito" temporal. El PR de medios de
+   * pago lo invocara (o lo reemplazara) desde la confirmacion de pago / los webhooks de Stripe, que
+   * gobernaran subscriptions.status ('active'/'past_due'/'canceled') y escribiran ESTAS MISMAS
+   * columnas: no hay un camino paralelo que migrar.
+   *
+   * El OWNER es SIEMPRE el sub del token verificado (where id/profile_id = ownerId), NUNCA un id del
+   * cliente: por este camino no se puede cambiar el plan de otro usuario. Idempotente: reelegir el
+   * plan actual re-escribe los mismos valores y devuelve el mismo estado, sin efectos adicionales.
+   * Devuelve el estado consolidado (misma forma que GET /v1/me) para que la consola refresque su
+   * cache ['me'], o null si el owner no tiene perfil (usuario sin registro completo -> 404 en la ruta).
+   */
+  async selectPlan(
+    ownerId: string,
+    plan: Pick<PlanDefinition, 'id' | 'tier'>,
+  ): Promise<RegistrationState | null> {
+    return this.sql.begin(async (tx) => {
+      // Este UPDATE va PRIMERO a proposito: toma el row lock de profiles del owner, que actua como
+      // mutex por usuario para toda la transaccion. Dos selecciones concurrentes del mismo owner se
+      // serializan aqui, asi el update-then-insert de subscriptions de abajo no puede duplicar filas
+      // (la segunda transaccion ve la fila que la primera dejo al commitear).
+      const profileRows = await tx<{ id: string }[]>`
+        update profiles
+        set tier = ${plan.tier}, updated_at = now()
+        where id = ${ownerId}
+        returning id
+      `;
+      if (profileRows.length === 0) {
+        // Sin perfil no hay a quien activarle un plan: la transaccion no escribio nada mas.
+        return null;
+      }
+      const subRows = await tx<{ id: string }[]>`
+        update subscriptions
+        set plan = ${plan.id}, status = 'active'
+        where profile_id = ${ownerId}
+        returning id
+      `;
+      if (subRows.length === 0) {
+        // Perfil sin fila de suscripcion (borde historico): se crea, mismo shape que insertFreePlan.
+        await tx`
+          insert into subscriptions (profile_id, plan, status)
+          values (${ownerId}, ${plan.id}, 'active')
+        `;
+      }
+      return this.loadState(tx as unknown as Sql, ownerId);
+    });
   }
 
   /**

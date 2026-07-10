@@ -137,8 +137,8 @@ describe('POST /v1/recipes/:id/run — encolado', () => {
 });
 
 describe('POST /v1/recipes/:id/run — gate por tier', () => {
-  it('sin tier autonomous (pro) -> 403 (no resuelve la receta ni encola)', async () => {
-    getProfileTier.mockResolvedValue('pro');
+  it('sin plan con autonomia (free) -> 403 (no resuelve la receta ni encola)', async () => {
+    getProfileTier.mockResolvedValue('free');
     const res = await app.inject({
       method: 'POST',
       url: `/v1/recipes/${RECIPE_ID}/run`,
@@ -149,6 +149,17 @@ describe('POST /v1/recipes/:id/run — gate por tier', () => {
     expect(getRecipeForOwner).not.toHaveBeenCalled();
     expect(createJob).not.toHaveBeenCalled();
     expect(markRunNow).not.toHaveBeenCalled();
+  });
+
+  it('tier pro (plan con autonomia) tambien ejecuta: 202 y encola', async () => {
+    getProfileTier.mockResolvedValue('pro');
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/recipes/${RECIPE_ID}/run`,
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(createJob).toHaveBeenCalledTimes(1);
   });
 
   it('tier free (sin registro / null) -> 403', async () => {

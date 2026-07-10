@@ -134,8 +134,8 @@ describe('POST /v1/triggers (hmac)', () => {
     expect(decryptFromToken(passed.hmacSecretEncrypted, VAULT)).toBe(body.hmacSecret);
   });
 
-  it('GATE POR TIER: sin autonomous -> 403 (no genera ni crea)', async () => {
-    getProfileTier.mockResolvedValue('pro');
+  it('GATE POR PLAN: un tier sin autonomia (free) -> 403 (no genera ni crea)', async () => {
+    getProfileTier.mockResolvedValue('free');
     const res = await app.inject({
       method: 'POST',
       url: '/v1/triggers',
@@ -145,6 +145,18 @@ describe('POST /v1/triggers (hmac)', () => {
     expect(res.statusCode).toBe(403);
     expect(res.json().error.code).toBe('FORBIDDEN');
     expect(createTrigger).not.toHaveBeenCalled();
+  });
+
+  it('tier pro (plan con autonomia) tambien crea: el gate deriva del modulo central, 201', async () => {
+    getProfileTier.mockResolvedValue('pro');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/triggers',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: hmacBody,
+    });
+    expect(res.statusCode).toBe(201);
+    expect(createTrigger).toHaveBeenCalledTimes(1);
   });
 
   it('tier null (sin registro) -> 403', async () => {

@@ -614,3 +614,97 @@ describe('RegistrationRepository.getUserDetail', () => {
     expect(detail && 'organization' in detail).toBe(false);
   });
 });
+
+describe('RegistrationRepository.selectPlan (seleccion self-service)', () => {
+  const proProfileRow = { ...individualProfileRow, tier: 'pro' };
+  const proSubRow = { ...subRow, plan: 'pro' };
+
+  it('elegir Pro escribe tier + subscriptions.plan/status en UNA transaccion y devuelve el estado', async () => {
+    const sql = makeSql([
+      [{ id: 'user-1' }],      // update profiles (tier) -> 1 fila
+      [{ id: 's1' }],          // update subscriptions -> 1 fila (no hace falta insert)
+      [proProfileRow],         // loadState: profiles
+      [proSubRow],             // loadState: subscriptions
+      [usageRow],              // loadState: usage_counters
+    ]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    const state = await repo.selectPlan('user-1', { id: 'pro', tier: 'pro' });
+
+    expect(state?.profile).toMatchObject({ tier: 'pro' });
+    expect(state?.subscription).toMatchObject({ plan: 'pro', status: 'active' });
+
+    // MISMA fuente de verdad que el gating: profiles.tier + subscriptions.plan/status.
+    const updateProfile = findCall(sql, 'update profiles');
+    expect(updateProfile?.text).toContain('set tier =');
+    // AISLAMIENTO: ambos WHERE van por el owner recibido (el sub del token), parametrizado.
+    expect(updateProfile?.values).toEqual(['pro', 'user-1']);
+    const updateSub = findCall(sql, 'update subscriptions');
+    expect(updateSub?.text).toContain("status = 'active'");
+    expect(updateSub?.values).toEqual(['pro', 'user-1']);
+    // Sin fila faltante no se inserta nada.
+    expect(allText(sql)).not.toContain('insert into subscriptions');
+
+    // Atomicidad: las escrituras corren dentro de begin (tx:true).
+    const writes = sql.calls.filter((c) => /update (profiles|subscriptions)/.test(c.text));
+    expect(writes).toHaveLength(2);
+    expect(writes.every((c) => c.tx)).toBe(true);
+  });
+
+  it('si el perfil no tiene fila de suscripcion, la CREA (plan + active) en la misma transaccion', async () => {
+    const sql = makeSql([
+      [{ id: 'user-1' }],      // update profiles -> 1 fila
+      [],                      // update subscriptions -> 0 filas (no existia)
+      [],                      // insert subscriptions
+      [proProfileRow],         // loadState: profiles
+      [proSubRow],             // loadState: subscriptions
+      [usageRow],              // loadState: usage_counters
+    ]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    const state = await repo.selectPlan('user-1', { id: 'pro', tier: 'pro' });
+
+    const insertSub = findCall(sql, 'insert into subscriptions');
+    expect(insertSub?.text).toContain("'active'");
+    expect(insertSub?.values).toEqual(['user-1', 'pro']);
+    expect(insertSub?.tx).toBe(true);
+    expect(state?.subscription).toMatchObject({ plan: 'pro', status: 'active' });
+  });
+
+  it('devuelve null (404 en la ruta) si el owner no tiene perfil, sin tocar subscriptions', async () => {
+    const sql = makeSql([
+      [],                      // update profiles -> 0 filas (perfil inexistente)
+    ]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    const state = await repo.selectPlan('desconocido', { id: 'pro', tier: 'pro' });
+
+    expect(state).toBeNull();
+    expect(allText(sql)).not.toContain('subscriptions');
+  });
+
+  it('bajar a Free reescribe tier free + plan free (mismo camino, sin rama especial)', async () => {
+    const sql = makeSql([
+      [{ id: 'user-1' }],
+      [{ id: 's1' }],
+      [individualProfileRow],  // loadState: profiles (tier free)
+      [subRow],                // loadState: subscriptions (plan free)
+      [usageRow],
+    ]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    const state = await repo.selectPlan('user-1', { id: 'free', tier: 'free' });
+
+    expect(findCall(sql, 'update profiles')?.values).toEqual(['free', 'user-1']);
+    expect(findCall(sql, 'update subscriptions')?.values).toEqual(['free', 'user-1']);
+    expect(state?.profile).toMatchObject({ tier: 'free' });
+  });
+
+  it('propaga el error si una escritura falla (la transaccion real hace rollback)', async () => {
+    const sql = makeSql([
+      [{ id: 'user-1' }],              // update profiles ok
+      new Error('boom subscriptions'), // update subscriptions falla
+    ]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    await expect(repo.selectPlan('user-1', { id: 'pro', tier: 'pro' })).rejects.toThrow('boom subscriptions');
+    // No se leyo el estado final ni se intento el insert.
+    expect(allText(sql)).not.toContain('insert into subscriptions');
+    expect(allText(sql)).not.toContain('from profiles');
+  });
+});

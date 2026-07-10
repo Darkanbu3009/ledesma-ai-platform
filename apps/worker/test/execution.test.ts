@@ -156,6 +156,16 @@ describe('processClaimedJob', () => {
     expect(deps.jobs.markPendingRetry).not.toHaveBeenCalled();
   });
 
+  it('owner pro (plan con autonomia) tambien pasa el gate y ejecuta', async () => {
+    const deps = makeDeps({ getProfileTier: vi.fn(async () => 'pro' as const) });
+    const job = makeJob();
+
+    await processClaimedJob(deps, job);
+
+    expect(deps.jobs.markCompleted).toHaveBeenCalledWith('job-1');
+    expect(deps.jobs.markFailed).not.toHaveBeenCalled();
+  });
+
   it('fallo transitorio con attempts < 3 -> vuelve a pending (markPendingRetry) con last_error y backoff', async () => {
     const deps = makeDeps({
       runAgent: vi.fn(() => {
