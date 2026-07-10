@@ -24,8 +24,9 @@ const pillClass =
  * Tarjeta de un plan: superficie blanca plana con hairline; el recomendado (Pro) lleva borde firme
  * de 1px y pill "Recomendado". El plan que el usuario YA tiene se marca con el pill "Tu plan" (check
  * verde, unico verde de la tarjeta) y su CTA queda deshabilitado; en el resto, el CTA brasa es el
- * unico acento brasa de la tarjeta. El CTA muestra su propio estado de carga mientras la seleccion
- * esta en vuelo (y los demas CTAs quedan deshabilitados para no encadenar dos cambios).
+ * unico acento brasa de la tarjeta. Recibe onSelect como prop (la pagina inyecta el handler real de
+ * seleccion) y muestra su propio estado de carga mientras la seleccion esta en vuelo (los demas CTAs
+ * quedan deshabilitados para no encadenar dos cambios).
  */
 function PlanCard({
   plan,
@@ -42,7 +43,8 @@ function PlanCard({
   disabled: boolean;
   onSelect: (planId: PlanId) => void;
 }) {
-  const isCurrent = currentTier !== undefined && plan.tier === currentTier;
+  // Mientras ['me'] no resuelve, currentTier es undefined y no matchea ningun tier: sin plan actual.
+  const isCurrent = plan.tier === currentTier;
 
   return (
     <section

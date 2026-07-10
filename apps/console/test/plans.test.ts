@@ -7,6 +7,7 @@ import {
   selectPlanErrorMessage,
   tierAllowsAutonomy,
 } from '../src/lib/plans';
+import { TIER_ORDER } from '../src/lib/admin';
 
 // El catalogo es la fuente de verdad de copys del frontend: estos tests fijan sus invariantes
 // estructurales (los que la UI asume) y las reglas editoriales del producto (sin guiones largos
@@ -22,12 +23,10 @@ describe('PLANS', () => {
     expect(recommended.map((plan) => plan.id)).toEqual(['pro']);
   });
 
-  it('mapea cada plan a un tier de profiles.tier distinto (para marcar "Tu plan")', () => {
-    const tiers = PLANS.map((plan) => plan.tier);
-    expect(new Set(tiers).size).toBe(PLANS.length);
-    for (const tier of tiers) {
-      expect(['free', 'pro', 'autonomous']).toContain(tier);
-    }
+  it('cubre exactamente la escala de tiers (TIER_ORDER), en orden y sin repetir', () => {
+    // Si el backend agrega o renombra un tier, este toEqual truena y obliga a decidir su plan
+    // comercial (en vez de dejar usuarios sin marca "Tu plan" en el catalogo).
+    expect(PLANS.map((plan) => plan.tier)).toEqual(TIER_ORDER);
   });
 
   it('durante el lanzamiento todos los precios se muestran como Gratis', () => {

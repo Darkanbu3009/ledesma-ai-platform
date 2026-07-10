@@ -2,8 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
-import type { RegistrationState } from '../src/lib/registration';
-import type { ProfileTier } from '../src/lib/registration';
+import type { ProfileTier, RegistrationState } from '../src/lib/registration';
 
 // Se mockean useMe (tier actual) y useSelectPlan (la mutacion real): asi el test cubre el cableado
 // del catalogo (CTA -> mutate, carga, confirmacion de downgrade, error visible) sin red.
