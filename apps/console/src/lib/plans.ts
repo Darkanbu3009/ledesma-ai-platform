@@ -1,7 +1,15 @@
 // Catalogo de planes para /configuracion/paquetes, construido SOBRE el modulo central de planes
-// (@ledesma-platform/shared): el id, el tier y las capacidades de cada plan salen de la MISMA
+// (@ledesma-platform/shared/plans): el id, el tier y las capacidades de cada plan salen de la MISMA
 // definicion que consumen los gates del backend y el endpoint de seleccion. Aqui solo se agrega el
 // copy de presentacion (nombre, precio, features de la tarjeta). Sin React ni red: puro y testeable.
+//
+// Se importa el SUBPATH ./plans (no el barrel raiz) a proposito, por dos motivos:
+//  - El barrel arrastra modulos de servidor (jobs-repository y demas) que no deben entrar al bundle
+//    del browser; por este subpath solo entra el modulo puro de planes.
+//  - El export ./plans de shared apunta su condicion "import" a la FUENTE TS (src/plans/plans.ts),
+//    que Vite/vitest transforman al vuelo: el build de la consola no depende de que dist/ de shared
+//    este compilado (Vercel construye la consola aislada, sin correr el tsc de packages/shared,
+//    y con el barrel dist-only Rolldown no resolvia el import). El typecheck usa los tipos de dist.
 //
 // NOTA DE LANZAMIENTO: todos los precios se muestran como "Gratis" mientras se habilitan los medios de
 // pago (ver LAUNCH_NOTICE). Los limites de ejecuciones son placeholders de negocio; la cuota REAL que
@@ -14,7 +22,7 @@ import {
   tierAllowsAutonomy,
   type PlanDefinition,
   type PlanId,
-} from '@ledesma-platform/shared';
+} from '@ledesma-platform/shared/plans';
 import type { ProfileTier } from './registration';
 
 export type { PlanId };
