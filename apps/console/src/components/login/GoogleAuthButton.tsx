@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 
 /**
@@ -9,26 +9,59 @@ import { supabase } from '../../lib/supabase';
  * Autocontenido: maneja su propio estado porque el flujo OAuth es identico en
  * ambas pantallas y no toca el formulario de contrasena. Al click llama
  * supabase.auth.signInWithOAuth, que redirige la pagina completa a Google;
- * redirectTo apunta a window.location.origin, la misma base que ya usa el
- * cliente. Al volver, detectSessionInUrl consume el retorno y AuthProvider
+ * redirectTo apunta al pathname actual sobre window.location.origin (la misma
+ * base que ya usa el cliente), de modo que exito y cancelacion vuelven a esta
+ * pantalla. Al volver, detectSessionInUrl consume el retorno y AuthProvider
  * recibe la sesion por onAuthStateChange; el flujo post-login (GET /v1/me,
  * needsRegistration -> /registro) es el mismo que con contrasena.
  *
  * Errores: si signInWithOAuth falla antes de redirigir (red, popup/redirect
  * bloqueado), se limpia el estado de carga y se muestra un mensaje no
  * destructivo; el formulario de correo sigue usable. Si el usuario cancela en
- * Google, vuelve a la app sin sesion y ninguna pantalla queda colgada.
+ * Google, vuelve a esta misma pantalla (redirectTo apunta al pathname actual)
+ * con el error en el hash y se le muestra un mensaje claro; y si vuelve con
+ * el boton Atras del navegador, pageshow resetea el estado de carga para que
+ * el boton no quede colgado en una pagina restaurada desde el bfcache.
  */
 export function GoogleAuthButton() {
   const [pending, setPending] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
+  // Cancelacion o fallo en Google: el retorno llega sin sesion y con el error
+  // en el hash (#error=access_denied...). detectSessionInUrl no establece
+  // sesion en ese caso y supabase-js no limpia el hash de error, asi que aqui
+  // se traduce a un mensaje claro desde el primer render (inicializador lazy,
+  // sin setState en efectos). Si en alguna version el SDK ya lo consumio,
+  // simplemente no se muestra nada.
+  const [errorMsg, setErrorMsg] = useState(() =>
+    new URLSearchParams(window.location.hash.slice(1)).has('error')
+      ? 'No se completó el acceso con Google. Intenta de nuevo.'
+      : '',
+  );
+
+  useEffect(() => {
+    // Atras desde la pantalla de Google: el navegador puede restaurar esta
+    // pagina desde el back/forward cache con el estado de React vivo (pending
+    // aun en true). pageshow con persisted es la unica senal de ese caso.
+    function handlePageShow(event: PageTransitionEvent) {
+      if (event.persisted) setPending(false);
+    }
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
+  }, []);
+
+  useEffect(() => {
+    // Limpia el hash de error de la URL una vez traducido a mensaje, para que
+    // un reload o navegacion interna no lo re-muestre.
+    if (new URLSearchParams(window.location.hash.slice(1)).has('error')) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }, []);
 
   async function handleClick() {
     setPending(true);
     setErrorMsg('');
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: window.location.origin },
+      options: { redirectTo: window.location.origin + window.location.pathname },
     });
     if (error) {
       setPending(false);
