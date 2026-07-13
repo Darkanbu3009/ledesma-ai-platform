@@ -21,11 +21,14 @@ export function UserMenu({
   email,
   onSignOut,
   onNavigate,
+  collapsed = false,
 }: {
   fullName: string | undefined;
   email: string | undefined;
   onSignOut: () => void;
   onNavigate?: () => void;
+  /** Sidebar en mini-rail: el boton muestra solo el avatar y el popover usa ancho fijo. */
+  collapsed?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -98,7 +101,11 @@ export function UserMenu({
           role="menu"
           aria-label="Menú de usuario"
           onKeyDown={handleMenuKeyDown}
-          className="absolute bottom-full left-0 right-0 z-50 mb-2 rounded-[12px] border-[0.5px] border-[#E9E7DF] bg-surface p-1.5 shadow-card"
+          className={[
+            'absolute bottom-full left-0 z-50 mb-2 rounded-[12px] border-[0.5px] border-[#E9E7DF] bg-surface p-1.5 shadow-card',
+            // Colapsado, el contenedor mide ~48px: el popover toma ancho propio en vez de estirarse.
+            collapsed ? 'w-56' : 'right-0',
+          ].join(' ')}
         >
           {/* Cabecera de identidad del menu: avatar mas grande + nombre y email. */}
           <div className="flex items-center gap-3 border-b-[0.5px] border-[#E9E7DF] px-2.5 pb-3 pt-2">
@@ -131,13 +138,22 @@ export function UserMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        className={`flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-sm transition hover:bg-line-soft ${focusRing}`}
+        aria-label={collapsed ? displayName : undefined}
+        className={[
+          'flex w-full items-center gap-2.5 rounded-xl py-2 text-sm transition hover:bg-line-soft',
+          collapsed ? 'justify-center px-0' : 'px-2',
+          focusRing,
+        ].join(' ')}
       >
         <InitialsAvatar fullName={fullName} email={email} className="h-[30px] w-[30px] text-[12.5px]" />
-        <span className="min-w-0 flex-1 truncate text-left font-medium text-ink-soft">
-          {displayName}
-        </span>
-        <ChevronsUpDown className="h-3.5 w-3.5 flex-none text-muted-soft" aria-hidden="true" />
+        {collapsed === false && (
+          <span className="min-w-0 flex-1 truncate text-left font-medium text-ink-soft">
+            {displayName}
+          </span>
+        )}
+        {collapsed === false && (
+          <ChevronsUpDown className="h-3.5 w-3.5 flex-none text-muted-soft" aria-hidden="true" />
+        )}
       </button>
     </div>
   );

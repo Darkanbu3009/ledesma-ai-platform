@@ -101,8 +101,9 @@ export function App() {
               <Route path="/recetas" element={<RecipesPage />} />
               {/* Observabilidad: historial de ejecuciones (jobs). Solo lectura, sin gate por tier. */}
               <Route path="/actividad" element={<ActivityPage />} />
-              {/* Configuracion: shell con dos sub-vistas. "Mi cuenta" es la pantalla de perfil de
-                  siempre (reubicada, sin cambios funcionales) y "Paquetes" el catalogo de planes.
+              {/* Configuracion: shell con dos sub-vistas. "Mi cuenta" es la vista principal (la
+                  ruta base redirige aqui) y el catalogo de planes vive en /configuracion/paquetes,
+                  accesible desde el sub-item "Mejorar Plan" del sidebar (ya sin tab propio).
                   Para cualquier usuario logueado -- SIN AdminGate (no es area de admin). */}
               <Route path="/configuracion" element={<SettingsLayout />}>
                 <Route index element={<Navigate to="/configuracion/cuenta" replace />} />

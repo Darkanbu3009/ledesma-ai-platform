@@ -6,11 +6,22 @@ import { Sidebar } from './Sidebar';
 
 export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Colapso del sidebar de escritorio (estilo Claude): estado de sesion en React, sin persistencia
+  // (el proyecto no guarda preferencias de UI en storage del navegador). El drawer movil no participa.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   return (
     <div className="flex min-h-screen">
-      <div className="hidden md:block md:w-64 md:flex-shrink-0">
-        <Sidebar />
+      <div
+        className={[
+          'hidden md:block md:flex-shrink-0 transition-[width] duration-200 ease-in-out',
+          sidebarCollapsed ? 'md:w-16' : 'md:w-64',
+        ].join(' ')}
+      >
+        <Sidebar
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed((value) => value === false)}
+        />
       </div>
 
       {mobileOpen && (

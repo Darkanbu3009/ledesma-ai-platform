@@ -164,3 +164,73 @@ describe('Sidebar (item Configuracion en la lista principal)', () => {
     );
   });
 });
+
+describe('Sidebar (sub-item Mejorar Plan)', () => {
+  it('muestra Mejorar Plan debajo de Configuracion apuntando al catalogo de planes', () => {
+    useMeMock.mockReturnValue({ data: undefined });
+    renderSidebar('/dashboard');
+
+    const link = screen.getByRole('link', { name: 'Mejorar Plan' });
+    expect(link).toHaveAttribute('href', '/configuracion/paquetes');
+    expect(link).not.toHaveAttribute('aria-current');
+    // Orden en el nav: el sub-item va inmediatamente despues del item padre.
+    const labels = screen.getAllByRole('link').map((el) => el.textContent);
+    expect(labels.indexOf('Mejorar Plan')).toBe(labels.indexOf('Configuración') + 1);
+  });
+
+  it('marca activo el sub-item en /configuracion/paquetes', () => {
+    useMeMock.mockReturnValue({ data: undefined });
+    renderSidebar('/configuracion/paquetes');
+
+    expect(screen.getByRole('link', { name: 'Mejorar Plan' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+});
+
+describe('Sidebar (toggle de colapso)', () => {
+  it('sin onToggleCollapse (drawer movil) no renderiza el boton de colapso', () => {
+    useMeMock.mockReturnValue({ data: undefined });
+    renderSidebar('/dashboard');
+
+    expect(screen.queryByRole('button', { name: 'Colapsar panel' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Expandir panel' })).not.toBeInTheDocument();
+  });
+
+  it('expandido muestra "Colapsar panel" con aria-expanded=true y dispara el handler', () => {
+    useMeMock.mockReturnValue({ data: undefined });
+    const onToggle = vi.fn();
+    render(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <Sidebar collapsed={false} onToggleCollapse={onToggle} />
+      </MemoryRouter>,
+    );
+
+    const toggle = screen.getByRole('button', { name: 'Colapsar panel' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(toggle);
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it('colapsado muestra "Expandir panel" con aria-expanded=false y oculta las etiquetas', () => {
+    useMeMock.mockReturnValue({ data: undefined });
+    render(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <Sidebar collapsed onToggleCollapse={() => undefined} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Expandir panel' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    // Mini-rail: los links siguen (con title accesible) pero sin texto visible.
+    const config = screen.getByRole('link', { name: 'Configuración' });
+    expect(config).toHaveAttribute('href', '/configuracion');
+    expect(config).not.toHaveTextContent('Configuración');
+    expect(screen.getByRole('link', { name: 'Mejorar Plan' })).not.toHaveTextContent(
+      'Mejorar Plan',
+    );
+  });
+});
