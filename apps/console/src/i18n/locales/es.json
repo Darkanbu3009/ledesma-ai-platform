@@ -11,8 +11,6 @@
     "admin": "Admin"
   },
   "language": {
-    "spanish": "Español",
-    "english": "English",
     "sectionTitle": "Idioma",
     "sectionDescription": "Elige el idioma de la interfaz. El cambio se aplica de inmediato.",
     "modalTitle": "¿En qué idioma prefieres navegar?",

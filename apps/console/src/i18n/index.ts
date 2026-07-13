@@ -24,15 +24,32 @@ import en from './locales/en.json';
 export const SUPPORTED_LANGUAGES = ['es', 'en'] as const;
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 
-/** Idioma inicial segun el navegador: 'en' solo si navigator.language es claramente ingles. */
-export function detectBrowserLanguage(): SupportedLanguage {
-  const browserLanguage = typeof navigator === 'undefined' ? '' : (navigator.language ?? '');
-  return browserLanguage.toLowerCase().startsWith('en') ? 'en' : 'es';
+/**
+ * Nombres propios de cada idioma para los selectores (modal de la landing y Configuracion). Se
+ * muestran IGUAL en ambos idiomas (cada idioma se nombra a si mismo), por eso son una constante
+ * compartida y no claves de traduccion: una sola fuente de verdad para todos los selectores.
+ */
+export const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
+  es: 'Español',
+  en: 'English',
+};
+
+/** Colapsa cualquier etiqueta BCP 47 (ej. 'en-US') a uno de los dos idiomas soportados. */
+function toSupportedLanguage(tag: string | undefined): SupportedLanguage {
+  return tag?.toLowerCase().startsWith('en') ? 'en' : 'es';
 }
 
-/** Normaliza lo que reporte i18next (ej. 'en-US') a uno de los dos idiomas soportados. */
-export function currentLanguage(): SupportedLanguage {
-  return i18n.language?.toLowerCase().startsWith('en') ? 'en' : 'es';
+/** Idioma inicial segun el navegador: 'en' solo si navigator.language es claramente ingles. */
+export function detectBrowserLanguage(): SupportedLanguage {
+  return toSupportedLanguage(typeof navigator === 'undefined' ? undefined : navigator.language);
+}
+
+/**
+ * Idioma activo normalizado. Acepta la instancia reactiva de useTranslation para que los
+ * componentes lean el MISMO handle al que estan suscritos; sin argumento lee el singleton.
+ */
+export function currentLanguage(instance: Pick<typeof i18n, 'language'> = i18n): SupportedLanguage {
+  return toSupportedLanguage(instance.language);
 }
 
 void i18n.use(initReactI18next).init({
@@ -43,6 +60,10 @@ void i18n.use(initReactI18next).init({
   lng: detectBrowserLanguage(),
   fallbackLng: 'es',
   supportedLngs: SUPPORTED_LANGUAGES,
+  // Init SINCRONO: los recursos van inline (no hay backend que esperar) y asi la instancia queda
+  // lista en este mismo import, antes del primer render. Sin esto, i18next difiere el init a un
+  // tick posterior y useTranslation suspenderia el primer render sin un Suspense boundary.
+  initAsync: false,
   interpolation: {
     // React ya escapa el contenido interpolado; escapar dos veces corrompe acentos y comillas.
     escapeValue: false,

@@ -2,7 +2,12 @@ import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, KeyRound, Languages, LogOut, Pencil } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { SUPPORTED_LANGUAGES, currentLanguage, type SupportedLanguage } from '../i18n';
+import {
+  LANGUAGE_LABELS,
+  SUPPORTED_LANGUAGES,
+  currentLanguage,
+  type SupportedLanguage,
+} from '../i18n';
 import { markSessionLanguageChoice } from '../i18n/session-preference';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/useAuth';
@@ -307,12 +312,6 @@ function SessionSection() {
   );
 }
 
-/** Etiquetas de las opciones del selector: nombres propios, iguales en ambos locales. */
-const LANGUAGE_LABEL_KEYS: Record<SupportedLanguage, string> = {
-  es: 'language.spanish',
-  en: 'language.english',
-};
-
 /**
  * IDIOMA: fila con segmented control Español / English. Cambia el idioma de la app EN VIVO via
  * i18n.changeLanguage (fase 1 de i18n: solo estan migrados el sidebar y esta seccion; el resto de
@@ -321,10 +320,12 @@ const LANGUAGE_LABEL_KEYS: Record<SupportedLanguage, string> = {
  */
 function LanguageSection() {
   const { t, i18n } = useTranslation();
-  const active = currentLanguage();
+  // Se lee de la instancia del hook (la misma a la que useTranslation suscribe este render), no
+  // del singleton del modulo: asi el resaltado no depende de un acople implicito entre ambos.
+  const active = currentLanguage(i18n);
 
   function handleSelect(language: SupportedLanguage) {
-    if (language !== active) void i18n.changeLanguage(language);
+    void i18n.changeLanguage(language);
     markSessionLanguageChoice();
   }
 
@@ -357,7 +358,7 @@ function LanguageSection() {
                 : 'text-[#8A8880] hover:text-ink'
             }`}
           >
-            {t(LANGUAGE_LABEL_KEYS[language])}
+            {LANGUAGE_LABELS[language]}
           </button>
         ))}
       </div>

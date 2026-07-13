@@ -72,16 +72,36 @@ describe('i18n fase 1 (migracion de muestra: sidebar)', () => {
   });
 });
 
+describe('detectBrowserLanguage', () => {
+  // navigator.language se stubbea explicitamente: no se depende del default de jsdom (en-US).
+  function stubNavigatorLanguage(value: string) {
+    Object.defineProperty(window.navigator, 'language', { value, configurable: true });
+  }
+
+  it('solo devuelve en para navegadores claramente en ingles; cualquier otro cae a es', () => {
+    stubNavigatorLanguage('en-US');
+    expect(detectBrowserLanguage()).toBe('en');
+    stubNavigatorLanguage('es-MX');
+    expect(detectBrowserLanguage()).toBe('es');
+    stubNavigatorLanguage('fr-FR');
+    expect(detectBrowserLanguage()).toBe('es');
+  });
+});
+
 describe('LanguageModal (landing)', () => {
-  it('preselecciona el idioma detectado del navegador y reporta la eleccion explicita', () => {
+  it('preselecciona el idioma activo (resaltado y con foco inicial) y reporta la eleccion', () => {
     const onChoose = vi.fn();
     render(<LanguageModal onChoose={onChoose} onClose={vi.fn()} />);
-    // jsdom reporta navigator.language = en-US: la deteccion debe ser 'en'.
-    expect(detectBrowserLanguage()).toBe('en');
-    expect(screen.getByRole('button', { name: 'English' })).toBeInTheDocument();
+    // El setup global deja la app en espanol: Español debe ser la opcion sugerida, con el foco
+    // inicial (Enter confirma la sugerencia) y el resaltado; English queda como alternativa.
+    const spanish = screen.getByRole('button', { name: 'Español' });
+    expect(spanish).toHaveFocus();
+    expect(spanish.className).toContain('bg-foreground/5');
+    const english = screen.getByRole('button', { name: 'English' });
+    expect(english.className).not.toContain('bg-foreground/5');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Español' }));
-    expect(onChoose).toHaveBeenCalledWith('es');
+    fireEvent.click(english);
+    expect(onChoose).toHaveBeenCalledWith('en');
   });
 
   it('cerrar sin elegir avisa via onClose (asumir el idioma detectado, sin bloquear)', () => {

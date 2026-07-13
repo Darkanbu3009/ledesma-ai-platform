@@ -11,8 +11,6 @@
     "admin": "Admin"
   },
   "language": {
-    "spanish": "Español",
-    "english": "English",
     "sectionTitle": "Language",
     "sectionDescription": "Choose the interface language. The change applies immediately.",
     "modalTitle": "Which language do you prefer?",

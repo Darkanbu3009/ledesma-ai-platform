@@ -1,9 +1,10 @@
 import { useState, type JSX } from 'react';
 import { Navigate } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
 import { useAuth } from '../auth/useAuth';
+// Se usa el singleton directo (no useTranslation): aqui solo se dispara changeLanguage y ningun
+// texto de la landing esta migrado aun; suscribirse re-renderizaria toda la landing sin motivo.
+import i18n, { type SupportedLanguage } from '../i18n';
 import { hasSessionLanguageChoice, markSessionLanguageChoice } from '../i18n/session-preference';
-import type { SupportedLanguage } from '../i18n';
 import { LanguageModal } from '../components/landing/language-modal';
 import { LandingNav } from '../components/landing/landing-nav';
 import { Hero } from '../components/landing/hero';
@@ -29,9 +30,9 @@ import { PixelAgent } from '../components/landing/pixel-agent';
  */
 export function HomePage(): JSX.Element | null {
   const { session, loading } = useAuth();
-  const { i18n } = useTranslation();
-  // Modal de idioma (fase 1 de i18n): solo la PRIMERA visita de la sesion, si aun no hay eleccion.
-  // La marca vive en memoria (session-preference), asi que navegar y volver no lo reabre.
+  // Modal de idioma (fase 1 de i18n): se abre mientras no haya eleccion en esta sesion. La marca
+  // vive en memoria (session-preference), asi que tras elegir o cerrar no vuelve a aparecer; si
+  // el visitante navega a otra ruta SIN interactuar, al volver se le pregunta de nuevo.
   const [languageModalOpen, setLanguageModalOpen] = useState(() => !hasSessionLanguageChoice());
 
   function chooseLanguage(language: SupportedLanguage) {

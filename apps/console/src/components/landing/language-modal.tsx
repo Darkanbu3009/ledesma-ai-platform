@@ -1,23 +1,16 @@
-import { type JSX } from 'react';
+import { useRef, type JSX } from 'react';
 import { X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useDialog } from '../ui/useDialog';
 import { Logo } from '../brand/logo';
-import { SUPPORTED_LANGUAGES, detectBrowserLanguage, type SupportedLanguage } from '../../i18n';
-
-const OPTION_LABELS: Record<SupportedLanguage, string> = {
-  es: 'Español',
-  en: 'English',
-};
+import { LANGUAGE_LABELS, SUPPORTED_LANGUAGES, currentLanguage, type SupportedLanguage } from '../../i18n';
 
 /**
- * Modal de eleccion de idioma de la landing (fase 1 de i18n). Lo monta HomePage SOLO la primera
- * vez en la sesion, cuando todavia no hay preferencia de idioma (ver session-preference). Es una
- * eleccion rapida, no un muro: Escape, el fondo y la X cierran asumiendo el idioma detectado del
- * navegador, que ademas llega preseleccionado (resaltado) cuando es claramente es o en.
- *
- * Las etiquetas de las opciones son nombres propios (Español / English) y se muestran IGUAL en
- * ambos idiomas, por eso van fijas aqui; titulo y subtitulo si se traducen (claves language.*).
+ * Modal de eleccion de idioma de la landing (fase 1 de i18n). Lo monta HomePage cuando todavia no
+ * hay eleccion de idioma en la sesion (ver session-preference). Es una eleccion rapida, no un
+ * muro: Escape, el fondo y la X cierran asumiendo el idioma ya activo (el detectado del
+ * navegador, porque el modal solo existe antes de cualquier eleccion), que ademas llega
+ * preseleccionado: resaltado y con el foco inicial, para que Enter confirme la opcion sugerida.
  */
 export function LanguageModal({
   onChoose,
@@ -28,9 +21,12 @@ export function LanguageModal({
   /** El usuario cerro sin elegir: se asume el idioma detectado. */
   onClose: () => void;
 }): JSX.Element {
-  const { t } = useTranslation();
-  const detected = detectBrowserLanguage();
-  const dialogRef = useDialog({ onClose });
+  const { t, i18n } = useTranslation();
+  // Idioma activo (= detectado, ver arriba): es lo que el usuario conserva si cierra sin elegir,
+  // asi el resaltado y el cierre cuentan siempre la misma historia.
+  const preselected = currentLanguage(i18n);
+  const preselectedRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useDialog({ onClose, initialFocus: preselectedRef });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
@@ -60,15 +56,16 @@ export function LanguageModal({
           {SUPPORTED_LANGUAGES.map((language) => (
             <button
               key={language}
+              ref={language === preselected ? preselectedRef : undefined}
               type="button"
               onClick={() => onChoose(language)}
               className={`rounded-xl border px-4 py-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                language === detected
+                language === preselected
                   ? 'border-foreground bg-foreground/5 font-medium text-foreground'
                   : 'border-border text-foreground-secondary hover:border-foreground hover:text-foreground'
               }`}
             >
-              {OPTION_LABELS[language]}
+              {LANGUAGE_LABELS[language]}
             </button>
           ))}
         </div>
