@@ -1,4 +1,5 @@
 import { Fragment } from 'react';
+import { useTranslation } from 'react-i18next';
 
 /**
  * Tablero semanal ESTATICO para el gate de Tareas programadas: prueba visual de "una semana asi"
@@ -11,30 +12,32 @@ import { Fragment } from 'react';
 
 type Marca = 'ejecutada' | 'corriendo' | 'programada' | null;
 
+// `label` guarda la CLAVE de traduccion del dia; se resuelve con t(...) en el render.
 const DIAS: { label: string; actual?: boolean; finde?: boolean }[] = [
-  { label: 'lun' },
-  { label: 'mar' },
-  { label: 'mié', actual: true },
-  { label: 'jue' },
-  { label: 'vie' },
-  { label: 'sab', finde: true },
-  { label: 'dom', finde: true },
+  { label: 'gates.tareas.dias.lun' },
+  { label: 'gates.tareas.dias.mar' },
+  { label: 'gates.tareas.dias.mie', actual: true },
+  { label: 'gates.tareas.dias.jue' },
+  { label: 'gates.tareas.dias.vie' },
+  { label: 'gates.tareas.dias.sab', finde: true },
+  { label: 'gates.tareas.dias.dom', finde: true },
 ];
 
+// `nombre` y `horario` guardan CLAVES de traduccion; se resuelven con t(...) en el render.
 const TAREAS: { nombre: string; horario: string; marcas: Marca[] }[] = [
   {
-    nombre: 'Reporte de ventas',
-    horario: 'dias habiles 7:30',
+    nombre: 'gates.tareas.tarea1Nombre',
+    horario: 'gates.tareas.tarea1Horario',
     marcas: ['ejecutada', 'ejecutada', 'corriendo', 'programada', 'programada', null, null],
   },
   {
-    nombre: 'Cierre de facturas',
-    horario: 'lunes 8:00',
+    nombre: 'gates.tareas.tarea2Nombre',
+    horario: 'gates.tareas.tarea2Horario',
     marcas: ['ejecutada', null, null, null, null, null, null],
   },
   {
-    nombre: 'Respaldo de datos',
-    horario: 'diario 23:00',
+    nombre: 'gates.tareas.tarea3Nombre',
+    horario: 'gates.tareas.tarea3Horario',
     marcas: [
       'ejecutada',
       'ejecutada',
@@ -53,13 +56,15 @@ const marcaClass: Record<Exclude<Marca, null>, string> = {
   programada: 'border border-[#D3D1C7]',
 };
 
+// `label` guarda la CLAVE de traduccion del item de leyenda; se resuelve con t(...) en el render.
 const LEYENDA: { label: string; marca: Exclude<Marca, null> }[] = [
-  { label: 'ejecutada', marca: 'ejecutada' },
-  { label: 'corriendo ahora', marca: 'corriendo' },
-  { label: 'programada', marca: 'programada' },
+  { label: 'gates.tareas.leyendaEjecutada', marca: 'ejecutada' },
+  { label: 'gates.tareas.leyendaCorriendo', marca: 'corriendo' },
+  { label: 'gates.tareas.leyendaProgramada', marca: 'programada' },
 ];
 
 export function GateTareasTablero() {
+  const { t } = useTranslation();
   return (
     <div
       aria-hidden="true"
