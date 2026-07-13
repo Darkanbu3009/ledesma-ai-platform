@@ -8,7 +8,9 @@ export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   // Colapso del sidebar de escritorio (estilo Claude): estado de sesion en React, sin persistencia
   // (el proyecto no guarda preferencias de UI en storage del navegador). El drawer movil no participa.
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Arranca COLAPSADO por defecto (mini-rail); el usuario lo expande con el toggle y esa eleccion
+  // vive solo en la sesion. Recordarla entre sesiones seria via backend, en otro PR.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
   return (
     <div className="flex min-h-screen">

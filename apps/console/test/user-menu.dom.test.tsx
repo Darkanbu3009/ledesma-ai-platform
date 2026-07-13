@@ -233,4 +233,34 @@ describe('Sidebar (toggle de colapso)', () => {
       'Mejorar Plan',
     );
   });
+
+  it('colapsado, el popover del avatar sigue abriendo con Configuracion y Cerrar sesion', () => {
+    useMeMock.mockReturnValue({ data: { profile: { fullName: 'Ada Lovelace' } } });
+    render(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <Sidebar collapsed onToggleCollapse={() => undefined} />
+      </MemoryRouter>,
+    );
+
+    // En mini-rail el boton de cuenta es solo el avatar, nombrado via aria-label.
+    fireEvent.click(screen.getByRole('button', { name: 'Ada Lovelace' }));
+
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Configuración' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Cerrar sesión' })).toBeInTheDocument();
+  });
+});
+
+describe('Sidebar (footer sin duplicados)', () => {
+  it('con el popover cerrado no hay Configuracion ni Cerrar sesion sueltos en el footer', () => {
+    useMeMock.mockReturnValue({ data: { profile: { fullName: 'Ada Lovelace' } } });
+    renderSidebar('/dashboard');
+
+    // Unico acceso: el popover del avatar. Fuera de el, "Configuración" existe solo como link de
+    // la lista principal de navegacion (ese se conserva) y "Cerrar sesión" no existe como boton.
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Configuración' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Configuración' })).toBeInTheDocument();
+  });
 });
