@@ -74,7 +74,7 @@ export function GateTareasTablero() {
         <div className="grid min-w-[540px] grid-cols-[120px_repeat(7,minmax(0,1fr))] md:grid-cols-[170px_repeat(7,minmax(0,1fr))]">
           {/* Fila header: etiqueta + dias. Sab/dom llevan bg marfil en toda su columna. */}
           <div className="flex items-center border-b-[0.5px] border-[#F1EFE8] px-4 py-3 text-[11px] uppercase tracking-[0.07em] text-[#B4B2A9]">
-            Una semana asi
+            {t('gates.tareas.encabezado')}
           </div>
           {DIAS.map((dia) => (
             <div
@@ -83,7 +83,7 @@ export function GateTareasTablero() {
                 dia.finde ? 'bg-[#FAF9F5] text-[#B4B2A9]' : dia.actual ? 'font-medium text-ink' : 'text-[#5F5E5A]'
               }`}
             >
-              <span>{dia.label}</span>
+              <span>{t(dia.label)}</span>
               {dia.actual && <span className="mt-1 h-1 w-1 rounded-full bg-[#E5511E]" />}
             </div>
           ))}
@@ -94,9 +94,9 @@ export function GateTareasTablero() {
             return (
               <Fragment key={tarea.nombre}>
                 <div className={`flex min-w-0 flex-col justify-center px-4 py-3 ${borde}`}>
-                  <span className="truncate text-[12.5px] font-medium text-ink">{tarea.nombre}</span>
+                  <span className="truncate text-[12.5px] font-medium text-ink">{t(tarea.nombre)}</span>
                   <span className="hidden truncate font-mono text-[10.5px] text-[#8A8880] md:block">
-                    {tarea.horario}
+                    {t(tarea.horario)}
                   </span>
                 </div>
                 {DIAS.map((dia, col) => {
@@ -126,13 +126,11 @@ export function GateTareasTablero() {
           {LEYENDA.map((item) => (
             <span key={item.label} className="flex items-center gap-2 text-[11.5px] text-[#5F5E5A]">
               <span className={`h-[9px] w-[9px] flex-none rounded-[3px] ${marcaClass[item.marca]}`} />
-              {item.label}
+              {t(item.label)}
             </span>
           ))}
         </div>
-        <span className="font-mono text-[11.5px] text-[#8A8880]">
-          12 corridas esta semana, 0 fallos, 0 intervenciones
-        </span>
+        <span className="font-mono text-[11.5px] text-[#8A8880]">{t('gates.tareas.resumen')}</span>
       </div>
     </div>
   );
