@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CheckCircle2 } from 'lucide-react';
 import { useMyUpgradeRequests } from '../../lib/queries';
 import { useRequestUpgrade } from '../../lib/mutations';
@@ -40,6 +41,7 @@ export function RequestUpgradeCta({
   featureContext: FeatureContext;
   className?: string;
 }) {
+  const { t } = useTranslation();
   const myRequests = useMyUpgradeRequests();
   const requestUpgrade = useRequestUpgrade();
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -75,7 +77,7 @@ export function RequestUpgradeCta({
           className="inline-flex items-center gap-2 rounded-xl border border-ok/30 bg-ok/10 px-3.5 py-2 text-sm font-medium text-ok focus-visible:outline-none"
         >
           <CheckCircle2 className="h-4 w-4" />
-          Solicitud enviada · te contactaremos
+          {t('gates.solicitarAcceso.enviada')}
         </p>
       </div>
     );
@@ -93,12 +95,13 @@ export function RequestUpgradeCta({
         disabled={requestUpgrade.isPending || myRequests.isLoading}
         className={buttonClass}
       >
-        {requestUpgrade.isPending ? 'Solicitando acceso...' : 'Solicitar acceso'}
+        {requestUpgrade.isPending
+          ? t('gates.solicitarAcceso.solicitando')
+          : t('gates.solicitarAcceso.cta')}
       </button>
       <Notice notice={errorNotice} className="" />
       <p className="max-w-xs text-[12px] leading-[1.5] text-muted-soft">
-        Registra tu interes en el plan Autonomo. El equipo te contacta para activarlo; no se activa al
-        instante.
+        {t('gates.solicitarAcceso.nota')}
       </p>
     </div>
   );
