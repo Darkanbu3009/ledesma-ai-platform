@@ -1,6 +1,10 @@
-import { type JSX } from 'react';
+import { useState, type JSX } from 'react';
 import { Navigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../auth/useAuth';
+import { hasSessionLanguageChoice, markSessionLanguageChoice } from '../i18n/session-preference';
+import type { SupportedLanguage } from '../i18n';
+import { LanguageModal } from '../components/landing/language-modal';
 import { LandingNav } from '../components/landing/landing-nav';
 import { Hero } from '../components/landing/hero';
 import { Integration } from '../components/landing/integration';
@@ -25,6 +29,21 @@ import { PixelAgent } from '../components/landing/pixel-agent';
  */
 export function HomePage(): JSX.Element | null {
   const { session, loading } = useAuth();
+  const { i18n } = useTranslation();
+  // Modal de idioma (fase 1 de i18n): solo la PRIMERA visita de la sesion, si aun no hay eleccion.
+  // La marca vive en memoria (session-preference), asi que navegar y volver no lo reabre.
+  const [languageModalOpen, setLanguageModalOpen] = useState(() => !hasSessionLanguageChoice());
+
+  function chooseLanguage(language: SupportedLanguage) {
+    void i18n.changeLanguage(language);
+    dismissLanguageModal();
+  }
+
+  // Cerrar sin elegir fija el idioma ya detectado (el que la app trae activo): no se reabre.
+  function dismissLanguageModal() {
+    markSessionLanguageChoice();
+    setLanguageModalOpen(false);
+  }
 
   if (loading) return null;
   if (session) return <Navigate to="/agentes" replace />;
@@ -42,6 +61,9 @@ export function HomePage(): JSX.Element | null {
       </main>
       <LandingFooter />
       <PixelAgent />
+      {languageModalOpen && (
+        <LanguageModal onChoose={chooseLanguage} onClose={dismissLanguageModal} />
+      )}
     </div>
   );
 }

@@ -8,5 +8,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     passWithNoTests: true,
+    // Deja i18next inicializado (y en espanol) antes de cada archivo de tests: ver el propio setup.
+    setupFiles: ['./test/setup.i18n.ts'],
   },
 });
