@@ -6,8 +6,7 @@ import {
   ChefHat,
   KeyRound,
   LayoutDashboard,
-  PanelLeftClose,
-  PanelLeftOpen,
+  PanelLeft,
   ShieldCheck,
   Users,
   Webhook,
@@ -95,11 +94,9 @@ export function Sidebar({
             title={collapsed ? 'Expandir panel' : 'Colapsar panel'}
             className={`rounded-lg p-1.5 text-muted transition hover:bg-line-soft hover:text-ink ${focusRing}`}
           >
-            {collapsed ? (
-              <PanelLeftOpen className="h-[18px] w-[18px]" />
-            ) : (
-              <PanelLeftClose className="h-[18px] w-[18px]" />
-            )}
+            {/* Mismo glifo en ambos estados (identico al de Claude): el panel simple sin flechas.
+                El estado lo comunican aria-expanded y el aria-label/title, no el icono. */}
+            <PanelLeft className="h-[18px] w-[18px]" />
           </button>
         )}
       </div>
