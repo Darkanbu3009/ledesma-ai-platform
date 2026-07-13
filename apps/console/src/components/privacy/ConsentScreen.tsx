@@ -4,11 +4,7 @@ import { ShieldCheck } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { LedesmaLogo } from '../login/LedesmaLogo';
 import { useAcceptConsents } from '../../lib/mutations';
-import {
-  SIMPLIFIED_NOTICE,
-  pendingConsentBodies,
-  type ConsentsState,
-} from '../../lib/privacy';
+import { SIMPLIFIED_NOTICE, pendingConsentBodies, type ConsentsState } from '../../lib/privacy';
 
 /**
  * Pantalla de CONSENTIMIENTO (Fase 5.6). Se muestra cuando al titular le falta aceptar la version vigente

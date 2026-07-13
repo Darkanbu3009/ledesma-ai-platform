@@ -145,11 +145,7 @@ export function CredentialFormDialog({
             </select>
           </Field>
 
-          <Field
-            label="API key"
-            error={errors.apiKey}
-            hint={t('credenciales.form.apiKeyHint')}
-          >
+          <Field label="API key" error={errors.apiKey} hint={t('credenciales.form.apiKeyHint')}>
             {(field) => (
               <div className="relative">
                 <input

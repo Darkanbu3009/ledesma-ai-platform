@@ -32,7 +32,10 @@ export function PrivacySimplifiedNoticePage() {
             i18nKey="privacidad.avisoSimplificado.footer"
             components={{
               integral: (
-                <Link to="/aviso-de-privacidad" className="font-medium text-brasa hover:underline" />
+                <Link
+                  to="/aviso-de-privacidad"
+                  className="font-medium text-brasa hover:underline"
+                />
               ),
             }}
           />

@@ -108,7 +108,9 @@ function CredentialsEmptyState({ onAdd }: { onAdd: () => void }) {
               className="border-[#F1EFE8] px-[18px] py-[14px] [&:not(:last-child)]:border-b-[0.5px] sm:[&:not(:last-child)]:border-b-0 sm:[&:not(:last-child)]:border-r-[0.5px]"
             >
               <h3 className="text-[12.5px] font-medium text-ink">{t(garantia.tituloKey)}</h3>
-              <p className="mt-1 text-[12px] leading-[1.5] text-[#8A8880]">{t(garantia.textoKey)}</p>
+              <p className="mt-1 text-[12px] leading-[1.5] text-[#8A8880]">
+                {t(garantia.textoKey)}
+              </p>
             </div>
           ))}
         </div>

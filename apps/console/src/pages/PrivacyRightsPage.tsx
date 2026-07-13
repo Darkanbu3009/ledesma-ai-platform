@@ -272,7 +272,10 @@ export function PrivacyRightsPage() {
         {isLoading ? (
           <div className="mt-4 space-y-3">
             {[0, 1].map((i) => (
-              <div key={i} className="h-20 animate-pulse rounded-2xl border border-line bg-surface" />
+              <div
+                key={i}
+                className="h-20 animate-pulse rounded-2xl border border-line bg-surface"
+              />
             ))}
           </div>
         ) : isError ? (

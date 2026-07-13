@@ -37,7 +37,9 @@ export function PrivacyNoticePage() {
                   className="font-medium text-brasa hover:underline"
                 />
               ),
-              derechos: <Link to="/privacidad" className="font-medium text-brasa hover:underline" />,
+              derechos: (
+                <Link to="/privacidad" className="font-medium text-brasa hover:underline" />
+              ),
             }}
           />
         </p>
