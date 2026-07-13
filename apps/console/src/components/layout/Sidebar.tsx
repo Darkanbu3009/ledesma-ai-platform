@@ -115,7 +115,9 @@ export function Sidebar({
         )}
       </div>
 
-      <nav className="mt-7 flex-1 space-y-1">
+      {/* overflow-hidden + nowrap: durante la transicion de ancho las etiquetas no se envuelven
+          ni se derraman fuera del rail (el popover del UserMenu vive fuera de este nav). */}
+      <nav className="mt-7 flex-1 space-y-1 overflow-hidden whitespace-nowrap">
         {items.map((item) => (
           <Fragment key={item.to}>
             <NavLink
