@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { Trans, useTranslation } from 'react-i18next';
 import { ArrowLeft, Eye, EyeOff, RefreshCw, RotateCcw, ShieldAlert } from 'lucide-react';
 import { providerLabel } from '../lib/agents';
 import { readApiEnv } from '../lib/env';
@@ -31,6 +32,7 @@ const webhookHeadersExample = `x-ledesma-timestamp: 1718000000
 x-ledesma-signature: v1=<hmac-sha256 hex de "{timestamp}.{body}">`;
 
 export function ConnectPage() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const { data: agent, isLoading, isError, refetch } = useAgent(id);
   const [showSecret, setShowSecret] = useState(false);
@@ -68,15 +70,15 @@ export function ConnectPage() {
     return (
       <div className="mx-auto max-w-3xl">
         <div className="mt-10 rounded-xl border border-grafito-border bg-grafito p-8 text-center">
-          <p className="font-display text-lg text-hueso">No pudimos cargar el agente</p>
-          <p className="mt-2 text-sm text-hueso-muted">Revisa tu conexion e intenta de nuevo.</p>
+          <p className="font-display text-lg text-hueso">{t('auth.conectar.errorCargaAgente')}</p>
+          <p className="mt-2 text-sm text-hueso-muted">{t('auth.comun.revisaConexion')}</p>
           <button
             type="button"
             onClick={() => void refetch()}
             className="mt-5 inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2 text-sm text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
           >
             <RefreshCw className="h-4 w-4" />
-            Reintentar
+            {t('auth.comun.reintentar')}
           </button>
         </div>
       </div>
@@ -90,7 +92,7 @@ export function ConnectPage() {
   const snippets = [
     { title: 'cURL', content: curlSnippet(params) },
     { title: 'Node.js', content: nodeSnippet(params) },
-    { title: 'Movil y web', content: mobileWebGuide(params) },
+    { title: t('auth.conectar.movilYWeb'), content: mobileWebGuide(params) },
   ];
 
   return (
@@ -98,7 +100,7 @@ export function ConnectPage() {
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
           <h1 className="truncate font-display text-2xl font-bold text-hueso">
-            Conectar: {agent.name}
+            {t('auth.conectar.titulo', { nombre: agent.name })}
           </h1>
           <p className="mt-1 text-sm text-hueso-muted">
             {providerLabel(agent.providerId)} · <span className="font-mono">{agent.model}</span>
@@ -109,7 +111,7 @@ export function ConnectPage() {
           className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-grafito-border px-4 py-2 text-sm text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
         >
           <ArrowLeft className="h-4 w-4" />
-          Volver
+          {t('auth.conectar.volver')}
         </Link>
       </div>
 
@@ -127,14 +129,8 @@ export function ConnectPage() {
       <div className="mt-6 flex items-start gap-3 rounded-xl border border-brasa/40 bg-brasa/10 p-5">
         <ShieldAlert className="h-5 w-5 shrink-0 text-brasa" />
         <div className="text-sm">
-          <p className="text-brasa">
-            La API key del proveedor es de tu cliente y debe vivir en su servidor. Nunca la
-            incluyas en una app movil o pagina publica.
-          </p>
-          <p className="mt-1 text-hueso-muted">
-            Para integrar desde un cliente, tu backend emite tokens de sesion efimeros y el
-            cliente habla directo con la plataforma.
-          </p>
+          <p className="text-brasa">{t('auth.conectar.avisoKey')}</p>
+          <p className="mt-1 text-hueso-muted">{t('auth.conectar.avisoTokens')}</p>
         </div>
       </div>
 
@@ -156,12 +152,10 @@ export function ConnectPage() {
       {agent.webhookSecret ? (
         <section className="mt-8">
           <h2 className="font-display text-lg font-semibold text-hueso">
-            Verificacion de webhooks
+            {t('auth.conectar.webhooks.titulo')}
           </h2>
           <p className="mt-3 text-sm text-hueso-muted">
-            Cada vez que tu agente invoca una herramienta, la plataforma firma el POST a tu
-            webhook. Verifica la firma para asegurarte de que la peticion viene de Ledesma AI
-            Labs.
+            {t('auth.conectar.webhooks.descripcion')}
           </p>
 
           <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-grafito-border bg-grafito p-5">
@@ -176,11 +170,11 @@ export function ConnectPage() {
               <button
                 type="button"
                 onClick={() => setShowSecret((v) => !v)}
-                aria-label={showSecret ? 'Ocultar secreto' : 'Mostrar secreto'}
+                aria-label={showSecret ? t('auth.conectar.webhooks.ocultarSecreto') : t('auth.conectar.webhooks.mostrarSecreto')}
                 className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-grafito-border px-3 py-1.5 text-xs font-medium text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
               >
                 {showSecret ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                {showSecret ? 'Ocultar' : 'Revelar'}
+                {showSecret ? t('auth.conectar.webhooks.ocultar') : t('auth.conectar.webhooks.revelar')}
               </button>
               <CopyButton text={agent.webhookSecret} />
               <button
@@ -189,31 +183,30 @@ export function ConnectPage() {
                 className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-grafito-border px-3 py-1.5 text-xs font-medium text-brasa transition hover:border-brasa hover:text-brasa-hover"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
-                Rotar secreto
+                {t('auth.conectar.webhooks.rotarSecreto')}
               </button>
             </div>
           </div>
 
           {rotatedNotice ? (
             <p role="status" className="mt-2 text-sm text-brasa">
-              Secreto rotado. Actualiza tus integraciones.
+              {t('auth.conectar.webhooks.secretoRotado')}
             </p>
           ) : null}
 
           <div className="mt-4">
-            <p className="text-xs text-hueso-muted">Headers enviados en cada POST</p>
+            <p className="text-xs text-hueso-muted">{t('auth.conectar.webhooks.headersEnviados')}</p>
             <pre className={`${preClass} mt-2`}>{webhookHeadersExample}</pre>
           </div>
 
           <div className="mt-4">
             <div className="mb-2 flex items-center justify-between gap-3">
-              <p className="text-xs text-hueso-muted">Verificacion en tu servidor (Node)</p>
+              <p className="text-xs text-hueso-muted">{t('auth.conectar.webhooks.verificacionServidor')}</p>
               <CopyButton text={webhookVerifySnippet()} />
             </div>
             <pre className={preClass}>{webhookVerifySnippet()}</pre>
             <p className="mt-2 text-sm text-hueso-muted">
-              Guarda el secreto como variable de entorno (LEDESMA_WEBHOOK_SECRET) en tu servidor;
-              usa el body crudo (rawBody) para verificar.
+              {t('auth.conectar.webhooks.guardaSecreto')}
             </p>
           </div>
 
@@ -227,30 +220,28 @@ export function ConnectPage() {
       ) : null}
 
       <section className="mt-8">
-        <h2 className="font-display text-lg font-semibold text-hueso">Widget embebible</h2>
+        <h2 className="font-display text-lg font-semibold text-hueso">{t('auth.conectar.widget.titulo')}</h2>
         <p className="mt-3 text-sm text-hueso-muted">
-          Incrusta tu agente en cualquier sitio con una etiqueta HTML.
+          {t('auth.conectar.widget.descripcion')}
         </p>
 
         <div className="mt-4 space-y-8">
           <div>
-            <h3 className="text-sm font-medium text-hueso">Modo token (produccion)</h3>
+            <h3 className="text-sm font-medium text-hueso">{t('auth.conectar.widget.modoTokenTitulo')}</h3>
             <p className="mt-1 text-sm text-hueso-muted">
-              Tu backend emite tokens de sesion efimeros (la key queda como secreto en tu
-              servidor) y el widget habla directo con la plataforma. Cuando el token expira, el
-              widget pide otro solo.
+              {t('auth.conectar.widget.modoTokenCuerpo')}
             </p>
             <div className="mt-3 space-y-4">
               <div>
                 <div className="mb-2 flex items-center justify-between gap-3">
-                  <p className="text-xs text-hueso-muted">HTML de tu pagina</p>
+                  <p className="text-xs text-hueso-muted">{t('auth.conectar.widget.htmlPagina')}</p>
                   <CopyButton text={widgetTokenSnippet(params)} />
                 </div>
                 <pre className={preClass}>{widgetTokenSnippet(params)}</pre>
               </div>
               <div>
                 <div className="mb-2 flex items-center justify-between gap-3">
-                  <p className="text-xs text-hueso-muted">Servidor de tokens de ejemplo (Node)</p>
+                  <p className="text-xs text-hueso-muted">{t('auth.conectar.widget.servidorTokens')}</p>
                   <CopyButton text={tokenServerSnippet(params)} />
                 </div>
                 <pre className={preClass}>{tokenServerSnippet(params)}</pre>
@@ -259,12 +250,11 @@ export function ConnectPage() {
           </div>
 
           <div>
-            <h3 className="text-sm font-medium text-hueso">Modo directo (solo pruebas)</h3>
+            <h3 className="text-sm font-medium text-hueso">{t('auth.conectar.widget.modoDirectoTitulo')}</h3>
             <div className="mt-2 flex items-start gap-3 rounded-xl border border-brasa/40 bg-brasa/10 p-4">
               <ShieldAlert className="h-5 w-5 shrink-0 text-brasa" />
               <p className="text-sm text-brasa">
-                La key queda visible en el HTML. Usalo solo en pruebas o herramientas internas;
-                nunca en una pagina publica.
+                {t('auth.conectar.widget.modoDirectoAviso')}
               </p>
             </div>
             <div className="mt-3">
@@ -277,16 +267,16 @@ export function ConnectPage() {
           </div>
 
           <div>
-            <h3 className="text-sm font-medium text-hueso">Uso en React</h3>
+            <h3 className="text-sm font-medium text-hueso">{t('auth.conectar.widget.usoReactTitulo')}</h3>
             <p className="mt-1 text-sm text-hueso-muted">
-              El custom element funciona en React hoy cargando el script de la plataforma. Muy
-              pronto: wrapper npm (
-              <span className="font-mono">@ledesma-platform/widget-react</span>) con props
-              tipadas.
+              <Trans
+                i18nKey="auth.conectar.widget.usoReactCuerpo"
+                components={{ paquete: <span className="font-mono" /> }}
+              />
             </p>
             <div className="mt-3">
               <div className="mb-2 flex items-center justify-between gap-3">
-                <p className="text-xs text-hueso-muted">Componente de ejemplo</p>
+                <p className="text-xs text-hueso-muted">{t('auth.conectar.widget.componenteEjemplo')}</p>
                 <CopyButton text={widgetReactSnippet(params)} />
               </div>
               <pre className={preClass}>{widgetReactSnippet(params)}</pre>
@@ -294,13 +284,12 @@ export function ConnectPage() {
           </div>
 
           <div>
-            <h3 className="text-sm font-medium text-hueso">Personalizacion</h3>
+            <h3 className="text-sm font-medium text-hueso">{t('auth.conectar.widget.personalizacionTitulo')}</h3>
             <p className="mt-1 text-sm text-hueso-muted">
-              El tema se ajusta desde tu pagina con CSS custom properties (
-              <span className="font-mono">--la-accent</span>,{' '}
-              <span className="font-mono">--la-bg</span>,{' '}
-              <span className="font-mono">--la-radius</span>,{' '}
-              <span className="font-mono">--la-height</span>, ...):
+              <Trans
+                i18nKey="auth.conectar.widget.personalizacionCuerpo"
+                components={{ codigo: <span className="font-mono" /> }}
+              />
             </p>
             <pre className={`${preClass} mt-3`}>{widgetThemeExample}</pre>
           </div>
@@ -308,11 +297,9 @@ export function ConnectPage() {
       </section>
 
       <section className="mt-8">
-        <h2 className="font-display text-lg font-semibold text-hueso">Como funciona</h2>
+        <h2 className="font-display text-lg font-semibold text-hueso">{t('auth.conectar.comoFuncionaTitulo')}</h2>
         <p className="mt-3 text-sm text-hueso-muted">
-          La configuracion del agente (modelo, system prompt, parametros) vive en la plataforma. Si
-          cambias el cerebro desde la consola, todas tus integraciones lo usan de inmediato sin
-          cambiar codigo.
+          {t('auth.conectar.comoFuncionaCuerpo')}
         </p>
       </section>
     </div>

@@ -1,4 +1,5 @@
 import { type CSSProperties, type JSX, useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { BrainSwap, type ModelProvider } from './brain-swap';
 import { PixelDataFlow } from './pixel-data-flow';
 
@@ -73,11 +74,13 @@ const nodeStyle: CSSProperties = {
 
 /** Tarjeta "Tus sistemas": cinco filas (logo + nombre + subtitulo + estado). */
 function SystemsCard(): JSX.Element {
+  const { t } = useTranslation();
+
   return (
     <div className="flex w-full flex-col rounded-2xl border border-border bg-background-secondary p-3 shadow-md min-[1100px]:w-[180px] min-[1100px]:flex-shrink-0">
       <div className="flex h-6 items-center px-1">
         <span className="font-jetbrains text-[0.7rem] uppercase tracking-[0.18em] text-foreground-secondary">
-          Tus sistemas
+          {t('landing.heroShowcase.tusSistemas')}
         </span>
       </div>
       <ul className="flex flex-1 flex-col" role="list">
@@ -91,7 +94,7 @@ function SystemsCard(): JSX.Element {
             <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-[#26241F]">
               <img
                 src={system.src}
-                alt={`Logo de ${system.name}`}
+                alt={t('landing.heroShowcase.logoAlt', { name: system.name })}
                 className="h-[22px] w-[22px] object-contain"
                 loading="lazy"
                 decoding="async"

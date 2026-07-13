@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { Calendar, KeyRound, Link2, Trash2 } from 'lucide-react';
 import type { ProviderId } from '../../lib/agents';
 import { providerLabel } from '../../lib/agents';
@@ -41,6 +42,7 @@ export function CredentialCard({
   credential: ProviderCredential;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation();
   const accent = ACCENTS[credential.providerId] ?? FALLBACK_ACCENT;
 
   return (
@@ -79,7 +81,7 @@ export function CredentialCard({
       <button
         type="button"
         onClick={onDelete}
-        aria-label={`Eliminar credencial ${credential.label}`}
+        aria-label={t('credenciales.tarjeta.eliminarAria', { etiqueta: credential.label })}
         className={`flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-line bg-surface text-muted transition hover:border-[rgba(192,73,43,0.35)] hover:bg-[rgba(192,73,43,0.05)] hover:text-[#C0492B] ${focusRing}`}
       >
         <Trash2 className="h-[17px] w-[17px]" />

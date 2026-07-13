@@ -1,4 +1,5 @@
 import { type JSX, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Globe,
   MessageCircle,
@@ -86,14 +87,14 @@ const CODE_LINES: Token[][] = [
 /** Texto plano del snippet (las 3 lineas) para el boton Copiar. */
 const CODE_TEXT = CODE_LINES.map((line) => line.map((token) => token.text).join('')).join('\n');
 
-/** Superficies donde corre el agente (fila de canales del mockup). */
-const SURFACES: { icon: LucideIcon; label: string }[] = [
-  { icon: Globe, label: 'Web' },
-  { icon: MessageCircle, label: 'WhatsApp' },
-  { icon: Hash, label: 'Slack' },
-  { icon: Mail, label: 'Correo' },
-  { icon: Code2, label: 'API' },
-  { icon: Smartphone, label: 'Móvil' }
+/** Superficies donde corre el agente (fila de canales del mockup). Guardan la CLAVE i18n. */
+const SURFACES: { icon: LucideIcon; labelKey: string }[] = [
+  { icon: Globe, labelKey: 'landing.integracion.superficies.web' },
+  { icon: MessageCircle, labelKey: 'landing.integracion.superficies.whatsapp' },
+  { icon: Hash, labelKey: 'landing.integracion.superficies.slack' },
+  { icon: Mail, labelKey: 'landing.integracion.superficies.correo' },
+  { icon: Code2, labelKey: 'landing.integracion.superficies.api' },
+  { icon: Smartphone, labelKey: 'landing.integracion.superficies.movil' }
 ];
 
 /**
@@ -102,6 +103,7 @@ const SURFACES: { icon: LucideIcon; label: string }[] = [
  * superficies que el equipo ya usa.
  */
 export function Integration(): JSX.Element {
+  const { t } = useTranslation();
   const [copiado, setCopiado] = useState(false);
 
   const copiar = async (): Promise<void> => {
@@ -119,14 +121,13 @@ export function Integration(): JSX.Element {
       <div className="mx-auto max-w-6xl px-6 py-20">
         <div className="max-w-2xl">
           <span className="font-jetbrains text-xs font-medium uppercase tracking-[0.18em] text-foreground-secondary">
-            Integración
+            {t('landing.integracion.eyebrow')}
           </span>
           <h2 className="mt-5 font-display text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-            Lo montas en tres líneas
+            {t('landing.integracion.titulo')}
           </h2>
           <p className="mt-4 text-lg text-foreground-secondary">
-            Sin migraciones ni proyectos de meses. Pegas el snippet, el agente queda
-            renderizado y corre en las superficies donde tu equipo ya trabaja.
+            {t('landing.integracion.descripcion')}
           </p>
         </div>
 
@@ -153,7 +154,7 @@ export function Integration(): JSX.Element {
                 ) : (
                   <Copy className="h-3 w-3 shrink-0" aria-hidden="true" />
                 )}
-                {copiado ? 'Copiado' : 'Copiar'}
+                {copiado ? t('landing.integracion.copiado') : t('landing.integracion.copiar')}
               </button>
             </div>
             <div className="flex flex-1 py-4 font-jetbrains text-[13.5px] leading-[2.1]">
@@ -192,23 +193,23 @@ export function Integration(): JSX.Element {
         <div className="mt-12 border-t border-border pt-9">
           <div className="mb-5 flex flex-wrap items-baseline gap-x-3.5 gap-y-1">
             <p className="font-jetbrains text-xs uppercase tracking-[0.16em] text-foreground-secondary">
-              Corre donde ya trabajas
+              {t('landing.integracion.canalesTitulo')}
             </p>
-            <p className="text-sm text-foreground-secondary">El mismo agente, sin reescribir nada.</p>
+            <p className="text-sm text-foreground-secondary">{t('landing.integracion.canalesSubtitulo')}</p>
           </div>
           <ul className="flex flex-wrap gap-3">
             {SURFACES.map((surface) => {
               const Icon = surface.icon;
               return (
                 <li
-                  key={surface.label}
+                  key={surface.labelKey}
                   className="group inline-flex cursor-default items-center gap-2.5 rounded-xl border border-border bg-background-secondary px-4 py-3 text-sm font-medium text-foreground-secondary transition-[transform,background-color,border-color] duration-200 hover:border-accent/30 hover:bg-background-tertiary motion-safe:hover:-translate-y-0.5"
                 >
                   <Icon
                     className="h-[18px] w-[18px] text-foreground transition-colors duration-200 group-hover:text-accent"
                     aria-hidden="true"
                   />
-                  {surface.label}
+                  {t(surface.labelKey)}
                 </li>
               );
             })}

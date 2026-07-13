@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
 import { MIN_PASSWORD_LENGTH } from '../lib/password';
 import { useAuth } from '../auth/useAuth';
@@ -44,6 +45,7 @@ type PageStatus = NewPasswordStatus | 'session-lost';
  * coincidencia); el token nunca se maneja a mano.
  */
 export function NewPasswordPage() {
+  const { t } = useTranslation();
   const { session, loading } = useAuth();
   const navigate = useNavigate();
   const [password, setPassword] = useState('');
@@ -71,11 +73,11 @@ export function NewPasswordPage() {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (password.length < MIN_PASSWORD_LENGTH) {
-      fail(`La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.`);
+      fail(t('auth.errores.contrasenaMinima', { min: MIN_PASSWORD_LENGTH }));
       return;
     }
     if (password !== confirm) {
-      fail('Las contraseñas no coinciden.');
+      fail(t('auth.errores.contrasenasNoCoinciden'));
       return;
     }
     setStatus('submitting');
@@ -84,16 +86,16 @@ export function NewPasswordPage() {
     if (error) {
       if (error.code === 'weak_password') {
         // La regla real la aplica el servidor; se muestra su mensaje sin prometer otra.
-        fail(`La contraseña no cumple los requisitos del servidor: ${error.message}`);
+        fail(t('auth.errores.requisitosServidor', { mensaje: error.message }));
       } else if (error.code === 'same_password') {
-        fail('La nueva contraseña debe ser distinta a la actual.');
+        fail(t('auth.nuevaContrasena.distintaActual'));
       } else if (error.name === 'AuthSessionMissingError') {
         // Sin sesion local, y tambien el session_not_found del servidor:
         // auth-js normaliza ambos a AuthSessionMissingError (status 400 sin
         // code), asi que el nombre del error es la senal estable.
         setStatus('session-lost');
       } else {
-        fail('No pudimos guardar la contraseña. Intenta de nuevo.');
+        fail(t('auth.nuevaContrasena.errorGuardar'));
       }
       return;
     }

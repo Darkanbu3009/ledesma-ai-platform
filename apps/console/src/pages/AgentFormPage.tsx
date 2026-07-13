@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeft, BarChart3, Play, Plug } from 'lucide-react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -53,6 +54,7 @@ function Section({
 }
 
 export function AgentFormPage() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const isEdit = Boolean(id);
   const navigate = useNavigate();
@@ -117,21 +119,21 @@ export function AgentFormPage() {
     <div className="mx-auto max-w-3xl">
       <div className="flex items-center justify-between gap-4">
         <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">
-          {isEdit ? 'Editar agente' : 'Crear agente'}
+          {isEdit ? t('agentes.form.editarTitulo') : t('agentes.lista.crearAgente')}
         </h1>
         <Link
           to="/agentes"
           className="inline-flex items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
         >
           <ArrowLeft className="h-4 w-4" />
-          Volver
+          {t('agentes.form.volver')}
         </Link>
       </div>
 
       {isEdit && isLoading ? (
         <SkeletonList count={4} cardClassName="h-28" className="mt-8 space-y-5" />
       ) : isEdit && isError ? (
-        <ErrorState title="No pudimos cargar el agente" onRetry={() => void refetch()} />
+        <ErrorState title={t('agentes.form.errorCarga')} onRetry={() => void refetch()} />
       ) : (
         <FormProvider {...form}>
           <form onSubmit={(e) => void onSubmit(e)} className="mt-8 space-y-6" noValidate>
@@ -140,7 +142,7 @@ export function AgentFormPage() {
                 role="alert"
                 className="rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa"
               >
-                No pudimos guardar el agente. Intenta de nuevo.
+                {t('agentes.form.errorGuardar')}
               </div>
             )}
 
@@ -148,36 +150,46 @@ export function AgentFormPage() {
               <div className="flex flex-wrap gap-2.5">
                 <Link to={`/agentes/${id}/playground`} className={secondaryActionClass}>
                   <Play className="h-4 w-4" />
-                  Probar agente
+                  {t('agentes.form.probarAgente')}
                 </Link>
                 <Link to={`/agentes/${id}/conectar`} className={secondaryActionClass}>
                   <Plug className="h-4 w-4" />
-                  Conectar
+                  {t('agentes.form.conectar')}
                 </Link>
                 <Link to={`/agentes/${id}/uso`} className={secondaryActionClass}>
                   <BarChart3 className="h-4 w-4" />
-                  Uso
+                  {t('agentes.form.uso')}
                 </Link>
               </div>
             )}
 
-            <Section title="Identidad" description="Cómo se identifica este agente en la consola.">
-              <Field label="Nombre" error={errors.name?.message}>
-                <input {...register('name')} className={inputClass} placeholder="Mi agente" />
+            <Section
+              title={t('agentes.form.identidadTitulo')}
+              description={t('agentes.form.identidadDescripcion')}
+            >
+              <Field label={t('agentes.form.nombreLabel')} error={errors.name?.message}>
+                <input
+                  {...register('name')}
+                  className={inputClass}
+                  placeholder={t('agentes.form.nombrePlaceholder')}
+                />
               </Field>
 
-              <Field label="Descripción" error={errors.description?.message}>
+              <Field label={t('agentes.form.descripcionLabel')} error={errors.description?.message}>
                 <textarea
                   {...register('description')}
                   rows={3}
                   className={inputClass}
-                  placeholder="Qué hace este agente"
+                  placeholder={t('agentes.form.descripcionPlaceholder')}
                 />
               </Field>
             </Section>
 
-            <Section title="Modelo" description="El cerebro que mueve al agente. Es intercambiable.">
-              <Field label="Proveedor" error={errors.providerId?.message}>
+            <Section
+              title={t('agentes.form.modeloTitulo')}
+              description={t('agentes.form.modeloDescripcion')}
+            >
+              <Field label={t('agentes.form.proveedorLabel')} error={errors.providerId?.message}>
                 <select
                   {...register('providerId', { onChange: () => setValue('model', '') })}
                   className={inputClass}
@@ -191,9 +203,9 @@ export function AgentFormPage() {
               </Field>
 
               <Field
-                label="Modelo"
+                label={t('agentes.form.modeloTitulo')}
                 error={errors.model?.message}
-                hint="Sugerencias según el proveedor; puedes escribir cualquier identificador válido."
+                hint={t('agentes.form.modeloHint')}
               >
                 {(field) => (
                   <>
@@ -221,7 +233,7 @@ export function AgentFormPage() {
                 <Field
                   label="Temperature"
                   error={errors.temperature?.message}
-                  hint="Vacío = por defecto del proveedor"
+                  hint={t('agentes.form.temperatureHint')}
                 >
                   <input
                     type="number"
@@ -236,7 +248,7 @@ export function AgentFormPage() {
                 <Field
                   label="Base URL"
                   error={errors.baseUrl?.message}
-                  hint="URL base del endpoint compatible con OpenAI"
+                  hint={t('agentes.form.baseUrlHint')}
                 >
                   <input
                     {...register('baseUrl')}
@@ -248,15 +260,15 @@ export function AgentFormPage() {
             </Section>
 
             <Section
-              title="Comportamiento"
-              description="Las instrucciones base que guían cada respuesta del agente."
+              title={t('agentes.form.comportamientoTitulo')}
+              description={t('agentes.form.comportamientoDescripcion')}
             >
               <Field label="System prompt" error={errors.systemPrompt?.message}>
                 <textarea
                   {...register('systemPrompt')}
                   rows={6}
                   className={inputClass}
-                  placeholder="Instrucciones para el agente"
+                  placeholder={t('agentes.form.systemPromptPlaceholder')}
                 />
               </Field>
             </Section>
@@ -276,7 +288,7 @@ export function AgentFormPage() {
                     }}
                     className="rounded-[10px] border border-line bg-transparent px-[22px] py-[11px] text-sm font-medium text-muted transition hover:border-[rgba(192,73,43,0.35)] hover:bg-[rgba(192,73,43,0.05)] hover:text-[#C0492B]"
                   >
-                    Eliminar agente
+                    {t('agentes.form.eliminarAgente')}
                   </button>
                 )}
               </div>
@@ -285,7 +297,7 @@ export function AgentFormPage() {
                 disabled={isSaving}
                 className="rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:-translate-y-px hover:bg-[#C8460F] hover:shadow-[0_2px_6px_rgba(31,30,28,0.14)] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {isSaving ? 'Guardando...' : 'Guardar agente'}
+                {isSaving ? t('agentes.form.guardando') : t('agentes.form.guardarAgente')}
               </button>
             </div>
           </form>
@@ -296,7 +308,7 @@ export function AgentFormPage() {
         open={confirmOpen}
         agentName={agent?.name ?? ''}
         busy={deleteAgent.isPending}
-        error={deleteAgent.isError ? 'No pudimos eliminar el agente. Intenta de nuevo.' : undefined}
+        error={deleteAgent.isError ? t('agentes.form.errorEliminar') : undefined}
         onConfirm={handleDelete}
         onCancel={() => setConfirmOpen(false)}
       />

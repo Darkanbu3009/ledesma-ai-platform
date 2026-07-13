@@ -1,7 +1,9 @@
 import { type FormEvent, type RefObject, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Loader2, X } from 'lucide-react';
 import { ApiError } from '../../lib/api';
+import i18n from '../../i18n';
 import { providerLabel } from '../../lib/agents';
 import { compatibleCredentials } from '../../lib/credentials';
 import { useAgents, useCredentials, useRecipe } from '../../lib/queries';
@@ -28,14 +30,14 @@ type Mode = 'create' | 'edit';
 /** Traduce el error del backend a un mensaje en espanol. */
 function backendMessage(error: unknown, mode: Mode): string {
   if (error instanceof ApiError) {
-    if (error.status === 401) return 'Tu sesion expiro. Vuelve a iniciar sesion.';
-    if (error.status === 403) return 'Las recetas requieren el plan Autonomo (tier autonomous).';
-    if (error.status === 404) return 'El agente o la credencial ya no existen. Actualiza y prueba de nuevo.';
-    if (error.status === 400) return 'El backend rechazo la receta. Revisa el nombre y los pasos.';
+    if (error.status === 401) return i18n.t('recetas.form.errorSesion');
+    if (error.status === 403) return i18n.t('recetas.form.errorPlan');
+    if (error.status === 404) return i18n.t('recetas.form.errorNoExiste');
+    if (error.status === 400) return i18n.t('recetas.form.errorRechazo');
   }
   return mode === 'edit'
-    ? 'No pudimos guardar los cambios. Intenta de nuevo.'
-    : 'No pudimos crear la receta. Intenta de nuevo.';
+    ? i18n.t('recetas.form.errorGuardar')
+    : i18n.t('recetas.form.errorCrear');
 }
 
 /**
@@ -57,6 +59,7 @@ function Shell({
   initialFocusRef: RefObject<HTMLInputElement | null>;
   children: React.ReactNode;
 }) {
+  const { t } = useTranslation();
   const dialogRef = useDialog({ onClose, initialFocus: initialFocusRef });
 
   return (
@@ -79,7 +82,7 @@ function Shell({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Cerrar"
+            aria-label={t('recetas.form.cerrarAria')}
             className="flex h-8 w-8 flex-none items-center justify-center rounded-lg text-muted transition hover:bg-line-soft hover:text-ink"
           >
             <X className="h-[18px] w-[18px]" />
@@ -112,6 +115,7 @@ function RecipeForm({
   recipeId?: string;
   nameRef: RefObject<HTMLInputElement | null>;
 }) {
+  const { t } = useTranslation();
   const { data: agents, isLoading: agentsLoading } = useAgents();
   const { data: credentials, isLoading: credentialsLoading } = useCredentials();
   const createRecipe = useCreateRecipe();
@@ -182,7 +186,7 @@ function RecipeForm({
   }
 
   const noAgents = !agentsLoading && (agents?.length ?? 0) === 0;
-  const submitLabel = isEdit ? 'Guardar cambios' : 'Crear receta';
+  const submitLabel = isEdit ? t('recetas.form.guardarCambios') : t('recetas.form.crearReceta');
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5 overflow-y-auto px-6 py-6" noValidate>
@@ -195,7 +199,7 @@ function RecipeForm({
         </div>
       )}
 
-      <Field label="Nombre" error={errors.name}>
+      <Field label={t('recetas.form.nombreLabel')} error={errors.name}>
         <input
           ref={nameRef}
           type="text"
@@ -205,34 +209,34 @@ function RecipeForm({
             setErrors((prev) => ({ ...prev, name: undefined }));
           }}
           className={inputClass}
-          placeholder="Ej: Resumen y respuesta de pedidos"
+          placeholder={t('recetas.form.nombrePlaceholder')}
           maxLength={RECIPE_NAME_MAX}
         />
       </Field>
 
-      <Field label="Descripcion" hint="Opcional: para que sirve esta receta.">
+      <Field label={t('recetas.form.descripcionLabel')} hint={t('recetas.form.descripcionHint')}>
         <textarea
           value={draft.description}
           onChange={(e) => patch({ description: e.target.value })}
           className={`${inputClass} min-h-[64px] resize-y`}
-          placeholder="Opcional"
+          placeholder={t('recetas.form.descripcionPlaceholder')}
           maxLength={RECIPE_DESCRIPTION_MAX}
         />
       </Field>
 
       {noAgents ? (
         <div className="rounded-xl border border-line bg-field px-4 py-3 text-sm text-muted">
-          Primero necesitas un agente.{' '}
+          {t('recetas.form.sinAgentes')}{' '}
           <Link to="/agentes" className="font-medium text-brasa hover:underline">
-            Crea uno en Agentes
+            {t('recetas.form.sinAgentesLink')}
           </Link>
           .
         </div>
       ) : (
         <Field
-          label="Agente"
+          label={t('recetas.form.agenteLabel')}
           error={errors.agentId}
-          hint={fieldsFixed ? 'El agente es fijo; crea una nueva receta para cambiarlo.' : undefined}
+          hint={fieldsFixed ? t('recetas.form.agenteFijoHint') : undefined}
         >
           <select
             value={draft.agentId}
@@ -240,7 +244,7 @@ function RecipeForm({
             className={inputClass}
             disabled={agentsLoading || fieldsFixed}
           >
-            <option value="">{agentsLoading ? 'Cargando agentes...' : 'Elige un agente...'}</option>
+            <option value="">{agentsLoading ? t('recetas.form.cargandoAgentes') : t('recetas.form.eligeAgente')}</option>
             {agents?.map((agent) => (
               <option key={agent.id} value={agent.id}>
                 {agent.name} · {providerLabel(agent.providerId)}
@@ -251,14 +255,14 @@ function RecipeForm({
       )}
 
       <Field
-        label="Credencial"
+        label={t('recetas.form.credencialLabel')}
         error={errors.credentialId}
-        hint={fieldsFixed ? 'La credencial es fija; crea una nueva receta para cambiarla.' : undefined}
+        hint={fieldsFixed ? t('recetas.form.credencialFijaHint') : undefined}
       >
         {(field) =>
           !selectedAgent ? (
             <div className="rounded-xl border border-line bg-field px-4 py-3 text-sm text-muted">
-              Elige primero un agente para ver sus credenciales.
+              {t('recetas.form.eligePrimeroAgente')}
             </div>
           ) : credentialsLoading ? (
             <div className="h-11 animate-pulse rounded-xl border border-line bg-field" />
@@ -270,14 +274,14 @@ function RecipeForm({
                 </option>
               ))}
               {compatible.every((cred) => cred.id !== draft.credentialId) && (
-                <option value={draft.credentialId}>Credencial no disponible</option>
+                <option value={draft.credentialId}>{t('recetas.form.credencialNoDisponible')}</option>
               )}
             </select>
           ) : compatible.length === 0 ? (
             <div className="rounded-xl border border-line bg-field px-4 py-3 text-sm text-muted">
-              No tienes credenciales de {providerLabel(selectedAgent.providerId)}.{' '}
+              {t('recetas.form.sinCredenciales', { proveedor: providerLabel(selectedAgent.providerId) })}{' '}
               <Link to="/credenciales" className="font-medium text-brasa hover:underline">
-                Agrega una en Credenciales
+                {t('recetas.form.sinCredencialesLink')}
               </Link>
               .
             </div>
@@ -291,7 +295,7 @@ function RecipeForm({
               }}
               className={inputClass}
             >
-              <option value="">Elige una credencial...</option>
+              <option value="">{t('recetas.form.eligeCredencial')}</option>
               {compatible.map((cred) => (
                 <option key={cred.id} value={cred.id}>
                   {cred.label}
@@ -319,7 +323,7 @@ function RecipeForm({
           onClick={onClose}
           className="rounded-[10px] border border-line bg-surface px-4 py-2.5 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
         >
-          Cancelar
+          {t('recetas.comunes.cancelar')}
         </button>
         <button
           type="submit"
@@ -327,7 +331,7 @@ function RecipeForm({
           className="inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-2.5 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
         >
           {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-          {mutation.isPending ? 'Guardando...' : submitLabel}
+          {mutation.isPending ? t('recetas.form.guardando') : submitLabel}
         </button>
       </div>
     </form>
@@ -348,15 +352,16 @@ export function RecipeFormDialog({
   onClose: () => void;
   onSaved: (mode: Mode) => void;
 }) {
+  const { t } = useTranslation();
   const isEdit = Boolean(recipeId);
   const { data: recipe, isLoading, isError } = useRecipe(recipeId ?? undefined);
   // El foco inicial (campo Nombre) lo comparte el Shell (para capturarlo) y el formulario (que lo monta).
   const nameRef = useRef<HTMLInputElement>(null);
 
-  const title = isEdit ? 'Editar receta' : 'Nueva receta';
+  const title = isEdit ? t('recetas.form.tituloEditar') : t('recetas.form.tituloNueva');
   const subtitle = isEdit
-    ? 'Ajusta el nombre, la descripcion y los pasos.'
-    : 'Un flujo de pasos que tu agente ejecuta en orden.';
+    ? t('recetas.form.subtituloEditar')
+    : t('recetas.form.subtituloNueva');
 
   if (isEdit && isLoading) {
     return (
@@ -378,7 +383,7 @@ export function RecipeFormDialog({
             role="alert"
             className="rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa"
           >
-            No pudimos cargar la receta. Cierra e intenta de nuevo.
+            {t('recetas.form.errorCargarReceta')}
           </div>
         </div>
       </Shell>

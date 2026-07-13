@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Bot, MessageCircle, Pencil, Wrench } from 'lucide-react';
 import type { AgentConfig, ProviderId } from '../../lib/agents';
 import { playgroundPath, providerLabel } from '../../lib/agents';
@@ -42,6 +43,7 @@ const FALLBACK_ACCENT: Accent = {
 };
 
 export function AgentCard({ agent }: { agent: AgentConfig }) {
+  const { t } = useTranslation();
   const accent = ACCENTS[agent.providerId] ?? FALLBACK_ACCENT;
   const toolsCount = agent.tools.length;
 
@@ -72,7 +74,7 @@ export function AgentCard({ agent }: { agent: AgentConfig }) {
       </span>
 
       <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-muted">
-        {agent.description || 'Sin descripción'}
+        {agent.description || t('agentes.card.sinDescripcion')}
       </p>
 
       {/* Pie anclado al fondo (mt-auto) para que las acciones queden alineadas entre tarjetas, sin
@@ -81,11 +83,11 @@ export function AgentCard({ agent }: { agent: AgentConfig }) {
         <div className="flex items-center gap-3.5 border-t border-line-soft pt-3.5 text-[12.5px] text-muted-soft">
           <span className="inline-flex items-center gap-1.5">
             <Wrench className="h-3.5 w-3.5" />
-            {toolsCount} {toolsCount === 1 ? 'herramienta' : 'herramientas'}
+            {t('agentes.card.herramientas', { count: toolsCount })}
           </span>
           <span className="inline-flex items-center gap-1.5">
             <span className="h-[7px] w-[7px] rounded-full bg-ok" aria-hidden="true" />
-            Activo
+            {t('agentes.card.activo')}
           </span>
         </div>
 
@@ -95,19 +97,19 @@ export function AgentCard({ agent }: { agent: AgentConfig }) {
         <div className="mt-3.5 grid grid-cols-2 gap-2">
           <Link
             to={`/agentes/${agent.id}`}
-            aria-label={`Editar ${agent.name}`}
+            aria-label={t('agentes.card.editarAria', { name: agent.name })}
             className={`inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-line bg-surface px-3 py-2 text-[13px] font-semibold text-muted transition hover:border-ink-soft hover:text-ink ${focusRing}`}
           >
             <Pencil className="h-[15px] w-[15px]" />
-            Editar
+            {t('agentes.card.editar')}
           </Link>
           <Link
             to={playgroundPath(agent.id)}
-            aria-label={`Conversar con ${agent.name}`}
+            aria-label={t('agentes.card.conversarAria', { name: agent.name })}
             className={`inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-brasa-line bg-brasa-soft px-3 py-2 text-[13px] font-semibold text-brasa transition hover:bg-brasa hover:text-white ${focusRing}`}
           >
             <MessageCircle className="h-[15px] w-[15px]" />
-            Conversar
+            {t('agentes.card.conversar')}
           </Link>
         </div>
       </div>

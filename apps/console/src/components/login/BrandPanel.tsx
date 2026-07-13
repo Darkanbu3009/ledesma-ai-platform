@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { drawCloud } from '../landing/pixelDither';
 import { LedesmaLogo } from './LedesmaLogo';
 
@@ -13,17 +14,16 @@ const PULSE_S = 0.6;
  * formulario en movil.
  */
 export function BrandCopy() {
+  const { t } = useTranslation();
   return (
     <div className="max-w-[320px]">
       <p className="font-mono text-[11px] uppercase tracking-[3px] text-[#B23E14]">
-        Plataforma de agentes
+        {t('auth.marca.eyebrow')}
       </p>
       <p className="mt-3 font-display text-[19px] font-medium leading-snug text-ink">
-        Agentes que ejecutan trabajo real dentro de tus sistemas.
+        {t('auth.marca.titular')}
       </p>
-      <p className="mt-3 text-[12.5px] text-muted">
-        Multi-tenant &middot; BYOK &middot; Trazabilidad completa
-      </p>
+      <p className="mt-3 text-[12.5px] text-muted">{t('auth.marca.soporte')}</p>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { AuthScreen, SubmitButton, authInputClass, authLabelClass } from '../components/AuthScreen';
@@ -12,18 +13,20 @@ type Mode = 'empresa' | 'individual';
 
 /** Salir de la cuenta actual. AuthProvider detecta el cambio y ProtectedRoute redirige a /login. */
 function SignOutLink() {
+  const { t } = useTranslation();
   return (
     <button
       type="button"
       onClick={() => void supabase.auth.signOut()}
       className="text-xs text-muted-soft transition hover:text-ink"
     >
-      Cerrar sesion
+      {t('registro.cerrarSesion')}
     </button>
   );
 }
 
 function RegistrationForm() {
+  const { t } = useTranslation();
   // Default 'individual' (Persona): el camino sin friccion que entra directo. El usuario puede
   // cambiar a Empresa si aplica -- ambos entran igual de directo, pero el default es el mas simple.
   const [mode, setMode] = useState<Mode>('individual');
@@ -64,8 +67,8 @@ function RegistrationForm() {
   return (
     <form onSubmit={handleSubmit} className="space-y-5" noValidate>
       <div>
-        <h1 className="font-display text-lg font-semibold text-ink">Completar registro</h1>
-        <p className="mt-1 text-sm text-muted">Necesitamos algunos datos para activar tu cuenta.</p>
+        <h1 className="font-display text-lg font-semibold text-ink">{t('registro.form.titulo')}</h1>
+        <p className="mt-1 text-sm text-muted">{t('registro.form.subtitulo')}</p>
       </div>
 
       {/* Toggle Empresa/Persona: segmento limpio, seleccionado en brasa, el otro neutro. */}
@@ -82,7 +85,7 @@ function RegistrationForm() {
                 : 'rounded-md px-3 py-2 text-sm font-medium text-muted transition hover:text-ink'
             }
           >
-            {value === 'empresa' ? 'Empresa' : 'Persona'}
+            {value === 'empresa' ? t('registro.form.empresa') : t('registro.form.persona')}
           </button>
         ))}
       </div>
@@ -90,13 +93,13 @@ function RegistrationForm() {
       {mode === 'empresa' && (
         <div>
           <label htmlFor="org-name" className={authLabelClass}>
-            Nombre de la empresa
+            {t('registro.form.nombreEmpresaLabel')}
           </label>
           <input
             id="org-name"
             value={orgName}
             onChange={(e) => setOrgName(e.target.value)}
-            placeholder="Acme S.A."
+            placeholder={t('registro.form.nombreEmpresaPlaceholder')}
             className={authInputClass}
           />
           {errors.orgName && (
@@ -109,7 +112,7 @@ function RegistrationForm() {
 
       <div>
         <label htmlFor="full-name" className={authLabelClass}>
-          {mode === 'empresa' ? 'Tu nombre (administrador)' : 'Nombre completo'}
+          {mode === 'empresa' ? t('registro.form.tuNombreAdminLabel') : t('registro.form.nombreCompletoLabel')}
         </label>
         <input
           id="full-name"
@@ -128,18 +131,18 @@ function RegistrationForm() {
 
       {failed && (
         <p className="text-sm text-brasa" role="alert">
-          No pudimos completar el registro. Intenta de nuevo.
+          {t('registro.form.errorGenerico')}
         </p>
       )}
 
-      <SubmitButton pending={submitting} pendingLabel="Enviando...">
-        {mode === 'empresa' ? 'Registrar empresa' : 'Crear mi cuenta'}
+      <SubmitButton pending={submitting} pendingLabel={t('auth.comun.enviando')}>
+        {mode === 'empresa' ? t('registro.form.registrarEmpresa') : t('registro.form.crearMiCuenta')}
       </SubmitButton>
 
       <p className="text-center text-xs text-muted-soft">
         {mode === 'empresa'
-          ? 'Tu empresa queda activa de inmediato.'
-          : 'Tu cuenta queda activa de inmediato.'}
+          ? t('registro.form.empresaActiva')
+          : t('registro.form.cuentaActiva')}
       </p>
     </form>
   );
@@ -151,6 +154,7 @@ function RegistrationForm() {
  * - sin registro -> formulario de Completar registro (empresa o persona).
  */
 export function RegistrationPage() {
+  const { t } = useTranslation();
   const { data, isLoading, isError, refetch } = useMe();
 
   if (isLoading) {
@@ -161,15 +165,15 @@ export function RegistrationPage() {
     return (
       <AuthScreen>
         <div className="text-center">
-          <p className="font-display text-lg font-semibold text-ink">No pudimos cargar tu cuenta</p>
-          <p className="mt-2 text-sm text-muted">Revisa tu conexion e intenta de nuevo.</p>
+          <p className="font-display text-lg font-semibold text-ink">{t('registro.errorCarga.titulo')}</p>
+          <p className="mt-2 text-sm text-muted">{t('auth.comun.revisaConexion')}</p>
           <button
             type="button"
             onClick={() => void refetch()}
             className="mt-5 inline-flex items-center gap-2 rounded-lg border border-line bg-field px-4 py-2 text-sm font-medium text-ink transition hover:border-brasa"
           >
             <RefreshCw className="h-4 w-4" />
-            Reintentar
+            {t('auth.comun.reintentar')}
           </button>
         </div>
       </AuthScreen>

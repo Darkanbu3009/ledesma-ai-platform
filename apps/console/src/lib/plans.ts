@@ -23,6 +23,7 @@ import {
   type PlanDefinition,
   type PlanId,
 } from '@ledesma-platform/shared/plans';
+import i18n from '../i18n';
 import type { ProfileTier } from './registration';
 
 export type { PlanId };
@@ -30,7 +31,10 @@ export type { PlanId };
 // de superficie para la consola, sin duplicar la definicion.
 export { isDowngrade, tierAllowsAutonomy };
 
-/** Feature de un plan como termino corto + texto, el mismo patron termino+definicion de los gates. */
+/**
+ * Feature de un plan como termino corto + texto, el mismo patron termino+definicion de los gates.
+ * `term` y `text` guardan CLAVES de traduccion (i18n); la tarjeta resuelve `t(...)` en el render.
+ */
 export interface PlanFeature {
   term: string;
   text: string;
@@ -48,7 +52,10 @@ export interface Plan extends PlanDefinition {
   price: string;
   /** Sufijo gris junto al precio. */
   priceSuffix: string;
-  /** Linea mono bajo el precio con el limite de ejecuciones del plan (derivada de runsPerMonth). */
+  /**
+   * Linea mono bajo el precio con el limite de ejecuciones del plan (derivada de runsPerMonth).
+   * Guarda la CLAVE de traduccion; la tarjeta la resuelve con t(...) interpolando runsPerMonth.
+   */
   runsLine: string;
   /** Un solo plan recomendado: lleva borde firme y pill "Recomendado". */
   recommended: boolean;
@@ -62,11 +69,11 @@ export const LAUNCH_NOTICE =
 /**
  * Linea de ejecuciones de la tarjeta, DERIVADA de runsPerMonth del modulo central (unica fuente del
  * numero): si el limite de un plan cambia alli, el catalogo lo refleja sin tocar copys. null = plan
- * a medida (Business).
+ * a medida (Business). Devuelve la CLAVE i18n; la tarjeta interpola runsPerMonth al renderizar.
  */
 function runsLineFor(runsPerMonth: number | null): string {
-  if (runsPerMonth === null) return 'Ejecuciones ampliadas para equipos';
-  return `${runsPerMonth.toLocaleString('en-US')} ejecuciones al mes`;
+  if (runsPerMonth === null) return 'planes.tarjeta.runsEquipos';
+  return 'planes.tarjeta.runsPorMes';
 }
 
 export const PLANS: Plan[] = [
@@ -78,10 +85,10 @@ export const PLANS: Plan[] = [
     runsLine: runsLineFor(getPlanById('free').runsPerMonth),
     recommended: false,
     features: [
-      { term: 'Agentes', text: '1 agente' },
-      { term: 'Modo de uso', text: 'Solo Playground, con tu API key' },
-      { term: 'Autonomía', text: 'Sin recetas, tareas ni triggers' },
-      { term: 'Soporte', text: 'Comunidad' },
+      { term: 'planes.features.termAgentes', text: 'planes.features.unAgente' },
+      { term: 'planes.features.termModoUso', text: 'planes.features.soloPlayground' },
+      { term: 'planes.features.termAutonomia', text: 'planes.features.sinAutonomia' },
+      { term: 'planes.features.termSoporte', text: 'planes.features.soporteComunidad' },
     ],
   },
   {
@@ -92,10 +99,10 @@ export const PLANS: Plan[] = [
     runsLine: runsLineFor(getPlanById('pro').runsPerMonth),
     recommended: true,
     features: [
-      { term: 'Agentes', text: 'Agentes ilimitados' },
-      { term: 'Modo de uso', text: 'Playground y embebido con tu widget' },
-      { term: 'Autonomía', text: 'Recetas, tareas, triggers y alertas de fallo' },
-      { term: 'Soporte', text: 'Prioritario por correo' },
+      { term: 'planes.features.termAgentes', text: 'planes.features.agentesIlimitados' },
+      { term: 'planes.features.termModoUso', text: 'planes.features.playgroundYWidget' },
+      { term: 'planes.features.termAutonomia', text: 'planes.features.autonomiaCompleta' },
+      { term: 'planes.features.termSoporte', text: 'planes.features.soporteCorreo' },
     ],
   },
   {
