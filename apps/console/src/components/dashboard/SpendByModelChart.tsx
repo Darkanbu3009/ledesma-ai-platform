@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { chartTheme } from './chart-theme';
 import { ChartTooltip } from './ChartTooltip';
@@ -20,13 +21,14 @@ function formatAxisUsd(value: number): string {
  * mayor a menor gasto; solo modelos CON tarifa (los sin tarifa se comunican aparte en la pantalla).
  */
 export function SpendByModelChart({ data }: { data: ModelSpendPoint[] }) {
+  const { t } = useTranslation();
   if (data.length === 0) {
     return (
       <div
         className="flex items-center justify-center rounded-2xl border border-line bg-surface text-sm text-muted"
         style={{ height: MIN_HEIGHT }}
       >
-        Sin gasto tarifado en este periodo.
+        {t('panel.grafica.gastoVacio')}
       </div>
     );
   }
@@ -35,7 +37,7 @@ export function SpendByModelChart({ data }: { data: ModelSpendPoint[] }) {
     <div
       className="rounded-2xl border border-line bg-surface p-4"
       role="img"
-      aria-label="Grafica de gasto estimado en USD por modelo"
+      aria-label={t('panel.grafica.gastoAria')}
     >
       <ResponsiveContainer width="100%" height={height}>
         <BarChart data={data} layout="vertical" margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>

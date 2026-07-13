@@ -160,10 +160,10 @@ export function updateProfileNameErrorMessage(err: unknown): string {
       : null;
   switch (status) {
     case 400:
-      return 'Revisa el nombre e intenta de nuevo.';
+      return i18n.t('registro.perfil.revisaNombre');
     case 401:
-      return 'Tu sesión expiró. Vuelve a iniciar sesión.';
+      return i18n.t('registro.perfil.sesionExpirada');
     default:
-      return 'No pudimos actualizar tu nombre. Intenta de nuevo.';
+      return i18n.t('registro.perfil.errorActualizar');
   }
 }

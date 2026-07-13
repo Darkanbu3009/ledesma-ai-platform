@@ -1,5 +1,6 @@
 import { type JSX } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { MessageCircle, Mail } from 'lucide-react';
 import { Logo } from '../brand/logo';
 
@@ -37,6 +38,8 @@ const linkClass =
  * a crear cuenta / iniciar sesion.
  */
 export function LandingFooter(): JSX.Element {
+  const { t } = useTranslation();
+
   return (
     <footer className="border-t border-border bg-background/80">
       <div className="mx-auto max-w-6xl px-6 py-12">
@@ -44,15 +47,14 @@ export function LandingFooter(): JSX.Element {
           <div className="max-w-sm">
             <Logo className="h-8 w-auto" />
             <p className="mt-4 text-sm text-foreground-secondary">
-              Agentes verticales de IA para tu empresa, integrados en los sistemas que tu
-              equipo ya usa.
+              {t('landing.footer.descripcion')}
             </p>
           </div>
 
           <div className="grid grid-cols-2 gap-10 sm:gap-16">
             <div>
               <p className="font-jetbrains text-xs uppercase tracking-[0.16em] text-foreground-secondary">
-                Contacto
+                {t('landing.footer.contacto')}
               </p>
               <ul className="mt-4 space-y-3 text-sm">
                 <li>
@@ -72,7 +74,7 @@ export function LandingFooter(): JSX.Element {
                     href={FACEBOOK_URL}
                     target="_blank"
                     rel="noopener noreferrer"
-                    aria-label="Facebook de Ledesma AI Labs"
+                    aria-label={t('landing.footer.facebookAria')}
                     className={`inline-flex items-center gap-2 ${linkClass}`}
                   >
                     <FacebookIcon className="h-4 w-4" />
@@ -84,17 +86,17 @@ export function LandingFooter(): JSX.Element {
 
             <div>
               <p className="font-jetbrains text-xs uppercase tracking-[0.16em] text-foreground-secondary">
-                Cuenta
+                {t('landing.footer.cuenta')}
               </p>
               <ul className="mt-4 space-y-3 text-sm">
                 <li>
                   <Link to="/crear-cuenta" className={linkClass}>
-                    Crear cuenta
+                    {t('landing.comun.crearCuenta')}
                   </Link>
                 </li>
                 <li>
                   <Link to="/login" className={linkClass}>
-                    Iniciar sesión
+                    {t('landing.comun.iniciarSesion')}
                   </Link>
                 </li>
               </ul>
@@ -104,7 +106,7 @@ export function LandingFooter(): JSX.Element {
 
         <div className="mt-10 border-t border-border pt-6">
           <p className="font-jetbrains text-xs text-foreground-secondary">
-            Ledesma AI Labs - Agentes verticales de IA para empresas
+            {t('landing.footer.tagline')}
           </p>
         </div>
       </div>

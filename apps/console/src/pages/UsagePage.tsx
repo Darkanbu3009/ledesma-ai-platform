@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Play, RefreshCw } from 'lucide-react';
 import { providerLabel } from '../lib/agents';
@@ -20,10 +21,11 @@ const badgeToneClass = {
   muted: 'text-hueso-muted',
 } as const;
 
+// `label` guarda la CLAVE de traduccion; se resuelve con t(...) en el render.
 const rangePresets: Array<{ value: UsageRangePreset; label: string }> = [
-  { value: '7d', label: '7 dias' },
-  { value: '30d', label: '30 dias' },
-  { value: 'all', label: 'Todo' },
+  { value: '7d', label: 'uso.rango.dias7' },
+  { value: '30d', label: 'uso.rango.dias30' },
+  { value: 'all', label: 'uso.rango.todo' },
 ];
 
 // 'YYYY-MM-DD' -> '10 jun' (es-MX). Se interpreta en UTC para no desfasar el dia.
@@ -38,6 +40,7 @@ function formatDayLabel(isoDate: string): string {
 }
 
 export function UsagePage() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const { data: agent, isLoading, isError, refetch } = useAgent(id);
   const [preset, setPreset] = useState<UsageRangePreset>('30d');
@@ -59,15 +62,15 @@ export function UsagePage() {
     return (
       <div className="mx-auto max-w-3xl">
         <div className="mt-10 rounded-xl border border-grafito-border bg-grafito p-8 text-center">
-          <p className="font-display text-lg text-hueso">No pudimos cargar el agente</p>
-          <p className="mt-2 text-sm text-hueso-muted">Revisa tu conexion e intenta de nuevo.</p>
+          <p className="font-display text-lg text-hueso">{t('uso.errorAgente')}</p>
+          <p className="mt-2 text-sm text-hueso-muted">{t('uso.errorDescripcion')}</p>
           <button
             type="button"
             onClick={() => void refetch()}
             className="mt-5 inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2 text-sm text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
           >
             <RefreshCw className="h-4 w-4" />
-            Reintentar
+            {t('uso.reintentar')}
           </button>
         </div>
       </div>
@@ -77,11 +80,11 @@ export function UsagePage() {
   const totals = usage.data?.totals;
   const totalCards = totals
     ? [
-        { label: 'Corridas', value: String(totals.runs) },
-        { label: 'Completadas', value: String(totals.completed) },
-        { label: 'Errores', value: String(totals.errors), accent: totals.errors > 0 },
-        { label: 'Tokens entrada', value: formatTokens(totals.inputTokens) },
-        { label: 'Tokens salida', value: formatTokens(totals.outputTokens) },
+        { label: t('uso.totales.corridas'), value: String(totals.runs) },
+        { label: t('uso.totales.completadas'), value: String(totals.completed) },
+        { label: t('uso.totales.errores'), value: String(totals.errors), accent: totals.errors > 0 },
+        { label: t('uso.totales.tokensEntrada'), value: formatTokens(totals.inputTokens) },
+        { label: t('uso.totales.tokensSalida'), value: formatTokens(totals.outputTokens) },
       ]
     : [];
 
@@ -96,7 +99,7 @@ export function UsagePage() {
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
           <h1 className="truncate font-display text-2xl font-bold text-hueso">
-            Uso: {agent.name}
+            {t('uso.titulo', { nombre: agent.name })}
           </h1>
           <p className="mt-1 text-sm text-hueso-muted">
             {providerLabel(agent.providerId)} · <span className="font-mono">{agent.model}</span>
@@ -109,21 +112,21 @@ export function UsagePage() {
             className="inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2 text-sm text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
           >
             <RefreshCw className={`h-4 w-4 ${usage.isFetching ? 'animate-spin' : ''}`} />
-            Actualizar
+            {t('uso.actualizar')}
           </button>
           <Link
             to={`/agentes/${agent.id}`}
             className="inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2 text-sm text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
           >
             <ArrowLeft className="h-4 w-4" />
-            Volver
+            {t('uso.volver')}
           </Link>
         </div>
       </div>
 
       <div
         role="group"
-        aria-label="Rango de fechas"
+        aria-label={t('uso.rango.etiqueta')}
         className="mt-6 inline-flex rounded-lg border border-grafito-border bg-grafito p-1"
       >
         {rangePresets.map((option) => (
@@ -137,7 +140,7 @@ export function UsagePage() {
                 : 'text-hueso-muted hover:text-hueso'
             }`}
           >
-            {option.label}
+            {t(option.label)}
           </button>
         ))}
       </div>
@@ -156,28 +159,26 @@ export function UsagePage() {
         </div>
       ) : usage.isError || !usage.data ? (
         <div className="mt-10 rounded-xl border border-grafito-border bg-grafito p-8 text-center">
-          <p className="font-display text-lg text-hueso">No pudimos cargar el uso del agente</p>
-          <p className="mt-2 text-sm text-hueso-muted">Revisa tu conexion e intenta de nuevo.</p>
+          <p className="font-display text-lg text-hueso">{t('uso.errorUso')}</p>
+          <p className="mt-2 text-sm text-hueso-muted">{t('uso.errorDescripcion')}</p>
           <button
             type="button"
             onClick={() => void usage.refetch()}
             className="mt-5 inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2 text-sm text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
           >
             <RefreshCw className="h-4 w-4" />
-            Reintentar
+            {t('uso.reintentar')}
           </button>
         </div>
       ) : usage.data.totals.runs === 0 && preset === 'all' ? (
         <div className="mt-10 rounded-xl border border-dashed border-grafito-border py-16 text-center">
-          <p className="text-sm text-hueso-muted">
-            Aun no hay corridas registradas. Prueba tu agente en el Playground.
-          </p>
+          <p className="text-sm text-hueso-muted">{t('uso.vacio.mensaje')}</p>
           <Link
             to={`/agentes/${agent.id}/playground`}
             className="mt-5 inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2 text-sm text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
           >
             <Play className="h-4 w-4" />
-            Ir al Playground
+            {t('uso.vacio.cta')}
           </Link>
         </div>
       ) : (
@@ -199,13 +200,13 @@ export function UsagePage() {
           </div>
 
           <section className="mt-8">
-            <h2 className="font-display text-lg font-semibold text-hueso">Corridas por dia</h2>
+            <h2 className="font-display text-lg font-semibold text-hueso">{t('uso.grafica.titulo')}</h2>
             <div className="mt-3 rounded-xl border border-grafito-border bg-grafito p-4">
               {runsByDay.length === 0 ? (
                 // Estado vacio: eje base y un texto tenue, sin bloque ni area en blanco.
                 <div className="flex h-40 flex-col">
                   <div className="flex flex-1 items-center justify-center">
-                    <p className="text-sm text-hueso-muted">Sin corridas en este periodo.</p>
+                    <p className="text-sm text-hueso-muted">{t('uso.grafica.vacio')}</p>
                   </div>
                   <div className="border-t border-grafito-border" />
                 </div>
@@ -227,7 +228,10 @@ export function UsagePage() {
                         {runsByDay.map((day) => (
                           <div
                             key={day.date}
-                            title={`${formatDayLabel(day.date)}: ${day.runs} ${day.runs === 1 ? 'corrida' : 'corridas'}`}
+                            title={t('uso.grafica.tooltip', {
+                              count: day.runs,
+                              fecha: formatDayLabel(day.date),
+                            })}
                             className="max-w-[22px] flex-1 rounded-t-[3px] bg-brasa transition-colors hover:bg-[#C8460F]"
                             style={{
                               height: `${(day.runs / maxRunsByDay) * 100}%`,
@@ -257,16 +261,18 @@ export function UsagePage() {
 
           {usage.data.recent.length > 0 && (
             <section className="mt-8">
-              <h2 className="font-display text-lg font-semibold text-hueso">Corridas recientes</h2>
+              <h2 className="font-display text-lg font-semibold text-hueso">
+                {t('uso.recientes.titulo')}
+              </h2>
               <div className="mt-3 overflow-x-auto rounded-xl border border-grafito-border bg-grafito">
                 <table className="w-full text-left text-sm">
                   <thead>
                     <tr className="border-b border-grafito-border text-xs text-hueso-muted">
-                      <th className="px-4 py-3 font-medium">Fecha</th>
-                      <th className="px-4 py-3 font-medium">Estado</th>
-                      <th className="px-4 py-3 font-medium">Codigo</th>
-                      <th className="px-4 py-3 font-medium">Tokens</th>
-                      <th className="px-4 py-3 font-medium">Duracion</th>
+                      <th className="px-4 py-3 font-medium">{t('uso.recientes.fecha')}</th>
+                      <th className="px-4 py-3 font-medium">{t('uso.recientes.estado')}</th>
+                      <th className="px-4 py-3 font-medium">{t('uso.recientes.codigo')}</th>
+                      <th className="px-4 py-3 font-medium">{t('uso.recientes.tokens')}</th>
+                      <th className="px-4 py-3 font-medium">{t('uso.recientes.duracion')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -303,10 +309,7 @@ export function UsagePage() {
         </>
       )}
 
-      <p className="mt-8 text-xs text-hueso-muted">
-        Solo se registran metricas de cada corrida (tokens, duracion, estado). El contenido de las
-        conversaciones nunca se almacena.
-      </p>
+      <p className="mt-8 text-xs text-hueso-muted">{t('uso.notaPrivacidad')}</p>
     </div>
   );
 }

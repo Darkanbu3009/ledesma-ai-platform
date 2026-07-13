@@ -1,5 +1,6 @@
 import { useId, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Trans, useTranslation } from 'react-i18next';
 import { Eye, EyeOff } from 'lucide-react';
 import { providerLabel, type ProviderId } from '../../lib/agents';
 import type { ProviderCredential } from '../../lib/credentials';
@@ -36,6 +37,7 @@ export function PlaygroundCredential({
   apiKey: string;
   onApiKeyChange: (key: string) => void;
 }) {
+  const { t } = useTranslation();
   const [showKey, setShowKey] = useState(false);
   const groupName = useId();
   const selected = compatible.find((cred) => cred.id === credentialId);
@@ -43,32 +45,29 @@ export function PlaygroundCredential({
   return (
     <div className="rounded-xl border border-grafito-border bg-grafito p-5">
       <div className="mb-4">
-        <h2 className="text-sm font-medium text-hueso">Credencial de la sesion</h2>
-        <p className="mt-1 text-xs text-hueso-muted">
-          Con que key conversa el agente. Reusa una de tu boveda o pega una al momento; nunca se
-          guarda en la plataforma.
-        </p>
+        <h2 className="text-sm font-medium text-hueso">{t('playground.credencial.titulo')}</h2>
+        <p className="mt-1 text-xs text-hueso-muted">{t('playground.credencial.descripcion')}</p>
       </div>
 
       {/* Selector de modo (radiogroup accesible). */}
       <div
         role="radiogroup"
-        aria-label="Origen de la credencial"
+        aria-label={t('playground.credencial.origenAria')}
         className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2"
       >
         <ModeOption
           name={groupName}
           checked={mode === 'saved'}
           onSelect={() => onModeChange('saved')}
-          title="Credencial guardada"
-          description="Reusa una de tu boveda"
+          title={t('playground.credencial.guardadaTitulo')}
+          description={t('playground.credencial.guardadaDescripcion')}
         />
         <ModeOption
           name={groupName}
           checked={mode === 'paste'}
           onSelect={() => onModeChange('paste')}
-          title="Pegar al momento"
-          description="Una key solo para esta sesion"
+          title={t('playground.credencial.pegarTitulo')}
+          description={t('playground.credencial.pegarDescripcion')}
         />
       </div>
 
@@ -77,24 +76,30 @@ export function PlaygroundCredential({
           <div className="h-11 animate-pulse rounded-xl border border-line bg-field" />
         ) : compatible.length === 0 ? (
           <div className="rounded-xl border border-line bg-field px-4 py-3 text-sm text-hueso-muted">
-            No tenes credenciales de {providerLabel(providerId)}. Pega una key al momento o{' '}
-            <Link to="/credenciales" className="font-medium text-brasa hover:underline">
-              agregala en Credenciales
-            </Link>
-            .
+            <Trans
+              i18nKey="playground.credencial.sinCredenciales"
+              values={{ provider: providerLabel(providerId) }}
+              components={{
+                enlace: (
+                  <Link to="/credenciales" className="font-medium text-brasa hover:underline" />
+                ),
+              }}
+            />
           </div>
         ) : (
           <div className="space-y-2">
             <Field
-              label="Credencial guardada"
-              hint={`Solo se muestran las de ${providerLabel(providerId)}, el proveedor del agente.`}
+              label={t('playground.credencial.guardadaTitulo')}
+              hint={t('playground.credencial.soloProveedor', {
+                provider: providerLabel(providerId),
+              })}
             >
               <select
                 value={credentialId}
                 onChange={(event) => onCredentialIdChange(event.target.value)}
                 className={inputClass}
               >
-                <option value="">Elegi una credencial...</option>
+                <option value="">{t('playground.credencial.eligeOpcion')}</option>
                 {compatible.map((cred) => (
                   <option key={cred.id} value={cred.id}>
                     {cred.label}
@@ -111,8 +116,8 @@ export function PlaygroundCredential({
         )
       ) : (
         <Field
-          label="API key del proveedor"
-          hint="Tu llave se usa solo para esta sesion de prueba, viaja cifrada en cada peticion y NUNCA se guarda en la plataforma."
+          label={t('playground.credencial.apiKeyLabel')}
+          hint={t('playground.credencial.apiKeyHint')}
         >
           <div className="relative">
             <input
@@ -120,14 +125,18 @@ export function PlaygroundCredential({
               value={apiKey}
               onChange={(event) => onApiKeyChange(event.target.value)}
               className={`${inputClass} pr-11`}
-              placeholder="Pega tu API key"
+              placeholder={t('playground.credencial.apiKeyPlaceholder')}
               autoComplete="off"
               spellCheck={false}
             />
             <button
               type="button"
               onClick={() => setShowKey((value) => !value)}
-              aria-label={showKey ? 'Ocultar API key' : 'Mostrar API key'}
+              aria-label={
+                showKey
+                  ? t('playground.credencial.ocultarKey')
+                  : t('playground.credencial.mostrarKey')
+              }
               className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-hueso-muted transition hover:text-hueso"
             >
               {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}

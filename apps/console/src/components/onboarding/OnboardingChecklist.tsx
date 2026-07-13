@@ -1,4 +1,5 @@
 import { type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Check, Sparkles } from 'lucide-react';
 import { useOnboardingProgress } from '../../lib/queries';
@@ -29,11 +30,12 @@ type StepStatus = 'done' | 'active' | 'blocked';
  * es el activo, numero gris delineado si esta bloqueado. Neutros: el brasa queda para el CTA.
  */
 function StepCircle({ status, number }: { status: StepStatus; number: number }) {
+  const { t } = useTranslation();
   if (status === 'done') {
     return (
       <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-[#F1EFE8] text-ink">
         <Check className="h-3.5 w-3.5" />
-        <span className="sr-only">Completado</span>
+        <span className="sr-only">{t('onboarding.completado')}</span>
       </span>
     );
   }
@@ -105,6 +107,7 @@ function StepRow({ step, status, number }: { step: OnboardingStep; status: StepS
  * pendientes en greige. Compacto (segmentos fijos de ~26x4) para vivir a la derecha de un header.
  */
 function SegmentedProgress({ completedCount }: { completedCount: number }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-none items-center gap-2.5">
       <div
@@ -112,7 +115,10 @@ function SegmentedProgress({ completedCount }: { completedCount: number }) {
         aria-valuenow={completedCount}
         aria-valuemin={0}
         aria-valuemax={ONBOARDING_STEP_COUNT}
-        aria-label={`${completedCount} de ${ONBOARDING_STEP_COUNT} pasos completados`}
+        aria-label={t('onboarding.progreso.aria', {
+          completados: completedCount,
+          total: ONBOARDING_STEP_COUNT,
+        })}
         className="flex gap-1"
       >
         {Array.from({ length: ONBOARDING_STEP_COUNT }, (_, i) => (
@@ -126,7 +132,10 @@ function SegmentedProgress({ completedCount }: { completedCount: number }) {
         ))}
       </div>
       <span className="text-[12.5px] text-[#8A8880]">
-        {completedCount} de {ONBOARDING_STEP_COUNT}
+        {t('onboarding.progreso.contador', {
+          completados: completedCount,
+          total: ONBOARDING_STEP_COUNT,
+        })}
       </span>
     </div>
   );
@@ -143,6 +152,7 @@ function SegmentedProgress({ completedCount }: { completedCount: number }) {
  * No bloquea la navegacion: es una tarjeta mas del Panel que el usuario puede ignorar.
  */
 export function OnboardingChecklist(): ReactNode {
+  const { t } = useTranslation();
   const { hasCredential, hasAgent, hasRun, completedCount, isComplete, firstAgentId, isLoading, isError } =
     useOnboardingProgress();
 

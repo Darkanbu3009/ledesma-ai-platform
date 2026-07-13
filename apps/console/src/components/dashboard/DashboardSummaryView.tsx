@@ -1,4 +1,5 @@
 import { type ReactNode, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   AlertTriangle,
   Boxes,
@@ -66,11 +67,6 @@ function num(value: number): string {
   return value.toLocaleString('es-MX');
 }
 
-/** Pluraliza "modelo": 1 -> "modelo", n -> "modelos". */
-function modelWord(count: number): string {
-  return count === 1 ? 'modelo' : 'modelos';
-}
-
 /** EJE OPERACIONES: la foto actual de la cola + los recursos activos, arriba por ser lo mas escaneable. */
 function OperationsSection({
   operations,
@@ -79,23 +75,32 @@ function OperationsSection({
   operations: DashboardOperations;
   lastRunAt: string | null;
 }) {
+  const { t } = useTranslation();
   const { jobs, resources } = operations;
   return (
     <section>
       <SectionHeading
-        title="Operaciones"
-        description="Estado actual de la cola de ejecucion y los recursos activos."
+        title={t('panel.operaciones.titulo')}
+        description={t('panel.operaciones.descripcion')}
       />
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <MetricCard label="Pendientes" value={num(jobs.pending)} icon={<Clock className="h-4 w-4" />} />
-        <MetricCard label="En curso" value={num(jobs.running)} icon={<Loader className="h-4 w-4" />} />
         <MetricCard
-          label="Completadas"
+          label={t('panel.operaciones.pendientes')}
+          value={num(jobs.pending)}
+          icon={<Clock className="h-4 w-4" />}
+        />
+        <MetricCard
+          label={t('panel.operaciones.enCurso')}
+          value={num(jobs.running)}
+          icon={<Loader className="h-4 w-4" />}
+        />
+        <MetricCard
+          label={t('panel.operaciones.completadas')}
           value={num(jobs.completed)}
           icon={<CheckCircle2 className="h-4 w-4" />}
         />
         <MetricCard
-          label="Fallidas"
+          label={t('panel.operaciones.fallidas')}
           value={num(jobs.failed)}
           emphasis={jobs.failed > 0}
           icon={<AlertTriangle className="h-4 w-4" />}
@@ -103,24 +108,24 @@ function OperationsSection({
       </div>
       <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <MetricCard
-          label="Tareas activas"
+          label={t('panel.operaciones.tareasActivas')}
           value={num(resources.scheduledTasksActive)}
           icon={<CalendarClock className="h-4 w-4" />}
         />
         <MetricCard
-          label="Triggers activos"
+          label={t('panel.operaciones.triggersActivos')}
           value={num(resources.triggersActive)}
           icon={<Webhook className="h-4 w-4" />}
         />
         <MetricCard
-          label="Recetas"
+          label={t('panel.operaciones.recetas')}
           value={num(resources.recipesActive)}
           icon={<ChefHat className="h-4 w-4" />}
         />
         <MetricCard
-          label="Ultima ejecucion"
+          label={t('panel.operaciones.ultimaEjecucion')}
           value={lastRunAt ? formatRunDate(lastRunAt) : '—'}
-          hint={lastRunAt ? undefined : 'Sin ejecuciones aun'}
+          hint={lastRunAt ? undefined : t('panel.operaciones.sinEjecuciones')}
           icon={<History className="h-4 w-4" />}
           compact
         />
@@ -131,18 +136,23 @@ function OperationsSection({
 
 /** EJE ACTIVIDAD: totales de corridas + la grafica de ejecuciones por dia. */
 function ActivitySection({ activity }: { activity: DashboardActivity }) {
+  const { t } = useTranslation();
   const series = useMemo(() => toActivitySeries(activity.byDay), [activity.byDay]);
   const { totals } = activity;
   return (
     <section>
       <SectionHeading
-        title="Actividad"
-        description="Ejecuciones de agentes por dia en el rango seleccionado."
+        title={t('panel.actividad.titulo')}
+        description={t('panel.actividad.descripcion')}
       />
       <div className="mb-4 flex flex-wrap gap-x-10 gap-y-3">
-        <InlineStat label="Corridas" value={num(totals.runs)} />
-        <InlineStat label="Exitosas" value={num(totals.completed)} />
-        <InlineStat label="Con error" value={num(totals.errors)} emphasis={totals.errors > 0} />
+        <InlineStat label={t('panel.actividad.corridas')} value={num(totals.runs)} />
+        <InlineStat label={t('panel.actividad.exitosas')} value={num(totals.completed)} />
+        <InlineStat
+          label={t('panel.actividad.conError')}
+          value={num(totals.errors)}
+          emphasis={totals.errors > 0}
+        />
       </div>
       <ActivityChart data={series} />
     </section>
@@ -151,30 +161,28 @@ function ActivitySection({ activity }: { activity: DashboardActivity }) {
 
 /** EJE GASTO: tokens + dinero BYOK, con el desglose por modelo y la nota de transparencia. */
 function SpendSection({ spend }: { spend: DashboardSpend }) {
+  const { t } = useTranslation();
   const series = useMemo(() => toModelSpendSeries(spend.byModel), [spend.byModel]);
   const shown = series.slice(0, MAX_SPEND_MODELS);
   const hidden = series.length - shown.length;
   const { tokens } = spend;
   return (
     <section>
-      <SectionHeading
-        title="Gasto"
-        description="Consumo estimado sobre la propia key del proveedor, desglosado por modelo."
-      />
+      <SectionHeading title={t('panel.gasto.titulo')} description={t('panel.gasto.descripcion')} />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <MetricCard
-          label="Gasto estimado"
+          label={t('panel.gasto.gastoEstimado')}
           value={formatUSD(spend.totalCostUsd)}
-          hint={spend.costComplete ? undefined : 'Total parcial: hay modelos sin tarifa conocida'}
+          hint={spend.costComplete ? undefined : t('panel.gasto.totalParcial')}
           icon={<CircleDollarSign className="h-4 w-4" />}
         />
         <MetricCard
-          label="Tokens totales"
+          label={t('panel.gasto.tokensTotales')}
           value={formatTokens(totalTokens(tokens))}
           icon={<Coins className="h-4 w-4" />}
         />
         <MetricCard
-          label="Modelos usados"
+          label={t('panel.gasto.modelosUsados')}
           value={num(spend.byModel.length)}
           icon={<Boxes className="h-4 w-4" />}
         />
@@ -182,32 +190,34 @@ function SpendSection({ spend }: { spend: DashboardSpend }) {
 
       <div className="mt-4 rounded-2xl border border-line bg-surface p-4">
         <div className="flex flex-wrap gap-x-10 gap-y-3">
-          <InlineStat label="Entrada" value={formatTokens(tokens.inputTokens)} />
-          <InlineStat label="Salida" value={formatTokens(tokens.outputTokens)} />
-          <InlineStat label="Cache lectura" value={formatTokens(tokens.cacheReadTokens)} />
-          <InlineStat label="Cache escritura" value={formatTokens(tokens.cacheWriteTokens)} />
+          <InlineStat label={t('panel.gasto.entrada')} value={formatTokens(tokens.inputTokens)} />
+          <InlineStat label={t('panel.gasto.salida')} value={formatTokens(tokens.outputTokens)} />
+          <InlineStat label={t('panel.gasto.cacheLectura')} value={formatTokens(tokens.cacheReadTokens)} />
+          <InlineStat label={t('panel.gasto.cacheEscritura')} value={formatTokens(tokens.cacheWriteTokens)} />
         </div>
       </div>
 
       <Notice notice={{ kind: 'ok', text: spend.note }} className="mt-4" />
 
       <div className="mt-6">
-        <h3 className="font-display text-[15px] font-semibold text-ink">Gasto por modelo</h3>
-        <p className="mt-0.5 text-[13px] text-muted">
-          Cada modelo se tarifa por separado; se muestran solo los que tienen tarifa conocida.
-        </p>
+        <h3 className="font-display text-[15px] font-semibold text-ink">
+          {t('panel.gasto.porModeloTitulo')}
+        </h3>
+        <p className="mt-0.5 text-[13px] text-muted">{t('panel.gasto.porModeloDescripcion')}</p>
         <div className="mt-3">
           <SpendByModelChart data={shown} />
         </div>
         {hidden > 0 && (
           <p className="mt-2 text-xs text-muted-soft">
-            y {hidden} {modelWord(hidden)} mas con gasto menor.
+            {t('panel.gasto.masModelos', { count: hidden })}
           </p>
         )}
         {spend.untariffedModels.length > 0 && (
           <p className="mt-2 text-xs text-muted-soft">
-            {spend.untariffedModels.length} {modelWord(spend.untariffedModels.length)} sin tarifa
-            conocida (no se estima su costo en dinero): {spend.untariffedModels.join(', ')}.
+            {t('panel.gasto.sinTarifa', {
+              count: spend.untariffedModels.length,
+              lista: spend.untariffedModels.join(', '),
+            })}
           </p>
         )}
       </div>

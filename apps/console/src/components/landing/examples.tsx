@@ -1,5 +1,6 @@
 import { type JSX } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   Receipt,
   Calculator,
@@ -30,21 +31,18 @@ const AGENT_ICONS: Record<AgentId, LucideIcon> = {
  * mismo config alimenta en el dashboard y el workspace del agente: el alcance es
  * solo la landing.
  */
-const AGENT_COPY: Record<AgentId, { tagline: string; description: string }> = {
+const AGENT_COPY: Record<AgentId, { taglineKey: string; descripcionKey: string }> = {
   ap: {
-    tagline: 'Procesa y valida facturas sin captura manual',
-    description:
-      'Lee cada factura, extrae los datos y los valida contra tu ERP y tus reglas. Detecta duplicados y errores antes de que se paguen. Cierras más rápido y sin captura manual.'
+    taglineKey: 'landing.ejemplos.agentes.ap.tagline',
+    descripcionKey: 'landing.ejemplos.agentes.ap.descripcion'
   },
   quotations: {
-    tagline: 'Arma cotizaciones complejas en minutos',
-    description:
-      'Aplica tus precios, márgenes y reglas comerciales al instante. Lo que tomaba horas de ida y vuelta queda en minutos, sin errores de cálculo.'
+    taglineKey: 'landing.ejemplos.agentes.quotations.tagline',
+    descripcionKey: 'landing.ejemplos.agentes.quotations.descripcion'
   },
   cs: {
-    tagline: 'Resuelve tickets y consultas al instante',
-    description:
-      'Responde con el contexto de tu negocio y acceso a tus sistemas, 24/7. No solo contesta: actualiza pedidos, consulta datos y escala a tu equipo solo cuando hace falta.'
+    taglineKey: 'landing.ejemplos.agentes.cs.tagline',
+    descripcionKey: 'landing.ejemplos.agentes.cs.descripcion'
   }
 };
 
@@ -54,21 +52,21 @@ const AGENT_COPY: Record<AgentId, { tagline: string; description: string }> = {
  * construye cualquier agente a la medida.
  */
 export function Examples(): JSX.Element {
+  const { t } = useTranslation();
+
   return (
     <section id="ejemplos" className="border-t border-border">
       <div className="mx-auto max-w-6xl px-6 py-20">
         <div className="max-w-2xl">
-          <Eyebrow>Ejemplos en vivo</Eyebrow>
+          <Eyebrow>{t('landing.ejemplos.eyebrow')}</Eyebrow>
           <h2 className="mt-5 font-display text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-            Una plataforma, muchos agentes
+            {t('landing.ejemplos.titulo')}
           </h2>
           <p className="mt-4 text-lg text-foreground-secondary">
             <strong className="font-semibold text-foreground">
-              Agentes que no solo responden: ejecutan trabajo real.
+              {t('landing.ejemplos.introDestacado')}
             </strong>{' '}
-            Todos corren sobre la misma plataforma, con las integraciones, la
-            seguridad y la trazabilidad ya resueltas. Cuentas por pagar,
-            cotizaciones, soporte… o el proceso que tu operación necesite.
+            {t('landing.ejemplos.introResto')}
           </p>
         </div>
 
@@ -93,23 +91,23 @@ export function Examples(): JSX.Element {
                       className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
                       aria-hidden="true"
                     />
-                    Ejemplo en vivo
+                    {t('landing.ejemplos.badgeEjemploEnVivo')}
                   </Badge>
                 </div>
                 <h3 className="mt-5 font-display text-xl font-semibold text-foreground">
                   {agent.name}
                 </h3>
                 <p className="mt-1.5 text-sm font-medium text-foreground/75">
-                  {copy.tagline}
+                  {t(copy.taglineKey)}
                 </p>
                 <p className="mt-3 flex-1 text-sm leading-relaxed text-foreground-secondary">
-                  {copy.description}
+                  {t(copy.descripcionKey)}
                 </p>
                 <Link
                   to="/crear-cuenta"
                   className="mt-6 inline-flex items-center gap-1.5 rounded-sm font-medium text-accent transition-colors hover:text-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
-                  Crear cuenta
+                  {t('landing.comun.crearCuenta')}
                   <ArrowRight
                     className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5"
                     aria-hidden="true"
@@ -131,23 +129,20 @@ export function Examples(): JSX.Element {
               </div>
               <div className="max-w-2xl">
                 <h3 className="font-display text-xl font-semibold text-foreground">
-                  ¿Otro proceso en mente?
+                  {t('landing.ejemplos.otroProcesoTitulo')}
                 </h3>
                 <p className="mt-1.5 text-sm leading-relaxed text-foreground-secondary">
-                  Estos tres son solo ejemplos.{' '}
+                  {t('landing.ejemplos.otroProcesoIntro')}{' '}
                   <strong className="font-semibold text-foreground">
-                    La misma plataforma se adapta a cualquier proceso de tu
-                    operación:
+                    {t('landing.ejemplos.otroProcesoDestacado')}
                   </strong>{' '}
-                  conciliaciones, onboarding, reportes, generación de
-                  documentos, lo que necesites. Tú describes el proceso;
-                  nosotros lo construimos y lo desplegamos.
+                  {t('landing.ejemplos.otroProcesoResto')}
                 </p>
               </div>
             </div>
             <Button asChild className="shrink-0">
               <Link to="/crear-cuenta">
-                Cuéntanos tu caso
+                {t('landing.ejemplos.cuentanosTuCaso')}
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </Link>
             </Button>

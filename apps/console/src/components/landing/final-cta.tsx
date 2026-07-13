@@ -1,5 +1,6 @@
 import { type JSX } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { ArrowRight, MessageCircle } from 'lucide-react';
 import { Button } from '../ui/button';
 
@@ -10,28 +11,29 @@ const WHATSAPP_URL = 'https://wa.me/528116261651';
  * CTA final de la landing: ultima invitacion a crear cuenta, con un atajo a WhatsApp.
  */
 export function FinalCTA(): JSX.Element {
+  const { t } = useTranslation();
+
   return (
     <section className="border-t border-border">
       <div className="mx-auto max-w-6xl px-6 py-24">
         <div className="relative isolate overflow-hidden rounded-2xl border border-border bg-background-secondary px-6 py-16 text-center shadow-md sm:px-12">
           <h2 className="mx-auto max-w-2xl font-display text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-            Pon un agente a trabajar en tu operación
+            {t('landing.ctaFinal.titulo')}
           </h2>
           <p className="mx-auto mt-4 max-w-xl text-lg text-foreground-secondary">
-            Tú describes el proceso; nosotros lo configuramos, lo integramos a tus sistemas y lo
-            ponemos en producción. A la medida de tu negocio y en una fracción del tiempo.
+            {t('landing.ctaFinal.descripcion')}
           </p>
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button asChild size="lg">
               <Link to="/crear-cuenta">
-                Crear cuenta
+                {t('landing.comun.crearCuenta')}
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </Button>
             <Button asChild variant="secondary" size="lg">
               <a href={WHATSAPP_URL}>
                 <MessageCircle className="h-4 w-4" />
-                Escríbenos por WhatsApp
+                {t('landing.ctaFinal.escribenosWhatsapp')}
               </a>
             </Button>
           </div>
