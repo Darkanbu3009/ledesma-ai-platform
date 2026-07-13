@@ -16,16 +16,16 @@ import en from './locales/en.json';
  * Deteccion de idioma (orden): preferencia del usuario -> idioma del navegador -> espanol. Hoy NO
  * hay preferencia persistida (localStorage no esta soportado en el entorno y el perfil del backend
  * aun no guarda idioma), asi que al arrancar solo aplican los dos ultimos pasos; la eleccion del
- * usuario (modal de la landing o selector de Configuracion) vive en el estado de la sesion de
- * i18next via changeLanguage. Por lo mismo NO se usa i18next-browser-languagedetector: su cadena
- * de deteccion por defecto lee/escribe localStorage.
+ * usuario (selector discreto de la landing o selector de Configuracion) vive en el estado de la
+ * sesion de i18next via changeLanguage. Por lo mismo NO se usa i18next-browser-languagedetector:
+ * su cadena de deteccion por defecto lee/escribe localStorage.
  */
 
 export const SUPPORTED_LANGUAGES = ['es', 'en'] as const;
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 
 /**
- * Nombres propios de cada idioma para los selectores (modal de la landing y Configuracion). Se
+ * Nombres propios de cada idioma para los selectores (landing y Configuracion). Se
  * muestran IGUAL en ambos idiomas (cada idioma se nombra a si mismo), por eso son una constante
  * compartida y no claves de traduccion: una sola fuente de verdad para todos los selectores.
  */

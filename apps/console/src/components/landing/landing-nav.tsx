@@ -2,6 +2,7 @@ import { type JSX } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '../ui/button';
 import { Logo } from '../brand/logo';
+import { LanguageSwitcher } from './language-switcher';
 
 const NAV_LINKS = [
   { href: '#integracion', label: 'Integración' },
@@ -38,6 +39,7 @@ export function LandingNav(): JSX.Element {
         </nav>
 
         <div className="flex items-center gap-2 sm:gap-3">
+          <LanguageSwitcher />
           <Button asChild variant="ghost" size="sm">
             <Link to="/login">Iniciar sesión</Link>
           </Button>

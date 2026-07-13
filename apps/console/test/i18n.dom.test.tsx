@@ -19,7 +19,7 @@ vi.mock('../src/lib/supabase', () => ({
 
 import i18n, { detectBrowserLanguage } from '../src/i18n';
 import { Sidebar } from '../src/components/layout/Sidebar';
-import { LanguageModal } from '../src/components/landing/language-modal';
+import { LanguageSwitcher } from '../src/components/landing/language-switcher';
 
 afterEach(async () => {
   cleanup();
@@ -88,26 +88,26 @@ describe('detectBrowserLanguage', () => {
   });
 });
 
-describe('LanguageModal (landing)', () => {
-  it('preselecciona el idioma activo (resaltado y con foco inicial) y reporta la eleccion', () => {
-    const onChoose = vi.fn();
-    render(<LanguageModal onChoose={onChoose} onClose={vi.fn()} />);
-    // El setup global deja la app en espanol: Español debe ser la opcion sugerida, con el foco
-    // inicial (Enter confirma la sugerencia) y el resaltado; English queda como alternativa.
-    const spanish = screen.getByRole('button', { name: 'Español' });
-    expect(spanish).toHaveFocus();
-    expect(spanish.className).toContain('bg-foreground/5');
-    const english = screen.getByRole('button', { name: 'English' });
-    expect(english.className).not.toContain('bg-foreground/5');
-
-    fireEvent.click(english);
-    expect(onChoose).toHaveBeenCalledWith('en');
+describe('LanguageSwitcher (landing)', () => {
+  it('marca el idioma activo y NO es un modal (sin dialog, sin bloquear)', () => {
+    render(<LanguageSwitcher />);
+    // El setup global deja la app en espanol: ES es la opcion activa y EN la alternativa. Los
+    // botones exponen el nombre propio del idioma como nombre accesible.
+    expect(screen.getByRole('button', { name: 'Español' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'English' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('cerrar sin elegir avisa via onClose (asumir el idioma detectado, sin bloquear)', () => {
-    const onClose = vi.fn();
-    render(<LanguageModal onChoose={vi.fn()} onClose={onClose} />);
-    fireEvent.click(screen.getByRole('button', { name: /Cerrar y continuar/ }));
-    expect(onClose).toHaveBeenCalled();
+  it('elegir EN cambia el idioma EN VIVO y la etiqueta del grupo se traduce', async () => {
+    render(<LanguageSwitcher />);
+    expect(screen.getByRole('group', { name: 'Idioma' })).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'English' }));
+    });
+    expect(i18n.language).toBe('en');
+    expect(screen.getByRole('button', { name: 'English' })).toHaveAttribute('aria-pressed', 'true');
+    // El propio selector tambien esta migrado: su aria-label cambia con el idioma.
+    expect(screen.getByRole('group', { name: 'Language' })).toBeInTheDocument();
   });
 });

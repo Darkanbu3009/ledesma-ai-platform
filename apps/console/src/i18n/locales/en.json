@@ -13,8 +13,6 @@
   "language": {
     "sectionTitle": "Language",
     "sectionDescription": "Choose the interface language. The change applies immediately.",
-    "modalTitle": "Which language do you prefer?",
-    "modalSubtitle": "You can change it later in Settings.",
-    "modalClose": "Close and continue in the detected language"
+    "switcherLabel": "Language"
   }
 }
