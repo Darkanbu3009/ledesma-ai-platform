@@ -8,7 +8,12 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 // que dashboard.dom.test.tsx). El Sidebar ademas tira de useAuth (AuthContext) y de supabase (que lee
 // env al importarse): se aislan con mocks para renderizarlo suelto.
 const { useIsAdminMock } = vi.hoisted(() => ({ useIsAdminMock: vi.fn() }));
-vi.mock('../src/lib/queries', () => ({ useIsAdmin: useIsAdminMock }));
+vi.mock('../src/lib/queries', () => ({
+  useIsAdmin: useIsAdminMock,
+  // El Sidebar tambien lee useMe (full_name para el menu de usuario del footer): sin datos basta,
+  // el menu cae al email y aca solo se ejerce el item de admin.
+  useMe: () => ({ data: undefined }),
+}));
 vi.mock('../src/auth/useAuth', () => ({
   useAuth: () => ({ user: { email: 'ada@example.com' }, session: null, loading: false }),
 }));
