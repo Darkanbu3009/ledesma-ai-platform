@@ -1,10 +1,11 @@
 import { NavLink } from 'react-router-dom';
-import { Activity, Bot, CalendarClock, ChefHat, KeyRound, LayoutDashboard, LogOut, ShieldCheck, User, Users, Webhook } from 'lucide-react';
+import { Activity, Bot, CalendarClock, ChefHat, KeyRound, LayoutDashboard, Settings, ShieldCheck, Users, Webhook } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../auth/useAuth';
-import { useIsAdmin } from '../../lib/queries';
+import { useIsAdmin, useMe } from '../../lib/queries';
 import { focusRing } from '../../lib/utils';
 import { Logo } from '../brand/logo';
+import { UserMenu } from './UserMenu';
 
 const navItems = [
   { to: '/dashboard', label: 'Panel', icon: LayoutDashboard },
@@ -15,6 +16,9 @@ const navItems = [
   { to: '/actividad', label: 'Actividad', icon: Activity },
   { to: '/credenciales', label: 'Credenciales', icon: KeyRound },
   { to: '/privacidad', label: 'Privacidad', icon: ShieldCheck },
+  // Apunta a la ruta base (su index redirige a /configuracion/cuenta) para que el prefix-match
+  // del NavLink resalte toda la seccion (cuenta y paquetes), igual que hacia el viejo "Mi cuenta".
+  { to: '/configuracion', label: 'Configuración', icon: Settings },
 ];
 
 /** Item de nav del area de admin. Solo se agrega cuando useIsAdmin() resuelve true (ver abajo). */
@@ -22,6 +26,9 @@ const adminNavItem = { to: '/admin', label: 'Admin', icon: Users };
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { user } = useAuth();
+  // full_name para el menu de usuario: misma fuente que el encabezado de identidad de Mi cuenta
+  // (la query ['me'], ya en cache por los gates). Mientras resuelve, el menu cae al email.
+  const { data: me } = useMe();
   // Item de admin CONDICIONAL: solo visible para super-admins. No parpadea porque el Sidebar se monta por
   // dentro de RegistrationGate, que ya resolvio /v1/me antes de renderizar el layout: al montar, isAdmin ya
   // es su valor final (un admin lo ve desde el primer paint; un usuario normal nunca). Es UX cosmetica -- el
@@ -62,33 +69,15 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
 
       <div className="border-t border-line pt-4">
-        {/* Acceso a Configuracion: apunta a la ruta base (su index redirige a /configuracion/cuenta),
-            asi el prefix-match del NavLink resalta toda la seccion (cuenta y paquetes) manteniendo
-            aria-current en sintonia con el resalte. El boton de cerrar sesion se queda debajo. */}
-        <NavLink
-          to="/configuracion"
-          onClick={onNavigate}
-          className={({ isActive }) =>
-            [
-              'flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition',
-              focusRing,
-              isActive ? 'bg-brasa-soft text-brasa' : 'text-ink-soft hover:bg-line-soft',
-            ].join(' ')
-          }
-        >
-          <User className="h-[18px] w-[18px] flex-none" />
-          <span className="flex min-w-0 flex-col">
-            <span className="font-medium leading-tight">Mi cuenta</span>
-            <span className="truncate text-xs text-muted-soft">{user?.email}</span>
-          </span>
-        </NavLink>
-        <button
-          onClick={handleLogout}
-          className={`mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted transition hover:bg-line-soft hover:text-ink ${focusRing}`}
-        >
-          <LogOut className="h-[17px] w-[17px]" />
-          Cerrar sesión
-        </button>
+        {/* Boton de cuenta (patron tipo Claude): avatar de inicial + nombre + chevron. Al click
+            despliega el menu popover hacia arriba con Configuracion y Cerrar sesion (el signOut
+            es el MISMO handleLogout de siempre, pasado por prop). */}
+        <UserMenu
+          fullName={me?.profile?.fullName}
+          email={user?.email}
+          onSignOut={() => void handleLogout()}
+          onNavigate={onNavigate}
+        />
       </div>
     </aside>
   );
