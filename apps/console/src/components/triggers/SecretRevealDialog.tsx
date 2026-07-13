@@ -168,20 +168,20 @@ function SecretValue({
 
 /** Guia de firma para HMAC: los nombres de header y el formato que el sistema externo debe mandar. */
 function SignatureGuide({ reveal }: { reveal: Extract<TriggerReveal, { authMode: 'hmac' }> }) {
+  const { t } = useTranslation();
   const { signature } = reveal;
   const rows: Array<{ term: string; value: string }> = [
-    { term: 'Algoritmo', value: signature.algorithm },
-    { term: 'Cuerpo firmado', value: signature.signedPayload },
-    { term: 'Header de firma', value: `${signature.signatureHeader}: ${signature.signatureFormat}` },
-    { term: 'Header de timestamp', value: `${signature.timestampHeader} (Unix en segundos)` },
-    { term: 'Ventana anti-replay', value: `${signature.toleranceSeconds}s` },
+    { term: t('triggers.guia.algoritmo'), value: signature.algorithm },
+    { term: t('triggers.guia.cuerpoFirmado'), value: signature.signedPayload },
+    { term: t('triggers.guia.headerFirma'), value: `${signature.signatureHeader}: ${signature.signatureFormat}` },
+    { term: t('triggers.guia.headerTimestamp'), value: t('triggers.guia.timestampUnix', { header: signature.timestampHeader }) },
+    { term: t('triggers.guia.ventanaAntiReplay'), value: `${signature.toleranceSeconds}s` },
   ];
   return (
     <div className="rounded-xl border border-line bg-field px-4 py-3.5">
-      <p className="text-sm font-medium text-ink">Como firmar cada peticion</p>
+      <p className="text-sm font-medium text-ink">{t('triggers.guia.titulo')}</p>
       <p className="mt-1 text-xs text-muted">
-        Tu sistema calcula el HMAC del cuerpo y lo manda en estos headers. Sin firma valida, el webhook
-        responde 401.
+        {t('triggers.guia.descripcion')}
       </p>
       <dl className="mt-3 space-y-2">
         {rows.map((row) => (

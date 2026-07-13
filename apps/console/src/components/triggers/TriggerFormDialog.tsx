@@ -1,7 +1,9 @@
 import { type FormEvent, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Link2, Loader2, ShieldCheck, X } from 'lucide-react';
 import { ApiError } from '../../lib/api';
+import i18n from '../../i18n';
 import { providerLabel } from '../../lib/agents';
 import { compatibleCredentials } from '../../lib/credentials';
 import { useAgents, useCredentials } from '../../lib/queries';
@@ -20,12 +22,12 @@ import { useDialog } from '../ui/useDialog';
 /** Traduce el error del backend a un mensaje en espanol. */
 function backendMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.status === 401) return 'Tu sesion expiro. Vuelve a iniciar sesion.';
-    if (error.status === 403) return 'Crear triggers requiere el plan Autonomo (tier autonomous).';
-    if (error.status === 404) return 'El agente o la credencial ya no existen. Actualiza y prueba de nuevo.';
-    if (error.status === 400) return 'El backend rechazo el trigger. Revisa el agente, la credencial y el mensaje.';
+    if (error.status === 401) return i18n.t('triggers.form.errorSesion');
+    if (error.status === 403) return i18n.t('triggers.form.errorPlan');
+    if (error.status === 404) return i18n.t('triggers.form.errorNoExiste');
+    if (error.status === 400) return i18n.t('triggers.form.errorRechazo');
   }
-  return 'No pudimos crear el trigger. Intenta de nuevo.';
+  return i18n.t('triggers.form.errorCrear');
 }
 
 /** Una opcion del selector de modo de auth. */

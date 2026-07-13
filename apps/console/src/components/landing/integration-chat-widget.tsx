@@ -425,6 +425,7 @@ function ChatItem({ item }: { item: ScriptMessage }): JSX.Element {
  * de acento, animaciones, disparo por viewport y movimiento reducido.
  */
 export function IntegrationChatWidget(): JSX.Element {
+  const { t } = useTranslation();
   // Se calcula una vez al montar: define si animamos o mostramos el estado final estatico.
   const [reduceMotion] = useState(prefersReducedMotion);
 
@@ -508,7 +509,7 @@ export function IntegrationChatWidget(): JSX.Element {
         setTyping(true);
         await sleep(
           message.kind === 'agent'
-            ? typingDuration(message.text)
+            ? typingDuration(t(message.textKey))
             : CARD_TIMING[message.kind].typing
         );
         if (cancelled) return;
@@ -555,7 +556,7 @@ export function IntegrationChatWidget(): JSX.Element {
       cancelled = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [reduceMotion, started]);
+  }, [reduceMotion, started, t]);
 
   // Auto-scroll al ultimo mensaje mientras la conversacion avanza (no en estatico).
   useEffect(() => {
@@ -585,13 +586,13 @@ export function IntegrationChatWidget(): JSX.Element {
         >
           <AgentIcon className="h-[18px] w-[18px]" />
         </span>
-        <span className="font-display text-sm font-semibold text-foreground">{agent.name}</span>
+        <span className="font-display text-sm font-semibold text-foreground">{t(agent.nameKey)}</span>
         <span className="ml-auto inline-flex items-center gap-1.5 font-jetbrains text-[10px] uppercase tracking-[0.06em] text-success">
           <span
             className="h-1.5 w-1.5 rounded-full bg-success shadow-[0_0_7px_rgba(16,185,129,0.6)]"
             aria-hidden="true"
           />
-          En línea
+          {t('landing.chatWidget.enLinea')}
         </span>
       </div>
 
@@ -604,11 +605,11 @@ export function IntegrationChatWidget(): JSX.Element {
 
       <div className="flex items-center gap-2 border-t border-border p-3">
         <div className="flex-1 rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm text-foreground-secondary/60">
-          Escribe tu mensaje
+          {t('landing.chatWidget.escribeTuMensaje')}
         </div>
         <button
           type="button"
-          aria-label="Enviar mensaje"
+          aria-label={t('landing.chatWidget.enviarMensajeAria')}
           style={accentSurfaceStyle}
           className="flex h-10 w-10 flex-none items-center justify-center rounded-xl text-white transition-colors duration-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background-secondary"
         >

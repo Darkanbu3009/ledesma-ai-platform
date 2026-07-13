@@ -60,6 +60,7 @@ function MenuAdjuntar({
   titulo: string;
   onElegir: (accept: string) => void;
 }) {
+  const { t } = useTranslation();
   const [abierto, setAbierto] = useState(false);
   const contenedorRef = useRef<HTMLDivElement | null>(null);
 
@@ -95,7 +96,7 @@ function MenuAdjuntar({
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={abierto}
-        aria-label="Adjuntar archivo"
+        aria-label={t('playground.adjuntos.adjuntarArchivo')}
         title={titulo}
         className="inline-flex items-center justify-center rounded-lg p-1.5 text-hueso-muted transition hover:bg-line-soft hover:text-hueso disabled:cursor-not-allowed disabled:opacity-60"
       >
@@ -106,16 +107,16 @@ function MenuAdjuntar({
           role="menu"
           className="absolute bottom-full left-0 z-10 mb-2 min-w-[11rem] overflow-hidden rounded-lg border border-grafito-border bg-grafito py-1 shadow-lg"
         >
-          {OPCIONES_ADJUNTO.map(({ label, Icono, accept }) => (
+          {OPCIONES_ADJUNTO.map(({ labelKey, Icono, accept }) => (
             <button
-              key={label}
+              key={labelKey}
               type="button"
               role="menuitem"
               onClick={() => elegir(accept)}
               className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-hueso-muted transition hover:bg-carbon hover:text-hueso"
             >
               <Icono className="h-4 w-4 shrink-0" />
-              {label}
+              {t(labelKey)}
             </button>
           ))}
         </div>
@@ -132,6 +133,7 @@ type ViewItem =
   | { kind: 'error'; code: string; message?: string; retryText: string };
 
 export function PlaygroundPage() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const { data: agent, isLoading, isError, refetch } = useAgent(id);
 
