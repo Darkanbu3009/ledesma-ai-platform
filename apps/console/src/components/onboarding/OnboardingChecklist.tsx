@@ -163,32 +163,34 @@ export function OnboardingChecklist(): ReactNode {
   const steps: OnboardingStep[] = [
     {
       id: 'credential',
-      title: 'Conecta tu primer proveedor (API key)',
-      description: 'Guarda una credencial (Anthropic, OpenAI o compatible) para que tus agentes puedan ejecutar.',
+      title: t('onboarding.pasos.credencial.titulo'),
+      description: t('onboarding.pasos.credencial.descripcion'),
       done: hasCredential,
       href: '/credenciales',
-      cta: 'Poner credencial',
-      blockedNote: 'Empieza por aqui',
+      cta: t('onboarding.pasos.credencial.cta'),
+      blockedNote: t('onboarding.pasos.credencial.bloqueado'),
     },
     {
       id: 'agent',
-      title: 'Crea tu primer agente',
-      description: 'Define que hace y con que modelo. Podes crearlo conversando con el Configurador.',
+      title: t('onboarding.pasos.agente.titulo'),
+      description: t('onboarding.pasos.agente.descripcion'),
       done: hasAgent,
       href: '/configurador',
-      cta: 'Crear agente',
-      blockedNote: 'Despues del paso 1',
+      cta: t('onboarding.pasos.agente.cta'),
+      blockedNote: t('onboarding.pasos.agente.bloqueado'),
     },
     {
       id: 'run',
-      title: 'Ejecuta tu agente',
-      description: 'Probalo en el Playground y observa tu primera corrida.',
+      title: t('onboarding.pasos.ejecutar.titulo'),
+      description: t('onboarding.pasos.ejecutar.descripcion'),
       done: hasRun,
       // Sin agente todavia no hay Playground al que ir: el CTA queda deshabilitado hasta que exista uno.
       href: firstAgentId ? playgroundPath(firstAgentId) : undefined,
-      cta: 'Ejecutar',
+      cta: t('onboarding.pasos.ejecutar.cta'),
       // Sin agente el motivo veraz es crearlo (texto que la pantalla ya usaba); con agente, el orden.
-      blockedNote: firstAgentId ? 'Despues del paso 2' : 'Crea un agente primero',
+      blockedNote: firstAgentId
+        ? t('onboarding.pasos.ejecutar.bloqueadoConAgente')
+        : t('onboarding.pasos.ejecutar.bloqueadoSinAgente'),
     },
   ];
 
@@ -212,10 +214,10 @@ export function OnboardingChecklist(): ReactNode {
             </span>
             <div>
               <h2 id="onboarding-title" className="font-display text-[19px] font-bold leading-tight text-ink">
-                Bienvenido a {PRODUCT_NAME}
+                {t('onboarding.bienvenida.titulo', { producto: PRODUCT_NAME })}
               </h2>
               <p className="mt-1 text-[13.5px] text-[#8A8880]">
-                Tu primer agente funcionando en 3 pasos · ~4 min
+                {t('onboarding.bienvenida.subtitulo')}
               </p>
             </div>
           </div>
@@ -231,7 +233,7 @@ export function OnboardingChecklist(): ReactNode {
         {!showWelcome && (
           <div className="mb-3 flex items-center justify-between gap-4">
             <h2 id="onboarding-title" className="font-display text-[15px] font-bold text-ink">
-              Primeros pasos
+              {t('onboarding.primerosPasos')}
             </h2>
             <SegmentedProgress completedCount={completedCount} />
           </div>
