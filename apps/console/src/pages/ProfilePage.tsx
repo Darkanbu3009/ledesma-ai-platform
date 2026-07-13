@@ -1,6 +1,14 @@
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, KeyRound, LogOut, Pencil } from 'lucide-react';
+import { ArrowRight, KeyRound, Languages, LogOut, Pencil } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import {
+  LANGUAGE_LABELS,
+  SUPPORTED_LANGUAGES,
+  currentLanguage,
+  type SupportedLanguage,
+} from '../i18n';
+import { markSessionLanguageChoice } from '../i18n/session-preference';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/useAuth';
 import { useMe } from '../lib/queries';
@@ -305,6 +313,60 @@ function SessionSection() {
 }
 
 /**
+ * IDIOMA: fila con segmented control Español / English. Cambia el idioma de la app EN VIVO via
+ * i18n.changeLanguage (fase 1 de i18n: solo estan migrados el sidebar y esta seccion; el resto de
+ * la app sigue en espanol). La eleccion NO se persiste todavia: vive en la sesion de i18next y se
+ * marca en session-preference para que el modal de la landing no reaparezca en esta sesion.
+ */
+function LanguageSection() {
+  const { t, i18n } = useTranslation();
+  // Se lee de la instancia del hook (la misma a la que useTranslation suscribe este render), no
+  // del singleton del modulo: asi el resaltado no depende de un acople implicito entre ambos.
+  const active = currentLanguage(i18n);
+
+  function handleSelect(language: SupportedLanguage) {
+    void i18n.changeLanguage(language);
+    markSessionLanguageChoice();
+  }
+
+  return (
+    <section className={`${cardClass} flex flex-wrap items-center gap-3.5 px-[22px] py-4`}>
+      <span
+        aria-hidden="true"
+        className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] bg-[#F1EFE8] text-[#5F5E5A]"
+      >
+        <Languages className="h-4 w-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <h2 className="text-[13.5px] font-medium text-ink">{t('language.sectionTitle')}</h2>
+        <p className="text-xs text-[#8A8880]">{t('language.sectionDescription')}</p>
+      </div>
+      <div
+        role="group"
+        aria-label={t('language.sectionTitle')}
+        className="flex flex-none rounded-[10px] border-[0.5px] border-[#E9E7DF] bg-[#F1EFE8] p-0.5"
+      >
+        {SUPPORTED_LANGUAGES.map((language) => (
+          <button
+            key={language}
+            type="button"
+            aria-pressed={language === active}
+            onClick={() => handleSelect(language)}
+            className={`rounded-lg px-3 py-1.5 text-[12.5px] transition ${focusRing} ${
+              language === active
+                ? 'bg-surface font-medium text-ink shadow-sm'
+                : 'text-[#8A8880] hover:text-ink'
+            }`}
+          >
+            {LANGUAGE_LABELS[language]}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/**
  * PANTALLA DE PERFIL (/configuracion/cuenta, antes /perfil): el usuario ve sus datos de cuenta (email
  * de Supabase + campos de /v1/me), edita SOLO su nombre (PATCH /v1/me/profile via useUpdateProfileName),
  * ve su cuota con enlace al Panel y puede cerrar sesion. Vive como sub-vista del shell de Configuracion
@@ -332,6 +394,7 @@ export function ProfilePage() {
           />
           <UsageSection usageCounter={data.usageCounter} tier={data.profile.tier} />
           <SessionSection />
+          <LanguageSection />
           {/* Zona de peligro: fila punteada al final del perfil. Abre el modal de confirmacion fuerte
               (escribir el email) y, tras el borrado, cierra sesion y redirige. El email esperado sale
               de useAuth().user?.email (mismo origen que el encabezado). */}

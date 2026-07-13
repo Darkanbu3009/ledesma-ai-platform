@@ -1,0 +1,20 @@
+{
+  "nav": {
+    "panel": "Dashboard",
+    "agentes": "Agents",
+    "recetas": "Recipes",
+    "tareas": "Tasks",
+    "triggers": "Triggers",
+    "actividad": "Activity",
+    "credenciales": "Credentials",
+    "privacidad": "Privacy",
+    "admin": "Admin"
+  },
+  "language": {
+    "sectionTitle": "Language",
+    "sectionDescription": "Choose the interface language. The change applies immediately.",
+    "modalTitle": "Which language do you prefer?",
+    "modalSubtitle": "You can change it later in Settings.",
+    "modalClose": "Close and continue in the detected language"
+  }
+}

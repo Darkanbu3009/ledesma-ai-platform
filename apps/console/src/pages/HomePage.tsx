@@ -1,6 +1,11 @@
-import { type JSX } from 'react';
+import { useState, type JSX } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../auth/useAuth';
+// Se usa el singleton directo (no useTranslation): aqui solo se dispara changeLanguage y ningun
+// texto de la landing esta migrado aun; suscribirse re-renderizaria toda la landing sin motivo.
+import i18n, { type SupportedLanguage } from '../i18n';
+import { hasSessionLanguageChoice, markSessionLanguageChoice } from '../i18n/session-preference';
+import { LanguageModal } from '../components/landing/language-modal';
 import { LandingNav } from '../components/landing/landing-nav';
 import { Hero } from '../components/landing/hero';
 import { Integration } from '../components/landing/integration';
@@ -25,6 +30,21 @@ import { PixelAgent } from '../components/landing/pixel-agent';
  */
 export function HomePage(): JSX.Element | null {
   const { session, loading } = useAuth();
+  // Modal de idioma (fase 1 de i18n): se abre mientras no haya eleccion en esta sesion. La marca
+  // vive en memoria (session-preference), asi que tras elegir o cerrar no vuelve a aparecer; si
+  // el visitante navega a otra ruta SIN interactuar, al volver se le pregunta de nuevo.
+  const [languageModalOpen, setLanguageModalOpen] = useState(() => !hasSessionLanguageChoice());
+
+  function chooseLanguage(language: SupportedLanguage) {
+    void i18n.changeLanguage(language);
+    dismissLanguageModal();
+  }
+
+  // Cerrar sin elegir fija el idioma ya detectado (el que la app trae activo): no se reabre.
+  function dismissLanguageModal() {
+    markSessionLanguageChoice();
+    setLanguageModalOpen(false);
+  }
 
   if (loading) return null;
   if (session) return <Navigate to="/agentes" replace />;
@@ -42,6 +62,9 @@ export function HomePage(): JSX.Element | null {
       </main>
       <LandingFooter />
       <PixelAgent />
+      {languageModalOpen && (
+        <LanguageModal onChoose={chooseLanguage} onClose={dismissLanguageModal} />
+      )}
     </div>
   );
 }

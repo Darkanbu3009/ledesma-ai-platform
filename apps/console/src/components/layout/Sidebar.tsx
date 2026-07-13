@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   Activity,
   Bot,
@@ -21,19 +22,21 @@ import { UserMenu } from './UserMenu';
 // Solo las secciones de la app (patron de Claude): Configuracion y Mejorar Plan NO van aqui,
 // viven unicamente en el popover del perfil del footer (UserMenu). Por eso, estando en
 // /configuracion*, ningun item de esta lista queda activo: es lo esperado.
+// Las etiquetas viven en los locales de i18n (claves "nav.*"): este sidebar es la migracion de
+// MUESTRA de la fase 1 de internacionalizacion y valida el flujo es-en de punta a punta.
 const navItems = [
-  { to: '/dashboard', label: 'Panel', icon: LayoutDashboard },
-  { to: '/agentes', label: 'Agentes', icon: Bot },
-  { to: '/recetas', label: 'Recetas', icon: ChefHat },
-  { to: '/tareas', label: 'Tareas', icon: CalendarClock },
-  { to: '/triggers', label: 'Triggers', icon: Webhook },
-  { to: '/actividad', label: 'Actividad', icon: Activity },
-  { to: '/credenciales', label: 'Credenciales', icon: KeyRound },
-  { to: '/privacidad', label: 'Privacidad', icon: ShieldCheck },
+  { to: '/dashboard', labelKey: 'nav.panel', icon: LayoutDashboard },
+  { to: '/agentes', labelKey: 'nav.agentes', icon: Bot },
+  { to: '/recetas', labelKey: 'nav.recetas', icon: ChefHat },
+  { to: '/tareas', labelKey: 'nav.tareas', icon: CalendarClock },
+  { to: '/triggers', labelKey: 'nav.triggers', icon: Webhook },
+  { to: '/actividad', labelKey: 'nav.actividad', icon: Activity },
+  { to: '/credenciales', labelKey: 'nav.credenciales', icon: KeyRound },
+  { to: '/privacidad', labelKey: 'nav.privacidad', icon: ShieldCheck },
 ];
 
 /** Item de nav del area de admin. Solo se agrega cuando useIsAdmin() resuelve true (ver abajo). */
-const adminNavItem = { to: '/admin', label: 'Admin', icon: Users };
+const adminNavItem = { to: '/admin', labelKey: 'nav.admin', icon: Users };
 
 export function Sidebar({
   onNavigate,
@@ -47,6 +50,8 @@ export function Sidebar({
   onToggleCollapse?: () => void;
 }) {
   const { user } = useAuth();
+  // t re-renderiza el sidebar cuando cambia el idioma (selector de Configuracion o modal de la landing).
+  const { t } = useTranslation();
   // full_name para el menu de usuario: misma fuente que el encabezado de identidad de Mi cuenta
   // (la query ['me'], ya en cache por los gates). Mientras resuelve, el menu cae al email.
   const { data: me } = useMe();
@@ -109,11 +114,11 @@ export function Sidebar({
             key={item.to}
             to={item.to}
             onClick={onNavigate}
-            title={collapsed ? item.label : undefined}
+            title={collapsed ? t(item.labelKey) : undefined}
             className={({ isActive }) => itemClass(isActive)}
           >
             <item.icon className="h-[18px] w-[18px] flex-none" />
-            {collapsed === false && item.label}
+            {collapsed === false && t(item.labelKey)}
           </NavLink>
         ))}
       </nav>
