@@ -1,15 +1,17 @@
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useId, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronsUpDown, LogOut, Settings } from 'lucide-react';
+import { ChevronsUpDown, LogOut, Settings, Sparkles } from 'lucide-react';
 import { focusRing } from '../../lib/utils';
 import { InitialsAvatar } from '../ui/InitialsAvatar';
 
 /**
  * MENU DE USUARIO del footer del sidebar (patron tipo Claude): un boton de cuenta (avatar de
  * inicial + nombre o email + chevron) que despliega HACIA ARRIBA un menu popover con la cabecera
- * de identidad (avatar mas grande, nombre y email), la entrada a Configuracion
- * (/configuracion/cuenta) y Cerrar sesion (que dispara el MISMO handler de signOut de siempre,
- * recibido por prop). Solo UI: cero fetching y cero logica de auth propia.
+ * de identidad (avatar mas grande, nombre y email), Configuracion (/configuracion/cuenta),
+ * Mejorar Plan (/configuracion/paquetes), un separador y Cerrar sesion (que dispara el MISMO
+ * handler de signOut de siempre, recibido por prop). Este menu es el UNICO punto de entrada a
+ * esas opciones (patron de Claude): no existen como items del sidebar principal.
+ * Solo UI: cero fetching y cero logica de auth propia.
  *
  * Comportamiento: abre/cierra con el boton; se cierra al elegir una opcion, al hacer clic afuera
  * (listener de mousedown en document) y con Escape (que devuelve el foco al boton). Accesible:
@@ -84,6 +86,13 @@ export function UserMenu({
     navigate('/configuracion/cuenta');
   }
 
+  /** Catalogo de planes: misma URL de siempre, solo cambia el punto de entrada (este menu). */
+  function handleUpgrade() {
+    setOpen(false);
+    onNavigate?.();
+    navigate('/configuracion/paquetes');
+  }
+
   function handleSignOut() {
     setOpen(false);
     onSignOut();
@@ -123,6 +132,13 @@ export function UserMenu({
               <Settings className="h-4 w-4 flex-none text-muted" />
               Configuración
             </button>
+            <button type="button" role="menuitem" onClick={handleUpgrade} className={itemClass}>
+              <Sparkles className="h-4 w-4 flex-none text-muted" />
+              Mejorar Plan
+            </button>
+          </div>
+          <div role="separator" className="my-1.5 border-t-[0.5px] border-[#E9E7DF]" />
+          <div className="space-y-0.5">
             <button type="button" role="menuitem" onClick={handleSignOut} className={itemClass}>
               <LogOut className="h-4 w-4 flex-none text-muted" />
               Cerrar sesión

@@ -21,13 +21,14 @@ vi.mock('../src/lib/supabase', () => ({ supabase: { auth: { signOut: signOutMock
 
 import { Sidebar } from '../src/components/layout/Sidebar';
 
-/** El destino real de Configuracion se sustituye por un stub para observar la navegacion. */
+/** Los destinos reales del menu se sustituyen por stubs para observar la navegacion. */
 function renderSidebar(initialPath = '/dashboard') {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
       <Sidebar />
       <Routes>
         <Route path="/configuracion/cuenta" element={<p>vista cuenta</p>} />
+        <Route path="/configuracion/paquetes" element={<p>vista paquetes</p>} />
         <Route path="*" element={null} />
       </Routes>
     </MemoryRouter>,
@@ -63,7 +64,7 @@ describe('UserMenu (menu de usuario del footer del sidebar)', () => {
     expect(screen.getByText('A')).toBeInTheDocument();
   });
 
-  it('al click abre el menu con cabecera de identidad y las dos opciones', () => {
+  it('al click abre el menu con cabecera de identidad y las tres opciones en orden', () => {
     useMeMock.mockReturnValue({ data: { profile: { fullName: 'Ada Lovelace' } } });
     renderSidebar();
 
@@ -71,8 +72,10 @@ describe('UserMenu (menu de usuario del footer del sidebar)', () => {
 
     const menu = screen.getByRole('menu');
     expect(menu).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: 'Configuración' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: 'Cerrar sesión' })).toBeInTheDocument();
+    // Orden: Configuracion, Mejorar Plan, separador, Cerrar sesion.
+    const itemNames = screen.getAllByRole('menuitem').map((el) => el.textContent);
+    expect(itemNames).toEqual(['Configuración', 'Mejorar Plan', 'Cerrar sesión']);
+    expect(screen.getByRole('separator')).toBeInTheDocument();
     // Cabecera del menu: nombre + email (el nombre tambien esta en el boton, por eso >= 2).
     expect(screen.getAllByText('Ada Lovelace').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('ada@example.com')).toBeInTheDocument();
@@ -114,6 +117,17 @@ describe('UserMenu (menu de usuario del footer del sidebar)', () => {
     expect(screen.getByText('vista cuenta')).toBeInTheDocument();
   });
 
+  it('Mejorar Plan navega a /configuracion/paquetes y cierra el menu', () => {
+    useMeMock.mockReturnValue({ data: { profile: { fullName: 'Ada Lovelace' } } });
+    renderSidebar();
+
+    fireEvent.click(accountButton());
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Mejorar Plan' }));
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(screen.getByText('vista paquetes')).toBeInTheDocument();
+  });
+
   it('Cerrar sesion dispara el mismo handler de signOut y cierra el menu', () => {
     useMeMock.mockReturnValue({ data: { profile: { fullName: 'Ada Lovelace' } } });
     renderSidebar();
@@ -125,16 +139,19 @@ describe('UserMenu (menu de usuario del footer del sidebar)', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
 
-  it('las flechas ciclan el foco entre los items del menu', () => {
+  it('las flechas ciclan el foco entre los tres items del menu', () => {
     useMeMock.mockReturnValue({ data: { profile: { fullName: 'Ada Lovelace' } } });
     renderSidebar();
 
     fireEvent.click(accountButton());
     const menu = screen.getByRole('menu');
     const config = screen.getByRole('menuitem', { name: 'Configuración' });
+    const upgrade = screen.getByRole('menuitem', { name: 'Mejorar Plan' });
     const logout = screen.getByRole('menuitem', { name: 'Cerrar sesión' });
 
     expect(config).toHaveFocus();
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(upgrade).toHaveFocus();
     fireEvent.keyDown(menu, { key: 'ArrowDown' });
     expect(logout).toHaveFocus();
     fireEvent.keyDown(menu, { key: 'ArrowDown' });
@@ -144,48 +161,33 @@ describe('UserMenu (menu de usuario del footer del sidebar)', () => {
   });
 });
 
-describe('Sidebar (item Configuracion en la lista principal)', () => {
-  it('agrega el item con destino /configuracion, inactivo fuera de la seccion', () => {
+describe('Sidebar (lista principal sin Configuracion ni Mejorar Plan)', () => {
+  it('la lista de navegacion tiene solo las 8 secciones de la app', () => {
     useMeMock.mockReturnValue({ data: undefined });
     renderSidebar('/dashboard');
 
-    const link = screen.getByRole('link', { name: 'Configuración' });
-    expect(link).toHaveAttribute('href', '/configuracion');
-    expect(link).not.toHaveAttribute('aria-current');
-  });
-
-  it('marca activo el item en cualquier ruta de /configuracion (prefix-match)', () => {
-    useMeMock.mockReturnValue({ data: undefined });
-    renderSidebar('/configuracion/paquetes');
-
-    expect(screen.getByRole('link', { name: 'Configuración' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
-  });
-});
-
-describe('Sidebar (sub-item Mejorar Plan)', () => {
-  it('muestra Mejorar Plan debajo de Configuracion apuntando al catalogo de planes', () => {
-    useMeMock.mockReturnValue({ data: undefined });
-    renderSidebar('/dashboard');
-
-    const link = screen.getByRole('link', { name: 'Mejorar Plan' });
-    expect(link).toHaveAttribute('href', '/configuracion/paquetes');
-    expect(link).not.toHaveAttribute('aria-current');
-    // Orden en el nav: el sub-item va inmediatamente despues del item padre.
     const labels = screen.getAllByRole('link').map((el) => el.textContent);
-    expect(labels.indexOf('Mejorar Plan')).toBe(labels.indexOf('Configuración') + 1);
+    expect(labels).toEqual([
+      'Panel',
+      'Agentes',
+      'Recetas',
+      'Tareas',
+      'Triggers',
+      'Actividad',
+      'Credenciales',
+      'Privacidad',
+    ]);
+    expect(screen.queryByRole('link', { name: 'Configuración' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Mejorar Plan' })).not.toBeInTheDocument();
   });
 
-  it('marca activo el sub-item en /configuracion/paquetes', () => {
+  it('en /configuracion* ningun item de la lista principal queda activo (esperado)', () => {
     useMeMock.mockReturnValue({ data: undefined });
     renderSidebar('/configuracion/paquetes');
 
-    expect(screen.getByRole('link', { name: 'Mejorar Plan' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
+    for (const link of screen.getAllByRole('link')) {
+      expect(link).not.toHaveAttribute('aria-current');
+    }
   });
 });
 
@@ -226,15 +228,12 @@ describe('Sidebar (toggle de colapso)', () => {
       'false',
     );
     // Mini-rail: los links siguen (con title accesible) pero sin texto visible.
-    const config = screen.getByRole('link', { name: 'Configuración' });
-    expect(config).toHaveAttribute('href', '/configuracion');
-    expect(config).not.toHaveTextContent('Configuración');
-    expect(screen.getByRole('link', { name: 'Mejorar Plan' })).not.toHaveTextContent(
-      'Mejorar Plan',
-    );
+    const panel = screen.getByRole('link', { name: 'Panel' });
+    expect(panel).toHaveAttribute('href', '/dashboard');
+    expect(panel).not.toHaveTextContent('Panel');
   });
 
-  it('colapsado, el popover del avatar sigue abriendo con Configuracion y Cerrar sesion', () => {
+  it('colapsado, el popover del avatar sigue abriendo con las tres opciones', () => {
     useMeMock.mockReturnValue({ data: { profile: { fullName: 'Ada Lovelace' } } });
     render(
       <MemoryRouter initialEntries={['/dashboard']}>
@@ -247,20 +246,19 @@ describe('Sidebar (toggle de colapso)', () => {
 
     expect(screen.getByRole('menu')).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Configuración' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Mejorar Plan' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Cerrar sesión' })).toBeInTheDocument();
   });
 });
 
-describe('Sidebar (footer sin duplicados)', () => {
-  it('con el popover cerrado no hay Configuracion ni Cerrar sesion sueltos en el footer', () => {
+describe('Sidebar (popover como unico acceso a Configuracion/Mejorar Plan/Cerrar sesion)', () => {
+  it('con el popover cerrado esas opciones no existen en ningun lado del sidebar', () => {
     useMeMock.mockReturnValue({ data: { profile: { fullName: 'Ada Lovelace' } } });
     renderSidebar('/dashboard');
 
-    // Unico acceso: el popover del avatar. Fuera de el, "Configuración" existe solo como link de
-    // la lista principal de navegacion (ese se conserva) y "Cerrar sesión" no existe como boton.
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Configuración' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Cerrar sesión' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Configuración' })).toBeInTheDocument();
+    expect(screen.queryByText('Configuración')).not.toBeInTheDocument();
+    expect(screen.queryByText('Mejorar Plan')).not.toBeInTheDocument();
+    expect(screen.queryByText('Cerrar sesión')).not.toBeInTheDocument();
   });
 });

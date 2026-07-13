@@ -42,9 +42,7 @@ describe('AppLayout (colapso del sidebar)', () => {
       'aria-expanded',
       'false',
     );
-    expect(screen.getByRole('link', { name: 'Configuración' })).not.toHaveTextContent(
-      'Configuración',
-    );
+    expect(screen.getByRole('link', { name: 'Panel' })).not.toHaveTextContent('Panel');
     expect(screen.getByText('contenido')).toBeInTheDocument();
   });
 
@@ -56,7 +54,7 @@ describe('AppLayout (colapso del sidebar)', () => {
       'aria-expanded',
       'true',
     );
-    expect(screen.getByRole('link', { name: 'Configuración' })).toHaveTextContent('Configuración');
+    expect(screen.getByRole('link', { name: 'Panel' })).toHaveTextContent('Panel');
 
     fireEvent.click(screen.getByRole('button', { name: 'Colapsar panel' }));
     expect(screen.getByRole('button', { name: 'Expandir panel' })).toBeInTheDocument();
