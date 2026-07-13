@@ -1,4 +1,5 @@
 import type { FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CheckCircle2, TriangleAlert } from 'lucide-react';
 import { inputClass, monoLabelClass, SubmitButton } from './LoginForm';
 import { AuthNotice } from './AuthNotice';
@@ -23,13 +24,14 @@ interface NewPasswordFormProps {
  * pedir un enlace nuevo.
  */
 export function InvalidRecoveryNotice() {
+  const { t } = useTranslation();
   return (
     <AuthNotice
       icon={TriangleAlert}
-      title="Enlace inválido o expirado"
-      body="El enlace para restablecer tu contraseña ya no es válido. Pide uno nuevo y vuelve a intentarlo."
+      title={t('auth.nuevaContrasena.enlaceInvalidoTitulo')}
+      body={t('auth.nuevaContrasena.enlaceInvalidoCuerpo')}
       linkTo="/recuperar"
-      linkLabel="Pedir un enlace nuevo"
+      linkLabel={t('auth.nuevaContrasena.pedirEnlaceNuevo')}
     />
   );
 }
@@ -52,14 +54,19 @@ export function NewPasswordForm({
   onConfirmChange,
   onSubmit,
 }: NewPasswordFormProps) {
+  const { t } = useTranslation();
   if (status === 'saved') {
     return (
       <AuthNotice
         icon={CheckCircle2}
-        title="Contraseña guardada"
-        body="Tu contraseña se actualizó. Te estamos redirigiendo."
+        title={t('auth.nuevaContrasena.guardadaTitulo')}
+        body={t('auth.nuevaContrasena.guardadaCuerpo')}
         linkTo={continueTo}
-        linkLabel={continueTo === '/login' ? 'Ir a iniciar sesión' : 'Ir a la consola'}
+        linkLabel={
+          continueTo === '/login'
+            ? t('auth.comun.irIniciarSesion')
+            : t('auth.nuevaContrasena.irConsola')
+        }
       />
     );
   }
@@ -67,16 +74,18 @@ export function NewPasswordForm({
   return (
     <div>
       <div className="mb-7">
-        <h1 className="font-display text-[22px] font-medium text-ink">Elige una nueva contraseña</h1>
+        <h1 className="font-display text-[22px] font-medium text-ink">
+          {t('auth.nuevaContrasena.titulo')}
+        </h1>
         <p className="mt-1.5 text-sm leading-relaxed text-muted">
-          Escríbela dos veces para confirmarla.
+          {t('auth.nuevaContrasena.subtitulo')}
         </p>
       </div>
 
       <form onSubmit={onSubmit} className="space-y-4">
         <div>
           <label htmlFor="password" className={`${monoLabelClass} mb-2 block tracking-[3px]`}>
-            Nueva contraseña
+            {t('auth.nuevaContrasena.nuevaContrasenaLabel')}
           </label>
           <input
             id="password"
@@ -89,7 +98,7 @@ export function NewPasswordForm({
         </div>
         <div>
           <label htmlFor="confirm" className={`${monoLabelClass} mb-2 block tracking-[3px]`}>
-            Confirmar contraseña
+            {t('auth.campos.confirmarContrasena')}
           </label>
           <input
             id="confirm"
@@ -105,8 +114,11 @@ export function NewPasswordForm({
             {errorMsg}
           </p>
         )}
-        <SubmitButton pending={status === 'submitting'} pendingLabel="Guardando...">
-          Guardar contraseña
+        <SubmitButton
+          pending={status === 'submitting'}
+          pendingLabel={t('auth.nuevaContrasena.guardando')}
+        >
+          {t('auth.nuevaContrasena.guardar')}
         </SubmitButton>
       </form>
     </div>

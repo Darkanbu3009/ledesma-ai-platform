@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { Logo } from '../brand/logo';
 import type { PrivacyDocument } from '../../lib/privacy';
@@ -9,10 +10,11 @@ import type { PrivacyDocument } from '../../lib/privacy';
  * (borde punteado, fondo tenue) para que no se confunda con contenido final.
  */
 function PlaceholderBlock({ text }: { text: string }) {
+  const { t } = useTranslation();
   return (
     <div className="mt-2 rounded-xl border border-dashed border-brasa-line bg-brasa-soft px-4 py-3">
       <p className="text-[11px] font-semibold uppercase tracking-wide text-[#993C1D]">
-        Revision legal pendiente
+        {t('privacidad.aviso.placeholderTag')}
       </p>
       <p className="mt-1 text-sm leading-relaxed text-muted">{text}</p>
     </div>
@@ -25,6 +27,7 @@ function PlaceholderBlock({ text }: { text: string }) {
  * No requiere sesion (el widget y la landing pueden enlazarla). El contenido legal real lo pone un abogado.
  */
 export function LegalDocument({ doc, footer }: { doc: PrivacyDocument; footer?: ReactNode }) {
+  const { t } = useTranslation();
   return (
     <div className="min-h-screen bg-cream px-4 py-10">
       <div className="mx-auto w-full max-w-3xl">
@@ -37,7 +40,7 @@ export function LegalDocument({ doc, footer }: { doc: PrivacyDocument; footer?: 
           </h1>
           <p className="mt-2 max-w-2xl text-[15px] leading-relaxed text-muted">{doc.subtitle}</p>
           <p className="mt-3 inline-flex items-center rounded-md bg-line-soft px-2.5 py-1 text-xs font-medium text-muted">
-            Version {doc.version}
+            {t('privacidad.aviso.version', { version: doc.version })}
           </p>
         </header>
 
@@ -50,7 +53,7 @@ export function LegalDocument({ doc, footer }: { doc: PrivacyDocument; footer?: 
                   <h2 className="font-display text-lg font-bold text-ink">{section.heading}</h2>
                   {section.optional && (
                     <span className="rounded-full border border-line px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-soft">
-                      Opcional
+                      {t('privacidad.aviso.opcional')}
                     </span>
                   )}
                 </div>

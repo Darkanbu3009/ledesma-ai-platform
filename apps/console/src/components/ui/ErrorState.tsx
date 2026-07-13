@@ -1,4 +1,5 @@
 import { RefreshCw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '../../lib/utils';
 
 /**
@@ -16,20 +17,21 @@ export function ErrorState({
   onRetry: () => void;
   className?: string;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       role="alert"
       className={cn('rounded-2xl border border-line bg-surface p-8 text-center shadow-card', className)}
     >
       <p className="font-display text-lg font-bold text-ink">{title}</p>
-      <p className="mt-2 text-sm text-muted">Revisa tu conexión e intenta de nuevo.</p>
+      <p className="mt-2 text-sm text-muted">{t('ui.estadoError.revisaConexion')}</p>
       <button
         type="button"
         onClick={onRetry}
         className="mt-5 inline-flex items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
       >
         <RefreshCw className="h-4 w-4" />
-        Reintentar
+        {t('ui.acciones.reintentar')}
       </button>
     </div>
   );

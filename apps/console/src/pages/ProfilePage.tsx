@@ -48,6 +48,7 @@ function IdentityHeader({
   email: string | undefined;
   subscription: Subscription | null;
 }) {
+  const { t } = useTranslation();
   const currentName = profile.fullName;
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(currentName);
@@ -82,7 +83,7 @@ function IdentityHeader({
       { fullName: trimmed },
       {
         onSuccess: () => {
-          setNotice({ kind: 'ok', text: 'Nombre actualizado.' });
+          setNotice({ kind: 'ok', text: t('cuenta.identidad.nombreActualizado') });
           setEditing(false);
         },
         onError: (err) => setNotice({ kind: 'error', text: updateProfileNameErrorMessage(err) }),
@@ -102,13 +103,13 @@ function IdentityHeader({
         {/* Dot de suscripcion: verde solo cuando la suscripcion esta activa. El texto sr-only
             anuncia el estado a lectores de pantalla (el title solo cubre el hover). */}
         <span
-          title={subscriptionActive ? 'Suscripción activa' : 'Sin suscripción activa'}
+          title={subscriptionActive ? t('cuenta.identidad.suscripcionActiva') : t('cuenta.identidad.sinSuscripcionActiva')}
           className={`absolute -bottom-px -right-px h-[13px] w-[13px] rounded-full border-[2.5px] border-white ${
             subscriptionActive ? 'bg-[#1D9E75]' : 'bg-[#B4B2A9]'
           }`}
         >
           <span className="sr-only">
-            {subscriptionActive ? 'Suscripción activa' : 'Sin suscripción activa'}
+            {subscriptionActive ? t('cuenta.identidad.suscripcionActiva') : t('cuenta.identidad.sinSuscripcionActiva')}
           </span>
         </span>
       </div>
@@ -116,7 +117,7 @@ function IdentityHeader({
       <div className="min-w-0 flex-1">
         {editing ? (
           <form onSubmit={handleSubmit} noValidate className="max-w-sm">
-            <Field label="Nombre completo" error={error}>
+            <Field label={t('cuenta.identidad.nombreCompletoLabel')} error={error}>
               <input
                 value={value}
                 onChange={(e) => {
@@ -136,7 +137,7 @@ function IdentityHeader({
                 size="sm"
                 disabled={mutation.isPending || unchanged}
               >
-                {mutation.isPending ? 'Guardando...' : 'Guardar'}
+                {mutation.isPending ? t('ui.acciones.guardando') : t('ui.acciones.guardar')}
               </Button>
               <Button
                 type="button"
@@ -145,7 +146,7 @@ function IdentityHeader({
                 onClick={cancelEditing}
                 disabled={mutation.isPending}
               >
-                Cancelar
+                {t('ui.acciones.cancelar')}
               </Button>
             </div>
           </form>
@@ -158,8 +159,8 @@ function IdentityHeader({
               type="button"
               variant="ghost"
               size="icon"
-              title="Editar nombre"
-              aria-label="Editar nombre"
+              title={t('cuenta.identidad.editarNombre')}
+              aria-label={t('cuenta.identidad.editarNombre')}
               onClick={startEditing}
               className="h-7 w-7 flex-none rounded-lg text-[#8A8880]"
             >
@@ -167,7 +168,7 @@ function IdentityHeader({
             </Button>
           </div>
         )}
-        <p className="mt-0.5 truncate text-[13px] text-[#8A8880]">{email ?? 'Sin email'}</p>
+        <p className="mt-0.5 truncate text-[13px] text-[#8A8880]">{email ?? t('cuenta.identidad.sinEmail')}</p>
         <Notice notice={notice} className="mt-3" />
       </div>
 
@@ -193,7 +194,7 @@ function IdentityHeader({
           </span>
         </div>
         <p className="font-mono text-[11px] text-[#B4B2A9]">
-          miembro desde {formatUserDate(profile.createdAt)}
+          {t('cuenta.identidad.miembroDesde', { fecha: formatUserDate(profile.createdAt) })}
         </p>
       </div>
     </section>
@@ -210,6 +211,7 @@ const MAX_SEGMENTS = 30;
  * enlace de actividad conserva su destino actual (/dashboard).
  */
 function UsageSection({ usageCounter, tier }: { usageCounter: UsageCounter | null; tier: string }) {
+  const { t } = useTranslation();
   const limit = usageCounter?.runsLimit ?? 0;
   const used = usageCounter?.runsUsed ?? 0;
   const segmentable = Number.isInteger(limit) && limit > 0 && limit <= MAX_SEGMENTS;
@@ -218,22 +220,22 @@ function UsageSection({ usageCounter, tier }: { usageCounter: UsageCounter | nul
     <section className={`${cardClass} px-[22px] py-[18px]`}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <div>
-          <h2 className="text-[13.5px] font-medium text-ink">Uso del periodo</h2>
-          <p className="text-xs text-[#8A8880]">Ejecuciones de tus agentes en el plan {tier}.</p>
+          <h2 className="text-[13.5px] font-medium text-ink">{t('cuenta.uso.titulo')}</h2>
+          <p className="text-xs text-[#8A8880]">{t('cuenta.uso.descripcion', { plan: tier })}</p>
         </div>
         {usageCounter && (
           <p className="text-[22px] font-medium tabular-nums text-ink">
             {used.toLocaleString('es-MX')}
             <span className="text-[13px] font-normal text-[#B4B2A9]">
               {' '}
-              de {limit.toLocaleString('es-MX')}
+              {t('cuenta.uso.deLimite', { limite: limit.toLocaleString('es-MX') })}
             </span>
           </p>
         )}
       </div>
 
       {usageCounter ? (
-        <div role="img" aria-label={`${used} de ${limit} ejecuciones usadas`} className="mt-3.5">
+        <div role="img" aria-label={t('cuenta.uso.medidorAria', { usadas: used, limite: limit })} className="mt-3.5">
           {segmentable ? (
             <div className="flex gap-[5px]">
               {Array.from({ length: limit }, (_, i) => (
@@ -255,18 +257,18 @@ function UsageSection({ usageCounter, tier }: { usageCounter: UsageCounter | nul
           )}
         </div>
       ) : (
-        <p className="mt-3.5 text-sm text-[#8A8880]">Aún no hay datos de uso.</p>
+        <p className="mt-3.5 text-sm text-[#8A8880]">{t('cuenta.uso.sinDatos')}</p>
       )}
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
         {segmentable && (
-          <p className="text-[11.5px] text-[#B4B2A9]">Cada bloque es una ejecución</p>
+          <p className="text-[11.5px] text-[#B4B2A9]">{t('cuenta.uso.cadaBloque')}</p>
         )}
         <Link
           to="/dashboard"
           className={`ml-auto inline-flex items-center gap-1 rounded-md text-[12.5px] font-medium text-brasa-active transition hover:underline hover:underline-offset-2 ${focusRing}`}
         >
-          Ver actividad
+          {t('cuenta.uso.verActividad')}
           <ArrowRight className="h-3.5 w-3.5" />
         </Link>
       </div>
@@ -279,6 +281,7 @@ function UsageSection({ usageCounter, tier }: { usageCounter: UsageCounter | nul
  * sesion, con el MISMO handler de siempre (supabase.auth.signOut()).
  */
 function SessionSection() {
+  const { t } = useTranslation();
   return (
     <section className={`${cardClass} flex flex-wrap items-center gap-3.5 px-[22px] py-4`}>
       <span
@@ -288,9 +291,9 @@ function SessionSection() {
         <KeyRound className="h-4 w-4" />
       </span>
       <div className="min-w-0 flex-1">
-        <h2 className="text-[13.5px] font-medium text-ink">Sesión</h2>
+        <h2 className="text-[13.5px] font-medium text-ink">{t('cuenta.sesion.titulo')}</h2>
         <p className="text-xs text-[#8A8880]">
-          Entras con tu correo y contraseña. Aquí puedes cerrar la sesión activa.
+          {t('cuenta.sesion.descripcion')}
         </p>
       </div>
       <Button
@@ -299,7 +302,7 @@ function SessionSection() {
         size="sm"
         onClick={() => void supabase.auth.signOut()}
       >
-        Cerrar sesión
+        {t('cuenta.sesion.cerrarSesion')}
         <LogOut className="h-[15px] w-[15px]" />
       </Button>
     </section>
@@ -366,6 +369,7 @@ function LanguageSection() {
  * de peligro (que abre el modal de confirmacion fuerte de borrado).
  */
 export function ProfilePage() {
+  const { t } = useTranslation();
   const { data, isLoading, isError, refetch } = useMe();
   const { user } = useAuth();
 
@@ -374,7 +378,7 @@ export function ProfilePage() {
       {isLoading ? (
         <SkeletonList count={3} cardClassName="h-40" className="mt-8 space-y-4" />
       ) : isError || !data || !data.profile ? (
-        <ErrorState title="No pudimos cargar tu cuenta" onRetry={() => void refetch()} />
+        <ErrorState title={t('cuenta.errores.cargarCuenta')} onRetry={() => void refetch()} />
       ) : (
         <div className="mt-8 space-y-3">
           <IdentityHeader

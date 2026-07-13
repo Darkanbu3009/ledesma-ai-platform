@@ -1,9 +1,9 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check } from 'lucide-react';
 import { useMe } from '../lib/queries';
 import { useSelectPlan } from '../lib/mutations';
 import {
-  LAUNCH_NOTICE,
   PLANS,
   downgradeLossSummary,
   isDowngrade,
@@ -43,6 +43,7 @@ function PlanCard({
   disabled: boolean;
   onSelect: (planId: PlanId) => void;
 }) {
+  const { t } = useTranslation();
   // Mientras ['me'] no resuelve, currentTier es undefined y no matchea ningun tier: sin plan actual.
   const isCurrent = plan.tier === currentTier;
 
@@ -55,11 +56,11 @@ function PlanCard({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-[16px] font-medium text-ink">{plan.name}</h2>
         <div className="flex items-center gap-1.5">
-          {plan.recommended && <span className={pillClass}>Recomendado</span>}
+          {plan.recommended && <span className={pillClass}>{t('planes.tarjeta.recomendado')}</span>}
           {isCurrent && (
             <span className={pillClass}>
               <Check className="h-3 w-3 flex-none text-[#1D9E75]" aria-hidden="true" />
-              Tu plan
+              {t('planes.tarjeta.tuPlan')}
             </span>
           )}
         </div>
@@ -69,14 +70,17 @@ function PlanCard({
         {plan.price}
         <span className="text-[13px] font-normal text-[#B4B2A9]"> {plan.priceSuffix}</span>
       </p>
-      <p className="mt-1 font-mono text-[11.5px] text-[#5F5E5A]">{plan.runsLine}</p>
+      <p className="mt-1 font-mono text-[11.5px] text-[#5F5E5A]">
+        {/* runsLine guarda la clave; la cantidad (runsPerMonth) se interpola aqui (null = plan a medida). */}
+        {t(plan.runsLine, { cantidad: plan.runsPerMonth?.toLocaleString('en-US') })}
+      </p>
 
       {/* Features como termino + definicion (el patron de los gates), sin bullets ni iconos. */}
       <dl className="mt-5 flex-1 space-y-3 border-t-[0.5px] border-[#F1EFE8] pt-5">
         {plan.features.map((feature) => (
           <div key={feature.term}>
-            <dt className="text-[12px] font-medium text-ink">{feature.term}</dt>
-            <dd className="text-[12.5px] text-[#8A8880]">{feature.text}</dd>
+            <dt className="text-[12px] font-medium text-ink">{t(feature.term)}</dt>
+            <dd className="text-[12.5px] text-[#8A8880]">{t(feature.text)}</dd>
           </div>
         ))}
       </dl>
@@ -84,7 +88,7 @@ function PlanCard({
       <div className="mt-6">
         {isCurrent ? (
           <Button type="button" variant="secondary-neutral" size="sm" disabled className="w-full">
-            Plan actual
+            {t('planes.tarjeta.planActual')}
           </Button>
         ) : (
           <Button
@@ -94,7 +98,7 @@ function PlanCard({
             disabled={disabled}
             onClick={() => onSelect(plan.id)}
           >
-            {busy ? 'Activando...' : `Elegir ${plan.name}`}
+            {busy ? t('planes.tarjeta.activando') : t('planes.tarjeta.elegir', { plan: plan.name })}
           </Button>
         )}
       </div>
@@ -112,6 +116,7 @@ function PlanCard({
  * shell de Configuracion (SettingsLayout pone titulo y tabs).
  */
 export function PlansPage() {
+  const { t } = useTranslation();
   const { data } = useMe();
   const selectPlan = useSelectPlan();
   // Mientras ['me'] no resuelve, el catalogo se muestra sin marca de plan actual (sin bloquear la vista).
@@ -129,7 +134,7 @@ export function PlansPage() {
     selectPlan.mutate(planId, {
       onSuccess: () => {
         setPendingDowngrade(null);
-        setNotice({ kind: 'ok', text: 'Listo. Tu plan ya esta activo.' });
+        setNotice({ kind: 'ok', text: t('planes.exito') });
       },
       // Error visible y NO destructivo: se CIERRA el dialogo de confirmacion (si estaba abierto)
       // para que el aviso no quede tapado por el overlay; el catalogo queda intacto y el CTA vuelve
@@ -155,7 +160,7 @@ export function PlansPage() {
 
   return (
     <div className="mt-8">
-      <p className="text-xs text-[#8A8880]">{LAUNCH_NOTICE}</p>
+      <p className="text-xs text-[#8A8880]">{t('planes.avisoLanzamiento')}</p>
       <Notice notice={notice} />
       <div className="mt-4 grid gap-4 md:grid-cols-3">
         {PLANS.map((plan) => (

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, Copy, TriangleAlert } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { cn, focusRing } from '../../lib/utils';
 
 type CopyButtonVariant = 'default' | 'primary';
@@ -19,8 +20,8 @@ const VARIANT_CLASSES: Record<CopyButtonVariant, string> = {
  */
 export function CopyButton({
   text,
-  label = 'Copiar',
-  copiedLabel = 'Copiado',
+  label,
+  copiedLabel,
   variant = 'default',
   className,
 }: {
@@ -30,6 +31,7 @@ export function CopyButton({
   variant?: CopyButtonVariant;
   className?: string;
 }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const [failed, setFailed] = useState(false);
   const timeoutRef = useRef<number | null>(null);
@@ -64,7 +66,11 @@ export function CopyButton({
   }
 
   const iconSize = variant === 'primary' ? 'h-4 w-4' : 'h-3.5 w-3.5';
-  const currentLabel = failed ? 'Copia a mano' : copied ? copiedLabel : label;
+  const currentLabel = failed
+    ? t('ui.copiar.copiaAMano')
+    : copied
+      ? (copiedLabel ?? t('ui.copiar.copiado'))
+      : (label ?? t('ui.copiar.copiar'));
 
   return (
     <button

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { FlaskConical, Plus, Trash2 } from 'lucide-react';
 import type { AgentFormValues } from '../../lib/agent-schema';
@@ -22,6 +23,7 @@ function emptyTool(): ToolFormValues {
 /** Editor de la lista de tools del agente; requiere FormProvider del form padre.
  * agentId habilita el boton Probar (solo en edicion: la prueba usa la version guardada). */
 export function ToolsEditor({ agentId }: { agentId?: string }) {
+  const { t } = useTranslation();
   const {
     control,
     formState: { errors },
@@ -31,11 +33,11 @@ export function ToolsEditor({ agentId }: { agentId?: string }) {
 
   return (
     <div>
-      <p className="mb-2 block text-sm font-medium text-hueso">Herramientas</p>
+      <p className="mb-2 block text-sm font-medium text-hueso">{t('agentes.herramientas.titulo')}</p>
       <div className="space-y-4">
         {fields.length === 0 && (
           <div className="rounded-lg border border-dashed border-grafito-border px-4 py-5 text-sm text-hueso-muted">
-            Este agente no tiene herramientas. Agrega una para que pueda llamar webhooks externos.
+            {t('agentes.herramientas.vacio')}
           </div>
         )}
         {fields.map((field, index) => (
@@ -52,7 +54,7 @@ export function ToolsEditor({ agentId }: { agentId?: string }) {
           className="inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2 text-sm font-medium text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
         >
           <Plus className="h-4 w-4" />
-          Agregar herramienta
+          {t('agentes.herramientas.agregar')}
         </button>
       </div>
     </div>
@@ -68,6 +70,7 @@ function ToolCard({
   agentId?: string;
   onRemove: () => void;
 }) {
+  const { t } = useTranslation();
   const {
     control,
     register,
@@ -107,7 +110,7 @@ function ToolCard({
     const parsed = tryParseJsonObject(getValues(`tools.${index}.rawSchema`) ?? '');
     const params = parsed ? tryJsonSchemaToParams(parsed) : null;
     if (params === null) {
-      setModeError('El schema es demasiado complejo para el modo simple');
+      setModeError(t('agentes.herramientas.schemaComplejo'));
       return;
     }
     replaceParams(params);
@@ -117,18 +120,20 @@ function ToolCard({
   return (
     <div className="space-y-4 rounded-xl border border-grafito-border bg-grafito p-4">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-semibold text-hueso">Herramienta {index + 1}</p>
+        <p className="text-sm font-semibold text-hueso">
+          {t('agentes.herramientas.tituloItem', { numero: index + 1 })}
+        </p>
         <div className="flex items-center gap-2">
           {agentId && (
             <button
               type="button"
               onClick={openTestDialog}
               disabled={isDirty}
-              title={isDirty ? 'Guarda primero: la prueba usa la version guardada' : undefined}
+              title={isDirty ? t('agentes.herramientas.guardaPrimero') : undefined}
               className="inline-flex items-center gap-1.5 rounded-lg border border-grafito-border px-3 py-1.5 text-xs font-medium text-hueso-muted transition hover:border-hueso-muted hover:text-hueso disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-grafito-border disabled:hover:text-hueso-muted"
             >
               <FlaskConical className="h-3.5 w-3.5" />
-              Probar
+              {t('agentes.herramientas.probar')}
             </button>
           )}
           <button
@@ -137,7 +142,7 @@ function ToolCard({
             className="inline-flex items-center gap-1.5 rounded-lg border border-grafito-border px-3 py-1.5 text-xs font-medium text-brasa transition hover:border-brasa"
           >
             <Trash2 className="h-3.5 w-3.5" />
-            Eliminar herramienta
+            {t('agentes.herramientas.eliminar')}
           </button>
         </div>
       </div>
@@ -151,7 +156,7 @@ function ToolCard({
         />
       )}
 
-      <Field label="Nombre" error={toolErrors?.name?.message}>
+      <Field label={t('agentes.form.nombreLabel')} error={toolErrors?.name?.message}>
         <input
           {...register(`tools.${index}.name`)}
           className={inputClass}
@@ -159,19 +164,19 @@ function ToolCard({
         />
       </Field>
 
-      <Field label="Descripcion" error={toolErrors?.description?.message}>
+      <Field label={t('agentes.herramientas.descripcionLabel')} error={toolErrors?.description?.message}>
         <textarea
           {...register(`tools.${index}.description`)}
           rows={2}
           className={inputClass}
-          placeholder="Que hace la herramienta y cuando conviene usarla"
+          placeholder={t('agentes.herramientas.descripcionPlaceholder')}
         />
       </Field>
 
       <Field
-        label="URL del webhook"
+        label={t('agentes.herramientas.urlLabel')}
         error={toolErrors?.url?.message}
-        hint="Recibira un POST con { tool, input } y debe responder { content, isError? }"
+        hint={t('agentes.herramientas.urlHint')}
       >
         <input
           {...register(`tools.${index}.url`)}
@@ -182,7 +187,7 @@ function ToolCard({
 
       <div>
         <div className="mb-2 flex items-center justify-between gap-3">
-          <span className="text-sm font-medium text-hueso">Parametros</span>
+          <span className="text-sm font-medium text-hueso">{t('agentes.herramientas.parametros')}</span>
           <div className="inline-flex rounded-lg border border-grafito-border p-0.5">
             <button
               type="button"
@@ -219,7 +224,7 @@ function ToolCard({
           <div className="space-y-3">
             {paramFields.length === 0 && (
               <p className="text-xs text-hueso-muted">
-                Sin parametros: la herramienta se llama sin argumentos.
+                {t('agentes.herramientas.sinParametros')}
               </p>
             )}
             {paramFields.map((param, paramIndex) => {
@@ -230,14 +235,14 @@ function ToolCard({
                   className="space-y-3 rounded-lg border border-grafito-border bg-carbon/40 p-3"
                 >
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Nombre" error={paramErrors?.name?.message}>
+                    <Field label={t('agentes.form.nombreLabel')} error={paramErrors?.name?.message}>
                       <input
                         {...register(`tools.${index}.params.${paramIndex}.name`)}
                         className={inputClass}
                         placeholder="query"
                       />
                     </Field>
-                    <Field label="Tipo" error={paramErrors?.type?.message}>
+                    <Field label={t('agentes.herramientas.tipoLabel')} error={paramErrors?.type?.message}>
                       <select
                         {...register(`tools.${index}.params.${paramIndex}.type`)}
                         className={inputClass}
@@ -250,11 +255,14 @@ function ToolCard({
                       </select>
                     </Field>
                   </div>
-                  <Field label="Descripcion" error={paramErrors?.description?.message}>
+                  <Field
+                    label={t('agentes.herramientas.descripcionLabel')}
+                    error={paramErrors?.description?.message}
+                  >
                     <input
                       {...register(`tools.${index}.params.${paramIndex}.description`)}
                       className={inputClass}
-                      placeholder="Para que sirve este parametro"
+                      placeholder={t('agentes.herramientas.paramDescripcionPlaceholder')}
                     />
                   </Field>
                   <div className="flex items-center justify-between gap-3">
@@ -264,7 +272,7 @@ function ToolCard({
                         {...register(`tools.${index}.params.${paramIndex}.required`)}
                         className="h-4 w-4 accent-brasa"
                       />
-                      Requerido
+                      {t('agentes.herramientas.requerido')}
                     </label>
                     <button
                       type="button"
@@ -272,7 +280,7 @@ function ToolCard({
                       className="inline-flex items-center gap-1.5 rounded-lg border border-grafito-border px-3 py-1.5 text-xs font-medium text-brasa transition hover:border-brasa"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
-                      Eliminar
+                      {t('agentes.comun.eliminar')}
                     </button>
                   </div>
                 </div>
@@ -286,7 +294,7 @@ function ToolCard({
               className="inline-flex items-center gap-1.5 rounded-lg border border-grafito-border px-3 py-1.5 text-xs font-medium text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
             >
               <Plus className="h-3.5 w-3.5" />
-              Agregar parametro
+              {t('agentes.herramientas.agregarParametro')}
             </button>
           </div>
         ) : (

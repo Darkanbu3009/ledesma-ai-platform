@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Activity, Loader2, RefreshCw } from 'lucide-react';
 import { useAgents, useJobs } from '../lib/queries';
 import { playgroundPath } from '../lib/agents';
@@ -48,6 +49,7 @@ function StatusFilterBar({
  * con filtro activo conserva el estado centrado que invita a quitar el filtro.
  */
 function ActivityEmptyState({ filtered, ctaTo }: { filtered: boolean; ctaTo: string }) {
+  const { t } = useTranslation();
   if (!filtered) {
     return <ActivityGhostTable ctaTo={ctaTo} />;
   }
@@ -59,8 +61,8 @@ function ActivityEmptyState({ filtered, ctaTo }: { filtered: boolean; ctaTo: str
           <Activity className="h-6 w-6" />
         </span>
       }
-      title="Sin ejecuciones con este estado"
-      description="Prueba con otro estado o quita el filtro para ver todo el historial."
+      title={t('actividad.vacioFiltrado.titulo')}
+      description={t('actividad.vacioFiltrado.descripcion')}
     />
   );
 }
@@ -72,6 +74,7 @@ function ActivityEmptyState({ filtered, ctaTo }: { filtered: boolean; ctaTo: str
  * reconsulta si hay jobs en vuelo). SIN gate por tier: ver el historial propio es para todos los planes.
  */
 export function ActivityPage() {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<JobStatusFilter>('all');
 
   const {
@@ -104,8 +107,8 @@ export function ActivityPage() {
   return (
     <div className="mx-auto flex min-h-full max-w-4xl flex-col">
       <PageHeader
-        title="Actividad"
-        subtitle="Historial de ejecuciones de tus agentes: recetas, tareas programadas y triggers."
+        title={t('actividad.header.titulo')}
+        subtitle={t('actividad.header.subtitulo')}
         action={
           hasJobs &&
           refreshing && (
@@ -114,7 +117,7 @@ export function ActivityPage() {
               className="inline-flex items-center gap-1.5 text-[12px] text-muted-soft"
             >
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Actualizando
+              {t('actividad.actualizando')}
             </span>
           )
         }
@@ -125,7 +128,7 @@ export function ActivityPage() {
       {listLoading ? (
         <SkeletonList cardClassName="h-[104px]" />
       ) : isError ? (
-        <ErrorState title="No pudimos cargar tu actividad" onRetry={() => void refetch()} />
+        <ErrorState title={t('actividad.errorCargar')} onRetry={() => void refetch()} />
       ) : !hasJobs ? (
         <ActivityEmptyState filtered={status !== 'all'} ctaTo={emptyCtaTo} />
       ) : (
@@ -145,7 +148,7 @@ export function ActivityPage() {
               ) : (
                 <RefreshCw className="h-[18px] w-[18px]" />
               )}
-              Cargar mas
+              {t('actividad.cargarMas')}
             </button>
           )}
         </div>

@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { useDialog } from '../ui/useDialog';
 import { tierLabel } from '../../lib/admin';
 import type { ProfileTier } from '../../lib/registration';
@@ -29,6 +30,7 @@ export function ChangeTierDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useDialog({ open, onClose: onCancel, initialFocus: cancelRef });
 
@@ -41,15 +43,16 @@ export function ChangeTierDialog({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Cambiar tier"
+        aria-label={t('admin.cambioTier.titulo')}
         className="relative w-full max-w-sm rounded-2xl border border-line bg-surface p-6 shadow-card-hover"
       >
-        <h2 className="font-display text-lg font-bold text-ink">Cambiar tier</h2>
+        <h2 className="font-display text-lg font-bold text-ink">{t('admin.cambioTier.titulo')}</h2>
         <p className="mt-2 text-sm text-muted">
-          Vas a cambiar el tier de <span className="font-medium text-ink">{userName}</span> de{' '}
-          <span className="font-medium text-ink">{tierLabel(fromTier)}</span> a{' '}
-          <span className="font-medium text-ink">{tierLabel(toTier)}</span>. Esto ajusta el plan del
-          usuario y queda registrado.
+          <Trans
+            i18nKey="admin.cambioTier.descripcion"
+            values={{ usuario: userName, de: tierLabel(fromTier), a: tierLabel(toTier) }}
+            components={{ destacado: <span className="font-medium text-ink" /> }}
+          />
         </p>
         {error && (
           <div
@@ -67,7 +70,7 @@ export function ChangeTierDialog({
             disabled={busy}
             className="rounded-[10px] border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Cancelar
+            {t('ui.acciones.cancelar')}
           </button>
           <button
             type="button"
@@ -75,7 +78,7 @@ export function ChangeTierDialog({
             disabled={busy}
             className="rounded-[10px] bg-brasa px-4 py-2 text-sm font-semibold text-white transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {busy ? 'Cambiando...' : 'Cambiar tier'}
+            {busy ? t('admin.cambioTier.cambiando') : t('admin.cambioTier.titulo')}
           </button>
         </div>
       </div>

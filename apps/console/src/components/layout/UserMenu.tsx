@@ -1,6 +1,7 @@
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useId, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronsUpDown, LogOut, Settings, Sparkles } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { focusRing } from '../../lib/utils';
 import { InitialsAvatar } from '../ui/InitialsAvatar';
 
@@ -32,6 +33,7 @@ export function UserMenu({
   /** Sidebar en mini-rail: el boton muestra solo el avatar y el popover usa ancho fijo. */
   collapsed?: boolean;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -108,7 +110,7 @@ export function UserMenu({
           ref={menuRef}
           id={menuId}
           role="menu"
-          aria-label="Menú de usuario"
+          aria-label={t('ui.menuUsuario.etiqueta')}
           onKeyDown={handleMenuKeyDown}
           className={[
             'absolute bottom-full left-0 z-50 mb-2 rounded-[12px] border-[0.5px] border-[#E9E7DF] bg-surface p-1.5 shadow-card',
@@ -130,18 +132,18 @@ export function UserMenu({
           <div className="mt-1.5 space-y-0.5">
             <button type="button" role="menuitem" onClick={handleSettings} className={itemClass}>
               <Settings className="h-4 w-4 flex-none text-muted" />
-              Configuración
+              {t('ui.menuUsuario.configuracion')}
             </button>
             <button type="button" role="menuitem" onClick={handleUpgrade} className={itemClass}>
               <Sparkles className="h-4 w-4 flex-none text-muted" />
-              Mejorar Plan
+              {t('ui.menuUsuario.mejorarPlan')}
             </button>
           </div>
           <div role="separator" className="my-1.5 border-t-[0.5px] border-[#E9E7DF]" />
           <div className="space-y-0.5">
             <button type="button" role="menuitem" onClick={handleSignOut} className={itemClass}>
               <LogOut className="h-4 w-4 flex-none text-muted" />
-              Cerrar sesión
+              {t('ui.menuUsuario.cerrarSesion')}
             </button>
           </div>
         </div>

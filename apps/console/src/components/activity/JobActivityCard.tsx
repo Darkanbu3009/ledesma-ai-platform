@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { AlertCircle, Bot, ChefHat, Clock, Loader2, MessageSquare } from 'lucide-react';
 import { formatRunAt } from '../../lib/schedule';
 import { jobStatusLabel, jobTypeLabel, type JobActivity, type JobStatus } from '../../lib/jobs';
@@ -34,6 +35,7 @@ function StatusBadge({ status }: { status: JobStatus }) {
  * (useAgents); null = agente ya eliminado.
  */
 export function JobActivityCard({ job, agentName }: { job: JobActivity; agentName: string | null }) {
+  const { t } = useTranslation();
   const TypeIcon = job.type === 'recipe' ? ChefHat : MessageSquare;
   const created = formatRunAt(job.createdAt) ?? '—';
   const finished = formatRunAt(job.finishedAt);
@@ -48,7 +50,7 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="inline-flex min-w-0 items-center gap-1.5 truncate font-display text-[15px] font-bold text-ink">
               <Bot className="h-4 w-4 flex-none text-muted" />
-              <span className="truncate">{agentName ?? 'Agente eliminado'}</span>
+              <span className="truncate">{agentName ?? t('actividad.card.agenteEliminado')}</span>
             </h3>
             <span className="flex-none rounded-full border border-line bg-line-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
               {jobTypeLabel(job.type)}
@@ -60,9 +62,11 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
               <Clock className="h-3.5 w-3.5 flex-none" />
               {created}
             </span>
-            {finished && <span className="text-muted-soft">Fin: {finished}</span>}
+            {finished && (
+              <span className="text-muted-soft">{t('actividad.card.fin', { fecha: finished })}</span>
+            )}
             <span className="text-muted-soft">
-              {job.attempts} {job.attempts === 1 ? 'intento' : 'intentos'}
+              {t('actividad.card.intentos', { count: job.attempts })}
             </span>
           </div>
 

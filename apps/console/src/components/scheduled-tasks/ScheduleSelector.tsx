@@ -259,7 +259,9 @@ function AdvancedMode({
   return (
     <div className="space-y-2">
       <label className="block">
-        <span className="mb-1.5 block text-xs font-medium text-muted">Expresion cron (5 campos)</span>
+        <span className="mb-1.5 block text-xs font-medium text-muted">
+          {t('tareas.horario.cronLabel')}
+        </span>
         <input
           value={rawCron}
           onChange={(e) => onRawCronChange(e.target.value)}
@@ -271,13 +273,15 @@ function AdvancedMode({
         />
       </label>
       <p className="text-xs text-muted">
-        Orden: minuto hora dia-del-mes mes dia-de-semana. Ejemplo:{' '}
-        <span className="font-mono text-ink-soft">0 8 * * 1</span> = todos los lunes 08:00 UTC.
+        <Trans
+          i18nKey="tareas.horario.cronAyuda"
+          components={{ mono: <span className="font-mono text-ink-soft" /> }}
+        />
       </p>
 
       {!isEmpty && !valid && (
         <p role="alert" className="text-sm text-brasa">
-          Formato de cron invalido (deben ser 5 campos).
+          {t('tareas.horario.cronInvalido')}
         </p>
       )}
 
@@ -285,11 +289,15 @@ function AdvancedMode({
         <div className="space-y-1 rounded-lg border border-line bg-surface px-3.5 py-2.5">
           <p className="flex items-center gap-2 text-sm text-ink">
             <Clock className="h-4 w-4 flex-none text-brasa" />
-            {preview.description ? `Se ejecutara: ${preview.description}` : 'Expresion valida.'}
+            {preview.description
+              ? t('tareas.horario.seEjecutara', { descripcion: preview.description })
+              : t('tareas.horario.expresionValida')}
             <span className="text-xs text-muted-soft">· UTC</span>
           </p>
           {preview.nextRun && (
-            <p className="pl-6 text-xs text-muted">Proximo run estimado: {preview.nextRun}</p>
+            <p className="pl-6 text-xs text-muted">
+              {t('tareas.horario.proximoRun', { fecha: preview.nextRun })}
+            </p>
           )}
         </div>
       )}
@@ -299,10 +307,11 @@ function AdvancedMode({
 
 /** Linea de vista previa del modo amigable. */
 function SchedulePreview({ text }: { text: string }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2.5 text-sm text-ink">
       <Clock className="h-4 w-4 flex-none text-brasa" />
-      Se ejecutara: {text}
+      {t('tareas.horario.seEjecutara', { descripcion: text })}
       <span className="text-xs text-muted-soft">· UTC</span>
     </div>
   );

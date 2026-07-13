@@ -153,9 +153,9 @@ export function TriggersPage() {
       { id: trigger.id, update: { isActive: !trigger.isActive } },
       {
         onSuccess: () =>
-          setNotice({ kind: 'ok', text: trigger.isActive ? 'Trigger pausado.' : 'Trigger activado.' }),
+          setNotice({ kind: 'ok', text: trigger.isActive ? t('triggers.avisos.pausado') : t('triggers.avisos.activado') }),
         onError: () =>
-          setNotice({ kind: 'error', text: 'No pudimos actualizar el trigger. Intenta de nuevo.' }),
+          setNotice({ kind: 'error', text: t('triggers.errores.actualizar') }),
         // Solo limpiamos el spinner de ESTE trigger: dos toggles concurrentes no se pisan el estado.
         onSettled: () => setTogglingId((cur) => (cur === trigger.id ? null : cur)),
       },
@@ -167,7 +167,7 @@ export function TriggersPage() {
     if (data) {
       setReveal({ data, context: 'created' });
     } else {
-      setNotice({ kind: 'error', text: 'Creamos el trigger pero no pudimos mostrar el secreto. Rotalo para obtener uno nuevo.' });
+      setNotice({ kind: 'error', text: t('triggers.errores.secretoCrear') });
     }
   }
 
@@ -187,7 +187,7 @@ export function TriggersPage() {
           if (data) {
             setReveal({ data, context: 'rotated' });
           } else {
-            setNotice({ kind: 'error', text: 'Rotamos el secreto pero no pudimos mostrarlo. Intenta de nuevo.' });
+            setNotice({ kind: 'error', text: t('triggers.errores.secretoRotar') });
           }
         },
       },
@@ -204,14 +204,14 @@ export function TriggersPage() {
     deleteTrigger.mutate(toDelete.id, {
       onSuccess: () => {
         setToDelete(null);
-        setNotice({ kind: 'ok', text: 'Trigger eliminado.' });
+        setNotice({ kind: 'ok', text: t('triggers.avisos.eliminado') });
       },
     });
   }
 
   function describeTrigger(trigger: Trigger | null): string {
     if (!trigger) return '';
-    const agentName = agentsById.get(trigger.agentId)?.name ?? 'agente eliminado';
+    const agentName = agentsById.get(trigger.agentId)?.name ?? t('triggers.agenteEliminadoMin');
     return `${agentName} · ${authModeLabel(trigger.authMode)}`;
   }
 
@@ -220,14 +220,14 @@ export function TriggersPage() {
       {/* En el estado bloqueado el hero del gate reemplaza al titulo y subtitulo de la pagina. */}
       {(me.isLoading || isAutonomous) && (
         <PageHeader
-          title="Triggers"
-          subtitle="Crea URLs de webhook que ejecutan un agente cuando un evento externo las llama."
+          title={t('triggers.titulo')}
+          subtitle={t('triggers.subtitulo')}
           action={
             isAutonomous &&
             hasTriggers && (
               <button type="button" onClick={() => setFormOpen(true)} className={addButtonClass}>
                 <Plus className="h-[17px] w-[17px]" />
-                Crear trigger
+                {t('triggers.crearTrigger')}
               </button>
             )
           }
@@ -243,7 +243,7 @@ export function TriggersPage() {
       ) : listLoading ? (
         <SkeletonList cardClassName="h-[148px]" />
       ) : isError ? (
-        <ErrorState title="No pudimos cargar tus triggers" onRetry={() => void refetch()} />
+        <ErrorState title={t('triggers.errores.cargarLista')} onRetry={() => void refetch()} />
       ) : !hasTriggers ? (
         <TriggersEmptyState onAdd={() => setFormOpen(true)} />
       ) : (
@@ -266,7 +266,7 @@ export function TriggersPage() {
             className="flex w-full items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed border-line p-4 text-sm font-semibold text-muted transition hover:border-brasa-line hover:bg-brasa/[0.03] hover:text-brasa"
           >
             <Plus className="h-[18px] w-[18px]" />
-            Crear trigger
+            {t('triggers.crearTrigger')}
           </button>
         </div>
       )}
@@ -279,7 +279,7 @@ export function TriggersPage() {
         open={toRotate !== null}
         authMode={toRotate?.authMode ?? 'hmac'}
         busy={rotateTrigger.isPending}
-        error={rotateTrigger.isError ? 'No pudimos rotar el secreto. Intenta de nuevo.' : undefined}
+        error={rotateTrigger.isError ? t('triggers.errores.rotar') : undefined}
         onConfirm={confirmRotate}
         onCancel={() => setToRotate(null)}
       />
@@ -288,7 +288,7 @@ export function TriggersPage() {
         open={toDelete !== null}
         description={describeTrigger(toDelete)}
         busy={deleteTrigger.isPending}
-        error={deleteTrigger.isError ? 'No pudimos eliminar el trigger. Intenta de nuevo.' : undefined}
+        error={deleteTrigger.isError ? t('triggers.errores.eliminar') : undefined}
         onConfirm={confirmDelete}
         onCancel={() => setToDelete(null)}
       />

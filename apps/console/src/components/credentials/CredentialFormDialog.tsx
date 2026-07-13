@@ -1,4 +1,5 @@
 import { type FormEvent, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Eye, EyeOff, Loader2, ShieldCheck, X } from 'lucide-react';
 import { ApiError } from '../../lib/api';
 import { providerLabel, type ProviderId } from '../../lib/agents';
@@ -11,13 +12,13 @@ const PROVIDER_IDS: ProviderId[] = ['anthropic', 'openai', 'openai-compatible'];
 
 type FieldErrors = Partial<Record<'label' | 'apiKey' | 'baseUrl', string>>;
 
-/** Traduce el error del backend a un mensaje en espanol. El backend manda 400 o 401. */
-function backendMessage(error: unknown): string {
+/** Traduce el error del backend a la clave i18n de su mensaje. El backend manda 400 o 401. */
+function backendMessageKey(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.status === 401) return 'Tu sesion expiro. Vuelve a iniciar sesion.';
-    if (error.status === 400) return 'El backend rechazo la credencial. Revisa los datos.';
+    if (error.status === 401) return 'credenciales.form.errorSesion';
+    if (error.status === 400) return 'credenciales.form.errorRechazo';
   }
-  return 'No pudimos guardar la credencial. Intenta de nuevo.';
+  return 'credenciales.form.errorGuardar';
 }
 
 /**
@@ -32,6 +33,7 @@ export function CredentialFormDialog({
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const { t } = useTranslation();
   const createCredential = useCreateCredential();
 
   const [label, setLabel] = useState('');
@@ -94,16 +96,14 @@ export function CredentialFormDialog({
         <div className="flex items-start justify-between gap-4 border-b border-line-soft px-6 py-5">
           <div>
             <h2 id="credential-form-title" className="font-display text-lg font-bold text-ink">
-              Agregar credencial
+              {t('credenciales.agregar')}
             </h2>
-            <p className="mt-1 text-sm text-muted">
-              Guarda la llave de tu proveedor para reutilizarla en tus agentes.
-            </p>
+            <p className="mt-1 text-sm text-muted">{t('credenciales.form.subtitulo')}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Cerrar"
+            aria-label={t('credenciales.form.cerrarAria')}
             className="flex h-8 w-8 flex-none items-center justify-center rounded-lg text-muted transition hover:bg-line-soft hover:text-ink"
           >
             <X className="h-[18px] w-[18px]" />
@@ -116,22 +116,22 @@ export function CredentialFormDialog({
               role="alert"
               className="rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa"
             >
-              {backendMessage(createCredential.error)}
+              {t(backendMessageKey(createCredential.error))}
             </div>
           )}
 
-          <Field label="Etiqueta" error={errors.label}>
+          <Field label={t('credenciales.form.etiquetaLabel')} error={errors.label}>
             <input
               ref={labelRef}
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               className={inputClass}
-              placeholder="Mi llave de produccion"
+              placeholder={t('credenciales.form.etiquetaPlaceholder')}
               maxLength={120}
             />
           </Field>
 
-          <Field label="Proveedor">
+          <Field label={t('credenciales.form.proveedorLabel')}>
             <select
               value={providerId}
               onChange={(e) => handleProviderChange(e.target.value as ProviderId)}
@@ -148,7 +148,7 @@ export function CredentialFormDialog({
           <Field
             label="API key"
             error={errors.apiKey}
-            hint="Se guarda cifrada y no se vuelve a mostrar."
+            hint={t('credenciales.form.apiKeyHint')}
           >
             {(field) => (
               <div className="relative">
@@ -165,7 +165,11 @@ export function CredentialFormDialog({
                 <button
                   type="button"
                   onClick={() => setShowKey((v) => !v)}
-                  aria-label={showKey ? 'Ocultar API key' : 'Mostrar API key'}
+                  aria-label={
+                    showKey
+                      ? t('credenciales.form.ocultarKeyAria')
+                      : t('credenciales.form.mostrarKeyAria')
+                  }
                   className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-muted transition hover:text-ink"
                 >
                   {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -178,23 +182,20 @@ export function CredentialFormDialog({
             <Field
               label="Base URL"
               error={errors.baseUrl}
-              hint="URL base del endpoint compatible con OpenAI."
+              hint={t('credenciales.form.baseUrlHint')}
             >
               <input
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
                 className={inputClass}
-                placeholder="https://api.miproveedor.com/v1"
+                placeholder={t('credenciales.form.baseUrlPlaceholder')}
               />
             </Field>
           )}
 
           <div className="flex items-start gap-2 rounded-xl border border-line bg-field px-3.5 py-3 text-xs text-muted">
             <ShieldCheck className="mt-px h-4 w-4 flex-none text-ok" />
-            <span>
-              Tu llave viaja por una conexion segura y se cifra antes de guardarse. La consola nunca
-              la vuelve a mostrar.
-            </span>
+            <span>{t('credenciales.form.seguridadNota')}</span>
           </div>
 
           <div className="flex justify-end gap-3 pt-1">
@@ -203,7 +204,7 @@ export function CredentialFormDialog({
               onClick={onClose}
               className="rounded-[10px] border border-line bg-surface px-4 py-2.5 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
             >
-              Cancelar
+              {t('credenciales.cancelar')}
             </button>
             <button
               type="submit"
@@ -211,7 +212,9 @@ export function CredentialFormDialog({
               className="inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-2.5 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
               {createCredential.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              {createCredential.isPending ? 'Guardando...' : 'Guardar credencial'}
+              {createCredential.isPending
+                ? t('credenciales.form.guardando')
+                : t('credenciales.form.guardar')}
             </button>
           </div>
         </form>

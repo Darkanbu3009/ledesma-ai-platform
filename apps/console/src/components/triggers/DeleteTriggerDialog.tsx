@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useDialog } from '../ui/useDialog';
 
 /**
@@ -21,6 +22,7 @@ export function DeleteTriggerDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useDialog({ open, onClose: onCancel, initialFocus: cancelRef });
 
@@ -33,13 +35,13 @@ export function DeleteTriggerDialog({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Eliminar trigger"
+        aria-label={t('triggers.eliminarDialog.titulo')}
         className="relative w-full max-w-sm rounded-2xl border border-line bg-surface p-6 shadow-card-hover"
       >
-        <h2 className="font-display text-lg font-bold text-ink">Eliminar trigger</h2>
+        <h2 className="font-display text-lg font-bold text-ink">{t('triggers.eliminarDialog.titulo')}</h2>
         <p className="mt-2 text-sm text-muted">
-          Vas a eliminar el trigger de <span className="font-medium text-ink">{description}</span>. La
-          URL del webhook dejara de funcionar y esta accion no se puede deshacer.
+          {t('triggers.eliminarDialog.cuerpoAntes')} <span className="font-medium text-ink">{description}</span>.{' '}
+          {t('triggers.eliminarDialog.cuerpoDespues')}
         </p>
         {error && (
           <div
@@ -56,7 +58,7 @@ export function DeleteTriggerDialog({
             onClick={onCancel}
             className="rounded-[10px] border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
           >
-            Cancelar
+            {t('triggers.comunes.cancelar')}
           </button>
           <button
             type="button"
@@ -64,7 +66,7 @@ export function DeleteTriggerDialog({
             disabled={busy}
             className="rounded-[10px] bg-brasa px-4 py-2 text-sm font-semibold text-white transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {busy ? 'Eliminando...' : 'Eliminar'}
+            {busy ? t('triggers.comunes.eliminando') : t('triggers.comunes.eliminar')}
           </button>
         </div>
       </div>

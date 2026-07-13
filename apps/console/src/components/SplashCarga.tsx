@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+
 /**
  * Splash de carga de marca: reemplaza el "Cargando..." de texto plano en los splashes
  * INICIALES de pantalla completa (ProtectedRoute, RegistrationGate, ConsentGate y el
@@ -15,13 +17,14 @@
  * La animacion es CSS puro (Tailwind animate-*): cero JS de animacion, cero timers,
  * cero estado. Con prefers-reduced-motion el cuadrito queda estatico y la barra se
  * oculta (variantes motion-reduce). Sin texto visible: el contenedor anuncia
- * role="status" + aria-label="Cargando" para lectores de pantalla.
+ * role="status" + aria-label={t('ui.estado.cargandoAria')} para lectores de pantalla.
  */
 export function SplashCarga() {
+  const { t } = useTranslation();
   return (
     <div
       role="status"
-      aria-label="Cargando"
+      aria-label={t('ui.estado.cargandoAria')}
       className="flex min-h-screen flex-col items-center justify-center gap-[22px] bg-cream"
     >
       <svg viewBox="0 0 56 64" className="h-16 w-14" aria-hidden="true">

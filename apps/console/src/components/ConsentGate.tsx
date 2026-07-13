@@ -1,4 +1,5 @@
 import { Outlet } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { RefreshCw } from 'lucide-react';
 import { useConsents } from '../lib/queries';
 import { hasPendingConsents } from '../lib/privacy';
@@ -18,6 +19,7 @@ import { SplashCarga } from './SplashCarga';
  * Ante un error de red al cargar el estado, NO bloquea de forma agresiva: ofrece reintentar.
  */
 export function ConsentGate() {
+  const { t } = useTranslation();
   const { data, isLoading, isError, refetch } = useConsents();
 
   if (isLoading) {
@@ -28,15 +30,17 @@ export function ConsentGate() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-cream px-4">
         <div className="w-full max-w-sm rounded-2xl border border-line bg-surface p-7 text-center shadow-card-hover">
-          <p className="font-display text-lg font-semibold text-ink">No pudimos cargar tu cuenta</p>
-          <p className="mt-2 text-sm text-muted">Revisa tu conexion e intenta de nuevo.</p>
+          <p className="font-display text-lg font-semibold text-ink">
+            {t('privacidad.gate.errorTitulo')}
+          </p>
+          <p className="mt-2 text-sm text-muted">{t('privacidad.gate.errorTexto')}</p>
           <button
             type="button"
             onClick={() => void refetch()}
             className="mt-5 inline-flex items-center gap-2 rounded-lg border border-line bg-field px-4 py-2 text-sm font-medium text-ink transition hover:border-brasa"
           >
             <RefreshCw className="h-4 w-4" />
-            Reintentar
+            {t('privacidad.reintentar')}
           </button>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import type { FormEvent } from 'react';
 import { Link } from 'react-router-dom';
+import { Trans, useTranslation } from 'react-i18next';
 import { Mail } from 'lucide-react';
 import { inputClass, monoLabelClass, SubmitButton } from './LoginForm';
 import { GoogleAuthButton } from './GoogleAuthButton';
@@ -41,20 +42,26 @@ export function SignUpForm({
   onConfirmChange,
   onSubmit,
 }: SignUpFormProps) {
+  const { t } = useTranslation();
   if (status === 'sent') {
     return (
       <div className="flex flex-col items-center text-center">
         <span className="flex h-11 w-11 items-center justify-center rounded-full bg-brasa-soft text-brasa">
           <Mail className="h-5 w-5" aria-hidden="true" />
         </span>
-        <h1 className="mt-4 font-display text-[22px] font-medium text-ink">Revisa tu correo</h1>
+        <h1 className="mt-4 font-display text-[22px] font-medium text-ink">
+          {t('auth.comun.revisaCorreoTitulo')}
+        </h1>
         <p className="mt-2 text-sm leading-relaxed text-muted">
-          Enviamos un correo a <span className="font-medium text-ink">{email.trim()}</span> para
-          confirmar tu cuenta. Confírmala y luego inicia sesión.
+          <Trans
+            i18nKey="auth.crearCuenta.confirmacionEnviada"
+            values={{ email: email.trim() }}
+            components={{ correo: <span className="font-medium text-ink" /> }}
+          />
         </p>
         <p className="mt-5 text-sm text-muted">
           <Link to="/login" className="font-medium text-brasa transition hover:text-brasa-hover">
-            Ir a iniciar sesión
+            {t('auth.comun.irIniciarSesion')}
           </Link>
         </p>
       </div>
@@ -64,16 +71,18 @@ export function SignUpForm({
   return (
     <div>
       <div className="mb-7">
-        <h1 className="font-display text-[22px] font-medium text-ink">Crear tu cuenta</h1>
+        <h1 className="font-display text-[22px] font-medium text-ink">
+          {t('auth.crearCuenta.titulo')}
+        </h1>
         <p className="mt-1.5 text-sm leading-relaxed text-muted">
-          Regístrate con tu correo y una contraseña.
+          {t('auth.crearCuenta.subtitulo')}
         </p>
       </div>
 
       <form onSubmit={onSubmit} className="space-y-4">
         <div>
           <label htmlFor="email" className={`${monoLabelClass} mb-2 block tracking-[3px]`}>
-            Correo
+            {t('auth.campos.correo')}
           </label>
           <input
             id="email"
@@ -81,13 +90,13 @@ export function SignUpForm({
             autoComplete="email"
             value={email}
             onChange={(e) => onEmailChange(e.target.value)}
-            placeholder="tu@correo.com"
+            placeholder={t('auth.campos.correoPlaceholder')}
             className={inputClass}
           />
         </div>
         <div>
           <label htmlFor="password" className={`${monoLabelClass} mb-2 block tracking-[3px]`}>
-            Contraseña
+            {t('auth.campos.contrasena')}
           </label>
           <input
             id="password"
@@ -100,7 +109,7 @@ export function SignUpForm({
         </div>
         <div>
           <label htmlFor="confirm" className={`${monoLabelClass} mb-2 block tracking-[3px]`}>
-            Confirmar contraseña
+            {t('auth.campos.confirmarContrasena')}
           </label>
           <input
             id="confirm"
@@ -121,23 +130,26 @@ export function SignUpForm({
                   to="/login"
                   className="font-medium underline underline-offset-2 transition hover:text-brasa-hover"
                 >
-                  Iniciar sesión
+                  {t('auth.login.iniciarSesion')}
                 </Link>
               </>
             )}
           </p>
         )}
-        <SubmitButton pending={status === 'submitting'} pendingLabel="Creando cuenta...">
-          Crear cuenta
+        <SubmitButton
+          pending={status === 'submitting'}
+          pendingLabel={t('auth.crearCuenta.creandoCuenta')}
+        >
+          {t('auth.crearCuenta.accion')}
         </SubmitButton>
       </form>
 
       <GoogleAuthButton />
 
       <p className="mt-7 text-center text-sm text-muted">
-        ¿Ya tienes cuenta?{' '}
+        {t('auth.crearCuenta.yaTienesCuenta')}{' '}
         <Link to="/login" className="font-medium text-brasa transition hover:text-brasa-hover">
-          Iniciar sesión
+          {t('auth.login.iniciarSesion')}
         </Link>
       </p>
     </div>

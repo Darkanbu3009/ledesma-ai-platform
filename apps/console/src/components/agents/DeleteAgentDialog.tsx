@@ -1,3 +1,4 @@
+import { Trans, useTranslation } from 'react-i18next';
 import { useDialog } from '../ui/useDialog';
 
 export function DeleteAgentDialog({
@@ -15,6 +16,7 @@ export function DeleteAgentDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   // Antes no tenia ninguna gestion de foco/teclado; ahora hereda trampa de foco, Escape y retorno del
   // hook compartido. `initialFocus` por defecto ('first') enfoca el boton Cancelar al abrir.
   const dialogRef = useDialog({ open, onClose: onCancel });
@@ -28,13 +30,18 @@ export function DeleteAgentDialog({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Eliminar agente"
+        aria-label={t('agentes.form.eliminarAgente')}
         className="relative w-full max-w-sm rounded-xl border border-grafito-border bg-grafito p-6 shadow-2xl shadow-black/40"
       >
-        <h2 className="font-display text-lg font-semibold text-hueso">Eliminar agente</h2>
+        <h2 className="font-display text-lg font-semibold text-hueso">
+          {t('agentes.form.eliminarAgente')}
+        </h2>
         <p className="mt-2 text-sm text-hueso-muted">
-          Vas a eliminar <span className="text-hueso">{agentName}</span>. Esta accion no se puede
-          deshacer.
+          <Trans
+            i18nKey="agentes.eliminarDialogo.confirmacion"
+            values={{ name: agentName }}
+            components={{ nombre: <span className="text-hueso" /> }}
+          />
         </p>
         {error && (
           <div
@@ -50,7 +57,7 @@ export function DeleteAgentDialog({
             onClick={onCancel}
             className="rounded-lg border border-grafito-border px-4 py-2 text-sm text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
           >
-            Cancelar
+            {t('agentes.comun.cancelar')}
           </button>
           <button
             type="button"
@@ -58,7 +65,7 @@ export function DeleteAgentDialog({
             disabled={busy}
             className="rounded-lg bg-brasa px-4 py-2 text-sm font-semibold text-carbon transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {busy ? 'Eliminando...' : 'Eliminar'}
+            {busy ? t('agentes.eliminarDialogo.eliminando') : t('agentes.comun.eliminar')}
           </button>
         </div>
       </div>

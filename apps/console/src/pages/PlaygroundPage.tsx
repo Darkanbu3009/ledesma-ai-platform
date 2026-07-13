@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
   ArrowUp,
@@ -31,10 +32,10 @@ import { PlaygroundCredential } from '../components/agents/PlaygroundCredential'
 const ACEPTA_IMAGENES = 'image/png,image/jpeg,image/webp,image/gif';
 const ACEPTA_DOCUMENTOS = '.pdf,.docx,.xlsx,.xls';
 
-/** Opciones del menu "+": etiqueta, icono y el accept que cada una pasa al file picker. */
+/** Opciones del menu "+": clave i18n de la etiqueta, icono y el accept que cada una pasa al file picker. */
 const OPCIONES_ADJUNTO = [
-  { label: 'Imagen', Icono: ImageIcon, accept: ACEPTA_IMAGENES },
-  { label: 'Documento', Icono: FileText, accept: ACEPTA_DOCUMENTOS },
+  { labelKey: 'playground.adjuntos.imagen', Icono: ImageIcon, accept: ACEPTA_IMAGENES },
+  { labelKey: 'playground.adjuntos.documento', Icono: FileText, accept: ACEPTA_DOCUMENTOS },
 ] as const;
 
 /** Icono de la miniatura segun la categoria del adjunto. */

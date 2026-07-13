@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { BarChart3, Loader2 } from 'lucide-react';
 import { useDashboard } from '../lib/queries';
 import {

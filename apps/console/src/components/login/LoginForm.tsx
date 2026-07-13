@@ -1,5 +1,6 @@
 import type { FormEvent, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { GoogleAuthButton } from './GoogleAuthButton';
 
 export type LoginStatus = 'idle' | 'submitting' | 'error';
@@ -37,19 +38,20 @@ export function LoginForm({
   onPasswordChange,
   onSubmit,
 }: LoginFormProps) {
+  const { t } = useTranslation();
   return (
     <div>
       <div className="mb-7">
-        <h1 className="font-display text-[22px] font-medium text-ink">Iniciar sesión</h1>
-        <p className="mt-1.5 text-sm leading-relaxed text-muted">
-          Entra con tu correo y contraseña.
-        </p>
+        <h1 className="font-display text-[22px] font-medium text-ink">
+          {t('auth.login.iniciarSesion')}
+        </h1>
+        <p className="mt-1.5 text-sm leading-relaxed text-muted">{t('auth.login.subtitulo')}</p>
       </div>
 
       <form onSubmit={onSubmit} className="space-y-4">
         <div>
           <label htmlFor="email" className={`${monoLabelClass} mb-2 block tracking-[3px]`}>
-            Correo
+            {t('auth.campos.correo')}
           </label>
           <input
             id="email"
@@ -57,20 +59,20 @@ export function LoginForm({
             autoComplete="email"
             value={email}
             onChange={(e) => onEmailChange(e.target.value)}
-            placeholder="tu@correo.com"
+            placeholder={t('auth.campos.correoPlaceholder')}
             className={inputClass}
           />
         </div>
         <div>
           <div className="mb-2 flex items-baseline justify-between">
             <label htmlFor="password" className={`${monoLabelClass} block tracking-[3px]`}>
-              Contraseña
+              {t('auth.campos.contrasena')}
             </label>
             <Link
               to="/recuperar"
               className="text-xs font-medium text-brasa transition hover:text-brasa-hover"
             >
-              ¿Olvidaste tu contraseña?
+              {t('auth.login.olvidasteContrasena')}
             </Link>
           </div>
           <input
@@ -87,20 +89,20 @@ export function LoginForm({
             {errorMsg}
           </p>
         )}
-        <SubmitButton pending={status === 'submitting'} pendingLabel="Entrando...">
-          Iniciar sesión
+        <SubmitButton pending={status === 'submitting'} pendingLabel={t('auth.login.entrando')}>
+          {t('auth.login.iniciarSesion')}
         </SubmitButton>
       </form>
 
       <GoogleAuthButton />
 
       <p className="mt-7 text-center text-sm text-muted">
-        ¿No tienes cuenta?{' '}
+        {t('auth.login.sinCuenta')}{' '}
         <Link
           to="/crear-cuenta"
           className="font-medium text-brasa transition hover:text-brasa-hover"
         >
-          Crear cuenta
+          {t('auth.crearCuenta.accion')}
         </Link>
       </p>
     </div>
@@ -113,13 +115,14 @@ export function LoginForm({
  */
 export function SubmitButton({
   pending = false,
-  pendingLabel = 'Enviando...',
+  pendingLabel,
   children,
 }: {
   pending?: boolean;
   pendingLabel?: string;
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
   return (
     <button
       type="submit"
@@ -132,7 +135,7 @@ export function SubmitButton({
             className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"
             aria-hidden="true"
           />
-          {pendingLabel}
+          {pendingLabel ?? t('auth.comun.enviando')}
         </span>
       ) : (
         children

@@ -113,10 +113,10 @@ export const PLANS: Plan[] = [
     runsLine: runsLineFor(getPlanById('business').runsPerMonth),
     recommended: false,
     features: [
-      { term: 'Agentes', text: 'Agentes ilimitados' },
-      { term: 'Modo de uso', text: 'Todo lo de Pro' },
-      { term: 'Equipo', text: 'Asientos para tu equipo' },
-      { term: 'Soporte', text: 'Prioritario con acompañamiento' },
+      { term: 'planes.features.termAgentes', text: 'planes.features.agentesIlimitados' },
+      { term: 'planes.features.termModoUso', text: 'planes.features.todoLoDePro' },
+      { term: 'planes.features.termEquipo', text: 'planes.features.asientosEquipo' },
+      { term: 'planes.features.termSoporte', text: 'planes.features.soporteAcompanamiento' },
     ],
   },
 ];
@@ -132,10 +132,10 @@ export function planName(planId: PlanId): string {
  */
 export function downgradeLossSummary(currentTier: ProfileTier, target: PlanId): string[] {
   const labels: Record<'autonomy' | 'embedded', string> = {
-    autonomy: 'recetas, tareas programadas y triggers (autonomia)',
-    embedded: 'el widget embebido fuera del Playground',
+    autonomy: 'planes.perdidas.autonomia',
+    embedded: 'planes.perdidas.embebido',
   };
-  return lostCapabilities(currentTier, target).map((capability) => labels[capability]);
+  return lostCapabilities(currentTier, target).map((capability) => i18n.t(labels[capability]));
 }
 
 /**
@@ -154,20 +154,20 @@ export function selectPlanErrorMessage(err: unknown): string {
       : null;
   switch (status) {
     case 400:
-      return 'No reconocimos ese plan. Recarga la pagina e intenta de nuevo.';
+      return i18n.t('planes.errores.noReconocido');
     case 401:
-      return 'Tu sesión expiró. Vuelve a iniciar sesión.';
+      return i18n.t('planes.errores.sesionExpirada');
     case 404:
-      return 'Completa tu registro antes de elegir un plan.';
+      return i18n.t('planes.errores.completaRegistro');
     case 429:
-      return 'Demasiados intentos seguidos. Espera un momento e intenta de nuevo.';
+      return i18n.t('planes.errores.demasiadosIntentos');
     default:
       if (status !== null && status >= 500) {
-        return `No pudimos cambiar tu plan (error ${status} del servidor). Intenta de nuevo en unos minutos.`;
+        return i18n.t('planes.errores.servidor', { status });
       }
       if (status === null) {
-        return 'No pudimos conectar con el servidor. Revisa tu conexión e intenta de nuevo.';
+        return i18n.t('planes.errores.conexion');
       }
-      return 'No pudimos cambiar tu plan. Intenta de nuevo.';
+      return i18n.t('planes.errores.generico');
   }
 }
