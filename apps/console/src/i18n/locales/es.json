@@ -13,8 +13,6 @@
   "language": {
     "sectionTitle": "Idioma",
     "sectionDescription": "Elige el idioma de la interfaz. El cambio se aplica de inmediato.",
-    "modalTitle": "¿En qué idioma prefieres navegar?",
-    "modalSubtitle": "Puedes cambiarlo después desde Configuración.",
-    "modalClose": "Cerrar y continuar en el idioma detectado"
+    "switcherLabel": "Idioma"
   }
 }
