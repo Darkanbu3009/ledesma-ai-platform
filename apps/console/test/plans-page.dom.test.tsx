@@ -152,7 +152,7 @@ describe('PlansPage', () => {
     render(<PlansPage />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Elegir Pro' }));
-    expect(screen.getByText('No pudimos cambiar tu plan. Intenta de nuevo.')).toBeInTheDocument();
+    expect(screen.getByText('No pudimos cambiar tu plan (error 500 del servidor). Intenta de nuevo en unos minutos.')).toBeInTheDocument();
     // No destructivo: el CTA sigue disponible para reintentar.
     expect(screen.getByRole('button', { name: 'Elegir Pro' })).toBeEnabled();
   });
@@ -169,7 +169,7 @@ describe('PlansPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cambiar a Free' }));
     // El dialogo se cierra (el overlay taparia el aviso) y el error queda a la vista.
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.getByText('No pudimos cambiar tu plan. Intenta de nuevo.')).toBeInTheDocument();
+    expect(screen.getByText('No pudimos cambiar tu plan (error 500 del servidor). Intenta de nuevo en unos minutos.')).toBeInTheDocument();
   });
 
   it('EXITO: confirma con un aviso (la cache de ["me"] la refresca la mutacion real)', () => {

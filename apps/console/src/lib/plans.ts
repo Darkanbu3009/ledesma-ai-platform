@@ -135,6 +135,10 @@ export function downgradeLossSummary(currentTier: ProfileTier, target: PlanId): 
  * Traduce el error de seleccionar un plan (POST /v1/subscription/select) a un mensaje claro y no
  * destructivo para el catalogo. Duck-typed sobre `status` (mismo criterio que
  * updateProfileNameErrorMessage) para no acoplar este modulo puro a ApiError.
+ *
+ * Los casos no mapeados NO se colapsan en un generico mudo: un 5xx incluye el status real y un fallo
+ * sin respuesta (red/CORS) se distingue de un error del servidor. Sin esto, un 500, un 429 y un fetch
+ * caido muestran el mismo texto y el incidente queda indiagnosticable desde la UI.
  */
 export function selectPlanErrorMessage(err: unknown): string {
   const status =
@@ -148,7 +152,15 @@ export function selectPlanErrorMessage(err: unknown): string {
       return 'Tu sesión expiró. Vuelve a iniciar sesión.';
     case 404:
       return 'Completa tu registro antes de elegir un plan.';
+    case 429:
+      return 'Demasiados intentos seguidos. Espera un momento e intenta de nuevo.';
     default:
+      if (status !== null && status >= 500) {
+        return `No pudimos cambiar tu plan (error ${status} del servidor). Intenta de nuevo en unos minutos.`;
+      }
+      if (status === null) {
+        return 'No pudimos conectar con el servidor. Revisa tu conexión e intenta de nuevo.';
+      }
       return 'No pudimos cambiar tu plan. Intenta de nuevo.';
   }
 }
