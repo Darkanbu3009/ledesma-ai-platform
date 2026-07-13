@@ -82,7 +82,15 @@ describe('planName y selectPlanErrorMessage', () => {
     expect(selectPlanErrorMessage({ status: 400 })).toContain('No reconocimos ese plan');
     expect(selectPlanErrorMessage({ status: 401 })).toContain('sesión');
     expect(selectPlanErrorMessage({ status: 404 })).toContain('registro');
-    expect(selectPlanErrorMessage({ status: 500 })).toContain('Intenta de nuevo');
-    expect(selectPlanErrorMessage(new Error('x'))).toContain('Intenta de nuevo');
+    expect(selectPlanErrorMessage({ status: 429 })).toContain('Demasiados intentos');
+    // Otros 4xx no mapeados conservan el generico reintenable.
+    expect(selectPlanErrorMessage({ status: 409 })).toBe('No pudimos cambiar tu plan. Intenta de nuevo.');
+  });
+
+  it('un 5xx expone el status real (diagnostico desde la UI) y un fallo de red se distingue del servidor', () => {
+    expect(selectPlanErrorMessage({ status: 500 })).toContain('error 500 del servidor');
+    expect(selectPlanErrorMessage({ status: 503 })).toContain('error 503 del servidor');
+    // Sin respuesta HTTP (fetch caido, CORS): no es un error del servidor, se pide revisar la conexion.
+    expect(selectPlanErrorMessage(new Error('x'))).toContain('conexión');
   });
 });
