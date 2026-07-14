@@ -973,9 +973,10 @@
     "footer": {
       "descripcion": "Agentes verticales de IA para tu empresa, integrados en los sistemas que tu equipo ya usa.",
       "contacto": "Contacto",
+      "contactanos": "Contáctanos",
       "facebookAria": "Facebook de Ledesma AI Labs",
-      "cuenta": "Cuenta",
-      "tagline": "Ledesma AI Labs - Agentes verticales de IA para empresas"
+      "copyright": "© 2026 Ledesma AI Labs. Todos los derechos reservados",
+      "politicaPrivacidad": "Política de privacidad"
     }
   },
   "panel": {
