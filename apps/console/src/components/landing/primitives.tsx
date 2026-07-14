@@ -10,6 +10,7 @@ import {
   type LucideIcon
 } from 'lucide-react';
 import { Eyebrow } from './eyebrow';
+import { REVEAL_KEYFRAMES, revealAnimationClass, useRevealOnScroll } from './use-reveal-on-scroll';
 
 /**
  * Las 6 primitivas que forman "el cuerpo" alrededor del cerebro. Los iconos siguen
@@ -54,9 +55,11 @@ const PRIMITIVES: { icon: LucideIcon; tituloKey: string; descripcionKey: string 
  */
 export function Primitives(): JSX.Element {
   const { t } = useTranslation();
+  const { ref: gridRef, revealed } = useRevealOnScroll<HTMLDivElement>();
 
   return (
     <section id="plataforma" className="border-t border-border">
+      <style>{REVEAL_KEYFRAMES}</style>
       <div className="mx-auto max-w-6xl px-6 py-20">
         <div className="max-w-2xl">
           <Eyebrow>{t('landing.primitivas.eyebrow')}</Eyebrow>
@@ -68,11 +71,20 @@ export function Primitives(): JSX.Element {
           </p>
         </div>
 
-        <div className="mt-12 grid gap-px overflow-hidden rounded-2xl border border-border bg-border shadow-sm min-[640px]:grid-cols-2 min-[900px]:grid-cols-3">
-          {PRIMITIVES.map((primitive) => {
+        {/* Reveal al hacer scroll: se observa la grilla y cada cuadro entra con
+            fade-in + subida, escalonado 80ms segun su orden visual. */}
+        <div
+          ref={gridRef}
+          className="mt-12 grid gap-px overflow-hidden rounded-2xl border border-border bg-border shadow-sm min-[640px]:grid-cols-2 min-[900px]:grid-cols-3"
+        >
+          {PRIMITIVES.map((primitive, index) => {
             const Icon = primitive.icon;
             return (
-              <div key={primitive.tituloKey} className="bg-background-secondary p-6">
+              <div
+                key={primitive.tituloKey}
+                className={`bg-background-secondary p-6 ${revealAnimationClass(revealed)}`}
+                style={{ animationDelay: `${index * 80}ms` }}
+              >
                 <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent/10">
                   <Icon className="h-5 w-5 text-accent" aria-hidden="true" />
                 </div>
