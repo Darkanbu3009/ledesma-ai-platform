@@ -79,7 +79,7 @@ export function BrainSwap({ providers, active, cardRef, onSelect }: BrainSwapPro
     <div className="h-full w-full [perspective:1500px]">
       <div
         ref={cardRef}
-        className="relative isolate flex h-full w-full flex-col overflow-hidden rounded-2xl border border-border bg-background-secondary p-8 shadow-md"
+        className="relative isolate flex h-full w-full flex-col overflow-hidden rounded-2xl border border-border bg-background-secondary p-6 shadow-md sm:p-8"
         aria-label={t('landing.brainSwap.cartaAria', { label: activeLabel })}
       >
         {/* Glow radial sutil detras del cerebro, tenido con el acento activo */}

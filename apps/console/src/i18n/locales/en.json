@@ -771,7 +771,9 @@
       "plataforma": "Platform",
       "ejemplos": "Examples",
       "comoFunciona": "How it works",
-      "seccionesAria": "Sections"
+      "seccionesAria": "Sections",
+      "abrirMenu": "Open navigation menu",
+      "cerrarMenu": "Close navigation menu"
     },
     "hero": {
       "titulo": "Vertical AI agents, with the model you choose",
