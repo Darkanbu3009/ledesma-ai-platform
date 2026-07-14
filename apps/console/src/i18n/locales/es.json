@@ -52,7 +52,9 @@
       "resultados_other": "{{count}} resultados",
       "usuariosTotal_one": "{{count}} usuario",
       "usuariosTotal_other": "{{count}} usuarios",
-      "cargarMas": "Cargar mas"
+      "cargarMas": "Cargar mas",
+      "resultados_many": "{{count}} resultados",
+      "usuariosTotal_many": "{{count}} usuarios"
     },
     "ficha": {
       "volver": "Volver a la lista",
@@ -209,7 +211,8 @@
       "editarAria": "Editar {{name}}",
       "conversarAria": "Conversar con {{name}}",
       "editar": "Editar",
-      "conversar": "Conversar"
+      "conversar": "Conversar",
+      "herramientas_many": "{{count}} herramientas"
     },
     "form": {
       "editarTitulo": "Editar agente",
@@ -1029,7 +1032,9 @@
       "masModelos_one": "y {{count}} modelo mas con gasto menor.",
       "masModelos_other": "y {{count}} modelos mas con gasto menor.",
       "sinTarifa_one": "{{count}} modelo sin tarifa conocida (no se estima su costo en dinero): {{lista}}.",
-      "sinTarifa_other": "{{count}} modelos sin tarifa conocida (no se estima su costo en dinero): {{lista}}."
+      "sinTarifa_other": "{{count}} modelos sin tarifa conocida (no se estima su costo en dinero): {{lista}}.",
+      "masModelos_many": "y {{count}} modelos mas con gasto menor.",
+      "sinTarifa_many": "{{count}} modelos sin tarifa conocida (no se estima su costo en dinero): {{lista}}."
     },
     "grafica": {
       "ejecuciones_one": "{{cantidad}} ejecucion",
@@ -1037,7 +1042,8 @@
       "actividadVacia": "Sin ejecuciones en este periodo.",
       "actividadAria": "Grafica de ejecuciones por dia en el rango seleccionado",
       "gastoVacio": "Sin gasto tarifado en este periodo.",
-      "gastoAria": "Grafica de gasto estimado en USD por modelo"
+      "gastoAria": "Grafica de gasto estimado en USD por modelo",
+      "ejecuciones_many": "{{cantidad}} ejecuciones"
     }
   },
   "uso": {
@@ -1069,7 +1075,8 @@
       "titulo": "Corridas por dia",
       "vacio": "Sin corridas en este periodo.",
       "tooltip_one": "{{fecha}}: {{count}} corrida",
-      "tooltip_other": "{{fecha}}: {{count}} corridas"
+      "tooltip_other": "{{fecha}}: {{count}} corridas",
+      "tooltip_many": "{{fecha}}: {{count}} corridas"
     },
     "recientes": {
       "titulo": "Corridas recientes",
@@ -1349,7 +1356,8 @@
       "agente": "Elige el agente que ejecutara la receta.",
       "credencial": "Elige la credencial que va a usar.",
       "pasos": "Agrega al menos un paso con una instruccion."
-    }
+    },
+    "pasosContador_many": "{{count}} pasos"
   },
   "triggers": {
     "titulo": "Triggers",
@@ -1653,7 +1661,8 @@
       "agenteEliminado": "Agente eliminado",
       "fin": "Fin: {{fecha}}",
       "intentos_one": "{{count}} intento",
-      "intentos_other": "{{count}} intentos"
+      "intentos_other": "{{count}} intentos",
+      "intentos_many": "{{count}} intentos"
     },
     "filtros": {
       "todas": "Todas"

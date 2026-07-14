@@ -103,7 +103,7 @@ const SURFACES: { icon: LucideIcon; labelKey: string }[] = [
  * superficies que el equipo ya usa.
  */
 export function Integration(): JSX.Element {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [copiado, setCopiado] = useState(false);
 
   const copiar = async (): Promise<void> => {
@@ -185,8 +185,10 @@ export function Integration(): JSX.Element {
           {/* Widget renderizado: chat ANIMADO multi-agente (cuatro agentes en ciclo: Sales
               Analysis, Facturacion, Operaciones y Customer Success). Hereda el tema claro y
               propaga el acento del agente activo por una custom property; arranca al entrar al
-              viewport y respeta el movimiento reducido. La logica vive en su propio componente. */}
-          <IntegrationChatWidget />
+              viewport y respeta el movimiento reducido. La logica vive en su propio componente.
+              La key por idioma remonta el widget al cambiar de idioma: el guion animado arranca
+              de cero en vez de mezclar mensajes de dos corridas. */}
+          <IntegrationChatWidget key={i18n.language} />
         </div>
 
         {/* Fila de canales */}

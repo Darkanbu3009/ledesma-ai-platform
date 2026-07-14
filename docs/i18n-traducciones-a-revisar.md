@@ -223,3 +223,11 @@ Claves con traduccion dudosa, ambigua o termino de negocio sensible:
 - landing.ejemplos.agentes.quotations.nombre | "Cotizaciones" | "Quotes" | nombre de agente demo; podria ser "Quoting" o "Quotations"
 - Nota: formatRunAt (lib/schedule.ts) y formatWhen (lib/usage.ts) ahora formatean fechas con el locale del idioma activo (antes fijo "es"/"es-MX"); en espanol el resultado es identico
 - Nota: lib/privacy.ts conserva sus labels en espanol como constantes (los tests los fijan y la UI ya no los renderiza: las paginas resuelven las claves privacidad.* en el render)
+
+## Notas de la revision adversarial (post-extraccion)
+
+- Plurales: el espanol moderno tiene categoria "many" (Intl.PluralRules) para >= 1,000,000 y i18next no cae de _other cuando falta _many; se agregaron claves _many (copia de _other) a los 9 pares plurales en ambos idiomas para que un contador de un millon no renderice la clave cruda.
+- Animaciones con guion traducido (chat de la landing y demo del Configurador): se remontan con key por idioma al cambiar de idioma, para que el guion arranque de cero en vez de mezclar corridas.
+- Fechas: formatRunAt, formatWhen/formatRunDate, formatDayLabel y formatDate (admin) siguen el idioma activo; en espanol el resultado es identico al de antes. PrivacyRightsPage conserva toLocaleDateString() sin locale (comportamiento previo, por navegador).
+- Variantes preexistentes del mensaje de sesion expirada (con acentos, sin acentos y con voseo en NewPasswordForm) se extrajeron TAL CUAL del codigo original en claves separadas; unificar el wording queda como decision de producto fuera de este PR.
+- lib/plans.ts conserva LAUNCH_NOTICE (los tests lo importan y la pagina debe renderizar exactamente ese texto via planes.avisoLanzamiento).

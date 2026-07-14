@@ -84,11 +84,10 @@ export function formatUSD(value: number): string {
 export function formatDayLabel(isoDate: string): string {
   const [year, month, day] = isoDate.split('-').map(Number);
   if (!year || !month || !day) return isoDate;
-  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString('es-MX', {
-    day: 'numeric',
-    month: 'short',
-    timeZone: 'UTC',
-  });
+  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString(
+    currentLanguage() === 'en' ? 'en' : 'es-MX',
+    { day: 'numeric', month: 'short', timeZone: 'UTC' },
+  );
 }
 
 /** ISO -> fecha corta es-MX, p.ej. '10 jun, 14:32'. */

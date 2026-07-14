@@ -52,7 +52,9 @@
       "resultados_other": "{{count}} results",
       "usuariosTotal_one": "{{count}} user",
       "usuariosTotal_other": "{{count}} users",
-      "cargarMas": "Load more"
+      "cargarMas": "Load more",
+      "resultados_many": "{{count}} results",
+      "usuariosTotal_many": "{{count}} users"
     },
     "ficha": {
       "volver": "Back to the list",
@@ -209,7 +211,8 @@
       "editarAria": "Edit {{name}}",
       "conversarAria": "Chat with {{name}}",
       "editar": "Edit",
-      "conversar": "Chat"
+      "conversar": "Chat",
+      "herramientas_many": "{{count}} tools"
     },
     "form": {
       "editarTitulo": "Edit agent",
@@ -1029,7 +1032,9 @@
       "masModelos_one": "and {{count}} more model with lower spend.",
       "masModelos_other": "and {{count}} more models with lower spend.",
       "sinTarifa_one": "{{count}} model with no known rate (its money cost is not estimated): {{lista}}.",
-      "sinTarifa_other": "{{count}} models with no known rate (their money cost is not estimated): {{lista}}."
+      "sinTarifa_other": "{{count}} models with no known rate (their money cost is not estimated): {{lista}}.",
+      "masModelos_many": "and {{count}} more models with lower spend.",
+      "sinTarifa_many": "{{count}} models with no known rate (their money cost is not estimated): {{lista}}."
     },
     "grafica": {
       "ejecuciones_one": "{{cantidad}} run",
@@ -1037,7 +1042,8 @@
       "actividadVacia": "No runs in this period.",
       "actividadAria": "Chart of runs per day in the selected range",
       "gastoVacio": "No priced spend in this period.",
-      "gastoAria": "Chart of estimated spend in USD by model"
+      "gastoAria": "Chart of estimated spend in USD by model",
+      "ejecuciones_many": "{{cantidad}} runs"
     }
   },
   "uso": {
@@ -1069,7 +1075,8 @@
       "titulo": "Runs per day",
       "vacio": "No runs in this period.",
       "tooltip_one": "{{fecha}}: {{count}} run",
-      "tooltip_other": "{{fecha}}: {{count}} runs"
+      "tooltip_other": "{{fecha}}: {{count}} runs",
+      "tooltip_many": "{{fecha}}: {{count}} runs"
     },
     "recientes": {
       "titulo": "Recent runs",
@@ -1349,7 +1356,8 @@
       "agente": "Choose the agent that will run the recipe.",
       "credencial": "Choose the credential it will use.",
       "pasos": "Add at least one step with an instruction."
-    }
+    },
+    "pasosContador_many": "{{count}} steps"
   },
   "triggers": {
     "titulo": "Triggers",
@@ -1653,7 +1661,8 @@
       "agenteEliminado": "Deleted agent",
       "fin": "Finished: {{fecha}}",
       "intentos_one": "{{count}} attempt",
-      "intentos_other": "{{count}} attempts"
+      "intentos_other": "{{count}} attempts",
+      "intentos_many": "{{count}} attempts"
     },
     "filtros": {
       "todas": "All"

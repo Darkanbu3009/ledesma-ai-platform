@@ -243,18 +243,21 @@ function AdvancedMode({
   rawCron: string;
   onRawCronChange: (next: string) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const trimmed = rawCron.trim();
   const isEmpty = trimmed === '';
   const valid = !isEmpty && isValidCronExpression(rawCron);
 
   // Vista previa: descripcion legible (si es una forma conocida) y proximo run estimado (UTC).
+  // describeCron/formatRunAt traducen segun el idioma activo, por eso participa en el memo.
+  const language = i18n.language;
   const preview = useMemo(() => {
+    void language;
     if (!valid) return null;
     const description = describeCron(rawCron);
     const next = nextCronRun(rawCron, new Date());
     return { description, nextRun: formatRunAt(next ? next.toISOString() : null) };
-  }, [rawCron, valid]);
+  }, [rawCron, valid, language]);
 
   return (
     <div className="space-y-2">

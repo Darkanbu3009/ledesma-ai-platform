@@ -7,7 +7,7 @@
 // SOLO LECTURA salvo el cambio de tier (la unica mutacion del panel). El acceso lo impone el backend por
 // rol (requireAdminRole -> 403 a un no-admin); aca solo consumimos y presentamos.
 
-import i18n from '../i18n';
+import i18n, { currentLanguage } from '../i18n';
 import type { AccountType, ProfileRole, ProfileTier, Subscription, UsageCounter } from './registration';
 
 /**
@@ -150,7 +150,11 @@ export function roleLabel(role: ProfileRole): string {
 export function formatUserDate(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' });
+  return date.toLocaleDateString(currentLanguage() === 'en' ? 'en' : 'es-MX', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
 }
 
 // ---------------------------------------------------------------------------------------------------
