@@ -10,7 +10,7 @@ interface LogoProps {
    * Recorta el margen interno del lienzo para que la tinta llene el alto
    * dado por className (la consola lo usa en el sidebar y el aviso). Sin
    * esta prop se conserva el lienzo original con margen, que es del que
-   * dependen los tamanos de la landing (h-8/h-9/h-10).
+   * dependen los tamanos de la landing (h-12/h-14 en el nav, h-16 en el footer).
    */
   tight?: boolean;
 }

@@ -26,7 +26,7 @@ export function LandingNav(): JSX.Element {
           to="/"
           className="flex items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
-          <Logo className="h-9 w-auto md:h-10" />
+          <Logo className="h-12 w-auto md:h-14" />
         </Link>
 
         <nav className="hidden items-center gap-7 min-[900px]:flex" aria-label={t('landing.navegacion.seccionesAria')}>
