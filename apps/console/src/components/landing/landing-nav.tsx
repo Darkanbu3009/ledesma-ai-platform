@@ -64,8 +64,16 @@ export function LandingNav(): JSX.Element {
 
         <div className="flex min-w-0 items-center gap-1.5 sm:gap-3.5">
           <LanguageSwitcher />
-          {/* En pantallas muy chicas "Iniciar sesion" no cabe en la barra: pasa al panel
-              del menu hamburguesa. Desde sm vuelve a la barra con sus medidas de siempre. */}
+          {/* En la barra movil "Iniciar sesion" completo no cabe: se abrevia a "Entrar" como
+              enlace de texto discreto. El alto visual es de 32px, pero el pseudo-elemento
+              extiende el area tactil a ~44px sin cambiar el dibujo. Desde sm desaparece y
+              vuelve el boton de siempre. */}
+          <Link
+            to="/login"
+            className="relative inline-flex h-8 shrink-0 items-center rounded-md px-1 text-xs font-medium text-ink transition-colors hover:text-ink/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-[''] sm:hidden"
+          >
+            {t('landing.comun.entrar')}
+          </Link>
           <Button
             asChild
             variant="ghost"
@@ -74,8 +82,19 @@ export function LandingNav(): JSX.Element {
           >
             <Link to="/login">{t('landing.comun.iniciarSesion')}</Link>
           </Button>
-          <Button asChild size="sm" className="h-9 px-2.5 text-xs sm:h-10 sm:px-5 sm:text-sm">
-            <Link to="/crear-cuenta">{t('landing.comun.crearCuenta')}</Link>
+          {/* En movil la pildora es compacta (32px de alto, radio 8px) y el pseudo-elemento
+              amplia el toque a ~44px; desde sm recupera exactamente sus medidas de siempre.
+              Por debajo de 380px el texto completo no cabe junto a "Entrar", ES|EN y el
+              hamburguesa (menos aun en ingles), asi que se abrevia a "Crear" / "Sign up". */}
+          <Button
+            asChild
+            size="sm"
+            className="relative h-8 shrink-0 rounded-lg px-2.5 text-xs before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-[''] min-[380px]:px-[13px] sm:h-10 sm:rounded-[10px] sm:px-5 sm:text-sm sm:before:content-none"
+          >
+            <Link to="/crear-cuenta">
+              <span className="min-[380px]:hidden">{t('landing.comun.crear')}</span>
+              <span className="hidden min-[380px]:inline">{t('landing.comun.crearCuenta')}</span>
+            </Link>
           </Button>
 
           {/* Hamburguesa: solo por debajo de ~900px, donde la nav horizontal se oculta. */}
@@ -125,16 +144,6 @@ export function LandingNav(): JSX.Element {
                   </a>
                 </li>
               ))}
-              {/* "Iniciar sesion" vive aqui solo mientras esta fuera de la barra (< sm). */}
-              <li className="mt-1 border-t border-border pt-1 sm:hidden">
-                <Link
-                  to="/login"
-                  onClick={cerrarMenu}
-                  className="block rounded-md px-3 py-3 font-grotesk text-[0.9375rem] text-foreground-secondary transition-colors hover:bg-background-tertiary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                >
-                  {t('landing.comun.iniciarSesion')}
-                </Link>
-              </li>
             </ul>
           </nav>
         </>
