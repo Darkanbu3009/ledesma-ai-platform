@@ -95,7 +95,7 @@ export function Examples(): JSX.Element {
                   </Badge>
                 </div>
                 <h3 className="mt-5 font-display text-xl font-semibold text-foreground">
-                  {agent.name}
+                  {t(agent.nameKey)}
                 </h3>
                 <p className="mt-1.5 text-sm font-medium text-foreground/75">
                   {t(copy.taglineKey)}

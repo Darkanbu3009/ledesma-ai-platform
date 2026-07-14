@@ -1,3 +1,4 @@
+import i18n from '../i18n';
 import { isValidCronExpression } from './cron';
 
 /**
@@ -73,16 +74,16 @@ export type ScheduledTaskDraftErrors = Partial<
 export function validateScheduledTaskDraft(draft: ScheduledTaskDraft): ScheduledTaskDraftErrors {
   const errors: ScheduledTaskDraftErrors = {};
   if (draft.agentId.trim() === '') {
-    errors.agentId = 'Elige el agente que se va a ejecutar.';
+    errors.agentId = i18n.t('tareas.validacion.agente');
   }
   if (draft.credentialId.trim() === '') {
-    errors.credentialId = 'Elige la credencial que va a usar.';
+    errors.credentialId = i18n.t('tareas.validacion.credencial');
   }
   if (draft.message.trim() === '') {
-    errors.message = 'Escribe el mensaje que ejecutara el agente.';
+    errors.message = i18n.t('tareas.validacion.mensaje');
   }
   if (!isValidCronExpression(draft.cronExpression)) {
-    errors.cronExpression = 'Define un horario valido.';
+    errors.cronExpression = i18n.t('tareas.validacion.cron');
   }
   return errors;
 }

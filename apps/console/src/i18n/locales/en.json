@@ -14,5 +14,1659 @@
     "sectionTitle": "Language",
     "sectionDescription": "Choose the interface language. The change applies immediately.",
     "switcherLabel": "Language"
+  },
+  "admin": {
+    "comun": {
+      "sinEmail": "No email",
+      "sinNombre": "No name",
+      "usuario": "User",
+      "plan": "Plan",
+      "rol": "Role",
+      "registro": "Signed up",
+      "usuarioNoExiste": "We couldn't find this user. It may no longer exist."
+    },
+    "tier": {
+      "free": "Free",
+      "pro": "Pro",
+      "autonomo": "Autonomous"
+    },
+    "etiquetas": {
+      "individual": "Individual",
+      "empresa": "Company",
+      "adminOrganizacion": "Organization admin"
+    },
+    "errores": {
+      "cambioTier403": "You don't have permission to change this user's tier.",
+      "cambioTierGenerico": "We couldn't change the tier. Check your connection and try again."
+    },
+    "usuarios": {
+      "titulo": "Users",
+      "subtitulo": "Manage plans and review the activity of the platform's users.",
+      "buscarPlaceholder": "Search by email or name",
+      "colTipo": "Type",
+      "errorCarga": "We couldn't load the users",
+      "sinResultados": "We didn't find any users matching <destacado>“{{termino}}”</destacado>.",
+      "vacioTitulo": "No users",
+      "vacioDescripcion": "There are no users registered on the platform yet.",
+      "resultados_one": "{{count}} result",
+      "resultados_other": "{{count}} results",
+      "usuariosTotal_one": "{{count}} user",
+      "usuariosTotal_other": "{{count}} users",
+      "cargarMas": "Load more"
+    },
+    "ficha": {
+      "volver": "Back to the list",
+      "datosTitulo": "Details",
+      "datosDescripcion": "The user's profile, subscription and usage.",
+      "nombre": "Name",
+      "email": "Email",
+      "tipoCuenta": "Account type",
+      "identidadVerificada": "Identity verified",
+      "si": "Yes",
+      "no": "No",
+      "suscripcion": "Subscription",
+      "sinSuscripcion": "No subscription.",
+      "estado": "Status",
+      "uso": "Usage",
+      "sinDatosUso": "No usage data.",
+      "ejecucionesUsadas": "Runs used ({{periodo}})",
+      "actividadTitulo": "Activity",
+      "actividadDescripcion": "The user's operations, runs and spend. Spend is consumption on the user's own key (BYOK), not a charge from Ledesma.",
+      "actualizando": "Updating",
+      "errorActividad": "We couldn't load the activity",
+      "sinActividad": "This user has no recorded activity in this period yet.",
+      "cargandoFicha": "Loading the user's record...",
+      "usuarioNoEncontrado": "User not found",
+      "errorFicha": "We couldn't load the user's record",
+      "licenciaTitulo": "License",
+      "licenciaDescripcion": "The user's plan. Changing it operates monetization: it is done with confirmation.",
+      "esteUsuario": "this user"
+    },
+    "cambioTier": {
+      "titulo": "Change tier",
+      "descripcion": "You are about to change the tier of <destacado>{{usuario}}</destacado> from <destacado>{{de}}</destacado> to <destacado>{{a}}</destacado>. This adjusts the user's plan and is recorded.",
+      "cambiando": "Changing...",
+      "exito": "Tier updated to {{tier}}.",
+      "tierActual": "Current tier:",
+      "instruccion": "Change the user's plan. It is a deliberate action: you will be asked to confirm before it is applied.",
+      "grupoAria": "Change the user's tier"
+    }
+  },
+  "cuenta": {
+    "identidad": {
+      "nombreActualizado": "Name updated.",
+      "suscripcionActiva": "Active subscription",
+      "sinSuscripcionActiva": "No active subscription",
+      "nombreCompletoLabel": "Full name",
+      "editarNombre": "Edit name",
+      "sinEmail": "No email",
+      "miembroDesde": "member since {{fecha}}"
+    },
+    "uso": {
+      "titulo": "Usage this period",
+      "descripcion": "Runs of your agents on the {{plan}} plan.",
+      "deLimite": "of {{limite}}",
+      "medidorAria": "{{usadas}} of {{limite}} runs used",
+      "sinDatos": "No usage data yet.",
+      "cadaBloque": "Each block is one run",
+      "verActividad": "View activity"
+    },
+    "sesion": {
+      "titulo": "Session",
+      "descripcion": "You sign in with your email and password. Here you can sign out of the active session.",
+      "cerrarSesion": "Sign out"
+    },
+    "eliminar": {
+      "zonaTitulo": "Delete my account",
+      "zonaDescripcion": "Permanently deletes agents, credentials, recipes, tasks, triggers and history. It cannot be undone.",
+      "zonaBoton": "Delete account",
+      "dialogoTitulo": "Delete your account",
+      "dialogoDescripcion": "This action is <destacado>permanent and irreversible</destacado>. <destacado>Everything</destacado> will be deleted: your agents, credentials, recipes, scheduled tasks, triggers and activity history. We won't be able to recover it.",
+      "emailCuenta": "Your account email:",
+      "confirmarLabel": "To confirm, type your email",
+      "confirmarHint": "The button is enabled when the email exactly matches your account's email.",
+      "emailPlaceholder": "you@email.com",
+      "eliminando": "Deleting...",
+      "eliminarDefinitivamente": "Delete permanently"
+    },
+    "errores": {
+      "cargarCuenta": "We couldn't load your account",
+      "eliminar400": "The email doesn't match your account's email. Type it exactly as it appears above.",
+      "eliminar401": "Your session expired. Sign in again.",
+      "eliminarGenerico": "We couldn't delete your account. Try again in a moment."
+    }
+  },
+  "configuracion": {
+    "titulo": "Settings",
+    "subtitulo": "Manage your account details and your workspace plan."
+  },
+  "ui": {
+    "acciones": {
+      "guardar": "Save",
+      "guardando": "Saving...",
+      "cancelar": "Cancel",
+      "reintentar": "Retry"
+    },
+    "estado": {
+      "cargando": "Loading...",
+      "cargandoAria": "Loading"
+    },
+    "estadoError": {
+      "revisaConexion": "Check your connection and try again."
+    },
+    "copiar": {
+      "copiar": "Copy",
+      "copiado": "Copied",
+      "copiaAMano": "Copy manually"
+    },
+    "layout": {
+      "abrirMenu": "Open menu"
+    },
+    "sidebar": {
+      "expandirPanel": "Expand panel",
+      "colapsarPanel": "Collapse panel"
+    },
+    "menuUsuario": {
+      "etiqueta": "User menu",
+      "configuracion": "Settings",
+      "mejorarPlan": "Upgrade Plan",
+      "cerrarSesion": "Sign out"
+    }
+  },
+  "agentes": {
+    "lista": {
+      "titulo": "Agents",
+      "subtitulo": "Set up and manage your AI agents.",
+      "crearAgente": "Create agent",
+      "crearConConfigurador": "Create with the Configurator",
+      "errorCarga": "We couldn't load your agents"
+    },
+    "vacio": {
+      "configuradorLabel": "Configurator",
+      "recomendado": "Recommended",
+      "configuradorTitulo": "Describe it. We build it.",
+      "configuradorDescripcion": "Tell us what process you want to automate and the Configurator builds the agent by talking with you.",
+      "conversarConConfigurador": "Chat with the Configurator",
+      "manualLabel": "Manual",
+      "manualTitulo": "Set it up yourself, field by field",
+      "manualDescripcion": "Full control over every parameter. For when you already know exactly what you want.",
+      "filaSystemPromptValor": "Your definition",
+      "filaHerramientasValor": "HTTP · web · files",
+      "filaLimitesLabel": "Limits",
+      "filaLimitesValor": "Budget and steps",
+      "paso1Titulo": "You define it",
+      "paso1Descripcion": "What it does, model and tools.",
+      "paso2Titulo": "You test it",
+      "paso2Descripcion": "In the Playground, with your API key.",
+      "paso3Titulo": "You set it loose",
+      "paso3Descripcion": "Tasks, triggers, recipes or embedded."
+    },
+    "card": {
+      "sinDescripcion": "No description",
+      "herramientas_one": "{{count}} tool",
+      "herramientas_other": "{{count}} tools",
+      "activo": "Active",
+      "editarAria": "Edit {{name}}",
+      "conversarAria": "Chat with {{name}}",
+      "editar": "Edit",
+      "conversar": "Chat"
+    },
+    "form": {
+      "editarTitulo": "Edit agent",
+      "volver": "Back",
+      "errorCarga": "We couldn't load the agent",
+      "errorGuardar": "We couldn't save the agent. Try again.",
+      "probarAgente": "Test agent",
+      "conectar": "Connect",
+      "uso": "Usage",
+      "identidadTitulo": "Identity",
+      "identidadDescripcion": "How this agent is identified in the console.",
+      "nombreLabel": "Name",
+      "nombrePlaceholder": "My agent",
+      "descripcionLabel": "Description",
+      "descripcionPlaceholder": "What this agent does",
+      "modeloTitulo": "Model",
+      "modeloDescripcion": "The brain that powers the agent. It is swappable.",
+      "proveedorLabel": "Provider",
+      "modeloHint": "Suggestions based on the provider; you can type any valid identifier.",
+      "temperatureHint": "Empty = provider default",
+      "baseUrlHint": "Base URL of the OpenAI-compatible endpoint",
+      "comportamientoTitulo": "Behavior",
+      "comportamientoDescripcion": "The base instructions that guide every response from the agent.",
+      "systemPromptPlaceholder": "Instructions for the agent",
+      "eliminarAgente": "Delete agent",
+      "guardando": "Saving...",
+      "guardarAgente": "Save agent",
+      "errorEliminar": "We couldn't delete the agent. Try again."
+    },
+    "eliminarDialogo": {
+      "confirmacion": "You are about to delete <nombre>{{name}}</nombre>. This action cannot be undone.",
+      "eliminando": "Deleting..."
+    },
+    "comun": {
+      "cancelar": "Cancel",
+      "eliminar": "Delete",
+      "cerrar": "Close"
+    },
+    "rotarSecreto": {
+      "titulo": "Rotate the webhooks secret",
+      "descripcion": "A new secret will be generated immediately. Your systems that verify the signature will stop validating until you update LEDESMA_WEBHOOK_SECRET with the new value.",
+      "rotando": "Rotating...",
+      "rotar": "Rotate"
+    },
+    "probarTool": {
+      "titulo": "Test {{name}}",
+      "descripcion": "A signed POST will be sent to the webhook with the saved version of the tool.",
+      "inputInvalido": "The input must be a valid JSON object",
+      "errorEjecutar": "We couldn't run the test. Try again.",
+      "ejecutando": "Running...",
+      "ejecutar": "Run test"
+    },
+    "herramientas": {
+      "titulo": "Tools",
+      "vacio": "This agent has no tools. Add one so it can call external webhooks.",
+      "agregar": "Add tool",
+      "tituloItem": "Tool {{numero}}",
+      "guardaPrimero": "Save first: the test uses the saved version",
+      "probar": "Test",
+      "eliminar": "Delete tool",
+      "descripcionLabel": "Description",
+      "descripcionPlaceholder": "What the tool does and when to use it",
+      "urlLabel": "Webhook URL",
+      "urlHint": "It will receive a POST with { tool, input } and must respond { content, isError? }",
+      "parametros": "Parameters",
+      "schemaComplejo": "The schema is too complex for simple mode",
+      "sinParametros": "No parameters: the tool is called with no arguments.",
+      "tipoLabel": "Type",
+      "paramDescripcionPlaceholder": "What this parameter is for",
+      "requerido": "Required",
+      "agregarParametro": "Add parameter"
+    }
+  },
+  "playground": {
+    "errorCargaTitulo": "We couldn't load the agent",
+    "errorCargaDescripcion": "Check your connection and try again.",
+    "reintentar": "Retry",
+    "misAgentes": "My agents",
+    "titulo": "Playground: {{name}}",
+    "editar": "Edit",
+    "conversacionAria": "Conversation with the agent",
+    "eligeCredencial": "Choose a credential or paste your API key to test the agent.",
+    "escribeParaEmpezar": "Type a message to get started.",
+    "usoTokens": "{{input}} in / {{output}} out tokens",
+    "errorFallback": "Check your key or the model identifier.",
+    "mensajeAria": "Message for the agent",
+    "mensajePlaceholder": "Type a message...",
+    "detener": "Stop",
+    "enviar": "Send",
+    "adjuntos": {
+      "imagen": "Image",
+      "documento": "Document",
+      "adjuntarArchivo": "Attach file",
+      "maximoArchivos": "Maximum {{count}} files",
+      "quitarAria": "Remove {{name}}",
+      "subiendo": "Uploading..."
+    },
+    "credencial": {
+      "titulo": "Session credential",
+      "descripcion": "Which key the agent chats with. Reuse one from your vault or paste one on the spot; it is never stored on the platform.",
+      "origenAria": "Credential source",
+      "guardadaTitulo": "Saved credential",
+      "guardadaDescripcion": "Reuse one from your vault",
+      "pegarTitulo": "Paste on the spot",
+      "pegarDescripcion": "A key just for this session",
+      "sinCredenciales": "You don't have {{provider}} credentials. Paste a key on the spot or <enlace>add it in Credentials</enlace>.",
+      "soloProveedor": "Only {{provider}} credentials are shown, the agent's provider.",
+      "eligeOpcion": "Choose a credential...",
+      "apiKeyLabel": "Provider API key",
+      "apiKeyHint": "Your key is used only for this test session, travels encrypted with every request and is NEVER stored on the platform.",
+      "apiKeyPlaceholder": "Paste your API key",
+      "ocultarKey": "Hide API key",
+      "mostrarKey": "Show API key"
+    }
+  },
+  "auth": {
+    "comun": {
+      "enviando": "Sending...",
+      "reintentar": "Retry",
+      "revisaConexion": "Check your connection and try again.",
+      "divisorO": "or",
+      "revisaCorreoTitulo": "Check your email",
+      "irIniciarSesion": "Go to sign in"
+    },
+    "campos": {
+      "correo": "Email",
+      "correoPlaceholder": "you@email.com",
+      "contrasena": "Password",
+      "confirmarContrasena": "Confirm password"
+    },
+    "marca": {
+      "eyebrow": "Agent platform",
+      "titular": "Agents that do real work inside your systems.",
+      "soporte": "Multi-tenant · BYOK · Full traceability"
+    },
+    "errores": {
+      "correoInvalido": "Enter a valid email.",
+      "contrasenaRequerida": "Enter your password.",
+      "confirmaCorreo": "Confirm your email before signing in. Check your inbox.",
+      "credencialesIncorrectas": "Incorrect email or password.",
+      "loginGenerico": "We couldn't sign you in. Try again.",
+      "contrasenaMinima": "Your password must be at least {{min}} characters long.",
+      "contrasenasNoCoinciden": "The passwords don't match.",
+      "requisitosServidor": "The password doesn't meet the server requirements: {{mensaje}}"
+    },
+    "login": {
+      "iniciarSesion": "Sign in",
+      "subtitulo": "Sign in with your email and password.",
+      "olvidasteContrasena": "Forgot your password?",
+      "entrando": "Signing in...",
+      "sinCuenta": "Don't have an account?"
+    },
+    "crearCuenta": {
+      "titulo": "Create your account",
+      "subtitulo": "Sign up with your email and a password.",
+      "accion": "Create account",
+      "creandoCuenta": "Creating account...",
+      "yaTienesCuenta": "Already have an account?",
+      "correoConCuenta": "That email already has an account.",
+      "errorGenerico": "We couldn't create the account. Try again.",
+      "confirmacionEnviada": "We sent an email to <correo>{{email}}</correo> to confirm your account. Confirm it and then sign in."
+    },
+    "google": {
+      "continuar": "Continue with Google",
+      "conectando": "Connecting to Google...",
+      "errorRetorno": "Google sign-in wasn't completed. Try again.",
+      "errorConexion": "We couldn't connect to Google. Try again."
+    },
+    "recuperar": {
+      "titulo": "Reset your password",
+      "subtitulo": "Enter your email and we'll send you a link to choose a new password.",
+      "enviarEnlace": "Send reset link",
+      "enviandoEnlace": "Sending link...",
+      "volverIniciarSesion": "Back to sign in",
+      "confirmacionCuerpo": "If that email has an account, we sent you a link to reset your password.",
+      "errorEnvio": "We couldn't send the email. Try again in a few minutes."
+    },
+    "nuevaContrasena": {
+      "titulo": "Choose a new password",
+      "subtitulo": "Type it twice to confirm it.",
+      "nuevaContrasenaLabel": "New password",
+      "guardar": "Save password",
+      "guardando": "Saving...",
+      "guardadaTitulo": "Password saved",
+      "guardadaCuerpo": "Your password was updated. We're redirecting you.",
+      "irConsola": "Go to the console",
+      "enlaceInvalidoTitulo": "Invalid or expired link",
+      "enlaceInvalidoCuerpo": "The link to reset your password is no longer valid. Request a new one and try again.",
+      "pedirEnlaceNuevo": "Request a new link",
+      "distintaActual": "The new password must be different from the current one.",
+      "errorGuardar": "We couldn't save the password. Try again."
+    },
+    "conectar": {
+      "titulo": "Connect: {{nombre}}",
+      "volver": "Back",
+      "errorCargaAgente": "We couldn't load the agent",
+      "avisoKey": "The provider API key belongs to your client and must live on their server. Never include it in a mobile app or public page.",
+      "avisoTokens": "To integrate from a client, your backend issues short-lived session tokens and the client talks directly to the platform.",
+      "movilYWeb": "Mobile and web",
+      "webhooks": {
+        "titulo": "Webhook verification",
+        "descripcion": "Every time your agent invokes a tool, the platform signs the POST to your webhook. Verify the signature to make sure the request comes from Ledesma AI Labs.",
+        "ocultarSecreto": "Hide secret",
+        "mostrarSecreto": "Show secret",
+        "ocultar": "Hide",
+        "revelar": "Reveal",
+        "rotarSecreto": "Rotate secret",
+        "secretoRotado": "Secret rotated. Update your integrations.",
+        "headersEnviados": "Headers sent with each POST",
+        "verificacionServidor": "Verification on your server (Node)",
+        "guardaSecreto": "Store the secret as an environment variable (LEDESMA_WEBHOOK_SECRET) on your server; use the raw body (rawBody) to verify."
+      },
+      "widget": {
+        "titulo": "Embeddable widget",
+        "descripcion": "Embed your agent on any site with a single HTML tag.",
+        "modoTokenTitulo": "Token mode (production)",
+        "modoTokenCuerpo": "Your backend issues short-lived session tokens (the key stays as a secret on your server) and the widget talks directly to the platform. When the token expires, the widget requests a new one on its own.",
+        "htmlPagina": "Your page's HTML",
+        "servidorTokens": "Example token server (Node)",
+        "modoDirectoTitulo": "Direct mode (testing only)",
+        "modoDirectoAviso": "The key is visible in the HTML. Use it only for testing or internal tools; never on a public page.",
+        "usoReactTitulo": "Using it in React",
+        "usoReactCuerpo": "The custom element works in React today by loading the platform script. Coming soon: an npm wrapper (<paquete>@ledesma-platform/widget-react</paquete>) with typed props.",
+        "componenteEjemplo": "Example component",
+        "personalizacionTitulo": "Customization",
+        "personalizacionCuerpo": "The theme is adjusted from your page with CSS custom properties (<codigo>--la-accent</codigo>, <codigo>--la-bg</codigo>, <codigo>--la-radius</codigo>, <codigo>--la-height</codigo>, ...):"
+      },
+      "comoFuncionaTitulo": "How it works",
+      "comoFuncionaCuerpo": "The agent's configuration (model, system prompt, parameters) lives on the platform. If you change the brain from the console, all your integrations use it immediately without changing code."
+    }
+  },
+  "registro": {
+    "cerrarSesion": "Sign out",
+    "errorCarga": {
+      "titulo": "We couldn't load your account"
+    },
+    "form": {
+      "titulo": "Complete registration",
+      "subtitulo": "We need a few details to activate your account.",
+      "empresa": "Company",
+      "persona": "Individual",
+      "nombreEmpresaLabel": "Company name",
+      "nombreEmpresaPlaceholder": "Acme Inc.",
+      "tuNombreAdminLabel": "Your name (administrator)",
+      "nombreCompletoLabel": "Full name",
+      "errorGenerico": "We couldn't complete the registration. Try again.",
+      "registrarEmpresa": "Register company",
+      "crearMiCuenta": "Create my account",
+      "empresaActiva": "Your company is active immediately.",
+      "cuentaActiva": "Your account is active immediately."
+    },
+    "validacion": {
+      "campoObligatorio": "This field is required.",
+      "maxCaracteres": "Use {{max}} characters or fewer."
+    },
+    "perfil": {
+      "revisaNombre": "Check the name and try again.",
+      "sesionExpirada": "Your session expired. Sign in again.",
+      "errorActualizar": "We couldn't update your name. Try again."
+    }
+  },
+  "configurador": {
+    "errores": {
+      "sesionExpirada": "Your session expired. Sign in again.",
+      "autonomoRequierePlan": "Autonomous mode requires the corresponding plan. Go back to assistant mode to continue.",
+      "credencialNoDisponible": "The saved credential is not available. Choose another or paste one on the spot.",
+      "peticionRechazada": "The Configurator rejected the request. Check the credential and the model.",
+      "sinContacto": "We could not reach the Configurator. Try again.",
+      "agenteRechazado": "The backend rejected the agent. Check the preview.",
+      "crearFallo": "We could not create the agent. Try again."
+    },
+    "pagina": {
+      "titulo": "Configurator",
+      "subtituloAutonomo": "Describe the agent you want and it is created on its own once it is ready and valid.",
+      "subtituloAsistente": "Describe the agent you want and build it by chatting. You confirm before creating it.",
+      "volver": "Back",
+      "usando": "Using:",
+      "sesionAlMomento": "{{provider}} (on the spot)",
+      "cambiar": "Change",
+      "gateAutonomo": "Autonomous mode, which creates the agent without confirmation, is part of the Pro and Business plans.",
+      "tabsAriaLabel": "Configurator views",
+      "tabVistaPrevia": "Preview",
+      "modoAriaLabel": "Configurator mode",
+      "modoAsistente": "Assistant",
+      "modoAsistenteHint": "I review and confirm",
+      "modoAutonomo": "Autonomous",
+      "modoAutonomoHint": "create automatically"
+    },
+    "chat": {
+      "conversacionAriaLabel": "Conversation with the Configurator",
+      "vacio": "Tell us what agent you want to create and the Configurator builds it with you, step by step.",
+      "reintentar": "Retry",
+      "mensajeLabel": "Message for the Configurator",
+      "placeholder": "Type what you want your agent to do...",
+      "enviarAriaLabel": "Send message",
+      "escribiendoAriaLabel": "The Configurator is typing"
+    },
+    "preview": {
+      "titulo": "Agent preview",
+      "vacio": "The agent will appear here as you chat. Start by describing what you want it for.",
+      "descripcionLabel": "Description",
+      "herramientasLabel": "Tools ({{total}})",
+      "herramientaNativa": "Native",
+      "sinNombre": "No name yet",
+      "crearAgente": "Create agent",
+      "creandoAgente": "Creating agent...",
+      "listoParaCrear": "Ready to create.",
+      "faltaParaCrear": "Still needed before creating:",
+      "completaBasicos": "Complete the agent's name, provider, and model.",
+      "seguiConversando": "Keep chatting to complete the agent.",
+      "empezaDescribiendo": "Start by describing what you want the agent for.",
+      "autonomoCreando": "Ready and valid: creating the agent...",
+      "autonomoNota": "Automatic mode: the agent will be created on its own as soon as it is complete and valid.",
+      "verMas": "Show more",
+      "verMenos": "Show less"
+    },
+    "credencial": {
+      "titulo": "Session credential",
+      "descripcion": "The key the Configurator talks with. You use it only for this session; it is never stored on the platform.",
+      "origenAriaLabel": "Credential source",
+      "guardadaTitulo": "Saved credential",
+      "guardadaDescripcion": "Reuse one from your vault",
+      "pegarTitulo": "Paste on the spot",
+      "pegarDescripcion": "A key for this session only",
+      "sinCredenciales": "You have no saved credentials yet. Paste one on the spot or",
+      "sinCredencialesLink": "add it in Credentials",
+      "credencialLabel": "Credential",
+      "elegiCredencial": "Choose a credential...",
+      "modeloLabel": "Model",
+      "modeloHint": "The provider comes from the credential; you choose the model to use.",
+      "proveedorLabel": "Provider",
+      "apiKeyHint": "It travels encrypted on every turn and is not stored on the platform.",
+      "ocultarKey": "Hide API key",
+      "mostrarKey": "Show API key",
+      "baseUrlHint": "Base URL of the OpenAI-compatible endpoint.",
+      "notaSeguridad": "The key travels over a secure connection and is only used for this Configurator session. The console does not persist it.",
+      "cancelar": "Cancel",
+      "actualizar": "Update credential",
+      "empezar": "Start configuring",
+      "errorElegiCredencial": "Choose a saved credential",
+      "errorModeloObligatorio": "Model is required"
+    },
+    "demo": {
+      "usuario1": "I want an agent that reviews the invoices that arrive in my email and records them in my system",
+      "configurador2": "Understood. Do the invoices arrive as a PDF attachment or as a link? With that I can set up the extraction…",
+      "usuario3": "As a PDF attachment",
+      "configurador4": "Perfect. Agent ready: it reads the PDF, extracts vendor, amount, and date, and records it via HTTP. Shall we try it?"
+    }
+  },
+  "credenciales": {
+    "titulo": "Credentials",
+    "subtitulo": "Save your AI providers' API keys to reuse them in your agents.",
+    "agregar": "Add credential",
+    "cancelar": "Cancel",
+    "noticeGuardada": "Credential saved.",
+    "noticeEliminada": "Credential deleted.",
+    "errorCargar": "We couldn't load your credentials",
+    "vacio": {
+      "subtitulo": "Save your providers' API keys just once. Your agents use them from the vault, without pasting them again.",
+      "tarjetaLabel": "This is how your key is stored",
+      "ejemploBadge": "Example",
+      "ejemploNombre": "Anthropic · production",
+      "ejemploCifrada": "encrypted",
+      "ejemploUso": "3 agents use it",
+      "garantias": {
+        "cifradaTitulo": "Encrypted when saved",
+        "cifradaTexto": "AES-256-GCM in the vault. Not even the team can read it.",
+        "mascaraTitulo": "Never shown again",
+        "mascaraTexto": "You'll only see the mask. Your agents use it when they run.",
+        "tuyaTitulo": "Yours, always",
+        "tuyaTexto": "It's your key and your spend. Delete it whenever you want."
+      },
+      "compatibilidad": "Compatible with Anthropic, OpenAI and providers with a compatible API."
+    },
+    "form": {
+      "subtitulo": "Save your provider's key to reuse it in your agents.",
+      "cerrarAria": "Close",
+      "etiquetaLabel": "Label",
+      "etiquetaPlaceholder": "My production key",
+      "proveedorLabel": "Provider",
+      "apiKeyHint": "It is stored encrypted and never shown again.",
+      "mostrarKeyAria": "Show API key",
+      "ocultarKeyAria": "Hide API key",
+      "baseUrlHint": "Base URL of the OpenAI-compatible endpoint.",
+      "baseUrlPlaceholder": "https://api.myprovider.com/v1",
+      "seguridadNota": "Your key travels over a secure connection and is encrypted before being stored. The console never shows it again.",
+      "guardando": "Saving...",
+      "guardar": "Save credential",
+      "errorSesion": "Your session expired. Sign in again.",
+      "errorRechazo": "The backend rejected the credential. Check the data.",
+      "errorGuardar": "We couldn't save the credential. Try again."
+    },
+    "tarjeta": {
+      "eliminarAria": "Delete credential {{etiqueta}}"
+    },
+    "eliminar": {
+      "titulo": "Delete credential",
+      "confirmacion": "You are about to delete <nombre>{{etiqueta}}</nombre>. This action cannot be undone.",
+      "eliminando": "Deleting...",
+      "eliminar": "Delete",
+      "error": "We couldn't delete the credential. Try again."
+    }
+  },
+  "privacidad": {
+    "reintentar": "Retry",
+    "gate": {
+      "errorTitulo": "We couldn't load your account",
+      "errorTexto": "Check your connection and try again."
+    },
+    "consentimiento": {
+      "titulo": "Before you continue",
+      "kicker": "PRIVACY NOTICE",
+      "intro": "The platform operates AI agents autonomously that process data. To continue, we need your consent regarding how we handle it.",
+      "avisoSimplificadoTitulo": "Simplified notice",
+      "consultaIntegral": "See the <integral>comprehensive privacy notice</integral>.",
+      "aceptacion": "I have read and accept the platform's Privacy Notice.",
+      "error": "We couldn't record your acceptance. Try again.",
+      "registrando": "Recording...",
+      "aceptar": "Accept and continue",
+      "cerrarSesion": "Sign out"
+    },
+    "aviso": {
+      "placeholderTag": "Legal review pending",
+      "version": "Version {{version}}",
+      "opcional": "Optional"
+    },
+    "avisoIntegral": {
+      "titulo": "Comprehensive Privacy Notice",
+      "subtitulo": "Full details of how your personal data is processed under the LFPDPPP and the GDPR.",
+      "secciones": {
+        "responsable": {
+          "titulo": "Identity and address of the data controller",
+          "placeholder": "Legal name of the controller, registered address and contact details (including the personal data area/officer)."
+        },
+        "datos": {
+          "titulo": "Personal data processed",
+          "placeholder": "All categories of data collected, expressly IDENTIFYING SENSITIVE personal data if any."
+        },
+        "finalidades": {
+          "titulo": "Purposes of processing",
+          "placeholder": "NECESSARY purposes (that originate/are required for the relationship) distinguished from VOLUNTARY ones (which require consent). State which require consent."
+        },
+        "derechos": {
+          "titulo": "Means to exercise the data subject's rights (ARCO)",
+          "placeholder": "Procedure and means to exercise the rights of Access, Rectification, Cancellation and Opposition (and erasure/portability under GDPR), including requirements and response times."
+        },
+        "limitar-uso": {
+          "titulo": "Means to limit the use or disclosure",
+          "placeholder": "Mechanisms to limit the use or disclosure of data (e.g. exclusion lists, withdrawal of consent)."
+        },
+        "ia": {
+          "titulo": "Use of artificial intelligence and automated decisions",
+          "placeholder": "That the platform operates AI agents autonomously; the existence of automated decisions and, when they have a significant effect, the right to HUMAN INTERVENTION and to object (GDPR Art 22). Disclosure of interaction with AI (EU AI Act Art 50)."
+        },
+        "transferencias": {
+          "titulo": "Data transfers",
+          "placeholder": "Transfers to third parties, their purposes and whether they require consent. The new LFPDPPP no longer requires disclosing them in the notice; included as good practice and under GDPR."
+        },
+        "cambios": {
+          "titulo": "Changes to the privacy notice",
+          "placeholder": "How changes to the notice and its versioning will be communicated. When the version changes, your consent is requested again."
+        }
+      },
+      "footer": "See also the <simplificado>simplified notice</simplificado> or <derechos>exercise your rights</derechos>."
+    },
+    "avisoSimplificado": {
+      "titulo": "Simplified Privacy Notice",
+      "subtitulo": "A summary of how we process your personal data. The comprehensive notice has the full details.",
+      "secciones": {
+        "responsable": {
+          "titulo": "Identity and address of the data controller",
+          "placeholder": "Legal name of the controller, registered address and contact details in Mexico."
+        },
+        "datos": {
+          "titulo": "Personal data processed",
+          "placeholder": "Categories of data collected, expressly stating whether SENSITIVE personal data is processed."
+        },
+        "finalidades": {
+          "titulo": "Purposes of processing",
+          "placeholder": "NECESSARY purposes (to provide the service) and VOLUNTARY ones (require consent), stating which of the latter require your consent."
+        },
+        "limitar-uso": {
+          "titulo": "Means to limit the use or disclosure",
+          "placeholder": "How you can limit the use or disclosure of your data (e.g. exclusion lists, contact mechanisms)."
+        },
+        "integral": {
+          "titulo": "Where to read the comprehensive notice",
+          "placeholder": "Link and/or location where you can read the COMPREHENSIVE PRIVACY NOTICE in full detail."
+        }
+      },
+      "footer": "See the <integral>comprehensive privacy notice</integral> for the full details."
+    },
+    "solicitudes": {
+      "tipo": {
+        "access": "Access",
+        "rectification": "Rectification",
+        "cancellation": "Cancellation",
+        "opposition": "Opposition",
+        "erasure": "Erasure"
+      },
+      "estado": {
+        "pending": "Pending",
+        "in_progress": "In progress",
+        "completed": "Resolved",
+        "rejected": "Rejected"
+      }
+    },
+    "derechos": {
+      "titulo": "Privacy and your data",
+      "subtitulo": "Your data is yours. Here you can view it, correct it or delete it.",
+      "formTitulo": "Exercise a right",
+      "tipoLegend": "Request type",
+      "opciones": {
+        "access": "Know what data we process and why.",
+        "rectification": "Correct incomplete or inaccurate data.",
+        "cancellation": "Delete your data from our records.",
+        "opposition": "Stop specific uses of your data."
+      },
+      "detalleLabel": "Details (optional)",
+      "detalleHint": "Tell us what you need so we can handle your request.",
+      "detallePlaceholder": "Describe your request...",
+      "errorEnviar": "We couldn't send your request. Try again.",
+      "registroNota": "It is recorded and you can track it below.",
+      "enviando": "Sending...",
+      "enviar": "Send request",
+      "noticeEnviada": "Request sent. We will follow up on it.",
+      "descarga": {
+        "titulo": "Your copy, instantly",
+        "descripcion": "Profile, consents, requests and processing records in one JSON. No waiting, no requests.",
+        "error": "We couldn't generate the export. Try again.",
+        "preparando": "Preparing...",
+        "descargar": "Download my data"
+      },
+      "pasos": {
+        "titulo": "What happens after you send",
+        "paso1": "Your request is recorded with a date.",
+        "paso2": "We handle it within the legal deadlines.",
+        "paso3": "You see the resolution here, in your history."
+      },
+      "historial": {
+        "titulo": "Your requests",
+        "errorCargar": "We couldn't load your requests.",
+        "vacio": "You haven't sent any requests yet.",
+        "enviadaEl": "Sent on {{fecha}}"
+      },
+      "avisoFooter": "See the <aviso>privacy notice</aviso> to learn how we process your data."
+    }
+  },
+  "landing": {
+    "comun": {
+      "crearCuenta": "Create account",
+      "iniciarSesion": "Sign in"
+    },
+    "navegacion": {
+      "integracion": "Integration",
+      "plataforma": "Platform",
+      "ejemplos": "Examples",
+      "comoFunciona": "How it works",
+      "seccionesAria": "Sections"
+    },
+    "hero": {
+      "titulo": "Vertical AI agents, with the model you choose",
+      "descripcion": "They automate real work inside the systems your company already uses. The model is interchangeable: Claude, ChatGPT, or open source. You switch providers through configuration, without rewriting the agent or your integrations.",
+      "solicitarDemo": "Request a guided demo",
+      "whatsappMensajeDemo": "Hi, I'm interested in a guided demo of Ledesma AI Labs."
+    },
+    "heroShowcase": {
+      "tusSistemas": "Your systems",
+      "logoAlt": "{{name}} logo"
+    },
+    "brainSwap": {
+      "cartaAria": "Interchangeable model: the AI model switches between Claude, ChatGPT, and open source models without rebuilding the agent. Active model: {{label}}.",
+      "modeloActivo": "Active model",
+      "intercambiable": "Interchangeable",
+      "subtitulo": "Switch the model that powers the agent, without rebuilding anything.",
+      "cambiarModeloAria": "Switch model to {{label}}"
+    },
+    "integracion": {
+      "eyebrow": "Integration",
+      "titulo": "Set it up in three lines",
+      "descripcion": "No migrations or months-long projects. You paste the snippet, the agent is rendered, and it runs on the surfaces where your team already works.",
+      "copiar": "Copy",
+      "copiado": "Copied",
+      "canalesTitulo": "Runs where you already work",
+      "canalesSubtitulo": "The same agent, without rewriting anything.",
+      "superficies": {
+        "web": "Web",
+        "whatsapp": "WhatsApp",
+        "slack": "Slack",
+        "correo": "Email",
+        "api": "API",
+        "movil": "Mobile"
+      }
+    },
+    "chatWidget": {
+      "agentes": {
+        "ventas": "Sales Analysis",
+        "facturacion": "Invoicing",
+        "operaciones": "Operations",
+        "customerSuccess": "Customer Success"
+      },
+      "enLinea": "Online",
+      "escribeTuMensaje": "Type your message",
+      "enviarMensajeAria": "Send message",
+      "guiones": {
+        "ventas": {
+          "usuario1": "Give me the sales analysis for the last quarter.",
+          "usuario2": "What explains the October drop?",
+          "agente1": "The stockout in the star category (12 days without inventory) and lower traffic after the promotion. Without that stockout, October would have closed at ~$2.1M.",
+          "usuario3": "And the projection for next quarter?",
+          "agente2": "I project $7.4M (95% interval: $6.9M–$7.9M). The biggest risk is still inventory in the star category."
+        },
+        "facturacion": {
+          "usuario1": "Process this invoice and validate it.",
+          "usuario2": "Is the duplicate real?",
+          "agente1": "Yes: same supplier and amount as invoice A-1182 from June 3. I recommend not paying A-1207 until it's confirmed. Should I flag it for review?",
+          "usuario3": "Flag it.",
+          "agente2": "Done. Invoice A-1207 was flagged for review and I notified the payments lead."
+        },
+        "operaciones": {
+          "agente1": "I reviewed today's payments and found something that needs your attention.",
+          "usuario1": "What do you recommend?",
+          "agente2": "Hold the second payment (invoice A-1207) until it's cleared up with the supplier. I already prepared the clarification note. Should I send it?",
+          "usuario2": "Yes, go ahead.",
+          "agente3": "Done. I held the payment and sent the clarification. I'll let you know as soon as the supplier responds."
+        },
+        "customerSuccess": {
+          "usuario1": "Where can I check the status of my order?",
+          "agente1": "Your order is on its way and arrives tomorrow. Here is the tracking number and the order details.",
+          "usuario2": "Can I change the delivery address?",
+          "agente2": "Of course. I updated the address to your new branch and the carrier has already confirmed it.",
+          "usuario3": "Perfect, thanks.",
+          "agente3": "Happy to help. Anything else I can do for you?"
+        }
+      },
+      "reporte": {
+        "etiqueta": "Sales analysis · 3 months",
+        "kpis": {
+          "ventasTotales": "Total sales",
+          "ticketPromedio": "Average ticket",
+          "conversion": "Conversion"
+        },
+        "meses": {
+          "jul": "Jul",
+          "ago": "Aug",
+          "oct": "Oct",
+          "nov": "Nov",
+          "dic": "Dec"
+        }
+      },
+      "validacion": {
+        "pill": "Invoice · CFDI",
+        "etiqueta": "Extracted and validated data",
+        "campos": {
+          "proveedor": "Supplier",
+          "rfc": "RFC",
+          "folio": "Invoice no.",
+          "subtotal": "Subtotal",
+          "iva": "VAT 16%",
+          "total": "Total"
+        },
+        "checks": {
+          "rfcValido": "RFC valid with the SAT",
+          "montoCoincide": "Amount matches PO OC-4471",
+          "ivaCorrecto": "16% VAT correct",
+          "posibleDuplicado": "Possible duplicate: invoice A-1182 on Jun 3"
+        }
+      },
+      "alerta": {
+        "titulo": "Duplicate charge detected",
+        "detalle": "Aceros del Norte invoiced PO OC-4471 twice (invoices A-1182 and A-1207). Double payment risk: $48,200."
+      }
+    },
+    "primitivas": {
+      "eyebrow": "Model-independent",
+      "titulo": "The infrastructure a model doesn't give you",
+      "descripcion": "An LLM reasons, but it doesn't isolate customers, control access, leave an auditable trail, or connect to your systems. That's what the platform provides: a reusable layer that supports any provider and that you don't rebuild when you switch.",
+      "items": {
+        "modeloIntercambiable": {
+          "titulo": "Interchangeable model",
+          "descripcion": "Connect Claude, ChatGPT, or open source models with your own key (BYOK). The provider is switched through configuration; the agent, its tools, and its integrations remain intact."
+        },
+        "aislamientoMultiTenant": {
+          "titulo": "Multi-tenant isolation",
+          "descripcion": "Each customer operates in an isolated environment, with their own data, credentials, and settings. No crossover between accounts, and your information is never used to train models."
+        },
+        "controlAcceso": {
+          "titulo": "Access control and roles",
+          "descripcion": "Users, permissions, and workspaces per area. Access is granted by invitation and by role, under the principle of least privilege."
+        },
+        "credencialesRevocables": {
+          "titulo": "Revocable credentials",
+          "descripcion": "Each integration uses its own credential, with limited scope and immediate revocation. You grant or withdraw access without affecting the rest of the system."
+        },
+        "trazabilidad": {
+          "titulo": "Traceability and auditing",
+          "descripcion": "Every run is logged: input, context, model, and response. An auditable history of what the agent did, when, and with which data."
+        },
+        "integracionNativa": {
+          "titulo": "Native integration",
+          "descripcion": "The agent operates inside your systems (ERP, CRM, email, data) through connected tools. It works where your team already is, not in a separate interface."
+        }
+      }
+    },
+    "ejemplos": {
+      "eyebrow": "Live examples",
+      "titulo": "One platform, many agents",
+      "introDestacado": "Agents that don't just respond: they execute real work.",
+      "introResto": "They all run on the same platform, with integrations, security, and traceability already solved. Accounts payable, quotations, support… or whatever process your operation needs.",
+      "badgeEjemploEnVivo": "Live example",
+      "agentes": {
+        "ap": {
+          "tagline": "Processes and validates invoices without manual data entry",
+          "descripcion": "It reads every invoice, extracts the data, and validates it against your ERP and your rules. It detects duplicates and errors before they get paid. You close faster and without manual data entry.",
+          "nombre": "Accounts Payable"
+        },
+        "quotations": {
+          "tagline": "Builds complex quotes in minutes",
+          "descripcion": "It applies your prices, margins, and business rules instantly. What used to take hours of back and forth is done in minutes, without calculation errors.",
+          "nombre": "Quotes"
+        },
+        "cs": {
+          "tagline": "Resolves tickets and inquiries instantly",
+          "descripcion": "It responds with your business context and access to your systems, 24/7. It doesn't just answer: it updates orders, looks up data, and escalates to your team only when needed.",
+          "nombre": "Customer Success"
+        }
+      },
+      "otroProcesoTitulo": "Another process in mind?",
+      "otroProcesoIntro": "These three are just examples.",
+      "otroProcesoDestacado": "The same platform adapts to any process in your operation:",
+      "otroProcesoResto": "reconciliations, onboarding, reports, document generation, whatever you need. You describe the process; we build it and deploy it.",
+      "cuentanosTuCaso": "Tell us about your case"
+    },
+    "comoFunciona": {
+      "eyebrow": "How it works",
+      "titulo": "From your process to an agent in production",
+      "descripcion": "No months-long projects. The platform is already built; we configure and integrate the agent tailored to your operation.",
+      "pasos": {
+        "paso1": {
+          "titulo": "You tell us about your process",
+          "descripcion": "You tell us what you want to automate: accounts payable, quotations, support, or whatever flow your operation needs. We identify where an agent adds the most value."
+        },
+        "paso2": {
+          "titulo": "We configure and integrate it",
+          "descripcion": "We set up the agent on our platform, with the model you choose (BYOK), and connect it to your systems. Since the infrastructure is already in place, you have it in weeks, not months."
+        },
+        "paso3": {
+          "titulo": "It stays running in your business",
+          "descripcion": "The agent works inside your systems, executing real work. We fine-tune it and add new agents as your operation grows."
+        }
+      }
+    },
+    "ctaFinal": {
+      "titulo": "Put an agent to work in your operation",
+      "descripcion": "You describe the process; we configure it, integrate it with your systems, and put it into production. Tailored to your business and in a fraction of the time.",
+      "escribenosWhatsapp": "Message us on WhatsApp"
+    },
+    "footer": {
+      "descripcion": "Vertical AI agents for your company, integrated into the systems your team already uses.",
+      "contacto": "Contact",
+      "facebookAria": "Ledesma AI Labs on Facebook",
+      "cuenta": "Account",
+      "tagline": "Ledesma AI Labs - Vertical AI agents for companies"
+    }
+  },
+  "panel": {
+    "titulo": "Dashboard",
+    "subtitulo": "Your activity, operations, and spend at a glance.",
+    "actualizando": "Refreshing",
+    "errorCarga": "We couldn't load your dashboard",
+    "cero": {
+      "agentesActivos": "Active agents"
+    },
+    "vacio": {
+      "titulo": "No activity yet",
+      "descripcion": "Once you create an agent and run it, you'll see your activity, operations, and estimated spend here."
+    },
+    "rango": {
+      "etiqueta": "Time range",
+      "dias7": "7 days",
+      "dias30": "30 days",
+      "dias90": "90 days"
+    },
+    "operaciones": {
+      "titulo": "Operations",
+      "descripcion": "Current state of the run queue and active resources.",
+      "pendientes": "Pending",
+      "enCurso": "Running",
+      "completadas": "Completed",
+      "fallidas": "Failed",
+      "tareasActivas": "Active tasks",
+      "triggersActivos": "Active triggers",
+      "recetas": "Recipes",
+      "ultimaEjecucion": "Last run",
+      "sinEjecuciones": "No runs yet"
+    },
+    "actividad": {
+      "titulo": "Activity",
+      "descripcion": "Agent runs per day in the selected range.",
+      "corridas": "Runs",
+      "exitosas": "Successful",
+      "conError": "With errors"
+    },
+    "gasto": {
+      "titulo": "Spend",
+      "descripcion": "Estimated usage on your own provider key, broken down by model.",
+      "gastoEstimado": "Estimated spend",
+      "totalParcial": "Partial total: some models have no known rate",
+      "tokensTotales": "Total tokens",
+      "modelosUsados": "Models used",
+      "entrada": "Input",
+      "salida": "Output",
+      "cacheLectura": "Cache reads",
+      "cacheEscritura": "Cache writes",
+      "porModeloTitulo": "Spend by model",
+      "porModeloDescripcion": "Each model is priced separately; only models with a known rate are shown.",
+      "masModelos_one": "and {{count}} more model with lower spend.",
+      "masModelos_other": "and {{count}} more models with lower spend.",
+      "sinTarifa_one": "{{count}} model with no known rate (its money cost is not estimated): {{lista}}.",
+      "sinTarifa_other": "{{count}} models with no known rate (their money cost is not estimated): {{lista}}."
+    },
+    "grafica": {
+      "ejecuciones_one": "{{cantidad}} run",
+      "ejecuciones_other": "{{cantidad}} runs",
+      "actividadVacia": "No runs in this period.",
+      "actividadAria": "Chart of runs per day in the selected range",
+      "gastoVacio": "No priced spend in this period.",
+      "gastoAria": "Chart of estimated spend in USD by model"
+    }
+  },
+  "uso": {
+    "titulo": "Usage: {{nombre}}",
+    "actualizar": "Refresh",
+    "volver": "Back",
+    "reintentar": "Retry",
+    "errorAgente": "We couldn't load the agent",
+    "errorUso": "We couldn't load the agent's usage",
+    "errorDescripcion": "Check your connection and try again.",
+    "rango": {
+      "etiqueta": "Date range",
+      "dias7": "7 days",
+      "dias30": "30 days",
+      "todo": "All"
+    },
+    "vacio": {
+      "mensaje": "No runs recorded yet. Try your agent in the Playground.",
+      "cta": "Go to the Playground"
+    },
+    "totales": {
+      "corridas": "Runs",
+      "completadas": "Completed",
+      "errores": "Errors",
+      "tokensEntrada": "Input tokens",
+      "tokensSalida": "Output tokens"
+    },
+    "grafica": {
+      "titulo": "Runs per day",
+      "vacio": "No runs in this period.",
+      "tooltip_one": "{{fecha}}: {{count}} run",
+      "tooltip_other": "{{fecha}}: {{count}} runs"
+    },
+    "recientes": {
+      "titulo": "Recent runs",
+      "fecha": "Date",
+      "estado": "Status",
+      "codigo": "Code",
+      "tokens": "Tokens",
+      "duracion": "Duration"
+    },
+    "notaPrivacidad": "Only per-run metrics are recorded (tokens, duration, status). Conversation content is never stored.",
+    "estado": {
+      "completada": "Completed",
+      "error": "Error",
+      "detenida": "Stopped"
+    }
+  },
+  "planes": {
+    "avisoLanzamiento": "During the launch, all plans are free while we enable payment methods.",
+    "exito": "Done. Your plan is now active.",
+    "tarjeta": {
+      "recomendado": "Recommended",
+      "tuPlan": "Your plan",
+      "planActual": "Current plan",
+      "activando": "Activating...",
+      "elegir": "Choose {{plan}}",
+      "runsPorMes": "{{cantidad}} runs per month",
+      "runsEquipos": "Expanded runs for teams"
+    },
+    "features": {
+      "termAgentes": "Agents",
+      "termModoUso": "Usage mode",
+      "termAutonomia": "Autonomy",
+      "termSoporte": "Support",
+      "termEquipo": "Team",
+      "unAgente": "1 agent",
+      "agentesIlimitados": "Unlimited agents",
+      "soloPlayground": "Playground only, with your API key",
+      "playgroundYWidget": "Playground and embedded with your widget",
+      "sinAutonomia": "No recipes, tasks, or triggers",
+      "autonomiaCompleta": "Recipes, tasks, triggers, and failure alerts",
+      "todoLoDePro": "Everything in Pro",
+      "asientosEquipo": "Seats for your team",
+      "soporteComunidad": "Community",
+      "soporteCorreo": "Priority via email",
+      "soporteAcompanamiento": "Priority with hands-on guidance"
+    },
+    "dialogo": {
+      "titulo": "Change plan",
+      "cuerpo": "You are about to switch to the <nombre>{{plan}}</nombre> plan.",
+      "perdidas": "You will lose access to {{perdidas}} as soon as the change applies.",
+      "perdidasSeparador": " and ",
+      "cancelar": "Cancel",
+      "cambiando": "Changing...",
+      "cambiarA": "Switch to {{plan}}"
+    },
+    "perdidas": {
+      "autonomia": "recipes, scheduled tasks, and triggers (autonomy)",
+      "embebido": "the embedded widget outside the Playground"
+    },
+    "errores": {
+      "noReconocido": "We didn't recognize that plan. Reload the page and try again.",
+      "sesionExpirada": "Your session expired. Sign in again.",
+      "completaRegistro": "Complete your registration before choosing a plan.",
+      "demasiadosIntentos": "Too many attempts in a row. Wait a moment and try again.",
+      "servidor": "We couldn't change your plan (server error {{status}}). Try again in a few minutes.",
+      "conexion": "We couldn't reach the server. Check your connection and try again.",
+      "generico": "We couldn't change your plan. Try again."
+    },
+    "solicitudUpgrade": {
+      "errorSesion": "Your session expired. Sign in again.",
+      "errorRegistrar": "We could not register your request. Try again.",
+      "errorEnviar": "We could not send your request. Try again."
+    }
+  },
+  "gates": {
+    "ejemplo": "Example",
+    "elegirPlan": {
+      "cta": "Choose plan",
+      "nota": "Activate a plan with autonomy from the plan catalog. The change applies instantly."
+    },
+    "solicitarAcceso": {
+      "enviada": "Request sent · we'll contact you",
+      "solicitando": "Requesting access...",
+      "cta": "Request access",
+      "nota": "Registers your interest in the Autonomous plan. The team will contact you to activate it; it does not activate instantly."
+    },
+    "recetas": {
+      "paso1Titulo": "Collect invoices from email",
+      "paso1Descripcion": "Reads the PDFs that arrived in your inbox during the week.",
+      "paso2Titulo": "Extract vendor, amount, and date",
+      "paso2Descripcion": "Turns each document into structured data.",
+      "paso3Titulo": "Record in your system and notify",
+      "paso3Descripcion": "Uploads the data via HTTP and sends you the summary by email.",
+      "pie": "This recipe runs every Monday at 8:00, no one has to run it.",
+      "resumen": "47 runs, 0 interventions"
+    },
+    "tareas": {
+      "encabezado": "A week like this",
+      "dias": {
+        "lun": "Mon",
+        "mar": "Tue",
+        "mie": "Wed",
+        "jue": "Thu",
+        "vie": "Fri",
+        "sab": "Sat",
+        "dom": "Sun"
+      },
+      "tarea1Nombre": "Sales report",
+      "tarea1Horario": "weekdays 7:30",
+      "tarea2Nombre": "Invoice closing",
+      "tarea2Horario": "Mondays 8:00",
+      "tarea3Nombre": "Data backup",
+      "tarea3Horario": "daily 23:00",
+      "leyendaEjecutada": "completed",
+      "leyendaCorriendo": "running now",
+      "leyendaProgramada": "scheduled",
+      "resumen": "12 runs this week, 0 failures, 0 interventions"
+    },
+    "triggers": {
+      "ahora": "now",
+      "corriendo": "running",
+      "eventoFactura": "Vendor invoice received",
+      "eventoCotizacion": "New quote request",
+      "agenteCuentas": "Accounts payable",
+      "agenteCotizaciones": "Quotes",
+      "pie": "Each call to the URL runs the agent instantly, without anyone being connected.",
+      "resumen": "31 events this month, 0 missed"
+    }
+  },
+  "onboarding": {
+    "completado": "Completed",
+    "pasos": {
+      "credencial": {
+        "titulo": "Connect your first provider (API key)",
+        "descripcion": "Store a credential (Anthropic, OpenAI, or compatible) so your agents can run.",
+        "cta": "Add credential",
+        "bloqueado": "Start here"
+      },
+      "agente": {
+        "titulo": "Create your first agent",
+        "descripcion": "Define what it does and which model it uses. You can create it by chatting with the Configurator.",
+        "cta": "Create agent",
+        "bloqueado": "After step 1"
+      },
+      "ejecutar": {
+        "titulo": "Run your agent",
+        "descripcion": "Try it in the Playground and watch your first run.",
+        "cta": "Run",
+        "bloqueadoConAgente": "After step 2",
+        "bloqueadoSinAgente": "Create an agent first"
+      }
+    },
+    "progreso": {
+      "aria": "{{completados}} of {{total}} steps completed",
+      "contador": "{{completados}} of {{total}}"
+    },
+    "bienvenida": {
+      "titulo": "Welcome to {{producto}}",
+      "subtitulo": "Your first agent up and running in 3 steps · ~4 min"
+    },
+    "primerosPasos": "Getting started"
+  },
+  "recetas": {
+    "titulo": "Recipes",
+    "subtitulo": "Chain steps into a flow. It runs on its own, in the background.",
+    "nuevaReceta": "New recipe",
+    "pasosContador_one": "{{count}} step",
+    "pasosContador_other": "{{count}} steps",
+    "errores": {
+      "ejecutarPlan": "Running recipes requires a plan with autonomy (Pro or Business).",
+      "ejecutarNoExiste": "The recipe no longer exists. Refresh the list.",
+      "ejecutarPausada": "The recipe is paused. Activate it to run it.",
+      "ejecutarGenerico": "We could not queue the recipe. Try again.",
+      "actualizar": "We could not update the recipe. Try again.",
+      "eliminar": "We could not delete the recipe. Try again.",
+      "cargarLista": "We could not load your recipes"
+    },
+    "avisos": {
+      "encolada": "Recipe queued. It will run in the background.",
+      "pausada": "Recipe paused.",
+      "activada": "Recipe activated.",
+      "eliminada": "Recipe deleted.",
+      "actualizada": "Recipe updated.",
+      "creada": "Recipe created."
+    },
+    "gate": {
+      "badge": "Pro and Business plans",
+      "titulo": "A feature of the plans with autonomy",
+      "descripcion": "Recipes chain several steps and your agent runs them in order, on its own. They are available on the Pro and Business plans."
+    },
+    "vacio": {
+      "eyebrow": "START HERE",
+      "titulo": "Create your first recipe",
+      "descripcion": "Chain several steps into a single flow: your agent runs them in order and the output of each one feeds the next.",
+      "boton": "Create recipe"
+    },
+    "card": {
+      "estadoActiva": "ACTIVE",
+      "estadoPausada": "PAUSED",
+      "agenteEliminado": "Agent deleted",
+      "ultimaEjecucion": "Last run:",
+      "nunca": "Never",
+      "ejecutarAria": "Run recipe now",
+      "ejecutarTitle": "Activate the recipe to run it",
+      "ejecutar": "Run",
+      "pausarAria": "Pause recipe",
+      "activarAria": "Activate recipe",
+      "pausar": "Pause",
+      "activar": "Activate",
+      "editarAria": "Edit recipe",
+      "eliminarAria": "Delete recipe"
+    },
+    "form": {
+      "errorSesion": "Your session expired. Sign in again.",
+      "errorPlan": "Recipes require the Autonomous plan (autonomous tier).",
+      "errorNoExiste": "The agent or the credential no longer exist. Refresh and try again.",
+      "errorRechazo": "The backend rejected the recipe. Check the name and the steps.",
+      "errorGuardar": "We could not save the changes. Try again.",
+      "errorCrear": "We could not create the recipe. Try again.",
+      "errorCargarReceta": "We could not load the recipe. Close and try again.",
+      "cerrarAria": "Close",
+      "tituloEditar": "Edit recipe",
+      "tituloNueva": "New recipe",
+      "subtituloEditar": "Adjust the name, the description and the steps.",
+      "subtituloNueva": "A flow of steps that your agent runs in order.",
+      "nombreLabel": "Name",
+      "nombrePlaceholder": "E.g.: Order summary and reply",
+      "descripcionLabel": "Description",
+      "descripcionHint": "Optional: what this recipe is for.",
+      "descripcionPlaceholder": "Optional",
+      "sinAgentes": "First you need an agent.",
+      "sinAgentesLink": "Create one in Agents",
+      "agenteLabel": "Agent",
+      "agenteFijoHint": "The agent is fixed; create a new recipe to change it.",
+      "cargandoAgentes": "Loading agents...",
+      "eligeAgente": "Choose an agent...",
+      "credencialLabel": "Credential",
+      "credencialFijaHint": "The credential is fixed; create a new recipe to change it.",
+      "eligePrimeroAgente": "Choose an agent first to see its credentials.",
+      "credencialNoDisponible": "Credential not available",
+      "sinCredenciales": "You have no {{proveedor}} credentials.",
+      "sinCredencialesLink": "Add one in Credentials",
+      "eligeCredencial": "Choose a credential...",
+      "guardando": "Saving...",
+      "guardarCambios": "Save changes",
+      "crearReceta": "Create recipe"
+    },
+    "eliminarDialog": {
+      "titulo": "Delete recipe",
+      "cuerpoAntes": "You are about to delete the recipe",
+      "cuerpoDespues": "This action cannot be undone."
+    },
+    "comunes": {
+      "cancelar": "Cancel",
+      "eliminando": "Deleting...",
+      "eliminar": "Delete"
+    },
+    "retry": {
+      "titulo": "If a run fails, it retries from the first step.",
+      "detalle": "There is no per-step checkpoint: a retry runs the whole recipe again. Avoid irreversible actions (sending emails, charging, publishing) in the early steps, or do them in a way that repeating them causes no harm."
+    },
+    "pasos": {
+      "label": "Steps",
+      "descripcion": "They run in order, from top to bottom. The output of each step feeds the next.",
+      "pasoN": "Step {{numero}}",
+      "subirAria": "Move step {{numero}} up",
+      "bajarAria": "Move step {{numero}} down",
+      "eliminarAria": "Delete step {{numero}}",
+      "minimoTitle": "A recipe needs at least one step",
+      "placeholderPrimero": "E.g.: Find today's pending orders and summarize their status.",
+      "placeholderSiguiente": "E.g.: With that summary, draft a reply.",
+      "agregar": "Add step"
+    },
+    "validacion": {
+      "nombre": "Give the recipe a name.",
+      "nombreMax": "Use {{max}} characters or fewer.",
+      "agente": "Choose the agent that will run the recipe.",
+      "credencial": "Choose the credential it will use.",
+      "pasos": "Add at least one step with an instruction."
+    }
+  },
+  "triggers": {
+    "titulo": "Triggers",
+    "subtitulo": "Create webhook URLs that run an agent when an external event calls them.",
+    "crearTrigger": "Create trigger",
+    "agenteEliminadoMin": "agent deleted",
+    "errores": {
+      "actualizar": "We could not update the trigger. Try again.",
+      "secretoCrear": "We created the trigger but could not display the secret. Rotate it to get a new one.",
+      "secretoRotar": "We rotated the secret but could not display it. Try again.",
+      "rotar": "We could not rotate the secret. Try again.",
+      "eliminar": "We could not delete the trigger. Try again.",
+      "cargarLista": "We could not load your triggers"
+    },
+    "avisos": {
+      "pausado": "Trigger paused.",
+      "activado": "Trigger activated.",
+      "eliminado": "Trigger deleted."
+    },
+    "gate": {
+      "badge": "Pro and Business plans",
+      "titulo": "A feature of the plans with autonomy",
+      "descripcion": "Triggers let an external event fire your agents through a webhook URL. They are available on the Pro and Business plans."
+    },
+    "vacio": {
+      "eyebrow": "START HERE",
+      "titulo": "Create your first trigger",
+      "descripcion": "Choose an agent and a base message, and you will get a webhook URL. When an external event calls it, the platform runs your agent on its own."
+    },
+    "card": {
+      "estadoActivo": "ACTIVE",
+      "estadoPausado": "PAUSED",
+      "agenteEliminado": "Agent deleted",
+      "ultimoDisparo": "Last fired:",
+      "nunca": "Never",
+      "pausarAria": "Pause trigger",
+      "activarAria": "Activate trigger",
+      "pausar": "Pause",
+      "activar": "Activate",
+      "rotarAria": "Rotate secret",
+      "rotar": "Rotate",
+      "eliminarAria": "Delete trigger",
+      "hintHmac": "Your system POSTs here, signed with the HMAC secret.",
+      "hintToken": "Base URL. The token goes in the URL and was only shown when creating or rotating: if you lost it, rotate the token."
+    },
+    "form": {
+      "errorSesion": "Your session expired. Sign in again.",
+      "errorPlan": "Creating triggers requires the Autonomous plan (autonomous tier).",
+      "errorNoExiste": "The agent or the credential no longer exist. Refresh and try again.",
+      "errorRechazo": "The backend rejected the trigger. Check the agent, the credential and the message.",
+      "errorCrear": "We could not create the trigger. Try again.",
+      "subtitulo": "A webhook URL that runs your agent when an external event calls it.",
+      "cerrarAria": "Close",
+      "sinAgentes": "First you need an agent.",
+      "sinAgentesLink": "Create one in Agents",
+      "agenteLabel": "Agent",
+      "cargandoAgentes": "Loading agents...",
+      "eligeAgente": "Choose an agent...",
+      "credencialLabel": "Credential",
+      "eligePrimeroAgente": "Choose an agent first to see its credentials.",
+      "sinCredenciales": "You have no {{proveedor}} credentials.",
+      "sinCredencialesLink": "Add one in Credentials",
+      "eligeCredencial": "Choose a credential...",
+      "mensajeLabel": "Base message",
+      "mensajeHint": "The agent will run this message when fired. The incoming event can add its data (JSON body) as extra context.",
+      "mensajePlaceholder": "Process the incoming event and log a summary.",
+      "modoAuthLegend": "Authentication mode",
+      "authHmacTitulo": "HMAC (signature)",
+      "authHmacTag": "Recommended - more secure",
+      "authHmacDescripcion": "Your system signs each request with a secret. If the URL leaks, it is not enough to fire it.",
+      "authTokenTitulo": "Token in URL",
+      "authTokenTag": "Simple - less secure",
+      "authTokenDescripcion": "A token travels in the URL. It is easy to integrate, but if the URL leaks, anyone can fire the agent.",
+      "creando": "Creating..."
+    },
+    "eliminarDialog": {
+      "titulo": "Delete trigger",
+      "cuerpoAntes": "You are about to delete the trigger for",
+      "cuerpoDespues": "The webhook URL will stop working and this action cannot be undone."
+    },
+    "rotarDialog": {
+      "materialHmac": "HMAC secret",
+      "materialToken": "token",
+      "aria": "Rotate the trigger secret",
+      "titulo": "Rotate {{material}}",
+      "cuerpo": "A new {{material}} will be generated immediately and the previous one will stop working. Your external system will stop firing the trigger until you update it with the new value, which you will see only ONCE.",
+      "rotando": "Rotating...",
+      "rotar": "Rotate"
+    },
+    "comunes": {
+      "cancelar": "Cancel",
+      "eliminando": "Deleting...",
+      "eliminar": "Delete"
+    },
+    "reveal": {
+      "titulo": "Copy this now",
+      "subtituloCreado": "Your trigger was created. Save this before closing.",
+      "subtituloRotado": "You rotated the secret. The previous one no longer works: save the new one before closing.",
+      "advertenciaHmac": "This is the only time you will see the HMAC secret. It is not shown again. If you lose it, you will have to rotate it (and update your system).",
+      "advertenciaToken": "This is the only time you will see the URL with the token. It is not shown again. If you lose it, you will have to rotate the token (and update your system).",
+      "urlLabel": "Webhook URL",
+      "urlHint": "Set up your system to POST to this URL when the event happens.",
+      "secretoLabel": "HMAC secret",
+      "secretoHint": "Sign each request with this secret. It is not stored in plain text and is not shown again.",
+      "urlTokenLabel": "Webhook URL (with token)",
+      "urlTokenHint": "Paste this URL into your system. The token travels in the URL: treat it as a secret and do not share it.",
+      "yaLoCopie": "I copied it"
+    },
+    "guia": {
+      "titulo": "How to sign each request",
+      "descripcion": "Your system computes the HMAC of the body and sends it in these headers. Without a valid signature, the webhook responds 401.",
+      "algoritmo": "Algorithm",
+      "cuerpoFirmado": "Signed body",
+      "headerFirma": "Signature header",
+      "headerTimestamp": "Timestamp header",
+      "timestampUnix": "{{header}} (Unix in seconds)",
+      "ventanaAntiReplay": "Anti-replay window"
+    },
+    "validacion": {
+      "agente": "Choose the agent that will run.",
+      "credencial": "Choose the credential it will use.",
+      "mensaje": "Write the base message the agent will run.",
+      "authMode": "Choose the authentication mode."
+    },
+    "authModeEtiqueta": {
+      "hmac": "HMAC (signature)",
+      "urlToken": "Token in URL"
+    }
+  },
+  "tareas": {
+    "header": {
+      "titulo": "Scheduled tasks",
+      "subtitulo": "Schedule your agents to run on their own, at the time you choose."
+    },
+    "programarTarea": "Schedule task",
+    "cancelar": "Cancel",
+    "errorCargar": "We couldn't load your tasks",
+    "gate": {
+      "badge": "Pro and Business plans",
+      "titulo": "A feature of the autonomy plans",
+      "descripcion": "Scheduled tasks run your agents on their own, at the time you choose. They are available on the Pro and Business plans."
+    },
+    "vacio": {
+      "eyebrow": "START HERE",
+      "titulo": "Schedule your first agent",
+      "descripcion": "Choose an agent, the message it will run and how often it runs. The platform triggers it on its own at the time you set."
+    },
+    "avisos": {
+      "pausada": "Task paused.",
+      "activada": "Task activated.",
+      "errorActualizar": "We couldn't update the task. Please try again.",
+      "eliminada": "Task deleted.",
+      "programada": "Task scheduled."
+    },
+    "card": {
+      "agenteEliminado": "Deleted agent",
+      "estadoActiva": "ACTIVE",
+      "estadoPausada": "PAUSED",
+      "enPausa": "Paused",
+      "nunca": "Never",
+      "proximo": "Next:",
+      "ultimo": "Last:",
+      "pausar": "Pause",
+      "activar": "Activate",
+      "pausarTarea": "Pause task",
+      "activarTarea": "Activate task"
+    },
+    "eliminar": {
+      "titulo": "Delete task",
+      "ariaLabel": "Delete scheduled task",
+      "confirmacion": "You are about to delete the task <nombre>{{descripcion}}</nombre>. This action cannot be undone.",
+      "agenteEliminado": "deleted agent",
+      "boton": "Delete",
+      "eliminando": "Deleting...",
+      "error": "We couldn't delete the task. Please try again."
+    },
+    "errores": {
+      "sesionExpirada": "Your session expired. Sign in again.",
+      "requierePlan": "Scheduling tasks requires the Autonomous plan (autonomous tier).",
+      "noExisten": "The agent or the credential no longer exist. Refresh and try again.",
+      "rechazada": "The backend rejected the task. Check the schedule and the message.",
+      "generico": "We couldn't schedule the task. Please try again."
+    },
+    "form": {
+      "subtitulo": "Choose an agent, what message it runs and how often it runs on its own.",
+      "cerrar": "Close",
+      "sinAgentes": "You need an agent first. <enlace>Create one in Agents</enlace>.",
+      "agenteLabel": "Agent",
+      "cargandoAgentes": "Loading agents...",
+      "eligeAgente": "Choose an agent...",
+      "credencialLabel": "Credential",
+      "eligePrimeroAgente": "Choose an agent first to see its credentials.",
+      "sinCredenciales": "You don't have {{proveedor}} credentials. <enlace>Add one in Credentials</enlace>.",
+      "eligeCredencial": "Choose a credential...",
+      "mensajeLabel": "Message",
+      "mensajeHint": "The agent will run this message on every run.",
+      "mensajePlaceholder": "Generate today's sales summary and send it by email.",
+      "programando": "Scheduling..."
+    },
+    "horario": {
+      "titulo": "Schedule",
+      "modoAvanzado": "Advanced mode (cron)",
+      "modoSimple": "Back to simple mode",
+      "frecuenciaAria": "How often it runs",
+      "frecuencia": {
+        "cadaHora": "Every hour",
+        "cadaDia": "Every day",
+        "cadaSemana": "Every week",
+        "cadaMes": "Every month"
+      },
+      "dias": {
+        "domingo": "Sunday",
+        "lunes": "Monday",
+        "martes": "Tuesday",
+        "miercoles": "Wednesday",
+        "jueves": "Thursday",
+        "viernes": "Friday",
+        "sabado": "Saturday"
+      },
+      "minutoLabel": "Minute of every hour",
+      "diaSemanaLabel": "Day of the week",
+      "diaMesLabel": "Day of the month",
+      "diaN": "Day {{dia}}",
+      "horaUtcLabel": "Time (UTC)",
+      "cronLabel": "Cron expression (5 fields)",
+      "cronAyuda": "Order: minute hour day-of-month month day-of-week. Example: <mono>0 8 * * 1</mono> = every Monday 08:00 UTC.",
+      "cronInvalido": "Invalid cron format (must be 5 fields).",
+      "seEjecutara": "Will run: {{descripcion}}",
+      "expresionValida": "Valid expression.",
+      "proximoRun": "Estimated next run: {{fecha}}"
+    },
+    "cron": {
+      "cadaMinuto": "Every minute",
+      "cadaHoraEnPunto": "Every hour (on the hour)",
+      "cadaHoraAlMinuto": "Every hour, at minute {{minuto}}",
+      "cadaSemana": "Every {{dia}} at {{hora}}",
+      "cadaMes": "On day {{dia}} of every month at {{hora}}",
+      "cadaDia": "Every day at {{hora}}",
+      "dias": {
+        "domingos": "Sunday",
+        "lunes": "Monday",
+        "martes": "Tuesday",
+        "miercoles": "Wednesday",
+        "jueves": "Thursday",
+        "viernes": "Friday",
+        "sabados": "Saturday"
+      }
+    },
+    "validacion": {
+      "agente": "Choose the agent that will run.",
+      "credencial": "Choose the credential it will use.",
+      "mensaje": "Write the message the agent will run.",
+      "cron": "Set a valid schedule."
+    }
+  },
+  "actividad": {
+    "header": {
+      "titulo": "Activity",
+      "subtitulo": "Run history of your agents: recipes, scheduled tasks and triggers."
+    },
+    "actualizando": "Refreshing",
+    "errorCargar": "We couldn't load your activity",
+    "cargarMas": "Load more",
+    "vacioFiltrado": {
+      "titulo": "No runs with this status",
+      "descripcion": "Try another status or remove the filter to see the full history."
+    },
+    "fantasma": {
+      "columnas": {
+        "estado": "Status",
+        "agente": "Agent",
+        "origen": "Source",
+        "duracion": "Duration",
+        "cuando": "When"
+      },
+      "estados": {
+        "completada": "Completed",
+        "enCurso": "Running",
+        "fallida": "Failed"
+      },
+      "filas": {
+        "agenteCuentas": "Accounts payable",
+        "agenteVentas": "Sales report",
+        "agenteCotizaciones": "Quotes",
+        "agenteCierre": "Invoice closing",
+        "origenTrigger": "Trigger factura-recibida",
+        "origenTareaDiaria": "Daily task 7:30",
+        "origenReceta": "Weekly recipe",
+        "cuandoHace2Min": "2 min ago",
+        "cuandoAhora": "now",
+        "cuandoHace1H": "1 h ago",
+        "cuandoAyer": "yesterday"
+      },
+      "vacio": {
+        "titulo": "No runs yet",
+        "descripcion": "Every run of your agents will show up here: what triggered it, how long it took and how it ended.",
+        "cta": "Try an agent in the Playground"
+      }
+    },
+    "card": {
+      "agenteEliminado": "Deleted agent",
+      "fin": "Finished: {{fecha}}",
+      "intentos_one": "{{count}} attempt",
+      "intentos_other": "{{count}} attempts"
+    },
+    "filtros": {
+      "todas": "All"
+    },
+    "jobEstado": {
+      "pendiente": "Pending",
+      "enCurso": "Running",
+      "completada": "Completed",
+      "fallida": "Failed"
+    },
+    "jobTipo": {
+      "receta": "Recipe",
+      "mensaje": "Message"
+    }
   }
 }

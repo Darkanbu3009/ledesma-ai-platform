@@ -9,6 +9,8 @@
  * ejecuta el servidor coinciden, sin sorpresas por horario de verano.
  */
 
+import i18n, { currentLanguage } from '../i18n';
+
 export type ScheduleFrequency = 'hourly' | 'daily' | 'weekly' | 'monthly';
 
 /**
@@ -40,20 +42,21 @@ export const DEFAULT_SCHEDULE: FriendlySchedule = {
 /** Tope del dia del mes en el modo amigable: 28 garantiza que la tarea corra todos los meses. */
 export const MAX_FRIENDLY_DAY_OF_MONTH = 28;
 
-/** Nombres de los dias de la semana en plural (para "Todos los ..."). Indice 0 = domingo. */
-const WEEKDAY_PLURAL = [
-  'domingos',
-  'lunes',
-  'martes',
-  'miercoles',
-  'jueves',
-  'viernes',
-  'sabados',
+/** Claves de los nombres de los dias de la semana en plural (para "Todos los ..."). Indice 0 = domingo. */
+const WEEKDAY_PLURAL_KEYS = [
+  'tareas.cron.dias.domingos',
+  'tareas.cron.dias.lunes',
+  'tareas.cron.dias.martes',
+  'tareas.cron.dias.miercoles',
+  'tareas.cron.dias.jueves',
+  'tareas.cron.dias.viernes',
+  'tareas.cron.dias.sabados',
 ] as const;
 
 /** Nombre en plural del dia de la semana. Acepta 0-7 (0 y 7 = domingo). */
 export function weekdayName(day: number): string {
-  return WEEKDAY_PLURAL[day % 7] ?? String(day);
+  const key = WEEKDAY_PLURAL_KEYS[day % 7];
+  return key === undefined ? String(day) : i18n.t(key);
 }
 
 function pad2(value: number): string {
@@ -118,14 +121,16 @@ export function describeCron(expression: string): string | null {
     domField === '*' &&
     dowField === '*'
   ) {
-    return 'Cada minuto';
+    return i18n.t('tareas.cron.cadaMinuto');
   }
 
   if (minute === null || minute > 59) return null;
 
   // Cada hora (minuto fijo, resto comodin).
   if (hourField === '*' && domField === '*' && dowField === '*') {
-    return minute === 0 ? 'Cada hora (en punto)' : `Cada hora, al minuto ${pad2(minute)}`;
+    return minute === 0
+      ? i18n.t('tareas.cron.cadaHoraEnPunto')
+      : i18n.t('tareas.cron.cadaHoraAlMinuto', { minuto: pad2(minute) });
   }
 
   const hour = singleInt(hourField);
@@ -136,19 +141,19 @@ export function describeCron(expression: string): string | null {
   if (domField === '*' && dowField !== '*') {
     const weekday = singleInt(dowField);
     if (weekday === null || weekday > 7) return null;
-    return `Todos los ${weekdayName(weekday)} a las ${time}`;
+    return i18n.t('tareas.cron.cadaSemana', { dia: weekdayName(weekday), hora: time });
   }
 
   // Cada mes en un dia (dom fijo, dow comodin).
   if (domField !== '*' && dowField === '*') {
     const dom = singleInt(domField);
     if (dom === null || dom < 1 || dom > 31) return null;
-    return `El dia ${dom} de cada mes a las ${time}`;
+    return i18n.t('tareas.cron.cadaMes', { dia: dom, hora: time });
   }
 
   // Cada dia (dom y dow comodin).
   if (domField === '*' && dowField === '*') {
-    return `Todos los dias a las ${time}`;
+    return i18n.t('tareas.cron.cadaDia', { hora: time });
   }
 
   // Cualquier otra combinacion (dom y dow ambos fijos, etc.) es avanzada.
@@ -169,7 +174,7 @@ export function formatRunAt(iso: string | null): string | null {
   if (iso === null) return null;
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return null;
-  const formatted = date.toLocaleString('es', {
+  const formatted = date.toLocaleString(currentLanguage(), {
     timeZone: 'UTC',
     day: 'numeric',
     month: 'short',

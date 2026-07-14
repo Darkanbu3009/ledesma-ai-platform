@@ -186,9 +186,6 @@ export function ChatDemoConfigurador(): JSX.Element {
       }
     };
 
-    // Si el efecto se relanza (ej. cambio de idioma via `t`), el guion arranca de cero.
-    setBubbles([]);
-    setFading(false);
     void run();
 
     return () => {

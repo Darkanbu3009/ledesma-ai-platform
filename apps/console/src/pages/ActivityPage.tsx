@@ -19,6 +19,7 @@ function StatusFilterBar({
   value: JobStatusFilter;
   onChange: (next: JobStatusFilter) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="mt-5 flex flex-wrap gap-2">
       {JOB_STATUS_FILTERS.map((option) => {
@@ -36,7 +37,7 @@ function StatusFilterBar({
                 : 'border-line bg-surface text-muted hover:border-ink-soft hover:text-ink',
             ].join(' ')}
           >
-            {option.label}
+            {t(option.labelKey)}
           </button>
         );
       })}

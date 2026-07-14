@@ -8,6 +8,8 @@
  * cada paso una instruccion de texto ({ message }). El orden del array ES el orden de ejecucion.
  */
 
+import i18n from '../i18n';
+
 /** Un paso de la receta: UNA instruccion de texto. El orden en el array es el orden de ejecucion. */
 export interface RecipeStep {
   message: string;
@@ -122,18 +124,18 @@ export function validateRecipeDraft(draft: RecipeDraft): RecipeDraftErrors {
   const errors: RecipeDraftErrors = {};
   const name = draft.name.trim();
   if (name === '') {
-    errors.name = 'Ponle un nombre a la receta.';
+    errors.name = i18n.t('recetas.validacion.nombre');
   } else if (name.length > RECIPE_NAME_MAX) {
-    errors.name = `Usa ${RECIPE_NAME_MAX} caracteres o menos.`;
+    errors.name = i18n.t('recetas.validacion.nombreMax', { max: RECIPE_NAME_MAX });
   }
   if (draft.agentId.trim() === '') {
-    errors.agentId = 'Elige el agente que ejecutara la receta.';
+    errors.agentId = i18n.t('recetas.validacion.agente');
   }
   if (draft.credentialId.trim() === '') {
-    errors.credentialId = 'Elige la credencial que va a usar.';
+    errors.credentialId = i18n.t('recetas.validacion.credencial');
   }
   if (nonEmptySteps(draft.steps).length === 0) {
-    errors.steps = 'Agrega al menos un paso con una instruccion.';
+    errors.steps = i18n.t('recetas.validacion.pasos');
   }
   return errors;
 }

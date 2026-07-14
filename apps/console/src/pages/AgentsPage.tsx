@@ -52,7 +52,7 @@ const cardTitleClass = 'mt-4 text-[19px] font-medium tracking-[-0.01em] text-ink
 // queda en neutros. Ambos CTAs navegan a los mismos destinos que siempre:
 // /configurador y /agentes/nuevo.
 function AgentsEmptyState() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   // Filas del mini-formulario estatico de la tarjeta Manual: puro contenido de muestra.
   const manualFormRows: Array<[label: string, value: string]> = [
     [t('agentes.form.modeloTitulo'), 'Claude Sonnet'],
@@ -77,8 +77,9 @@ function AgentsEmptyState() {
           <p className="mt-2 text-[13px] leading-[1.5] text-[#5F5E5A]">
             {t('agentes.vacio.configuradorDescripcion')}
           </p>
-          {/* Mini-conversacion animada (decorativa) que muestra el flujo del Configurador. */}
-          <ChatDemoConfigurador />
+          {/* Mini-conversacion animada (decorativa) que muestra el flujo del Configurador. La key
+              por idioma remonta la demo al cambiar de idioma, para que el guion arranque de cero. */}
+          <ChatDemoConfigurador key={i18n.language} />
           <div className="mt-auto pt-5">
             <Button asChild>
               <Link to="/configurador">

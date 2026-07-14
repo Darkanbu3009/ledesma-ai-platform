@@ -14,5 +14,1659 @@
     "sectionTitle": "Idioma",
     "sectionDescription": "Elige el idioma de la interfaz. El cambio se aplica de inmediato.",
     "switcherLabel": "Idioma"
+  },
+  "admin": {
+    "comun": {
+      "sinEmail": "Sin email",
+      "sinNombre": "Sin nombre",
+      "usuario": "Usuario",
+      "plan": "Plan",
+      "rol": "Rol",
+      "registro": "Registro",
+      "usuarioNoExiste": "No encontramos a este usuario. Es posible que ya no exista."
+    },
+    "tier": {
+      "free": "Free",
+      "pro": "Pro",
+      "autonomo": "Autónomo"
+    },
+    "etiquetas": {
+      "individual": "Individual",
+      "empresa": "Empresa",
+      "adminOrganizacion": "Admin de organización"
+    },
+    "errores": {
+      "cambioTier403": "No tienes permiso para cambiar el tier de este usuario.",
+      "cambioTierGenerico": "No pudimos cambiar el tier. Revisa tu conexión e intenta de nuevo."
+    },
+    "usuarios": {
+      "titulo": "Usuarios",
+      "subtitulo": "Administra los planes y consulta la actividad de los usuarios de la plataforma.",
+      "buscarPlaceholder": "Buscar por email o nombre",
+      "colTipo": "Tipo",
+      "errorCarga": "No pudimos cargar los usuarios",
+      "sinResultados": "No encontramos usuarios que coincidan con <destacado>«{{termino}}»</destacado>.",
+      "vacioTitulo": "Sin usuarios",
+      "vacioDescripcion": "Todavia no hay usuarios registrados en la plataforma.",
+      "resultados_one": "{{count}} resultado",
+      "resultados_other": "{{count}} resultados",
+      "usuariosTotal_one": "{{count}} usuario",
+      "usuariosTotal_other": "{{count}} usuarios",
+      "cargarMas": "Cargar mas"
+    },
+    "ficha": {
+      "volver": "Volver a la lista",
+      "datosTitulo": "Datos",
+      "datosDescripcion": "Perfil, suscripcion y uso del usuario.",
+      "nombre": "Nombre",
+      "email": "Email",
+      "tipoCuenta": "Tipo de cuenta",
+      "identidadVerificada": "Identidad verificada",
+      "si": "Si",
+      "no": "No",
+      "suscripcion": "Suscripcion",
+      "sinSuscripcion": "Sin suscripcion.",
+      "estado": "Estado",
+      "uso": "Uso",
+      "sinDatosUso": "Sin datos de uso.",
+      "ejecucionesUsadas": "Ejecuciones usadas ({{periodo}})",
+      "actividadTitulo": "Actividad",
+      "actividadDescripcion": "Operaciones, ejecuciones y gasto del usuario. El gasto es consumo sobre la propia key del usuario (BYOK), no un cobro de Ledesma.",
+      "actualizando": "Actualizando",
+      "errorActividad": "No pudimos cargar la actividad",
+      "sinActividad": "Este usuario aun no registra actividad en este periodo.",
+      "cargandoFicha": "Cargando la ficha del usuario...",
+      "usuarioNoEncontrado": "Usuario no encontrado",
+      "errorFicha": "No pudimos cargar la ficha del usuario",
+      "licenciaTitulo": "Licencia",
+      "licenciaDescripcion": "El plan del usuario. Cambiarlo opera la monetizacion: se hace con confirmacion.",
+      "esteUsuario": "este usuario"
+    },
+    "cambioTier": {
+      "titulo": "Cambiar tier",
+      "descripcion": "Vas a cambiar el tier de <destacado>{{usuario}}</destacado> de <destacado>{{de}}</destacado> a <destacado>{{a}}</destacado>. Esto ajusta el plan del usuario y queda registrado.",
+      "cambiando": "Cambiando...",
+      "exito": "Tier actualizado a {{tier}}.",
+      "tierActual": "Tier actual:",
+      "instruccion": "Cambia el plan del usuario. Es una acción deliberada: se te pedirá confirmación antes de aplicarla.",
+      "grupoAria": "Cambiar tier del usuario"
+    }
+  },
+  "cuenta": {
+    "identidad": {
+      "nombreActualizado": "Nombre actualizado.",
+      "suscripcionActiva": "Suscripción activa",
+      "sinSuscripcionActiva": "Sin suscripción activa",
+      "nombreCompletoLabel": "Nombre completo",
+      "editarNombre": "Editar nombre",
+      "sinEmail": "Sin email",
+      "miembroDesde": "miembro desde {{fecha}}"
+    },
+    "uso": {
+      "titulo": "Uso del periodo",
+      "descripcion": "Ejecuciones de tus agentes en el plan {{plan}}.",
+      "deLimite": "de {{limite}}",
+      "medidorAria": "{{usadas}} de {{limite}} ejecuciones usadas",
+      "sinDatos": "Aún no hay datos de uso.",
+      "cadaBloque": "Cada bloque es una ejecución",
+      "verActividad": "Ver actividad"
+    },
+    "sesion": {
+      "titulo": "Sesión",
+      "descripcion": "Entras con tu correo y contraseña. Aquí puedes cerrar la sesión activa.",
+      "cerrarSesion": "Cerrar sesión"
+    },
+    "eliminar": {
+      "zonaTitulo": "Eliminar mi cuenta",
+      "zonaDescripcion": "Borra de forma permanente agentes, credenciales, recetas, tareas, triggers e historial. No se puede deshacer.",
+      "zonaBoton": "Eliminar cuenta",
+      "dialogoTitulo": "Eliminar tu cuenta",
+      "dialogoDescripcion": "Esta acción es <destacado>permanente e irreversible</destacado>. Se borrará <destacado>todo</destacado>: tus agentes, credenciales, recetas, tareas programadas, triggers e historial de actividad. No podremos recuperarlo.",
+      "emailCuenta": "Email de tu cuenta:",
+      "confirmarLabel": "Para confirmar, escribe tu email",
+      "confirmarHint": "El botón se habilita cuando el email coincide exactamente con el de tu cuenta.",
+      "emailPlaceholder": "tu@email.com",
+      "eliminando": "Eliminando...",
+      "eliminarDefinitivamente": "Eliminar definitivamente"
+    },
+    "errores": {
+      "cargarCuenta": "No pudimos cargar tu cuenta",
+      "eliminar400": "El email no coincide con el de tu cuenta. Escríbelo tal como aparece arriba.",
+      "eliminar401": "Tu sesión expiró. Vuelve a iniciar sesión.",
+      "eliminarGenerico": "No pudimos eliminar tu cuenta. Intenta de nuevo en un momento."
+    }
+  },
+  "configuracion": {
+    "titulo": "Configuración",
+    "subtitulo": "Administra los datos de tu cuenta y el plan de tu espacio."
+  },
+  "ui": {
+    "acciones": {
+      "guardar": "Guardar",
+      "guardando": "Guardando...",
+      "cancelar": "Cancelar",
+      "reintentar": "Reintentar"
+    },
+    "estado": {
+      "cargando": "Cargando...",
+      "cargandoAria": "Cargando"
+    },
+    "estadoError": {
+      "revisaConexion": "Revisa tu conexión e intenta de nuevo."
+    },
+    "copiar": {
+      "copiar": "Copiar",
+      "copiado": "Copiado",
+      "copiaAMano": "Copia a mano"
+    },
+    "layout": {
+      "abrirMenu": "Abrir menú"
+    },
+    "sidebar": {
+      "expandirPanel": "Expandir panel",
+      "colapsarPanel": "Colapsar panel"
+    },
+    "menuUsuario": {
+      "etiqueta": "Menú de usuario",
+      "configuracion": "Configuración",
+      "mejorarPlan": "Mejorar Plan",
+      "cerrarSesion": "Cerrar sesión"
+    }
+  },
+  "agentes": {
+    "lista": {
+      "titulo": "Agentes",
+      "subtitulo": "Configura y administra tus agentes de IA.",
+      "crearAgente": "Crear agente",
+      "crearConConfigurador": "Crear con el Configurador",
+      "errorCarga": "No pudimos cargar tus agentes"
+    },
+    "vacio": {
+      "configuradorLabel": "Configurador",
+      "recomendado": "Recomendado",
+      "configuradorTitulo": "Descríbelo. Nosotros lo armamos.",
+      "configuradorDescripcion": "Cuenta qué proceso quieres automatizar y el Configurador construye el agente conversando contigo.",
+      "conversarConConfigurador": "Conversar con el Configurador",
+      "manualLabel": "Manual",
+      "manualTitulo": "Configúralo tú, campo por campo",
+      "manualDescripcion": "Control total sobre cada parámetro. Para cuando ya sabes exactamente qué quieres.",
+      "filaSystemPromptValor": "Tu definición",
+      "filaHerramientasValor": "HTTP · web · archivos",
+      "filaLimitesLabel": "Límites",
+      "filaLimitesValor": "Presupuesto y pasos",
+      "paso1Titulo": "Lo defines",
+      "paso1Descripcion": "Qué hace, modelo y herramientas.",
+      "paso2Titulo": "Lo pruebas",
+      "paso2Descripcion": "En el Playground, con tu API key.",
+      "paso3Titulo": "Lo sueltas",
+      "paso3Descripcion": "Tareas, triggers, recetas o embebido."
+    },
+    "card": {
+      "sinDescripcion": "Sin descripción",
+      "herramientas_one": "{{count}} herramienta",
+      "herramientas_other": "{{count}} herramientas",
+      "activo": "Activo",
+      "editarAria": "Editar {{name}}",
+      "conversarAria": "Conversar con {{name}}",
+      "editar": "Editar",
+      "conversar": "Conversar"
+    },
+    "form": {
+      "editarTitulo": "Editar agente",
+      "volver": "Volver",
+      "errorCarga": "No pudimos cargar el agente",
+      "errorGuardar": "No pudimos guardar el agente. Intenta de nuevo.",
+      "probarAgente": "Probar agente",
+      "conectar": "Conectar",
+      "uso": "Uso",
+      "identidadTitulo": "Identidad",
+      "identidadDescripcion": "Cómo se identifica este agente en la consola.",
+      "nombreLabel": "Nombre",
+      "nombrePlaceholder": "Mi agente",
+      "descripcionLabel": "Descripción",
+      "descripcionPlaceholder": "Qué hace este agente",
+      "modeloTitulo": "Modelo",
+      "modeloDescripcion": "El cerebro que mueve al agente. Es intercambiable.",
+      "proveedorLabel": "Proveedor",
+      "modeloHint": "Sugerencias según el proveedor; puedes escribir cualquier identificador válido.",
+      "temperatureHint": "Vacío = por defecto del proveedor",
+      "baseUrlHint": "URL base del endpoint compatible con OpenAI",
+      "comportamientoTitulo": "Comportamiento",
+      "comportamientoDescripcion": "Las instrucciones base que guían cada respuesta del agente.",
+      "systemPromptPlaceholder": "Instrucciones para el agente",
+      "eliminarAgente": "Eliminar agente",
+      "guardando": "Guardando...",
+      "guardarAgente": "Guardar agente",
+      "errorEliminar": "No pudimos eliminar el agente. Intenta de nuevo."
+    },
+    "eliminarDialogo": {
+      "confirmacion": "Vas a eliminar <nombre>{{name}}</nombre>. Esta accion no se puede deshacer.",
+      "eliminando": "Eliminando..."
+    },
+    "comun": {
+      "cancelar": "Cancelar",
+      "eliminar": "Eliminar",
+      "cerrar": "Cerrar"
+    },
+    "rotarSecreto": {
+      "titulo": "Rotar el secreto de webhooks",
+      "descripcion": "Se generara un secreto nuevo de inmediato. Tus sistemas que verifican la firma dejaran de validar hasta que actualices LEDESMA_WEBHOOK_SECRET con el valor nuevo.",
+      "rotando": "Rotando...",
+      "rotar": "Rotar"
+    },
+    "probarTool": {
+      "titulo": "Probar {{name}}",
+      "descripcion": "Se enviara un POST firmado al webhook con la version guardada de la herramienta.",
+      "inputInvalido": "El input debe ser un objeto JSON valido",
+      "errorEjecutar": "No pudimos ejecutar la prueba. Intenta de nuevo.",
+      "ejecutando": "Ejecutando...",
+      "ejecutar": "Ejecutar prueba"
+    },
+    "herramientas": {
+      "titulo": "Herramientas",
+      "vacio": "Este agente no tiene herramientas. Agrega una para que pueda llamar webhooks externos.",
+      "agregar": "Agregar herramienta",
+      "tituloItem": "Herramienta {{numero}}",
+      "guardaPrimero": "Guarda primero: la prueba usa la version guardada",
+      "probar": "Probar",
+      "eliminar": "Eliminar herramienta",
+      "descripcionLabel": "Descripcion",
+      "descripcionPlaceholder": "Que hace la herramienta y cuando conviene usarla",
+      "urlLabel": "URL del webhook",
+      "urlHint": "Recibira un POST con { tool, input } y debe responder { content, isError? }",
+      "parametros": "Parametros",
+      "schemaComplejo": "El schema es demasiado complejo para el modo simple",
+      "sinParametros": "Sin parametros: la herramienta se llama sin argumentos.",
+      "tipoLabel": "Tipo",
+      "paramDescripcionPlaceholder": "Para que sirve este parametro",
+      "requerido": "Requerido",
+      "agregarParametro": "Agregar parametro"
+    }
+  },
+  "playground": {
+    "errorCargaTitulo": "No pudimos cargar el agente",
+    "errorCargaDescripcion": "Revisa tu conexion e intenta de nuevo.",
+    "reintentar": "Reintentar",
+    "misAgentes": "Mis agentes",
+    "titulo": "Playground: {{name}}",
+    "editar": "Editar",
+    "conversacionAria": "Conversacion con el agente",
+    "eligeCredencial": "Elegi una credencial o pega tu API key para probar el agente.",
+    "escribeParaEmpezar": "Escribe un mensaje para empezar.",
+    "usoTokens": "{{input}} in / {{output}} out tokens",
+    "errorFallback": "Revisa tu key o el identificador del modelo.",
+    "mensajeAria": "Mensaje para el agente",
+    "mensajePlaceholder": "Escribe un mensaje...",
+    "detener": "Detener",
+    "enviar": "Enviar",
+    "adjuntos": {
+      "imagen": "Imagen",
+      "documento": "Documento",
+      "adjuntarArchivo": "Adjuntar archivo",
+      "maximoArchivos": "Maximo {{count}} archivos",
+      "quitarAria": "Quitar {{name}}",
+      "subiendo": "Subiendo..."
+    },
+    "credencial": {
+      "titulo": "Credencial de la sesion",
+      "descripcion": "Con que key conversa el agente. Reusa una de tu boveda o pega una al momento; nunca se guarda en la plataforma.",
+      "origenAria": "Origen de la credencial",
+      "guardadaTitulo": "Credencial guardada",
+      "guardadaDescripcion": "Reusa una de tu boveda",
+      "pegarTitulo": "Pegar al momento",
+      "pegarDescripcion": "Una key solo para esta sesion",
+      "sinCredenciales": "No tenes credenciales de {{provider}}. Pega una key al momento o <enlace>agregala en Credenciales</enlace>.",
+      "soloProveedor": "Solo se muestran las de {{provider}}, el proveedor del agente.",
+      "eligeOpcion": "Elegi una credencial...",
+      "apiKeyLabel": "API key del proveedor",
+      "apiKeyHint": "Tu llave se usa solo para esta sesion de prueba, viaja cifrada en cada peticion y NUNCA se guarda en la plataforma.",
+      "apiKeyPlaceholder": "Pega tu API key",
+      "ocultarKey": "Ocultar API key",
+      "mostrarKey": "Mostrar API key"
+    }
+  },
+  "auth": {
+    "comun": {
+      "enviando": "Enviando...",
+      "reintentar": "Reintentar",
+      "revisaConexion": "Revisa tu conexion e intenta de nuevo.",
+      "divisorO": "o",
+      "revisaCorreoTitulo": "Revisa tu correo",
+      "irIniciarSesion": "Ir a iniciar sesión"
+    },
+    "campos": {
+      "correo": "Correo",
+      "correoPlaceholder": "tu@correo.com",
+      "contrasena": "Contraseña",
+      "confirmarContrasena": "Confirmar contraseña"
+    },
+    "marca": {
+      "eyebrow": "Plataforma de agentes",
+      "titular": "Agentes que ejecutan trabajo real dentro de tus sistemas.",
+      "soporte": "Multi-tenant · BYOK · Trazabilidad completa"
+    },
+    "errores": {
+      "correoInvalido": "Ingresa un correo válido.",
+      "contrasenaRequerida": "Ingresa tu contraseña.",
+      "confirmaCorreo": "Confirma tu correo antes de iniciar sesión. Revisa tu bandeja.",
+      "credencialesIncorrectas": "Correo o contraseña incorrectos.",
+      "loginGenerico": "No pudimos iniciar sesión. Intenta de nuevo.",
+      "contrasenaMinima": "La contraseña debe tener al menos {{min}} caracteres.",
+      "contrasenasNoCoinciden": "Las contraseñas no coinciden.",
+      "requisitosServidor": "La contraseña no cumple los requisitos del servidor: {{mensaje}}"
+    },
+    "login": {
+      "iniciarSesion": "Iniciar sesión",
+      "subtitulo": "Entra con tu correo y contraseña.",
+      "olvidasteContrasena": "¿Olvidaste tu contraseña?",
+      "entrando": "Entrando...",
+      "sinCuenta": "¿No tienes cuenta?"
+    },
+    "crearCuenta": {
+      "titulo": "Crear tu cuenta",
+      "subtitulo": "Regístrate con tu correo y una contraseña.",
+      "accion": "Crear cuenta",
+      "creandoCuenta": "Creando cuenta...",
+      "yaTienesCuenta": "¿Ya tienes cuenta?",
+      "correoConCuenta": "Ese correo ya tiene cuenta.",
+      "errorGenerico": "No pudimos crear la cuenta. Intenta de nuevo.",
+      "confirmacionEnviada": "Enviamos un correo a <correo>{{email}}</correo> para confirmar tu cuenta. Confírmala y luego inicia sesión."
+    },
+    "google": {
+      "continuar": "Continuar con Google",
+      "conectando": "Conectando con Google...",
+      "errorRetorno": "No se completó el acceso con Google. Intenta de nuevo.",
+      "errorConexion": "No pudimos conectar con Google. Intenta de nuevo."
+    },
+    "recuperar": {
+      "titulo": "Restablecer tu contraseña",
+      "subtitulo": "Escribe tu correo y te enviaremos un enlace para elegir una nueva contraseña.",
+      "enviarEnlace": "Enviar enlace para restablecer",
+      "enviandoEnlace": "Enviando enlace...",
+      "volverIniciarSesion": "Volver a iniciar sesión",
+      "confirmacionCuerpo": "Si ese correo tiene cuenta, te enviamos un enlace para restablecer tu contraseña.",
+      "errorEnvio": "No pudimos enviar el correo. Intenta de nuevo en unos minutos."
+    },
+    "nuevaContrasena": {
+      "titulo": "Elige una nueva contraseña",
+      "subtitulo": "Escríbela dos veces para confirmarla.",
+      "nuevaContrasenaLabel": "Nueva contraseña",
+      "guardar": "Guardar contraseña",
+      "guardando": "Guardando...",
+      "guardadaTitulo": "Contraseña guardada",
+      "guardadaCuerpo": "Tu contraseña se actualizó. Te estamos redirigiendo.",
+      "irConsola": "Ir a la consola",
+      "enlaceInvalidoTitulo": "Enlace inválido o expirado",
+      "enlaceInvalidoCuerpo": "El enlace para restablecer tu contraseña ya no es válido. Pide uno nuevo y vuelve a intentarlo.",
+      "pedirEnlaceNuevo": "Pedir un enlace nuevo",
+      "distintaActual": "La nueva contraseña debe ser distinta a la actual.",
+      "errorGuardar": "No pudimos guardar la contraseña. Intenta de nuevo."
+    },
+    "conectar": {
+      "titulo": "Conectar: {{nombre}}",
+      "volver": "Volver",
+      "errorCargaAgente": "No pudimos cargar el agente",
+      "avisoKey": "La API key del proveedor es de tu cliente y debe vivir en su servidor. Nunca la incluyas en una app movil o pagina publica.",
+      "avisoTokens": "Para integrar desde un cliente, tu backend emite tokens de sesion efimeros y el cliente habla directo con la plataforma.",
+      "movilYWeb": "Movil y web",
+      "webhooks": {
+        "titulo": "Verificacion de webhooks",
+        "descripcion": "Cada vez que tu agente invoca una herramienta, la plataforma firma el POST a tu webhook. Verifica la firma para asegurarte de que la peticion viene de Ledesma AI Labs.",
+        "ocultarSecreto": "Ocultar secreto",
+        "mostrarSecreto": "Mostrar secreto",
+        "ocultar": "Ocultar",
+        "revelar": "Revelar",
+        "rotarSecreto": "Rotar secreto",
+        "secretoRotado": "Secreto rotado. Actualiza tus integraciones.",
+        "headersEnviados": "Headers enviados en cada POST",
+        "verificacionServidor": "Verificacion en tu servidor (Node)",
+        "guardaSecreto": "Guarda el secreto como variable de entorno (LEDESMA_WEBHOOK_SECRET) en tu servidor; usa el body crudo (rawBody) para verificar."
+      },
+      "widget": {
+        "titulo": "Widget embebible",
+        "descripcion": "Incrusta tu agente en cualquier sitio con una etiqueta HTML.",
+        "modoTokenTitulo": "Modo token (produccion)",
+        "modoTokenCuerpo": "Tu backend emite tokens de sesion efimeros (la key queda como secreto en tu servidor) y el widget habla directo con la plataforma. Cuando el token expira, el widget pide otro solo.",
+        "htmlPagina": "HTML de tu pagina",
+        "servidorTokens": "Servidor de tokens de ejemplo (Node)",
+        "modoDirectoTitulo": "Modo directo (solo pruebas)",
+        "modoDirectoAviso": "La key queda visible en el HTML. Usalo solo en pruebas o herramientas internas; nunca en una pagina publica.",
+        "usoReactTitulo": "Uso en React",
+        "usoReactCuerpo": "El custom element funciona en React hoy cargando el script de la plataforma. Muy pronto: wrapper npm (<paquete>@ledesma-platform/widget-react</paquete>) con props tipadas.",
+        "componenteEjemplo": "Componente de ejemplo",
+        "personalizacionTitulo": "Personalizacion",
+        "personalizacionCuerpo": "El tema se ajusta desde tu pagina con CSS custom properties (<codigo>--la-accent</codigo>, <codigo>--la-bg</codigo>, <codigo>--la-radius</codigo>, <codigo>--la-height</codigo>, ...):"
+      },
+      "comoFuncionaTitulo": "Como funciona",
+      "comoFuncionaCuerpo": "La configuracion del agente (modelo, system prompt, parametros) vive en la plataforma. Si cambias el cerebro desde la consola, todas tus integraciones lo usan de inmediato sin cambiar codigo."
+    }
+  },
+  "registro": {
+    "cerrarSesion": "Cerrar sesion",
+    "errorCarga": {
+      "titulo": "No pudimos cargar tu cuenta"
+    },
+    "form": {
+      "titulo": "Completar registro",
+      "subtitulo": "Necesitamos algunos datos para activar tu cuenta.",
+      "empresa": "Empresa",
+      "persona": "Persona",
+      "nombreEmpresaLabel": "Nombre de la empresa",
+      "nombreEmpresaPlaceholder": "Acme S.A.",
+      "tuNombreAdminLabel": "Tu nombre (administrador)",
+      "nombreCompletoLabel": "Nombre completo",
+      "errorGenerico": "No pudimos completar el registro. Intenta de nuevo.",
+      "registrarEmpresa": "Registrar empresa",
+      "crearMiCuenta": "Crear mi cuenta",
+      "empresaActiva": "Tu empresa queda activa de inmediato.",
+      "cuentaActiva": "Tu cuenta queda activa de inmediato."
+    },
+    "validacion": {
+      "campoObligatorio": "Este campo es obligatorio.",
+      "maxCaracteres": "Usa {{max}} caracteres o menos."
+    },
+    "perfil": {
+      "revisaNombre": "Revisa el nombre e intenta de nuevo.",
+      "sesionExpirada": "Tu sesión expiró. Vuelve a iniciar sesión.",
+      "errorActualizar": "No pudimos actualizar tu nombre. Intenta de nuevo."
+    }
+  },
+  "configurador": {
+    "errores": {
+      "sesionExpirada": "Tu sesion expiro. Volve a iniciar sesion.",
+      "autonomoRequierePlan": "El modo autonomo requiere el plan correspondiente. Volve al modo asistente para continuar.",
+      "credencialNoDisponible": "La credencial guardada no esta disponible. Elegi otra o pega una al momento.",
+      "peticionRechazada": "El Configurador rechazo la peticion. Revisa la credencial y el modelo.",
+      "sinContacto": "No pudimos contactar al Configurador. Intenta de nuevo.",
+      "agenteRechazado": "El backend rechazo el agente. Revisa el preview.",
+      "crearFallo": "No pudimos crear el agente. Intenta de nuevo."
+    },
+    "pagina": {
+      "titulo": "Configurador",
+      "subtituloAutonomo": "Describi el agente que queres y se crea solo cuando esta listo y valido.",
+      "subtituloAsistente": "Describi el agente que queres y armalo conversando. Vos confirmas antes de crearlo.",
+      "volver": "Volver",
+      "usando": "Usando:",
+      "sesionAlMomento": "{{provider}} (al momento)",
+      "cambiar": "Cambiar",
+      "gateAutonomo": "El modo autonomo, que crea el agente sin confirmacion, es parte de los planes Pro y Business.",
+      "tabsAriaLabel": "Vistas del configurador",
+      "tabVistaPrevia": "Vista previa",
+      "modoAriaLabel": "Modo del configurador",
+      "modoAsistente": "Asistente",
+      "modoAsistenteHint": "reviso y confirmo",
+      "modoAutonomo": "Autonomo",
+      "modoAutonomoHint": "crear automaticamente"
+    },
+    "chat": {
+      "conversacionAriaLabel": "Conversacion con el Configurador",
+      "vacio": "Conta que agente queres crear y el Configurador lo arma con vos, paso a paso.",
+      "reintentar": "Reintentar",
+      "mensajeLabel": "Mensaje para el Configurador",
+      "placeholder": "Escribi lo que queres que haga tu agente...",
+      "enviarAriaLabel": "Enviar mensaje",
+      "escribiendoAriaLabel": "El Configurador esta escribiendo"
+    },
+    "preview": {
+      "titulo": "Vista previa del agente",
+      "vacio": "El agente va a aparecer aca a medida que converses. Empeza describiendo para que lo queres.",
+      "descripcionLabel": "Descripcion",
+      "herramientasLabel": "Herramientas ({{total}})",
+      "herramientaNativa": "Nativa",
+      "sinNombre": "Sin nombre todavia",
+      "crearAgente": "Crear agente",
+      "creandoAgente": "Creando agente...",
+      "listoParaCrear": "Listo para crear.",
+      "faltaParaCrear": "Falta para poder crear:",
+      "completaBasicos": "Completa el nombre, el proveedor y el modelo del agente.",
+      "seguiConversando": "Segui conversando para completar el agente.",
+      "empezaDescribiendo": "Empeza describiendo para que queres el agente.",
+      "autonomoCreando": "Listo y valido: creando el agente...",
+      "autonomoNota": "Modo automatico: el agente se creara solo apenas este completo y valido.",
+      "verMas": "Ver mas",
+      "verMenos": "Ver menos"
+    },
+    "credencial": {
+      "titulo": "Credencial de la sesion",
+      "descripcion": "Con que key conversa el Configurador. La usas solo para esta sesion; nunca se guarda en la plataforma.",
+      "origenAriaLabel": "Origen de la credencial",
+      "guardadaTitulo": "Credencial guardada",
+      "guardadaDescripcion": "Reusa una de tu boveda",
+      "pegarTitulo": "Pegar al momento",
+      "pegarDescripcion": "Una key solo para esta sesion",
+      "sinCredenciales": "No tenes credenciales guardadas todavia. Pega una al momento o",
+      "sinCredencialesLink": "agregala en Credenciales",
+      "credencialLabel": "Credencial",
+      "elegiCredencial": "Elegi una credencial...",
+      "modeloLabel": "Modelo",
+      "modeloHint": "El proveedor sale de la credencial; elegis el modelo a usar.",
+      "proveedorLabel": "Proveedor",
+      "apiKeyHint": "Viaja cifrada en cada turno y no se guarda en la plataforma.",
+      "ocultarKey": "Ocultar API key",
+      "mostrarKey": "Mostrar API key",
+      "baseUrlHint": "URL base del endpoint compatible con OpenAI.",
+      "notaSeguridad": "La key viaja por una conexion segura y solo se usa para esta sesion del Configurador. La consola no la persiste.",
+      "cancelar": "Cancelar",
+      "actualizar": "Actualizar credencial",
+      "empezar": "Empezar a configurar",
+      "errorElegiCredencial": "Elegi una credencial guardada",
+      "errorModeloObligatorio": "El modelo es obligatorio"
+    },
+    "demo": {
+      "usuario1": "Quiero un agente que revise las facturas que llegan a mi correo y las registre en mi sistema",
+      "configurador2": "Entendido. ¿Las facturas llegan como PDF adjunto o como enlace? Con eso armo la extracción…",
+      "usuario3": "Como PDF adjunto",
+      "configurador4": "Perfecto. Agente listo: lee el PDF, extrae proveedor, monto y fecha, y lo registra vía HTTP. ¿Lo probamos?"
+    }
+  },
+  "credenciales": {
+    "titulo": "Credenciales",
+    "subtitulo": "Guarda las API keys de tus proveedores de IA para reutilizarlas en tus agentes.",
+    "agregar": "Agregar credencial",
+    "cancelar": "Cancelar",
+    "noticeGuardada": "Credencial guardada.",
+    "noticeEliminada": "Credencial eliminada.",
+    "errorCargar": "No pudimos cargar tus credenciales",
+    "vacio": {
+      "subtitulo": "Guarda las API keys de tus proveedores una sola vez. Tus agentes las usan desde la boveda, sin volver a pegarlas.",
+      "tarjetaLabel": "Asi se guarda tu llave",
+      "ejemploBadge": "Ejemplo",
+      "ejemploNombre": "Anthropic · produccion",
+      "ejemploCifrada": "cifrada",
+      "ejemploUso": "3 agentes la usan",
+      "garantias": {
+        "cifradaTitulo": "Cifrada al guardar",
+        "cifradaTexto": "AES-256-GCM en la boveda. Ni el equipo puede leerla.",
+        "mascaraTitulo": "Nunca se vuelve a mostrar",
+        "mascaraTexto": "Solo veras la mascara. Tus agentes la usan al ejecutar.",
+        "tuyaTitulo": "Tuya, siempre",
+        "tuyaTexto": "Es tu key y tu gasto. La borras cuando quieras."
+      },
+      "compatibilidad": "Compatible con Anthropic, OpenAI y proveedores con API compatible."
+    },
+    "form": {
+      "subtitulo": "Guarda la llave de tu proveedor para reutilizarla en tus agentes.",
+      "cerrarAria": "Cerrar",
+      "etiquetaLabel": "Etiqueta",
+      "etiquetaPlaceholder": "Mi llave de produccion",
+      "proveedorLabel": "Proveedor",
+      "apiKeyHint": "Se guarda cifrada y no se vuelve a mostrar.",
+      "mostrarKeyAria": "Mostrar API key",
+      "ocultarKeyAria": "Ocultar API key",
+      "baseUrlHint": "URL base del endpoint compatible con OpenAI.",
+      "baseUrlPlaceholder": "https://api.miproveedor.com/v1",
+      "seguridadNota": "Tu llave viaja por una conexion segura y se cifra antes de guardarse. La consola nunca la vuelve a mostrar.",
+      "guardando": "Guardando...",
+      "guardar": "Guardar credencial",
+      "errorSesion": "Tu sesion expiro. Vuelve a iniciar sesion.",
+      "errorRechazo": "El backend rechazo la credencial. Revisa los datos.",
+      "errorGuardar": "No pudimos guardar la credencial. Intenta de nuevo."
+    },
+    "tarjeta": {
+      "eliminarAria": "Eliminar credencial {{etiqueta}}"
+    },
+    "eliminar": {
+      "titulo": "Eliminar credencial",
+      "confirmacion": "Vas a eliminar <nombre>{{etiqueta}}</nombre>. Esta accion no se puede deshacer.",
+      "eliminando": "Eliminando...",
+      "eliminar": "Eliminar",
+      "error": "No pudimos eliminar la credencial. Intenta de nuevo."
+    }
+  },
+  "privacidad": {
+    "reintentar": "Reintentar",
+    "gate": {
+      "errorTitulo": "No pudimos cargar tu cuenta",
+      "errorTexto": "Revisa tu conexion e intenta de nuevo."
+    },
+    "consentimiento": {
+      "titulo": "Antes de continuar",
+      "kicker": "AVISO DE PRIVACIDAD",
+      "intro": "La plataforma opera agentes de IA de forma autonoma que procesan datos. Para continuar, necesitamos tu consentimiento sobre como los tratamos.",
+      "avisoSimplificadoTitulo": "Aviso simplificado",
+      "consultaIntegral": "Consulta el <integral>aviso de privacidad integral</integral>.",
+      "aceptacion": "He leido y acepto el Aviso de Privacidad de la plataforma.",
+      "error": "No pudimos registrar tu aceptacion. Intenta de nuevo.",
+      "registrando": "Registrando...",
+      "aceptar": "Aceptar y continuar",
+      "cerrarSesion": "Cerrar sesion"
+    },
+    "aviso": {
+      "placeholderTag": "Revision legal pendiente",
+      "version": "Version {{version}}",
+      "opcional": "Opcional"
+    },
+    "avisoIntegral": {
+      "titulo": "Aviso de Privacidad Integral",
+      "subtitulo": "Detalle completo del tratamiento de tus datos personales conforme a la LFPDPPP y el GDPR.",
+      "secciones": {
+        "responsable": {
+          "titulo": "Identidad y domicilio del responsable",
+          "placeholder": "Nombre/denominacion legal del responsable, domicilio fiscal y datos de contacto (incluye area/persona de datos personales)."
+        },
+        "datos": {
+          "titulo": "Datos personales que se tratan",
+          "placeholder": "Todas las categorias de datos que se recaban, IDENTIFICANDO expresamente los datos personales SENSIBLES si los hubiera."
+        },
+        "finalidades": {
+          "titulo": "Finalidades del tratamiento",
+          "placeholder": "Finalidades NECESARIAS (dan origen/son requeridas para la relacion) distinguidas de las VOLUNTARIAS (que requieren consentimiento). Indicar cuales requieren consentimiento."
+        },
+        "derechos": {
+          "titulo": "Medios para ejercer los derechos del titular (ARCO)",
+          "placeholder": "Procedimiento y medios para ejercer los derechos de Acceso, Rectificacion, Cancelacion y Oposicion (y supresion/portabilidad para GDPR), incluyendo requisitos y plazos de respuesta."
+        },
+        "limitar-uso": {
+          "titulo": "Medios para limitar el uso o divulgacion",
+          "placeholder": "Mecanismos para limitar el uso o divulgacion de los datos (p.ej. registros de exclusion, revocacion del consentimiento)."
+        },
+        "ia": {
+          "titulo": "Uso de inteligencia artificial y decisiones automatizadas",
+          "placeholder": "Que la plataforma opera agentes de IA de forma autonoma; existencia de decisiones automatizadas y, cuando tengan efecto significativo, el derecho a INTERVENCION HUMANA y a oponerse (GDPR Art 22). Divulgacion de interaccion con IA (EU AI Act Art 50)."
+        },
+        "transferencias": {
+          "titulo": "Transferencias de datos",
+          "placeholder": "Transferencias a terceros, sus finalidades y si requieren consentimiento. La nueva LFPDPPP ya NO exige informarlas en el aviso; se incluye por buenas practicas y GDPR."
+        },
+        "cambios": {
+          "titulo": "Cambios al aviso de privacidad",
+          "placeholder": "Como se comunicaran los cambios al aviso y el versionado. Al cambiar la version, se solicita nuevamente tu consentimiento."
+        }
+      },
+      "footer": "Ver tambien el <simplificado>aviso simplificado</simplificado> o <derechos>ejercer tus derechos</derechos>."
+    },
+    "avisoSimplificado": {
+      "titulo": "Aviso de Privacidad Simplificado",
+      "subtitulo": "Resumen de como tratamos tus datos personales. El aviso integral tiene el detalle completo.",
+      "secciones": {
+        "responsable": {
+          "titulo": "Identidad y domicilio del responsable",
+          "placeholder": "Nombre/denominacion legal del responsable, domicilio fiscal y datos de contacto en Mexico."
+        },
+        "datos": {
+          "titulo": "Datos personales que se tratan",
+          "placeholder": "Categorias de datos que se recaban, indicando expresamente si se tratan datos personales SENSIBLES."
+        },
+        "finalidades": {
+          "titulo": "Finalidades del tratamiento",
+          "placeholder": "Finalidades NECESARIAS (para prestar el servicio) y VOLUNTARIAS (requieren consentimiento), indicando cuales de estas ultimas requieren tu consentimiento."
+        },
+        "limitar-uso": {
+          "titulo": "Medios para limitar el uso o divulgacion",
+          "placeholder": "Como puedes limitar el uso o divulgacion de tus datos (p.ej. registros de exclusion, mecanismos de contacto)."
+        },
+        "integral": {
+          "titulo": "Donde consultar el aviso integral",
+          "placeholder": "Enlace y/o ubicacion donde puedes consultar el AVISO DE PRIVACIDAD INTEGRAL con todo el detalle."
+        }
+      },
+      "footer": "Consulta el <integral>aviso de privacidad integral</integral> para el detalle completo."
+    },
+    "solicitudes": {
+      "tipo": {
+        "access": "Acceso",
+        "rectification": "Rectificacion",
+        "cancellation": "Cancelacion",
+        "opposition": "Oposicion",
+        "erasure": "Supresion"
+      },
+      "estado": {
+        "pending": "Pendiente",
+        "in_progress": "En proceso",
+        "completed": "Resuelta",
+        "rejected": "Rechazada"
+      }
+    },
+    "derechos": {
+      "titulo": "Privacidad y tus datos",
+      "subtitulo": "Tus datos son tuyos. Aqui los consultas, los corriges o los eliminas.",
+      "formTitulo": "Ejercer un derecho",
+      "tipoLegend": "Tipo de solicitud",
+      "opciones": {
+        "access": "Saber que datos tratamos y para que.",
+        "rectification": "Corregir datos incompletos o inexactos.",
+        "cancellation": "Eliminar tus datos de nuestros registros.",
+        "opposition": "Detener usos especificos de tus datos."
+      },
+      "detalleLabel": "Detalle (opcional)",
+      "detalleHint": "Cuentanos que necesitas para atender tu solicitud.",
+      "detallePlaceholder": "Describe tu solicitud...",
+      "errorEnviar": "No pudimos enviar tu solicitud. Intenta de nuevo.",
+      "registroNota": "Queda registrada y puedes seguirla abajo.",
+      "enviando": "Enviando...",
+      "enviar": "Enviar solicitud",
+      "noticeEnviada": "Solicitud enviada. Le daremos seguimiento.",
+      "descarga": {
+        "titulo": "Tu copia, al instante",
+        "descripcion": "Perfil, consentimientos, solicitudes y registros de tratamiento en un JSON. Sin esperas ni solicitudes.",
+        "error": "No pudimos generar la exportacion. Intenta de nuevo.",
+        "preparando": "Preparando...",
+        "descargar": "Descargar mis datos"
+      },
+      "pasos": {
+        "titulo": "Que sigue al enviar",
+        "paso1": "Tu solicitud queda registrada con fecha.",
+        "paso2": "La atendemos conforme a los plazos de ley.",
+        "paso3": "Ves la resolucion aqui, en tu historial."
+      },
+      "historial": {
+        "titulo": "Tus solicitudes",
+        "errorCargar": "No pudimos cargar tus solicitudes.",
+        "vacio": "Aun no has enviado solicitudes.",
+        "enviadaEl": "Enviada el {{fecha}}"
+      },
+      "avisoFooter": "Consulta el <aviso>aviso de privacidad</aviso> para conocer como tratamos tus datos."
+    }
+  },
+  "landing": {
+    "comun": {
+      "crearCuenta": "Crear cuenta",
+      "iniciarSesion": "Iniciar sesión"
+    },
+    "navegacion": {
+      "integracion": "Integración",
+      "plataforma": "Plataforma",
+      "ejemplos": "Ejemplos",
+      "comoFunciona": "Cómo funciona",
+      "seccionesAria": "Secciones"
+    },
+    "hero": {
+      "titulo": "Agentes verticales de IA, con el modelo que tú elijas",
+      "descripcion": "Automatizan trabajo real dentro de los sistemas que tu empresa ya usa. El modelo es intercambiable: Claude, ChatGPT u open source. Cambias de proveedor por configuración, sin reescribir el agente ni tus integraciones.",
+      "solicitarDemo": "Solicitar demo guiada",
+      "whatsappMensajeDemo": "Hola, me interesa una demo guiada de Ledesma AI Labs."
+    },
+    "heroShowcase": {
+      "tusSistemas": "Tus sistemas",
+      "logoAlt": "Logo de {{name}}"
+    },
+    "brainSwap": {
+      "cartaAria": "Modelo intercambiable: el modelo de IA cambia entre Claude, ChatGPT y modelos open source sin rehacer el agente. Modelo activo: {{label}}.",
+      "modeloActivo": "Modelo activo",
+      "intercambiable": "Intercambiable",
+      "subtitulo": "Cambia el modelo que mueve al agente, sin rehacer nada.",
+      "cambiarModeloAria": "Cambiar modelo a {{label}}"
+    },
+    "integracion": {
+      "eyebrow": "Integración",
+      "titulo": "Lo montas en tres líneas",
+      "descripcion": "Sin migraciones ni proyectos de meses. Pegas el snippet, el agente queda renderizado y corre en las superficies donde tu equipo ya trabaja.",
+      "copiar": "Copiar",
+      "copiado": "Copiado",
+      "canalesTitulo": "Corre donde ya trabajas",
+      "canalesSubtitulo": "El mismo agente, sin reescribir nada.",
+      "superficies": {
+        "web": "Web",
+        "whatsapp": "WhatsApp",
+        "slack": "Slack",
+        "correo": "Correo",
+        "api": "API",
+        "movil": "Móvil"
+      }
+    },
+    "chatWidget": {
+      "agentes": {
+        "ventas": "Sales Analysis",
+        "facturacion": "Facturación",
+        "operaciones": "Operaciones",
+        "customerSuccess": "Customer Success"
+      },
+      "enLinea": "En línea",
+      "escribeTuMensaje": "Escribe tu mensaje",
+      "enviarMensajeAria": "Enviar mensaje",
+      "guiones": {
+        "ventas": {
+          "usuario1": "Dame el análisis de ventas del último trimestre.",
+          "usuario2": "¿Qué explica la caída de octubre?",
+          "agente1": "El quiebre de stock en la categoría estrella (12 días sin inventario) y menor tráfico tras la promoción. Sin ese quiebre, octubre habría cerrado en ~$2.1M.",
+          "usuario3": "¿Y la proyección del próximo trimestre?",
+          "agente2": "Proyecto $7.4M (intervalo 95%: $6.9M–$7.9M). El mayor riesgo sigue siendo el inventario de la categoría estrella."
+        },
+        "facturacion": {
+          "usuario1": "Procesa esta factura y valídala.",
+          "usuario2": "¿El duplicado es real?",
+          "agente1": "Sí: mismo proveedor y monto que el folio A-1182 del 03 de junio. Te recomiendo no pagar A-1207 hasta confirmarlo. ¿La marco en revisión?",
+          "usuario3": "Márcala.",
+          "agente2": "Hecho. La factura A-1207 quedó en revisión y notifiqué al responsable de pagos."
+        },
+        "operaciones": {
+          "agente1": "Revisé los pagos de hoy y encontré algo que necesita tu atención.",
+          "usuario1": "¿Qué recomiendas?",
+          "agente2": "Retener el segundo pago (folio A-1207) hasta aclarar con el proveedor. Ya preparé la nota de aclaración. ¿La envío?",
+          "usuario2": "Sí, adelante.",
+          "agente3": "Listo. Retuve el pago y envié la aclaración. Te aviso en cuanto el proveedor responda."
+        },
+        "customerSuccess": {
+          "usuario1": "¿Dónde reviso el estatus de mi pedido?",
+          "agente1": "Tu pedido va en camino y llega mañana. Te comparto la guía de rastreo y el detalle de la orden.",
+          "usuario2": "¿Puedo cambiar la dirección de entrega?",
+          "agente2": "Claro. Actualicé la dirección a tu nueva sucursal y la paquetería ya lo confirmó.",
+          "usuario3": "Perfecto, gracias.",
+          "agente3": "Para eso estoy. ¿Algo más en lo que te pueda ayudar?"
+        }
+      },
+      "reporte": {
+        "etiqueta": "Análisis de ventas · 3 meses",
+        "kpis": {
+          "ventasTotales": "Ventas totales",
+          "ticketPromedio": "Ticket promedio",
+          "conversion": "Conversión"
+        },
+        "meses": {
+          "jul": "Jul",
+          "ago": "Ago",
+          "oct": "Oct",
+          "nov": "Nov",
+          "dic": "Dic"
+        }
+      },
+      "validacion": {
+        "pill": "Factura · CFDI",
+        "etiqueta": "Datos extraídos y validados",
+        "campos": {
+          "proveedor": "Proveedor",
+          "rfc": "RFC",
+          "folio": "Folio",
+          "subtotal": "Subtotal",
+          "iva": "IVA 16%",
+          "total": "Total"
+        },
+        "checks": {
+          "rfcValido": "RFC válido ante el SAT",
+          "montoCoincide": "Monto coincide con la OC-4471",
+          "ivaCorrecto": "IVA del 16% correcto",
+          "posibleDuplicado": "Posible duplicado: folio A-1182 el 03/jun"
+        }
+      },
+      "alerta": {
+        "titulo": "Cargo duplicado detectado",
+        "detalle": "Aceros del Norte facturó dos veces la OC-4471 (folios A-1182 y A-1207). Riesgo de doble pago: $48,200."
+      }
+    },
+    "primitivas": {
+      "eyebrow": "Independiente del modelo",
+      "titulo": "La infraestructura que un modelo no te da",
+      "descripcion": "Un LLM razona, pero no aísla clientes, no controla accesos, no deja rastro auditable ni se conecta a tus sistemas. Eso lo aporta la plataforma: una capa reutilizable que sostiene a cualquier proveedor y no rehaces cuando lo cambias.",
+      "items": {
+        "modeloIntercambiable": {
+          "titulo": "Modelo intercambiable",
+          "descripcion": "Conecta Claude, ChatGPT o modelos open source con tu propia llave (BYOK). El proveedor se cambia por configuración; el agente, sus herramientas y sus integraciones permanecen intactos."
+        },
+        "aislamientoMultiTenant": {
+          "titulo": "Aislamiento multi-tenant",
+          "descripcion": "Cada cliente opera en un entorno aislado, con sus propios datos, credenciales y configuración. Sin cruce entre cuentas, y tu información nunca se usa para entrenar modelos."
+        },
+        "controlAcceso": {
+          "titulo": "Control de acceso y roles",
+          "descripcion": "Usuarios, permisos y espacios de trabajo por área. El acceso se otorga por invitación y por rol, bajo el principio de menor privilegio."
+        },
+        "credencialesRevocables": {
+          "titulo": "Credenciales revocables",
+          "descripcion": "Cada integración usa una credencial propia, de alcance acotado y revocación inmediata. Otorgas o retiras acceso sin afectar al resto del sistema."
+        },
+        "trazabilidad": {
+          "titulo": "Trazabilidad y auditoría",
+          "descripcion": "Cada ejecución se registra: entrada, contexto, modelo y respuesta. Un historial auditable de qué hizo el agente, cuándo y con qué datos."
+        },
+        "integracionNativa": {
+          "titulo": "Integración nativa",
+          "descripcion": "El agente opera dentro de tus sistemas (ERP, CRM, correo, datos) a través de herramientas conectadas. Trabaja donde ya está tu equipo, no en una interfaz separada."
+        }
+      }
+    },
+    "ejemplos": {
+      "eyebrow": "Ejemplos en vivo",
+      "titulo": "Una plataforma, muchos agentes",
+      "introDestacado": "Agentes que no solo responden: ejecutan trabajo real.",
+      "introResto": "Todos corren sobre la misma plataforma, con las integraciones, la seguridad y la trazabilidad ya resueltas. Cuentas por pagar, cotizaciones, soporte… o el proceso que tu operación necesite.",
+      "badgeEjemploEnVivo": "Ejemplo en vivo",
+      "agentes": {
+        "ap": {
+          "tagline": "Procesa y valida facturas sin captura manual",
+          "descripcion": "Lee cada factura, extrae los datos y los valida contra tu ERP y tus reglas. Detecta duplicados y errores antes de que se paguen. Cierras más rápido y sin captura manual.",
+          "nombre": "Cuentas por Pagar"
+        },
+        "quotations": {
+          "tagline": "Arma cotizaciones complejas en minutos",
+          "descripcion": "Aplica tus precios, márgenes y reglas comerciales al instante. Lo que tomaba horas de ida y vuelta queda en minutos, sin errores de cálculo.",
+          "nombre": "Cotizaciones"
+        },
+        "cs": {
+          "tagline": "Resuelve tickets y consultas al instante",
+          "descripcion": "Responde con el contexto de tu negocio y acceso a tus sistemas, 24/7. No solo contesta: actualiza pedidos, consulta datos y escala a tu equipo solo cuando hace falta.",
+          "nombre": "Customer Success"
+        }
+      },
+      "otroProcesoTitulo": "¿Otro proceso en mente?",
+      "otroProcesoIntro": "Estos tres son solo ejemplos.",
+      "otroProcesoDestacado": "La misma plataforma se adapta a cualquier proceso de tu operación:",
+      "otroProcesoResto": "conciliaciones, onboarding, reportes, generación de documentos, lo que necesites. Tú describes el proceso; nosotros lo construimos y lo desplegamos.",
+      "cuentanosTuCaso": "Cuéntanos tu caso"
+    },
+    "comoFunciona": {
+      "eyebrow": "Cómo funciona",
+      "titulo": "De tu proceso a un agente en producción",
+      "descripcion": "Sin proyectos de meses. La plataforma ya está construida; nosotros configuramos e integramos el agente a la medida de tu operación.",
+      "pasos": {
+        "paso1": {
+          "titulo": "Nos cuentas tu proceso",
+          "descripcion": "Nos dices qué quieres automatizar: cuentas por pagar, cotizaciones, soporte o el flujo que tu operación necesite. Identificamos dónde un agente aporta más valor."
+        },
+        "paso2": {
+          "titulo": "Lo configuramos e integramos",
+          "descripcion": "Montamos el agente sobre nuestra plataforma, con el modelo que elijas (BYOK), y lo conectamos a tus sistemas. Como la infraestructura ya está lista, lo tienes en semanas, no en meses."
+        },
+        "paso3": {
+          "titulo": "Queda operando en tu negocio",
+          "descripcion": "El agente trabaja dentro de tus sistemas, ejecutando trabajo real. Lo ajustamos y sumamos nuevos agentes conforme crece tu operación."
+        }
+      }
+    },
+    "ctaFinal": {
+      "titulo": "Pon un agente a trabajar en tu operación",
+      "descripcion": "Tú describes el proceso; nosotros lo configuramos, lo integramos a tus sistemas y lo ponemos en producción. A la medida de tu negocio y en una fracción del tiempo.",
+      "escribenosWhatsapp": "Escríbenos por WhatsApp"
+    },
+    "footer": {
+      "descripcion": "Agentes verticales de IA para tu empresa, integrados en los sistemas que tu equipo ya usa.",
+      "contacto": "Contacto",
+      "facebookAria": "Facebook de Ledesma AI Labs",
+      "cuenta": "Cuenta",
+      "tagline": "Ledesma AI Labs - Agentes verticales de IA para empresas"
+    }
+  },
+  "panel": {
+    "titulo": "Panel",
+    "subtitulo": "Tu actividad, operaciones y gasto en un vistazo.",
+    "actualizando": "Actualizando",
+    "errorCarga": "No pudimos cargar tu panel",
+    "cero": {
+      "agentesActivos": "Agentes activos"
+    },
+    "vacio": {
+      "titulo": "Aun no hay actividad",
+      "descripcion": "Cuando crees un agente y lo ejecutes, aqui vas a ver tu actividad, tus operaciones y el gasto estimado."
+    },
+    "rango": {
+      "etiqueta": "Rango de tiempo",
+      "dias7": "7 dias",
+      "dias30": "30 dias",
+      "dias90": "90 dias"
+    },
+    "operaciones": {
+      "titulo": "Operaciones",
+      "descripcion": "Estado actual de la cola de ejecucion y los recursos activos.",
+      "pendientes": "Pendientes",
+      "enCurso": "En curso",
+      "completadas": "Completadas",
+      "fallidas": "Fallidas",
+      "tareasActivas": "Tareas activas",
+      "triggersActivos": "Triggers activos",
+      "recetas": "Recetas",
+      "ultimaEjecucion": "Ultima ejecucion",
+      "sinEjecuciones": "Sin ejecuciones aun"
+    },
+    "actividad": {
+      "titulo": "Actividad",
+      "descripcion": "Ejecuciones de agentes por dia en el rango seleccionado.",
+      "corridas": "Corridas",
+      "exitosas": "Exitosas",
+      "conError": "Con error"
+    },
+    "gasto": {
+      "titulo": "Gasto",
+      "descripcion": "Consumo estimado sobre la propia key del proveedor, desglosado por modelo.",
+      "gastoEstimado": "Gasto estimado",
+      "totalParcial": "Total parcial: hay modelos sin tarifa conocida",
+      "tokensTotales": "Tokens totales",
+      "modelosUsados": "Modelos usados",
+      "entrada": "Entrada",
+      "salida": "Salida",
+      "cacheLectura": "Cache lectura",
+      "cacheEscritura": "Cache escritura",
+      "porModeloTitulo": "Gasto por modelo",
+      "porModeloDescripcion": "Cada modelo se tarifa por separado; se muestran solo los que tienen tarifa conocida.",
+      "masModelos_one": "y {{count}} modelo mas con gasto menor.",
+      "masModelos_other": "y {{count}} modelos mas con gasto menor.",
+      "sinTarifa_one": "{{count}} modelo sin tarifa conocida (no se estima su costo en dinero): {{lista}}.",
+      "sinTarifa_other": "{{count}} modelos sin tarifa conocida (no se estima su costo en dinero): {{lista}}."
+    },
+    "grafica": {
+      "ejecuciones_one": "{{cantidad}} ejecucion",
+      "ejecuciones_other": "{{cantidad}} ejecuciones",
+      "actividadVacia": "Sin ejecuciones en este periodo.",
+      "actividadAria": "Grafica de ejecuciones por dia en el rango seleccionado",
+      "gastoVacio": "Sin gasto tarifado en este periodo.",
+      "gastoAria": "Grafica de gasto estimado en USD por modelo"
+    }
+  },
+  "uso": {
+    "titulo": "Uso: {{nombre}}",
+    "actualizar": "Actualizar",
+    "volver": "Volver",
+    "reintentar": "Reintentar",
+    "errorAgente": "No pudimos cargar el agente",
+    "errorUso": "No pudimos cargar el uso del agente",
+    "errorDescripcion": "Revisa tu conexion e intenta de nuevo.",
+    "rango": {
+      "etiqueta": "Rango de fechas",
+      "dias7": "7 dias",
+      "dias30": "30 dias",
+      "todo": "Todo"
+    },
+    "vacio": {
+      "mensaje": "Aun no hay corridas registradas. Prueba tu agente en el Playground.",
+      "cta": "Ir al Playground"
+    },
+    "totales": {
+      "corridas": "Corridas",
+      "completadas": "Completadas",
+      "errores": "Errores",
+      "tokensEntrada": "Tokens entrada",
+      "tokensSalida": "Tokens salida"
+    },
+    "grafica": {
+      "titulo": "Corridas por dia",
+      "vacio": "Sin corridas en este periodo.",
+      "tooltip_one": "{{fecha}}: {{count}} corrida",
+      "tooltip_other": "{{fecha}}: {{count}} corridas"
+    },
+    "recientes": {
+      "titulo": "Corridas recientes",
+      "fecha": "Fecha",
+      "estado": "Estado",
+      "codigo": "Codigo",
+      "tokens": "Tokens",
+      "duracion": "Duracion"
+    },
+    "notaPrivacidad": "Solo se registran metricas de cada corrida (tokens, duracion, estado). El contenido de las conversaciones nunca se almacena.",
+    "estado": {
+      "completada": "Completada",
+      "error": "Error",
+      "detenida": "Detenida"
+    }
+  },
+  "planes": {
+    "avisoLanzamiento": "Durante el lanzamiento, todos los planes son gratuitos mientras habilitamos los medios de pago.",
+    "exito": "Listo. Tu plan ya esta activo.",
+    "tarjeta": {
+      "recomendado": "Recomendado",
+      "tuPlan": "Tu plan",
+      "planActual": "Plan actual",
+      "activando": "Activando...",
+      "elegir": "Elegir {{plan}}",
+      "runsPorMes": "{{cantidad}} ejecuciones al mes",
+      "runsEquipos": "Ejecuciones ampliadas para equipos"
+    },
+    "features": {
+      "termAgentes": "Agentes",
+      "termModoUso": "Modo de uso",
+      "termAutonomia": "Autonomía",
+      "termSoporte": "Soporte",
+      "termEquipo": "Equipo",
+      "unAgente": "1 agente",
+      "agentesIlimitados": "Agentes ilimitados",
+      "soloPlayground": "Solo Playground, con tu API key",
+      "playgroundYWidget": "Playground y embebido con tu widget",
+      "sinAutonomia": "Sin recetas, tareas ni triggers",
+      "autonomiaCompleta": "Recetas, tareas, triggers y alertas de fallo",
+      "todoLoDePro": "Todo lo de Pro",
+      "asientosEquipo": "Asientos para tu equipo",
+      "soporteComunidad": "Comunidad",
+      "soporteCorreo": "Prioritario por correo",
+      "soporteAcompanamiento": "Prioritario con acompañamiento"
+    },
+    "dialogo": {
+      "titulo": "Cambiar de plan",
+      "cuerpo": "Vas a cambiar al plan <nombre>{{plan}}</nombre>.",
+      "perdidas": "Perderas acceso a {{perdidas}} en cuanto se aplique el cambio.",
+      "perdidasSeparador": " y a ",
+      "cancelar": "Cancelar",
+      "cambiando": "Cambiando...",
+      "cambiarA": "Cambiar a {{plan}}"
+    },
+    "perdidas": {
+      "autonomia": "recetas, tareas programadas y triggers (autonomia)",
+      "embebido": "el widget embebido fuera del Playground"
+    },
+    "errores": {
+      "noReconocido": "No reconocimos ese plan. Recarga la pagina e intenta de nuevo.",
+      "sesionExpirada": "Tu sesión expiró. Vuelve a iniciar sesión.",
+      "completaRegistro": "Completa tu registro antes de elegir un plan.",
+      "demasiadosIntentos": "Demasiados intentos seguidos. Espera un momento e intenta de nuevo.",
+      "servidor": "No pudimos cambiar tu plan (error {{status}} del servidor). Intenta de nuevo en unos minutos.",
+      "conexion": "No pudimos conectar con el servidor. Revisa tu conexión e intenta de nuevo.",
+      "generico": "No pudimos cambiar tu plan. Intenta de nuevo."
+    },
+    "solicitudUpgrade": {
+      "errorSesion": "Tu sesion expiro. Vuelve a iniciar sesion.",
+      "errorRegistrar": "No pudimos registrar tu solicitud. Intenta de nuevo.",
+      "errorEnviar": "No pudimos enviar tu solicitud. Intenta de nuevo."
+    }
+  },
+  "gates": {
+    "ejemplo": "Ejemplo",
+    "elegirPlan": {
+      "cta": "Elegir plan",
+      "nota": "Activa un plan con autonomia desde el catalogo de paquetes. El cambio aplica al instante."
+    },
+    "solicitarAcceso": {
+      "enviada": "Solicitud enviada · te contactaremos",
+      "solicitando": "Solicitando acceso...",
+      "cta": "Solicitar acceso",
+      "nota": "Registra tu interes en el plan Autonomo. El equipo te contacta para activarlo; no se activa al instante."
+    },
+    "recetas": {
+      "paso1Titulo": "Recolectar facturas del correo",
+      "paso1Descripcion": "Lee los PDF que llegaron a tu bandeja en la semana.",
+      "paso2Titulo": "Extraer proveedor, monto y fecha",
+      "paso2Descripcion": "Convierte cada documento en datos estructurados.",
+      "paso3Titulo": "Registrar en tu sistema y avisar",
+      "paso3Descripcion": "Sube los datos via HTTP y te manda el resumen por correo.",
+      "pie": "Esta receta corre cada lunes a las 8:00, nadie tiene que ejecutarla.",
+      "resumen": "47 corridas, 0 intervenciones"
+    },
+    "tareas": {
+      "encabezado": "Una semana asi",
+      "dias": {
+        "lun": "lun",
+        "mar": "mar",
+        "mie": "mié",
+        "jue": "jue",
+        "vie": "vie",
+        "sab": "sab",
+        "dom": "dom"
+      },
+      "tarea1Nombre": "Reporte de ventas",
+      "tarea1Horario": "dias habiles 7:30",
+      "tarea2Nombre": "Cierre de facturas",
+      "tarea2Horario": "lunes 8:00",
+      "tarea3Nombre": "Respaldo de datos",
+      "tarea3Horario": "diario 23:00",
+      "leyendaEjecutada": "ejecutada",
+      "leyendaCorriendo": "corriendo ahora",
+      "leyendaProgramada": "programada",
+      "resumen": "12 corridas esta semana, 0 fallos, 0 intervenciones"
+    },
+    "triggers": {
+      "ahora": "ahora",
+      "corriendo": "corriendo",
+      "eventoFactura": "Factura de proveedor recibida",
+      "eventoCotizacion": "Solicitud de cotizacion nueva",
+      "agenteCuentas": "Cuentas por pagar",
+      "agenteCotizaciones": "Cotizaciones",
+      "pie": "Cada llamada a la URL ejecuta al agente al instante, sin que nadie este conectado.",
+      "resumen": "31 eventos este mes, 0 perdidos"
+    }
+  },
+  "onboarding": {
+    "completado": "Completado",
+    "pasos": {
+      "credencial": {
+        "titulo": "Conecta tu primer proveedor (API key)",
+        "descripcion": "Guarda una credencial (Anthropic, OpenAI o compatible) para que tus agentes puedan ejecutar.",
+        "cta": "Poner credencial",
+        "bloqueado": "Empieza por aqui"
+      },
+      "agente": {
+        "titulo": "Crea tu primer agente",
+        "descripcion": "Define que hace y con que modelo. Podes crearlo conversando con el Configurador.",
+        "cta": "Crear agente",
+        "bloqueado": "Despues del paso 1"
+      },
+      "ejecutar": {
+        "titulo": "Ejecuta tu agente",
+        "descripcion": "Probalo en el Playground y observa tu primera corrida.",
+        "cta": "Ejecutar",
+        "bloqueadoConAgente": "Despues del paso 2",
+        "bloqueadoSinAgente": "Crea un agente primero"
+      }
+    },
+    "progreso": {
+      "aria": "{{completados}} de {{total}} pasos completados",
+      "contador": "{{completados}} de {{total}}"
+    },
+    "bienvenida": {
+      "titulo": "Bienvenido a {{producto}}",
+      "subtitulo": "Tu primer agente funcionando en 3 pasos · ~4 min"
+    },
+    "primerosPasos": "Primeros pasos"
+  },
+  "recetas": {
+    "titulo": "Recetas",
+    "subtitulo": "Encadena pasos en un flujo. Corre solo, en segundo plano.",
+    "nuevaReceta": "Nueva receta",
+    "pasosContador_one": "{{count}} paso",
+    "pasosContador_other": "{{count}} pasos",
+    "errores": {
+      "ejecutarPlan": "Ejecutar recetas requiere un plan con autonomia (Pro o Business).",
+      "ejecutarNoExiste": "La receta ya no existe. Actualiza la lista.",
+      "ejecutarPausada": "La receta esta pausada. Activala para ejecutarla.",
+      "ejecutarGenerico": "No pudimos encolar la receta. Intenta de nuevo.",
+      "actualizar": "No pudimos actualizar la receta. Intenta de nuevo.",
+      "eliminar": "No pudimos eliminar la receta. Intenta de nuevo.",
+      "cargarLista": "No pudimos cargar tus recetas"
+    },
+    "avisos": {
+      "encolada": "Receta encolada. Se ejecutara en segundo plano.",
+      "pausada": "Receta pausada.",
+      "activada": "Receta activada.",
+      "eliminada": "Receta eliminada.",
+      "actualizada": "Receta actualizada.",
+      "creada": "Receta creada."
+    },
+    "gate": {
+      "badge": "Planes Pro y Business",
+      "titulo": "Una funcion de los planes con autonomia",
+      "descripcion": "Las recetas encadenan varios pasos y tu agente los ejecuta en orden, solo. Estan disponibles en los planes Pro y Business."
+    },
+    "vacio": {
+      "eyebrow": "EMPIEZA AQUI",
+      "titulo": "Crea tu primera receta",
+      "descripcion": "Encadena varios pasos en un solo flujo: tu agente los ejecuta en orden y el resultado de cada uno alimenta al siguiente.",
+      "boton": "Crear receta"
+    },
+    "card": {
+      "estadoActiva": "ACTIVA",
+      "estadoPausada": "PAUSADA",
+      "agenteEliminado": "Agente eliminado",
+      "ultimaEjecucion": "Ultima ejecucion:",
+      "nunca": "Nunca",
+      "ejecutarAria": "Ejecutar receta ahora",
+      "ejecutarTitle": "Activa la receta para ejecutarla",
+      "ejecutar": "Ejecutar",
+      "pausarAria": "Pausar receta",
+      "activarAria": "Activar receta",
+      "pausar": "Pausar",
+      "activar": "Activar",
+      "editarAria": "Editar receta",
+      "eliminarAria": "Eliminar receta"
+    },
+    "form": {
+      "errorSesion": "Tu sesion expiro. Vuelve a iniciar sesion.",
+      "errorPlan": "Las recetas requieren el plan Autonomo (tier autonomous).",
+      "errorNoExiste": "El agente o la credencial ya no existen. Actualiza y prueba de nuevo.",
+      "errorRechazo": "El backend rechazo la receta. Revisa el nombre y los pasos.",
+      "errorGuardar": "No pudimos guardar los cambios. Intenta de nuevo.",
+      "errorCrear": "No pudimos crear la receta. Intenta de nuevo.",
+      "errorCargarReceta": "No pudimos cargar la receta. Cierra e intenta de nuevo.",
+      "cerrarAria": "Cerrar",
+      "tituloEditar": "Editar receta",
+      "tituloNueva": "Nueva receta",
+      "subtituloEditar": "Ajusta el nombre, la descripcion y los pasos.",
+      "subtituloNueva": "Un flujo de pasos que tu agente ejecuta en orden.",
+      "nombreLabel": "Nombre",
+      "nombrePlaceholder": "Ej: Resumen y respuesta de pedidos",
+      "descripcionLabel": "Descripcion",
+      "descripcionHint": "Opcional: para que sirve esta receta.",
+      "descripcionPlaceholder": "Opcional",
+      "sinAgentes": "Primero necesitas un agente.",
+      "sinAgentesLink": "Crea uno en Agentes",
+      "agenteLabel": "Agente",
+      "agenteFijoHint": "El agente es fijo; crea una nueva receta para cambiarlo.",
+      "cargandoAgentes": "Cargando agentes...",
+      "eligeAgente": "Elige un agente...",
+      "credencialLabel": "Credencial",
+      "credencialFijaHint": "La credencial es fija; crea una nueva receta para cambiarla.",
+      "eligePrimeroAgente": "Elige primero un agente para ver sus credenciales.",
+      "credencialNoDisponible": "Credencial no disponible",
+      "sinCredenciales": "No tienes credenciales de {{proveedor}}.",
+      "sinCredencialesLink": "Agrega una en Credenciales",
+      "eligeCredencial": "Elige una credencial...",
+      "guardando": "Guardando...",
+      "guardarCambios": "Guardar cambios",
+      "crearReceta": "Crear receta"
+    },
+    "eliminarDialog": {
+      "titulo": "Eliminar receta",
+      "cuerpoAntes": "Vas a eliminar la receta",
+      "cuerpoDespues": "Esta accion no se puede deshacer."
+    },
+    "comunes": {
+      "cancelar": "Cancelar",
+      "eliminando": "Eliminando...",
+      "eliminar": "Eliminar"
+    },
+    "retry": {
+      "titulo": "Si una corrida falla, se reintenta desde el primer paso.",
+      "detalle": "No hay checkpoint por paso: un reintento vuelve a ejecutar toda la receta. Evita acciones irreversibles (enviar correos, cobros, publicar) en los primeros pasos, o hazlas de forma que repetirlas no cause dano."
+    },
+    "pasos": {
+      "label": "Pasos",
+      "descripcion": "Se ejecutan en orden, de arriba hacia abajo. El resultado de cada paso alimenta al siguiente.",
+      "pasoN": "Paso {{numero}}",
+      "subirAria": "Subir paso {{numero}}",
+      "bajarAria": "Bajar paso {{numero}}",
+      "eliminarAria": "Eliminar paso {{numero}}",
+      "minimoTitle": "Una receta necesita al menos un paso",
+      "placeholderPrimero": "Ej: Busca los pedidos pendientes de hoy y resume su estado.",
+      "placeholderSiguiente": "Ej: Con ese resumen, redacta un borrador de respuesta.",
+      "agregar": "Agregar paso"
+    },
+    "validacion": {
+      "nombre": "Ponle un nombre a la receta.",
+      "nombreMax": "Usa {{max}} caracteres o menos.",
+      "agente": "Elige el agente que ejecutara la receta.",
+      "credencial": "Elige la credencial que va a usar.",
+      "pasos": "Agrega al menos un paso con una instruccion."
+    }
+  },
+  "triggers": {
+    "titulo": "Triggers",
+    "subtitulo": "Crea URLs de webhook que ejecutan un agente cuando un evento externo las llama.",
+    "crearTrigger": "Crear trigger",
+    "agenteEliminadoMin": "agente eliminado",
+    "errores": {
+      "actualizar": "No pudimos actualizar el trigger. Intenta de nuevo.",
+      "secretoCrear": "Creamos el trigger pero no pudimos mostrar el secreto. Rotalo para obtener uno nuevo.",
+      "secretoRotar": "Rotamos el secreto pero no pudimos mostrarlo. Intenta de nuevo.",
+      "rotar": "No pudimos rotar el secreto. Intenta de nuevo.",
+      "eliminar": "No pudimos eliminar el trigger. Intenta de nuevo.",
+      "cargarLista": "No pudimos cargar tus triggers"
+    },
+    "avisos": {
+      "pausado": "Trigger pausado.",
+      "activado": "Trigger activado.",
+      "eliminado": "Trigger eliminado."
+    },
+    "gate": {
+      "badge": "Planes Pro y Business",
+      "titulo": "Una funcion de los planes con autonomia",
+      "descripcion": "Los triggers dejan que un evento externo dispare tus agentes a traves de una URL de webhook. Estan disponibles en los planes Pro y Business."
+    },
+    "vacio": {
+      "eyebrow": "EMPIEZA AQUI",
+      "titulo": "Crea tu primer trigger",
+      "descripcion": "Elige un agente y un mensaje base, y obtendras una URL de webhook. Cuando un evento externo la llame, la plataforma ejecuta tu agente sola."
+    },
+    "card": {
+      "estadoActivo": "ACTIVO",
+      "estadoPausado": "PAUSADO",
+      "agenteEliminado": "Agente eliminado",
+      "ultimoDisparo": "Ultimo disparo:",
+      "nunca": "Nunca",
+      "pausarAria": "Pausar trigger",
+      "activarAria": "Activar trigger",
+      "pausar": "Pausar",
+      "activar": "Activar",
+      "rotarAria": "Rotar secreto",
+      "rotar": "Rotar",
+      "eliminarAria": "Eliminar trigger",
+      "hintHmac": "Tu sistema hace POST aqui, firmado con el secreto HMAC.",
+      "hintToken": "URL base. El token va en la URL y solo se mostro al crear o rotar: si lo perdiste, rota el token."
+    },
+    "form": {
+      "errorSesion": "Tu sesion expiro. Vuelve a iniciar sesion.",
+      "errorPlan": "Crear triggers requiere el plan Autonomo (tier autonomous).",
+      "errorNoExiste": "El agente o la credencial ya no existen. Actualiza y prueba de nuevo.",
+      "errorRechazo": "El backend rechazo el trigger. Revisa el agente, la credencial y el mensaje.",
+      "errorCrear": "No pudimos crear el trigger. Intenta de nuevo.",
+      "subtitulo": "Una URL de webhook que ejecuta tu agente cuando un evento externo la llama.",
+      "cerrarAria": "Cerrar",
+      "sinAgentes": "Primero necesitas un agente.",
+      "sinAgentesLink": "Crea uno en Agentes",
+      "agenteLabel": "Agente",
+      "cargandoAgentes": "Cargando agentes...",
+      "eligeAgente": "Elige un agente...",
+      "credencialLabel": "Credencial",
+      "eligePrimeroAgente": "Elige primero un agente para ver sus credenciales.",
+      "sinCredenciales": "No tienes credenciales de {{proveedor}}.",
+      "sinCredencialesLink": "Agrega una en Credenciales",
+      "eligeCredencial": "Elige una credencial...",
+      "mensajeLabel": "Mensaje base",
+      "mensajeHint": "El agente ejecutara este mensaje al dispararse. El evento entrante puede sumar sus datos (cuerpo JSON) como contexto extra.",
+      "mensajePlaceholder": "Procesa el evento entrante y registra un resumen.",
+      "modoAuthLegend": "Modo de autenticacion",
+      "authHmacTitulo": "HMAC (firma)",
+      "authHmacTag": "Recomendado - mas seguro",
+      "authHmacDescripcion": "Tu sistema firma cada peticion con un secreto. Si la URL se filtra, no alcanza para dispararlo.",
+      "authTokenTitulo": "Token en URL",
+      "authTokenTag": "Simple - menos seguro",
+      "authTokenDescripcion": "Un token viaja en la URL. Es facil de integrar, pero si la URL se filtra, cualquiera puede disparar el agente.",
+      "creando": "Creando..."
+    },
+    "eliminarDialog": {
+      "titulo": "Eliminar trigger",
+      "cuerpoAntes": "Vas a eliminar el trigger de",
+      "cuerpoDespues": "La URL del webhook dejara de funcionar y esta accion no se puede deshacer."
+    },
+    "rotarDialog": {
+      "materialHmac": "secreto HMAC",
+      "materialToken": "token",
+      "aria": "Rotar el secreto del trigger",
+      "titulo": "Rotar {{material}}",
+      "cuerpo": "Se generara un {{material}} nuevo de inmediato y el anterior dejara de servir. Tu sistema externo dejara de disparar el trigger hasta que lo actualices con el valor nuevo, que veras UNA sola vez.",
+      "rotando": "Rotando...",
+      "rotar": "Rotar"
+    },
+    "comunes": {
+      "cancelar": "Cancelar",
+      "eliminando": "Eliminando...",
+      "eliminar": "Eliminar"
+    },
+    "reveal": {
+      "titulo": "Copia esto ahora",
+      "subtituloCreado": "Tu trigger quedo creado. Guarda esto antes de cerrar.",
+      "subtituloRotado": "Rotaste el secreto. El anterior ya no sirve: guarda el nuevo antes de cerrar.",
+      "advertenciaHmac": "Este es el unico momento en que veras el secreto HMAC. No se vuelve a mostrar. Si lo pierdes, tendras que rotarlo (y actualizar tu sistema).",
+      "advertenciaToken": "Este es el unico momento en que veras la URL con el token. No se vuelve a mostrar. Si la pierdes, tendras que rotar el token (y actualizar tu sistema).",
+      "urlLabel": "URL del webhook",
+      "urlHint": "Configura tu sistema para hacer POST a esta URL cuando ocurra el evento.",
+      "secretoLabel": "Secreto HMAC",
+      "secretoHint": "Firma cada peticion con este secreto. No se guarda en claro ni se vuelve a mostrar.",
+      "urlTokenLabel": "URL del webhook (con token)",
+      "urlTokenHint": "Pega esta URL en tu sistema. El token viaja en la URL: tratala como un secreto y no la compartas.",
+      "yaLoCopie": "Ya lo copie"
+    },
+    "guia": {
+      "titulo": "Como firmar cada peticion",
+      "descripcion": "Tu sistema calcula el HMAC del cuerpo y lo manda en estos headers. Sin firma valida, el webhook responde 401.",
+      "algoritmo": "Algoritmo",
+      "cuerpoFirmado": "Cuerpo firmado",
+      "headerFirma": "Header de firma",
+      "headerTimestamp": "Header de timestamp",
+      "timestampUnix": "{{header}} (Unix en segundos)",
+      "ventanaAntiReplay": "Ventana anti-replay"
+    },
+    "validacion": {
+      "agente": "Elige el agente que se va a ejecutar.",
+      "credencial": "Elige la credencial que va a usar.",
+      "mensaje": "Escribe el mensaje base que ejecutara el agente.",
+      "authMode": "Elige el modo de autenticacion."
+    },
+    "authModeEtiqueta": {
+      "hmac": "HMAC (firma)",
+      "urlToken": "Token en URL"
+    }
+  },
+  "tareas": {
+    "header": {
+      "titulo": "Tareas programadas",
+      "subtitulo": "Programa a tus agentes para que se ejecuten solos, en el horario que elijas."
+    },
+    "programarTarea": "Programar tarea",
+    "cancelar": "Cancelar",
+    "errorCargar": "No pudimos cargar tus tareas",
+    "gate": {
+      "badge": "Planes Pro y Business",
+      "titulo": "Una funcion de los planes con autonomia",
+      "descripcion": "Las tareas programadas ejecutan tus agentes solos, en el horario que elijas. Estan disponibles en los planes Pro y Business."
+    },
+    "vacio": {
+      "eyebrow": "EMPIEZA AQUI",
+      "titulo": "Programa tu primer agente",
+      "descripcion": "Elige un agente, el mensaje que ejecutara y cada cuanto corre. La plataforma lo dispara sola en el horario que definas."
+    },
+    "avisos": {
+      "pausada": "Tarea pausada.",
+      "activada": "Tarea activada.",
+      "errorActualizar": "No pudimos actualizar la tarea. Intenta de nuevo.",
+      "eliminada": "Tarea eliminada.",
+      "programada": "Tarea programada."
+    },
+    "card": {
+      "agenteEliminado": "Agente eliminado",
+      "estadoActiva": "ACTIVA",
+      "estadoPausada": "PAUSADA",
+      "enPausa": "En pausa",
+      "nunca": "Nunca",
+      "proximo": "Proximo:",
+      "ultimo": "Ultimo:",
+      "pausar": "Pausar",
+      "activar": "Activar",
+      "pausarTarea": "Pausar tarea",
+      "activarTarea": "Activar tarea"
+    },
+    "eliminar": {
+      "titulo": "Eliminar tarea",
+      "ariaLabel": "Eliminar tarea programada",
+      "confirmacion": "Vas a eliminar la tarea <nombre>{{descripcion}}</nombre>. Esta accion no se puede deshacer.",
+      "agenteEliminado": "agente eliminado",
+      "boton": "Eliminar",
+      "eliminando": "Eliminando...",
+      "error": "No pudimos eliminar la tarea. Intenta de nuevo."
+    },
+    "errores": {
+      "sesionExpirada": "Tu sesion expiro. Vuelve a iniciar sesion.",
+      "requierePlan": "Programar tareas requiere el plan Autonomo (tier autonomous).",
+      "noExisten": "El agente o la credencial ya no existen. Actualiza y prueba de nuevo.",
+      "rechazada": "El backend rechazo la tarea. Revisa el horario y el mensaje.",
+      "generico": "No pudimos programar la tarea. Intenta de nuevo."
+    },
+    "form": {
+      "subtitulo": "Elige un agente, que mensaje ejecuta y cada cuanto corre solo.",
+      "cerrar": "Cerrar",
+      "sinAgentes": "Primero necesitas un agente. <enlace>Crea uno en Agentes</enlace>.",
+      "agenteLabel": "Agente",
+      "cargandoAgentes": "Cargando agentes...",
+      "eligeAgente": "Elige un agente...",
+      "credencialLabel": "Credencial",
+      "eligePrimeroAgente": "Elige primero un agente para ver sus credenciales.",
+      "sinCredenciales": "No tienes credenciales de {{proveedor}}. <enlace>Agrega una en Credenciales</enlace>.",
+      "eligeCredencial": "Elige una credencial...",
+      "mensajeLabel": "Mensaje",
+      "mensajeHint": "El agente ejecutara este mensaje en cada corrida.",
+      "mensajePlaceholder": "Genera el resumen de ventas de hoy y envialo por correo.",
+      "programando": "Programando..."
+    },
+    "horario": {
+      "titulo": "Horario",
+      "modoAvanzado": "Modo avanzado (cron)",
+      "modoSimple": "Volver al modo simple",
+      "frecuenciaAria": "Con que frecuencia se ejecuta",
+      "frecuencia": {
+        "cadaHora": "Cada hora",
+        "cadaDia": "Cada dia",
+        "cadaSemana": "Cada semana",
+        "cadaMes": "Cada mes"
+      },
+      "dias": {
+        "domingo": "Domingo",
+        "lunes": "Lunes",
+        "martes": "Martes",
+        "miercoles": "Miercoles",
+        "jueves": "Jueves",
+        "viernes": "Viernes",
+        "sabado": "Sabado"
+      },
+      "minutoLabel": "Minuto de cada hora",
+      "diaSemanaLabel": "Dia de la semana",
+      "diaMesLabel": "Dia del mes",
+      "diaN": "Dia {{dia}}",
+      "horaUtcLabel": "Hora (UTC)",
+      "cronLabel": "Expresion cron (5 campos)",
+      "cronAyuda": "Orden: minuto hora dia-del-mes mes dia-de-semana. Ejemplo: <mono>0 8 * * 1</mono> = todos los lunes 08:00 UTC.",
+      "cronInvalido": "Formato de cron invalido (deben ser 5 campos).",
+      "seEjecutara": "Se ejecutara: {{descripcion}}",
+      "expresionValida": "Expresion valida.",
+      "proximoRun": "Proximo run estimado: {{fecha}}"
+    },
+    "cron": {
+      "cadaMinuto": "Cada minuto",
+      "cadaHoraEnPunto": "Cada hora (en punto)",
+      "cadaHoraAlMinuto": "Cada hora, al minuto {{minuto}}",
+      "cadaSemana": "Todos los {{dia}} a las {{hora}}",
+      "cadaMes": "El dia {{dia}} de cada mes a las {{hora}}",
+      "cadaDia": "Todos los dias a las {{hora}}",
+      "dias": {
+        "domingos": "domingos",
+        "lunes": "lunes",
+        "martes": "martes",
+        "miercoles": "miercoles",
+        "jueves": "jueves",
+        "viernes": "viernes",
+        "sabados": "sabados"
+      }
+    },
+    "validacion": {
+      "agente": "Elige el agente que se va a ejecutar.",
+      "credencial": "Elige la credencial que va a usar.",
+      "mensaje": "Escribe el mensaje que ejecutara el agente.",
+      "cron": "Define un horario valido."
+    }
+  },
+  "actividad": {
+    "header": {
+      "titulo": "Actividad",
+      "subtitulo": "Historial de ejecuciones de tus agentes: recetas, tareas programadas y triggers."
+    },
+    "actualizando": "Actualizando",
+    "errorCargar": "No pudimos cargar tu actividad",
+    "cargarMas": "Cargar mas",
+    "vacioFiltrado": {
+      "titulo": "Sin ejecuciones con este estado",
+      "descripcion": "Prueba con otro estado o quita el filtro para ver todo el historial."
+    },
+    "fantasma": {
+      "columnas": {
+        "estado": "Estado",
+        "agente": "Agente",
+        "origen": "Origen",
+        "duracion": "Duracion",
+        "cuando": "Cuando"
+      },
+      "estados": {
+        "completada": "Completada",
+        "enCurso": "En curso",
+        "fallida": "Fallida"
+      },
+      "filas": {
+        "agenteCuentas": "Cuentas por pagar",
+        "agenteVentas": "Reporte de ventas",
+        "agenteCotizaciones": "Cotizaciones",
+        "agenteCierre": "Cierre de facturas",
+        "origenTrigger": "Trigger factura-recibida",
+        "origenTareaDiaria": "Tarea diaria 7:30",
+        "origenReceta": "Receta semanal",
+        "cuandoHace2Min": "hace 2 min",
+        "cuandoAhora": "ahora",
+        "cuandoHace1H": "hace 1 h",
+        "cuandoAyer": "ayer"
+      },
+      "vacio": {
+        "titulo": "Aun no hay ejecuciones",
+        "descripcion": "Cada corrida de tus agentes aparecera aqui: quien la disparo, cuanto tardo y en que estado termino.",
+        "cta": "Probar un agente en el Playground"
+      }
+    },
+    "card": {
+      "agenteEliminado": "Agente eliminado",
+      "fin": "Fin: {{fecha}}",
+      "intentos_one": "{{count}} intento",
+      "intentos_other": "{{count}} intentos"
+    },
+    "filtros": {
+      "todas": "Todas"
+    },
+    "jobEstado": {
+      "pendiente": "Pendiente",
+      "enCurso": "En curso",
+      "completada": "Completada",
+      "fallida": "Fallida"
+    },
+    "jobTipo": {
+      "receta": "Receta",
+      "mensaje": "Mensaje"
+    }
   }
 }
