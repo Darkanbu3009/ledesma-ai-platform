@@ -12,6 +12,7 @@ import {
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Eyebrow } from './eyebrow';
+import { REVEAL_KEYFRAMES, revealAnimationClass, useRevealOnScroll } from './use-reveal-on-scroll';
 import { AGENTS, type AgentId } from '../../lib/landing-agents';
 
 /**
@@ -53,9 +54,15 @@ const AGENT_COPY: Record<AgentId, { taglineKey: string; descripcionKey: string }
  */
 export function Examples(): JSX.Element {
   const { t } = useTranslation();
+  // Dos observadores independientes: la grilla de agentes revela sus tres tarjetas
+  // con stagger, y el panel "¿Otro proceso en mente?" revela cuando el mismo entra
+  // al viewport (queda mas abajo, no tendria sentido animarlo fuera de pantalla).
+  const { ref: gridRef, revealed: gridRevealed } = useRevealOnScroll<HTMLDivElement>();
+  const { ref: panelRef, revealed: panelRevealed } = useRevealOnScroll<HTMLDivElement>();
 
   return (
     <section id="ejemplos" className="border-t border-border">
+      <style>{REVEAL_KEYFRAMES}</style>
       <div className="mx-auto max-w-6xl px-6 py-20">
         <div className="max-w-2xl">
           <Eyebrow>{t('landing.ejemplos.eyebrow')}</Eyebrow>
@@ -70,14 +77,15 @@ export function Examples(): JSX.Element {
           </p>
         </div>
 
-        <div className="mt-12 grid gap-6 min-[900px]:grid-cols-3">
-          {AGENTS.map((agent) => {
+        <div ref={gridRef} className="mt-12 grid gap-6 min-[900px]:grid-cols-3">
+          {AGENTS.map((agent, index) => {
             const Icon = AGENT_ICONS[agent.id];
             const copy = AGENT_COPY[agent.id];
             return (
               <div
                 key={agent.id}
-                className="group flex flex-col rounded-2xl border border-border bg-background-secondary p-6 shadow-sm transition duration-200 hover:-translate-y-1 hover:border-accent/30 hover:shadow-md"
+                className={`group flex flex-col rounded-2xl border border-border bg-background-secondary p-6 shadow-sm transition duration-200 hover:-translate-y-1 hover:border-accent/30 hover:shadow-md ${revealAnimationClass(gridRevealed)}`}
+                style={{ animationDelay: `${index * 80}ms` }}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent/10">
@@ -121,7 +129,10 @@ export function Examples(): JSX.Element {
         {/* Panel "¿Otro proceso en mente?": deja claro que los tres de arriba son
             solo ejemplos. Tinte brasa muy sutil para destacar del resto de la
             seccion; apila en pantallas chicas (icono/texto arriba, boton abajo). */}
-        <div className="mt-6 rounded-2xl border border-accent/20 bg-accent/5 p-6 sm:p-8">
+        <div
+          ref={panelRef}
+          className={`mt-6 rounded-2xl border border-accent/20 bg-accent/5 p-6 sm:p-8 ${revealAnimationClass(panelRevealed)}`}
+        >
           <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
             <div className="flex items-start gap-4 md:items-center">
               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-accent/10">
