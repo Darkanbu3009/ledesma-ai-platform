@@ -52,7 +52,7 @@ export function LandingFooter(): JSX.Element {
       <div className="mx-auto max-w-6xl px-6 py-12">
         <div className="flex flex-col gap-10 min-[900px]:flex-row min-[900px]:justify-between">
           <div className="max-w-sm">
-            <Logo className="h-8 w-auto text-cream [&_rect]:fill-current" />
+            <Logo className="h-16 w-auto text-cream [&_rect]:fill-current" />
             <p className="mt-4 text-sm text-cream/85">
               {t('landing.footer.descripcion')}
             </p>
