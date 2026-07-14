@@ -19,8 +19,16 @@
   --ll-accent-hover: 211 71 26; /* #D3471A brasa hover */
   --ll-success: 4 120 87; /* #047857 verde profundo legible sobre crema */
 
-  /* Alto del header fijo de la landing (LandingNav) y base del offset de los anchors. */
-  --header-height: 4rem;
+  /* Alto del header fijo de la landing (LandingNav) y base del offset de los anchors.
+     Subio de 4rem para dar aire al logo mas grande (h-16 movil / h-20 desktop). */
+  --header-height: 5rem;
+}
+
+/* En pantallas medianas+ el logo crece a h-20, asi que el header gana un poco mas de alto. */
+@media (min-width: 768px) {
+  :root {
+    --header-height: 5.5rem;
+  }
 }
 
 html,

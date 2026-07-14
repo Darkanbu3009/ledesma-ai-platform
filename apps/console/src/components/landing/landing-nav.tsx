@@ -26,27 +26,27 @@ export function LandingNav(): JSX.Element {
           to="/"
           className="flex items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
-          <Logo className="h-12 w-auto md:h-14" />
+          <Logo className="h-16 w-auto md:h-20" />
         </Link>
 
-        <nav className="hidden items-center gap-7 min-[900px]:flex" aria-label={t('landing.navegacion.seccionesAria')}>
+        <nav className="hidden items-center gap-8 min-[900px]:flex" aria-label={t('landing.navegacion.seccionesAria')}>
           {NAV_LINKS.map((link) => (
             <a
               key={link.href}
               href={link.href}
-              className="rounded-sm font-grotesk text-sm text-foreground-secondary transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              className="rounded-sm font-grotesk text-[0.9375rem] text-foreground-secondary transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               {t(link.labelKey)}
             </a>
           ))}
         </nav>
 
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-2 sm:gap-3.5">
           <LanguageSwitcher />
-          <Button asChild variant="ghost" size="sm">
+          <Button asChild variant="ghost" size="sm" className="h-10 px-3.5">
             <Link to="/login">{t('landing.comun.iniciarSesion')}</Link>
           </Button>
-          <Button asChild size="sm">
+          <Button asChild size="sm" className="h-10 px-5">
             <Link to="/crear-cuenta">{t('landing.comun.crearCuenta')}</Link>
           </Button>
         </div>
