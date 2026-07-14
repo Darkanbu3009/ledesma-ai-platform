@@ -763,7 +763,9 @@
   },
   "landing": {
     "comun": {
+      "crear": "Crear",
       "crearCuenta": "Crear cuenta",
+      "entrar": "Entrar",
       "iniciarSesion": "Iniciar sesión"
     },
     "navegacion": {
