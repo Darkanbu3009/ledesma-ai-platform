@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 describe('useDeleteAccount', () => {
-  it('llama DELETE /v1/me con { confirmEmail } y, al exito, dispara signOut + redirect a /login', async () => {
+  it('llama DELETE /v1/me con { confirmEmail } y, al exito, dispara signOut + redirect a la landing (/)', async () => {
     apiFetchMock.mockResolvedValue({ accountDeleted: true, authUser: 'deleted', data: {} });
     signOutMock.mockResolvedValue({ error: null });
 
@@ -51,8 +51,8 @@ describe('useDeleteAccount', () => {
       method: 'DELETE',
       body: JSON.stringify({ confirmEmail: 'ada@example.com' }),
     });
-    // Efecto de exito: cerrar sesion del lado cliente y salir de la consola.
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/login', { replace: true }));
+    // Efecto de exito: cerrar sesion del lado cliente y salir de la consola a la landing publica.
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/', { replace: true }));
     expect(signOutMock).toHaveBeenCalledTimes(1);
   });
 
@@ -64,7 +64,7 @@ describe('useDeleteAccount', () => {
 
     result.current.mutate('ada@example.com');
 
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/login', { replace: true }));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/', { replace: true }));
     expect(signOutMock).toHaveBeenCalledTimes(1);
   });
 

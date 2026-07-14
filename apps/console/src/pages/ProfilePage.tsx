@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight, KeyRound, Languages, LogOut, Pencil } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { LANGUAGE_LABELS, SUPPORTED_LANGUAGES, currentLanguage } from '../i18n';
@@ -282,6 +282,12 @@ function UsageSection({ usageCounter, tier }: { usageCounter: UsageCounter | nul
  */
 function SessionSection() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  // Tras cerrar sesion se aterriza en la landing publica (/), no en /login.
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    navigate('/', { replace: true });
+  }
   return (
     <section className={`${cardClass} flex flex-wrap items-center gap-3.5 px-[22px] py-4`}>
       <span
@@ -300,7 +306,7 @@ function SessionSection() {
         type="button"
         variant="secondary-neutral"
         size="sm"
-        onClick={() => void supabase.auth.signOut()}
+        onClick={() => void handleSignOut()}
       >
         {t('cuenta.sesion.cerrarSesion')}
         <LogOut className="h-[15px] w-[15px]" />
