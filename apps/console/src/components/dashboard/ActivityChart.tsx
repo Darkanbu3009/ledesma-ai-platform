@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { chartTheme } from './chart-theme';
 import { ChartTooltip } from './ChartTooltip';
@@ -6,12 +7,6 @@ import type { ActivityPoint } from '../../lib/dashboard';
 // Altura fija reservada para la grafica: evita saltos de layout entre carga y datos.
 const CHART_HEIGHT = 260;
 
-/** Etiqueta del tooltip: "3 ejecuciones" / "1 ejecucion" (redondeado, con separador de miles es-MX). */
-function formatRuns(value: number): string {
-  const runs = Math.round(value);
-  return `${runs.toLocaleString('es-MX')} ${runs === 1 ? 'ejecucion' : 'ejecuciones'}`;
-}
-
 /**
  * Grafica de ACTIVIDAD: ejecuciones por dia en el rango, como area con la serie en brasa (paleta del
  * sistema, no los colores default de Recharts). Responsive (ResponsiveContainer) y con altura reservada.
@@ -19,13 +14,19 @@ function formatRuns(value: number): string {
  * nombra, asi que no lleva leyenda.
  */
 export function ActivityChart({ data }: { data: ActivityPoint[] }) {
+  const { t } = useTranslation();
+  // Etiqueta del tooltip: "3 ejecuciones" / "1 ejecucion" (redondeado, con separador de miles es-MX).
+  const formatRuns = (value: number): string => {
+    const runs = Math.round(value);
+    return t('panel.grafica.ejecuciones', { count: runs, cantidad: runs.toLocaleString('es-MX') });
+  };
   if (data.length === 0) {
     return (
       <div
         className="flex items-center justify-center rounded-2xl border border-line bg-surface text-sm text-muted"
         style={{ height: CHART_HEIGHT }}
       >
-        Sin ejecuciones en este periodo.
+        {t('panel.grafica.actividadVacia')}
       </div>
     );
   }
@@ -33,7 +34,7 @@ export function ActivityChart({ data }: { data: ActivityPoint[] }) {
     <div
       className="rounded-2xl border border-line bg-surface p-4"
       role="img"
-      aria-label="Grafica de ejecuciones por dia en el rango seleccionado"
+      aria-label={t('panel.grafica.actividadAria')}
     >
       <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
         <AreaChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>

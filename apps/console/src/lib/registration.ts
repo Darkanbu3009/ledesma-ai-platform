@@ -2,6 +2,8 @@
 // devuelve el backend en GET /v1/me (ver apps/backend/src/registration/types.ts). Sin imports de
 // red: asi la decision de enrutado y la validacion se testean como funciones puras, igual que env.ts.
 
+import i18n from '../i18n';
+
 export type AccountType = 'individual' | 'empresa_member';
 export type ProfileRole = 'individual' | 'org_admin';
 
@@ -136,10 +138,10 @@ export const NAME_MAX_LENGTH = 200;
 export function validateName(value: string): string | undefined {
   const trimmed = value.trim();
   if (trimmed.length === 0) {
-    return 'Este campo es obligatorio.';
+    return i18n.t('registro.validacion.campoObligatorio');
   }
   if (trimmed.length > NAME_MAX_LENGTH) {
-    return `Usa ${NAME_MAX_LENGTH} caracteres o menos.`;
+    return i18n.t('registro.validacion.maxCaracteres', { max: NAME_MAX_LENGTH });
   }
   return undefined;
 }
@@ -158,10 +160,10 @@ export function updateProfileNameErrorMessage(err: unknown): string {
       : null;
   switch (status) {
     case 400:
-      return 'Revisa el nombre e intenta de nuevo.';
+      return i18n.t('registro.perfil.revisaNombre');
     case 401:
-      return 'Tu sesión expiró. Vuelve a iniciar sesión.';
+      return i18n.t('registro.perfil.sesionExpirada');
     default:
-      return 'No pudimos actualizar tu nombre. Intenta de nuevo.';
+      return i18n.t('registro.perfil.errorActualizar');
   }
 }

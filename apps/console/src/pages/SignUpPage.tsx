@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
 import { isValidEmail } from '../lib/email';
 import { MIN_PASSWORD_LENGTH } from '../lib/password';
@@ -27,6 +28,7 @@ import { LedesmaLogo } from '../components/login/LedesmaLogo';
  * detecta ese caso y se muestra "Ese correo ya tiene cuenta".
  */
 export function SignUpPage() {
+  const { t } = useTranslation();
   const { session, loading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -48,15 +50,15 @@ export function SignUpPage() {
     event.preventDefault();
     const trimmed = email.trim();
     if (!isValidEmail(trimmed)) {
-      fail('Ingresa un correo válido.');
+      fail(t('auth.errores.correoInvalido'));
       return;
     }
     if (password.length < MIN_PASSWORD_LENGTH) {
-      fail(`La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.`);
+      fail(t('auth.errores.contrasenaMinima', { min: MIN_PASSWORD_LENGTH }));
       return;
     }
     if (password !== confirm) {
-      fail('Las contraseñas no coinciden.');
+      fail(t('auth.errores.contrasenasNoCoinciden'));
       return;
     }
     setStatus('submitting');
@@ -65,19 +67,19 @@ export function SignUpPage() {
     const { data, error } = await supabase.auth.signUp({ email: trimmed, password });
     if (error) {
       if (error.code === 'user_already_exists' || error.code === 'email_exists') {
-        fail('Ese correo ya tiene cuenta.', true);
+        fail(t('auth.crearCuenta.correoConCuenta'), true);
       } else if (error.code === 'weak_password') {
         // La regla real la aplica el servidor; se muestra su mensaje sin prometer otra.
-        fail(`La contraseña no cumple los requisitos del servidor: ${error.message}`);
+        fail(t('auth.errores.requisitosServidor', { mensaje: error.message }));
       } else {
-        fail('No pudimos crear la cuenta. Intenta de nuevo.');
+        fail(t('auth.crearCuenta.errorGenerico'));
       }
       return;
     }
     // Con confirmacion de correo activa, un correo ya registrado devuelve un
     // usuario ofuscado sin identities (sin error), para no filtrar existencia.
     if (data.user && !data.session && (data.user.identities?.length ?? 0) === 0) {
-      fail('Ese correo ya tiene cuenta.', true);
+      fail(t('auth.crearCuenta.correoConCuenta'), true);
       return;
     }
     if (data.session) {

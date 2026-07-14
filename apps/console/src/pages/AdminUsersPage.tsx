@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Loader2, Search, Users } from 'lucide-react';
+import { Trans, useTranslation } from 'react-i18next';
 import { useAdminUsers } from '../lib/queries';
 import { accountTypeLabel, formatUserDate, type AdminUserListItem } from '../lib/admin';
 import { PageHeader } from '../components/ui/PageHeader';
@@ -16,6 +17,7 @@ const SEARCH_DEBOUNCE_MS = 300;
 
 /** Una fila de la tabla. El email es un Link (foco de teclado); toda la fila navega a la ficha (mouse). */
 function UserRow({ user }: { user: AdminUserListItem }) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const to = `/admin/users/${user.id}`;
   return (
@@ -29,16 +31,16 @@ function UserRow({ user }: { user: AdminUserListItem }) {
           onClick={(e) => e.stopPropagation()}
           className={`font-medium text-ink hover:text-brasa ${focusRing} rounded`}
         >
-          {user.email ?? 'Sin email'}
+          {user.email ?? t('admin.comun.sinEmail')}
         </Link>
-        <p className="mt-0.5 text-[13px] text-muted">{user.fullName || 'Sin nombre'}</p>
+        <p className="mt-0.5 text-[13px] text-muted">{user.fullName || t('admin.comun.sinNombre')}</p>
       </td>
       <td className="px-4 py-3 text-sm text-muted">{accountTypeLabel(user.accountType)}</td>
       <td className="px-4 py-3">
         <TierBadge tier={user.tier} />
       </td>
       <td className="px-4 py-3">
-        {user.isAdmin ? <AdminBadge /> : <span className="text-sm text-muted-soft">Usuario</span>}
+        {user.isAdmin ? <AdminBadge /> : <span className="text-sm text-muted-soft">{t('admin.comun.usuario')}</span>}
       </td>
       <td className="px-4 py-3 text-sm text-muted whitespace-nowrap">
         {formatUserDate(user.createdAt)}
@@ -49,25 +51,26 @@ function UserRow({ user }: { user: AdminUserListItem }) {
 
 /** Tabla de usuarios (accesible: thead con headers de columna). Envuelta en un scroll horizontal en movil. */
 function UsersTable({ users }: { users: AdminUserListItem[] }) {
+  const { t } = useTranslation();
   return (
     <div className="overflow-x-auto rounded-2xl border border-line bg-surface shadow-card">
       <table className="w-full min-w-[640px] border-collapse text-left">
         <thead>
           <tr className="text-xs font-semibold uppercase tracking-wide text-muted-soft">
             <th scope="col" className="px-4 py-3">
-              Usuario
+              {t('admin.comun.usuario')}
             </th>
             <th scope="col" className="px-4 py-3">
-              Tipo
+              {t('admin.usuarios.colTipo')}
             </th>
             <th scope="col" className="px-4 py-3">
-              Plan
+              {t('admin.comun.plan')}
             </th>
             <th scope="col" className="px-4 py-3">
-              Rol
+              {t('admin.comun.rol')}
             </th>
             <th scope="col" className="px-4 py-3">
-              Registro
+              {t('admin.comun.registro')}
             </th>
           </tr>
         </thead>
@@ -88,6 +91,7 @@ function UsersTable({ users }: { users: AdminUserListItem[] }) {
  * de useJobs. Vive detras del AdminGate; el backend igual gatea por rol.
  */
 export function AdminUsersPage() {
+  const { t } = useTranslation();
   // `input` es lo que se tipea; `search` es el termino ya "asentado" (debounced) que alimenta la query.
   const [input, setInput] = useState('');
   const [search, setSearch] = useState('');
@@ -106,13 +110,13 @@ export function AdminUsersPage() {
   return (
     <div className="mx-auto flex min-h-full max-w-5xl flex-col">
       <PageHeader
-        title="Usuarios"
-        subtitle="Administra los planes y consulta la actividad de los usuarios de la plataforma."
+        title={t('admin.usuarios.titulo')}
+        subtitle={t('admin.usuarios.subtitulo')}
       />
 
       <div className="mt-6 max-w-sm">
         <label htmlFor="admin-user-search" className="sr-only">
-          Buscar por email o nombre
+          {t('admin.usuarios.buscarPlaceholder')}
         </label>
         <div className="relative">
           <Search
@@ -124,7 +128,7 @@ export function AdminUsersPage() {
             type="search"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Buscar por email o nombre"
+            placeholder={t('admin.usuarios.buscarPlaceholder')}
             className={cn(inputClass, 'pl-10')}
           />
         </div>
@@ -133,12 +137,15 @@ export function AdminUsersPage() {
       {isLoading ? (
         <SkeletonList count={1} cardClassName="h-64" className="mt-6" />
       ) : isError ? (
-        <ErrorState title="No pudimos cargar los usuarios" onRetry={() => void refetch()} />
+        <ErrorState title={t('admin.usuarios.errorCarga')} onRetry={() => void refetch()} />
       ) : users.length === 0 ? (
         searching ? (
           <div className="mt-6 rounded-2xl border border-line bg-surface p-8 text-center text-sm text-muted shadow-card">
-            No encontramos usuarios que coincidan con{' '}
-            <span className="font-medium text-ink">«{search.trim()}»</span>.
+            <Trans
+              i18nKey="admin.usuarios.sinResultados"
+              values={{ termino: search.trim() }}
+              components={{ destacado: <span className="font-medium text-ink" /> }}
+            />
           </div>
         ) : (
           <EmptyState
@@ -148,14 +155,16 @@ export function AdminUsersPage() {
                 <Users className="h-6 w-6" />
               </span>
             }
-            title="Sin usuarios"
-            description="Todavia no hay usuarios registrados en la plataforma."
+            title={t('admin.usuarios.vacioTitulo')}
+            description={t('admin.usuarios.vacioDescripcion')}
           />
         )
       ) : (
         <div className="mt-6">
           <p className="mb-3 text-[13px] text-muted">
-            {searching ? `${total} resultado${total === 1 ? '' : 's'}` : `${total} usuario${total === 1 ? '' : 's'}`}
+            {searching
+              ? t('admin.usuarios.resultados', { count: total })
+              : t('admin.usuarios.usuariosTotal', { count: total })}
           </p>
           <UsersTable users={users} />
 
@@ -168,7 +177,7 @@ export function AdminUsersPage() {
                 className={`inline-flex items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-60 ${focusRing}`}
               >
                 {isFetchingNextPage && <Loader2 className="h-4 w-4 animate-spin" />}
-                {isFetchingNextPage ? 'Cargando...' : 'Cargar mas'}
+                {isFetchingNextPage ? t('ui.estado.cargando') : t('admin.usuarios.cargarMas')}
               </button>
             </div>
           )}

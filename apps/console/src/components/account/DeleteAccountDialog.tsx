@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { AlertTriangle } from 'lucide-react';
+import { Trans, useTranslation } from 'react-i18next';
 import { useDialog } from '../ui/useDialog';
 import { Field, inputClass } from '../ui/Field';
 import { emailConfirmationMatches } from '../../lib/account';
@@ -39,6 +40,7 @@ export function DeleteAccountDialog({
   onConfirm: (confirmEmail: string) => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const cancelRef = useRef<HTMLButtonElement>(null);
 
   // Cierre GUARDADO por `busy`: no se cierra mientras el borrado corre. useDialog lee onClose por ref en
@@ -78,12 +80,13 @@ export function DeleteAccountDialog({
           </span>
           <div>
             <h2 id="delete-account-title" className="font-display text-lg font-bold text-ink">
-              Eliminar tu cuenta
+              {t('cuenta.eliminar.dialogoTitulo')}
             </h2>
             <p id="delete-account-desc" className="mt-1 text-sm text-muted">
-              Esta acción es <span className="font-semibold text-ink">permanente e irreversible</span>. Se
-              borrará <span className="font-semibold text-ink">todo</span>: tus agentes, credenciales,
-              recetas, tareas programadas, triggers e historial de actividad. No podremos recuperarlo.
+              <Trans
+                i18nKey="cuenta.eliminar.dialogoDescripcion"
+                components={{ destacado: <span className="font-semibold text-ink" /> }}
+              />
             </p>
           </div>
         </div>
@@ -91,18 +94,14 @@ export function DeleteAccountDialog({
         <form onSubmit={handleSubmit} noValidate className="mt-5">
           {/* El email objetivo SIEMPRE visible (no solo placeholder): referencia exacta mientras se escribe. */}
           <div className="mb-3 rounded-xl border border-line bg-field px-4 py-3 text-sm">
-            <span className="text-muted">Email de tu cuenta: </span>
+            <span className="text-muted">{t('cuenta.eliminar.emailCuenta')} </span>
             <span className="select-all break-all font-mono font-medium text-ink">
               {expectedEmail ?? '—'}
             </span>
           </div>
           <Field
-            label="Para confirmar, escribe tu email"
-            hint={
-              matches
-                ? undefined
-                : 'El botón se habilita cuando el email coincide exactamente con el de tu cuenta.'
-            }
+            label={t('cuenta.eliminar.confirmarLabel')}
+            hint={matches ? undefined : t('cuenta.eliminar.confirmarHint')}
           >
             {(field) => (
               <input
@@ -113,7 +112,7 @@ export function DeleteAccountDialog({
                 autoComplete="off"
                 autoCapitalize="off"
                 spellCheck={false}
-                placeholder={expectedEmail ?? 'tu@email.com'}
+                placeholder={expectedEmail ?? t('cuenta.eliminar.emailPlaceholder')}
                 className={inputClass}
               />
             )}
@@ -136,7 +135,7 @@ export function DeleteAccountDialog({
               disabled={busy}
               className="rounded-[10px] border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Cancelar
+              {t('ui.acciones.cancelar')}
             </button>
             <button
               type="submit"
@@ -144,7 +143,7 @@ export function DeleteAccountDialog({
               aria-disabled={!canConfirm}
               className="rounded-[10px] bg-brasa px-4 py-2 text-sm font-semibold text-white transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {busy ? 'Eliminando...' : 'Eliminar definitivamente'}
+              {busy ? t('cuenta.eliminar.eliminando') : t('cuenta.eliminar.eliminarDefinitivamente')}
             </button>
           </div>
         </form>

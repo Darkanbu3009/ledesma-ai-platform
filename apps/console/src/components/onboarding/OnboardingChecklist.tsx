@@ -1,4 +1,5 @@
 import { type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Check, Sparkles } from 'lucide-react';
 import { useOnboardingProgress } from '../../lib/queries';
@@ -29,11 +30,12 @@ type StepStatus = 'done' | 'active' | 'blocked';
  * es el activo, numero gris delineado si esta bloqueado. Neutros: el brasa queda para el CTA.
  */
 function StepCircle({ status, number }: { status: StepStatus; number: number }) {
+  const { t } = useTranslation();
   if (status === 'done') {
     return (
       <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-[#F1EFE8] text-ink">
         <Check className="h-3.5 w-3.5" />
-        <span className="sr-only">Completado</span>
+        <span className="sr-only">{t('onboarding.completado')}</span>
       </span>
     );
   }
@@ -105,6 +107,7 @@ function StepRow({ step, status, number }: { step: OnboardingStep; status: StepS
  * pendientes en greige. Compacto (segmentos fijos de ~26x4) para vivir a la derecha de un header.
  */
 function SegmentedProgress({ completedCount }: { completedCount: number }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-none items-center gap-2.5">
       <div
@@ -112,7 +115,10 @@ function SegmentedProgress({ completedCount }: { completedCount: number }) {
         aria-valuenow={completedCount}
         aria-valuemin={0}
         aria-valuemax={ONBOARDING_STEP_COUNT}
-        aria-label={`${completedCount} de ${ONBOARDING_STEP_COUNT} pasos completados`}
+        aria-label={t('onboarding.progreso.aria', {
+          completados: completedCount,
+          total: ONBOARDING_STEP_COUNT,
+        })}
         className="flex gap-1"
       >
         {Array.from({ length: ONBOARDING_STEP_COUNT }, (_, i) => (
@@ -126,7 +132,10 @@ function SegmentedProgress({ completedCount }: { completedCount: number }) {
         ))}
       </div>
       <span className="text-[12.5px] text-[#8A8880]">
-        {completedCount} de {ONBOARDING_STEP_COUNT}
+        {t('onboarding.progreso.contador', {
+          completados: completedCount,
+          total: ONBOARDING_STEP_COUNT,
+        })}
       </span>
     </div>
   );
@@ -143,6 +152,7 @@ function SegmentedProgress({ completedCount }: { completedCount: number }) {
  * No bloquea la navegacion: es una tarjeta mas del Panel que el usuario puede ignorar.
  */
 export function OnboardingChecklist(): ReactNode {
+  const { t } = useTranslation();
   const { hasCredential, hasAgent, hasRun, completedCount, isComplete, firstAgentId, isLoading, isError } =
     useOnboardingProgress();
 
@@ -153,32 +163,34 @@ export function OnboardingChecklist(): ReactNode {
   const steps: OnboardingStep[] = [
     {
       id: 'credential',
-      title: 'Conecta tu primer proveedor (API key)',
-      description: 'Guarda una credencial (Anthropic, OpenAI o compatible) para que tus agentes puedan ejecutar.',
+      title: t('onboarding.pasos.credencial.titulo'),
+      description: t('onboarding.pasos.credencial.descripcion'),
       done: hasCredential,
       href: '/credenciales',
-      cta: 'Poner credencial',
-      blockedNote: 'Empieza por aqui',
+      cta: t('onboarding.pasos.credencial.cta'),
+      blockedNote: t('onboarding.pasos.credencial.bloqueado'),
     },
     {
       id: 'agent',
-      title: 'Crea tu primer agente',
-      description: 'Define que hace y con que modelo. Podes crearlo conversando con el Configurador.',
+      title: t('onboarding.pasos.agente.titulo'),
+      description: t('onboarding.pasos.agente.descripcion'),
       done: hasAgent,
       href: '/configurador',
-      cta: 'Crear agente',
-      blockedNote: 'Despues del paso 1',
+      cta: t('onboarding.pasos.agente.cta'),
+      blockedNote: t('onboarding.pasos.agente.bloqueado'),
     },
     {
       id: 'run',
-      title: 'Ejecuta tu agente',
-      description: 'Probalo en el Playground y observa tu primera corrida.',
+      title: t('onboarding.pasos.ejecutar.titulo'),
+      description: t('onboarding.pasos.ejecutar.descripcion'),
       done: hasRun,
       // Sin agente todavia no hay Playground al que ir: el CTA queda deshabilitado hasta que exista uno.
       href: firstAgentId ? playgroundPath(firstAgentId) : undefined,
-      cta: 'Ejecutar',
+      cta: t('onboarding.pasos.ejecutar.cta'),
       // Sin agente el motivo veraz es crearlo (texto que la pantalla ya usaba); con agente, el orden.
-      blockedNote: firstAgentId ? 'Despues del paso 2' : 'Crea un agente primero',
+      blockedNote: firstAgentId
+        ? t('onboarding.pasos.ejecutar.bloqueadoConAgente')
+        : t('onboarding.pasos.ejecutar.bloqueadoSinAgente'),
     },
   ];
 
@@ -202,10 +214,10 @@ export function OnboardingChecklist(): ReactNode {
             </span>
             <div>
               <h2 id="onboarding-title" className="font-display text-[19px] font-bold leading-tight text-ink">
-                Bienvenido a {PRODUCT_NAME}
+                {t('onboarding.bienvenida.titulo', { producto: PRODUCT_NAME })}
               </h2>
               <p className="mt-1 text-[13.5px] text-[#8A8880]">
-                Tu primer agente funcionando en 3 pasos · ~4 min
+                {t('onboarding.bienvenida.subtitulo')}
               </p>
             </div>
           </div>
@@ -221,7 +233,7 @@ export function OnboardingChecklist(): ReactNode {
         {!showWelcome && (
           <div className="mb-3 flex items-center justify-between gap-4">
             <h2 id="onboarding-title" className="font-display text-[15px] font-bold text-ink">
-              Primeros pasos
+              {t('onboarding.primerosPasos')}
             </h2>
             <SegmentedProgress completedCount={completedCount} />
           </div>

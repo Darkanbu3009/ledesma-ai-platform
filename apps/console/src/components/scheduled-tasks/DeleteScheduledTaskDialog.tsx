@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { useDialog } from '../ui/useDialog';
 
 /**
@@ -21,6 +22,7 @@ export function DeleteScheduledTaskDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useDialog({ open, onClose: onCancel, initialFocus: cancelRef });
 
@@ -33,13 +35,16 @@ export function DeleteScheduledTaskDialog({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Eliminar tarea programada"
+        aria-label={t('tareas.eliminar.ariaLabel')}
         className="relative w-full max-w-sm rounded-2xl border border-line bg-surface p-6 shadow-card-hover"
       >
-        <h2 className="font-display text-lg font-bold text-ink">Eliminar tarea</h2>
+        <h2 className="font-display text-lg font-bold text-ink">{t('tareas.eliminar.titulo')}</h2>
         <p className="mt-2 text-sm text-muted">
-          Vas a eliminar la tarea <span className="font-medium text-ink">{description}</span>. Esta
-          accion no se puede deshacer.
+          <Trans
+            i18nKey="tareas.eliminar.confirmacion"
+            values={{ descripcion: description }}
+            components={{ nombre: <span className="font-medium text-ink" /> }}
+          />
         </p>
         {error && (
           <div
@@ -56,7 +61,7 @@ export function DeleteScheduledTaskDialog({
             onClick={onCancel}
             className="rounded-[10px] border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
           >
-            Cancelar
+            {t('tareas.cancelar')}
           </button>
           <button
             type="button"
@@ -64,7 +69,7 @@ export function DeleteScheduledTaskDialog({
             disabled={busy}
             className="rounded-[10px] bg-brasa px-4 py-2 text-sm font-semibold text-white transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {busy ? 'Eliminando...' : 'Eliminar'}
+            {busy ? t('tareas.eliminar.eliminando') : t('tareas.eliminar.boton')}
           </button>
         </div>
       </div>

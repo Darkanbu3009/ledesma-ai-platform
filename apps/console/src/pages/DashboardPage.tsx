@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { BarChart3, Loader2 } from 'lucide-react';
 import { useDashboard } from '../lib/queries';
 import {
@@ -31,12 +32,16 @@ function ZeroMetricCard({ label, value }: { label: string; value: string }) {
  * agentes activos no viaja en ese resumen, asi que se muestra 0 estatico de presentacion.
  */
 function ZeroMetricsRow({ summary }: { summary: DashboardSummary }) {
+  const { t } = useTranslation();
   return (
     <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-      <ZeroMetricCard label="Corridas" value={summary.activity.totals.runs.toLocaleString('es-MX')} />
+      <ZeroMetricCard
+        label={t('panel.actividad.corridas')}
+        value={summary.activity.totals.runs.toLocaleString('es-MX')}
+      />
       {/* TODO: conectar a GET /v1/dashboard */}
-      <ZeroMetricCard label="Agentes activos" value="0" />
-      <ZeroMetricCard label="Gasto estimado" value={formatUSD(summary.spend.totalCostUsd)} />
+      <ZeroMetricCard label={t('panel.cero.agentesActivos')} value="0" />
+      <ZeroMetricCard label={t('panel.gasto.gastoEstimado')} value={formatUSD(summary.spend.totalCostUsd)} />
     </div>
   );
 }
@@ -45,6 +50,7 @@ function ZeroMetricsRow({ summary }: { summary: DashboardSummary }) {
  * vive en el paso 2 del checklist (y en /agentes), asi que aqui no se repite el CTA. Todo el estado
  * inicial del Panel debe caber sin scroll en un viewport de laptop (1366x768). */
 function DashboardEmptyState() {
+  const { t } = useTranslation();
   return (
     <div className="mt-3 flex items-center gap-3.5 rounded-[10px] border-[0.5px] border-dashed border-[#D3D1C7] bg-[#FAF9F5] p-4">
       {/* Icono neutro: la firma brasa de la pagina es el spark del banner, no este badge. */}
@@ -52,11 +58,8 @@ function DashboardEmptyState() {
         <BarChart3 className="h-[18px] w-[18px]" />
       </span>
       <div className="min-w-0">
-        <h2 className="text-[13.5px] font-medium text-ink">Aun no hay actividad</h2>
-        <p className="mt-0.5 text-[12.5px] leading-snug text-muted">
-          Cuando crees un agente y lo ejecutes, aqui vas a ver tu actividad, tus operaciones y el gasto
-          estimado.
-        </p>
+        <h2 className="text-[13.5px] font-medium text-ink">{t('panel.vacio.titulo')}</h2>
+        <p className="mt-0.5 text-[12.5px] leading-snug text-muted">{t('panel.vacio.descripcion')}</p>
       </div>
     </div>
   );
@@ -71,6 +74,7 @@ function DashboardEmptyState() {
  * de admin).
  */
 export function DashboardPage() {
+  const { t } = useTranslation();
   const [preset, setPreset] = useState<DashboardRangePreset>('30d');
   // Memoizado por preset: evita recalcular un `from` distinto en cada render (y refetches en cadena).
   const range = useMemo(() => dashboardRangeFromPreset(preset), [preset]);
@@ -81,8 +85,8 @@ export function DashboardPage() {
   return (
     <div className="mx-auto flex min-h-full max-w-5xl flex-col">
       <PageHeader
-        title="Panel"
-        subtitle="Tu actividad, operaciones y gasto en un vistazo."
+        title={t('panel.titulo')}
+        subtitle={t('panel.subtitulo')}
         action={
           // Region viva SIEMPRE montada (aunque vacia): asi el lector de pantalla la registra al inicio
           // y anuncia el refresco cuando aparece. Si solo se montara al refrescar, el AT no lo anunciaria.
@@ -94,7 +98,7 @@ export function DashboardPage() {
             {refreshing && (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Actualizando
+                {t('panel.actualizando')}
               </>
             )}
           </span>
@@ -108,14 +112,14 @@ export function DashboardPage() {
 
       {/* Titulo de la zona de actividad a la izquierda, selector de rango alineado a la derecha. */}
       <div className="mt-4 flex items-center justify-between gap-4">
-        <h2 className="text-[14px] font-medium text-ink">Actividad</h2>
+        <h2 className="text-[14px] font-medium text-ink">{t('panel.actividad.titulo')}</h2>
         <RangeSelector value={preset} onChange={setPreset} />
       </div>
 
       {isLoading ? (
         <SkeletonList count={3} cardClassName="h-40" className="mt-6 space-y-4" />
       ) : isError || !data ? (
-        <ErrorState title="No pudimos cargar tu panel" onRetry={() => void refetch()} />
+        <ErrorState title={t('panel.errorCarga')} onRetry={() => void refetch()} />
       ) : !hasDashboardData(data) ? (
         <>
           <ZeroMetricsRow summary={data} />

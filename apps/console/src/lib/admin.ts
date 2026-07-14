@@ -7,6 +7,7 @@
 // SOLO LECTURA salvo el cambio de tier (la unica mutacion del panel). El acceso lo impone el backend por
 // rol (requireAdminRole -> 403 a un no-admin); aca solo consumimos y presentamos.
 
+import i18n, { currentLanguage } from '../i18n';
 import type { AccountType, ProfileRole, ProfileTier, Subscription, UsageCounter } from './registration';
 
 /**
@@ -103,15 +104,17 @@ export const TIER_ORDER: ProfileTier[] = ['free', 'pro', 'autonomous'];
 /** Tono visual de un badge: la clase Tailwind del pill (paleta light de la consola). */
 export type BadgeTone = string;
 
-const TIER_META: Record<ProfileTier, { label: string; tone: BadgeTone }> = {
-  free: { label: 'Free', tone: 'border-line bg-line-soft text-muted' },
-  pro: { label: 'Pro', tone: 'border-brasa-line bg-brasa-soft text-brasa' },
-  autonomous: { label: 'Autónomo', tone: 'border-anthropic-line bg-anthropic-soft text-anthropic' },
+const TIER_META: Record<ProfileTier, { labelKey: string; tone: BadgeTone }> = {
+  free: { labelKey: 'admin.tier.free', tone: 'border-line bg-line-soft text-muted' },
+  pro: { labelKey: 'admin.tier.pro', tone: 'border-brasa-line bg-brasa-soft text-brasa' },
+  autonomous: { labelKey: 'admin.tier.autonomo', tone: 'border-anthropic-line bg-anthropic-soft text-anthropic' },
 };
 
 /** Etiqueta + tono del badge de un tier. Fallback defensivo si el backend enviara un tier desconocido. */
 export function tierMeta(tier: ProfileTier): { label: string; tone: BadgeTone } {
-  return TIER_META[tier] ?? { label: tier, tone: 'border-line bg-line-soft text-muted' };
+  const meta = TIER_META[tier];
+  if (!meta) return { label: tier, tone: 'border-line bg-line-soft text-muted' };
+  return { label: i18n.t(meta.labelKey), tone: meta.tone };
 }
 
 /** Etiqueta legible de un tier (para textos fuera del badge, p.ej. el dialogo de confirmacion). */
@@ -123,9 +126,9 @@ export function tierLabel(tier: ProfileTier): string {
 export function accountTypeLabel(accountType: AccountType): string {
   switch (accountType) {
     case 'individual':
-      return 'Individual';
+      return i18n.t('admin.etiquetas.individual');
     case 'empresa_member':
-      return 'Empresa';
+      return i18n.t('admin.etiquetas.empresa');
     default:
       return accountType;
   }
@@ -135,9 +138,9 @@ export function accountTypeLabel(accountType: AccountType): string {
 export function roleLabel(role: ProfileRole): string {
   switch (role) {
     case 'individual':
-      return 'Individual';
+      return i18n.t('admin.etiquetas.individual');
     case 'org_admin':
-      return 'Admin de organización';
+      return i18n.t('admin.etiquetas.adminOrganizacion');
     default:
       return role;
   }
@@ -147,7 +150,11 @@ export function roleLabel(role: ProfileRole): string {
 export function formatUserDate(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' });
+  return date.toLocaleDateString(currentLanguage() === 'en' ? 'en' : 'es-MX', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -170,10 +177,10 @@ function errorStatus(err: unknown): number | null {
 export function changeTierErrorMessage(err: unknown): string {
   switch (errorStatus(err)) {
     case 403:
-      return 'No tienes permiso para cambiar el tier de este usuario.';
+      return i18n.t('admin.errores.cambioTier403');
     case 404:
-      return 'No encontramos a este usuario. Es posible que ya no exista.';
+      return i18n.t('admin.comun.usuarioNoExiste');
     default:
-      return 'No pudimos cambiar el tier. Revisa tu conexión e intenta de nuevo.';
+      return i18n.t('admin.errores.cambioTierGenerico');
   }
 }

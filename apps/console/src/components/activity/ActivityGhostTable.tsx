@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/button';
 
 /**
@@ -17,53 +18,61 @@ type EstadoFantasma = 'exito' | 'curso' | 'fallida';
 /** Grid compartido por el header y las filas: Estado | Agente | Origen | Duracion | Cuando. */
 const GRID = 'grid grid-cols-[90px_1.3fr_1fr_80px_90px] items-center gap-3 px-[18px]';
 
-const BADGE: Record<EstadoFantasma, { label: string; clase: string }> = {
-  exito: { label: 'Completada', clase: 'bg-[#E1F5EE] text-[#0F6E56]' },
-  curso: { label: 'En curso', clase: 'bg-[#F1EFE8] text-[#5F5E5A]' },
-  fallida: { label: 'Fallida', clase: 'bg-[#FCEBEB] text-[#A32D2D]' },
+const BADGE: Record<EstadoFantasma, { labelKey: string; clase: string }> = {
+  exito: { labelKey: 'actividad.fantasma.estados.completada', clase: 'bg-[#E1F5EE] text-[#0F6E56]' },
+  curso: { labelKey: 'actividad.fantasma.estados.enCurso', clase: 'bg-[#F1EFE8] text-[#5F5E5A]' },
+  fallida: { labelKey: 'actividad.fantasma.estados.fallida', clase: 'bg-[#FCEBEB] text-[#A32D2D]' },
 };
 
-const COLUMNAS = ['Estado', 'Agente', 'Origen', 'Duracion', 'Cuando'] as const;
+const COLUMNAS = [
+  'actividad.fantasma.columnas.estado',
+  'actividad.fantasma.columnas.agente',
+  'actividad.fantasma.columnas.origen',
+  'actividad.fantasma.columnas.duracion',
+  'actividad.fantasma.columnas.cuando',
+] as const;
 
+// `origenKey: null` = la fila del Playground: nombre de producto identico en ambos idiomas, no se traduce.
 const FILAS = [
   {
     estado: 'exito',
-    agente: 'Cuentas por pagar',
-    origen: 'Trigger factura-recibida',
+    agenteKey: 'actividad.fantasma.filas.agenteCuentas',
+    origenKey: 'actividad.fantasma.filas.origenTrigger',
     duracion: '1.8s',
-    cuando: 'hace 2 min',
+    cuandoKey: 'actividad.fantasma.filas.cuandoHace2Min',
   },
   {
     estado: 'curso',
-    agente: 'Reporte de ventas',
-    origen: 'Tarea diaria 7:30',
+    agenteKey: 'actividad.fantasma.filas.agenteVentas',
+    origenKey: 'actividad.fantasma.filas.origenTareaDiaria',
     duracion: '12s',
-    cuando: 'ahora',
+    cuandoKey: 'actividad.fantasma.filas.cuandoAhora',
   },
   {
     estado: 'exito',
-    agente: 'Cotizaciones',
-    origen: 'Playground',
+    agenteKey: 'actividad.fantasma.filas.agenteCotizaciones',
+    origenKey: null,
     duracion: '4.1s',
-    cuando: 'hace 1 h',
+    cuandoKey: 'actividad.fantasma.filas.cuandoHace1H',
   },
   {
     estado: 'fallida',
-    agente: 'Cierre de facturas',
-    origen: 'Receta semanal',
+    agenteKey: 'actividad.fantasma.filas.agenteCierre',
+    origenKey: 'actividad.fantasma.filas.origenReceta',
     duracion: '0.6s',
-    cuando: 'ayer',
+    cuandoKey: 'actividad.fantasma.filas.cuandoAyer',
   },
 ] as const satisfies readonly {
   estado: EstadoFantasma;
-  agente: string;
-  origen: string;
+  agenteKey: string;
+  origenKey: string | null;
   duracion: string;
-  cuando: string;
+  cuandoKey: string;
 }[];
 
 /** `ctaTo`: destino del CTA (Playground de un agente existente o /agentes como fallback). */
 export function ActivityGhostTable({ ctaTo }: { ctaTo: string }) {
+  const { t } = useTranslation();
   return (
     <div className="mt-6 overflow-hidden rounded-[14px] border-[0.5px] border-[#E9E7DF] bg-white">
       {/* Header de columnas: queda FUERA del bloque atenuado (opacidad plena). */}
@@ -75,7 +84,7 @@ export function ActivityGhostTable({ ctaTo }: { ctaTo: string }) {
               i === COLUMNAS.length - 1 ? 'text-right' : ''
             }`}
           >
-            {columna}
+            {t(columna)}
           </span>
         ))}
       </div>
@@ -86,7 +95,7 @@ export function ActivityGhostTable({ ctaTo }: { ctaTo: string }) {
         <div aria-hidden="true" className="opacity-[0.45]">
           {FILAS.map((fila, i) => (
             <div
-              key={fila.agente}
+              key={fila.agenteKey}
               className={`${GRID} py-[11px] ${
                 i < FILAS.length - 1 ? 'border-b-[0.5px] border-[#F1EFE8]' : ''
               }`}
@@ -94,13 +103,15 @@ export function ActivityGhostTable({ ctaTo }: { ctaTo: string }) {
               <span
                 className={`inline-flex w-fit items-center whitespace-nowrap rounded-full px-2 py-[2px] font-mono text-[11px] ${BADGE[fila.estado].clase}`}
               >
-                {BADGE[fila.estado].label}
+                {t(BADGE[fila.estado].labelKey)}
               </span>
-              <span className="truncate text-[12.5px] text-ink">{fila.agente}</span>
-              <span className="truncate text-[12.5px] text-[#8A8880]">{fila.origen}</span>
+              <span className="truncate text-[12.5px] text-ink">{t(fila.agenteKey)}</span>
+              <span className="truncate text-[12.5px] text-[#8A8880]">
+                {fila.origenKey ? t(fila.origenKey) : 'Playground'}
+              </span>
               <span className="font-mono text-[11px] text-[#8A8880]">{fila.duracion}</span>
               <span className="text-right font-mono text-[11px] text-[#B4B2A9]">
-                {fila.cuando}
+                {t(fila.cuandoKey)}
               </span>
             </div>
           ))}
@@ -109,14 +120,13 @@ export function ActivityGhostTable({ ctaTo }: { ctaTo: string }) {
         {/* Velo: gradiente blanco de transparente arriba a ~96% abajo, con el mensaje y el CTA. */}
         <div className="absolute inset-0 flex items-center justify-center bg-[linear-gradient(to_bottom,rgba(255,255,255,0),rgba(255,255,255,0.96))]">
           <div className="max-w-[400px] px-6 text-center">
-            <h2 className="text-[17px] font-medium text-ink">Aun no hay ejecuciones</h2>
+            <h2 className="text-[17px] font-medium text-ink">{t('actividad.fantasma.vacio.titulo')}</h2>
             <p className="mt-1.5 text-[13px] leading-relaxed text-[#5F5E5A]">
-              Cada corrida de tus agentes aparecera aqui: quien la disparo, cuanto tardo y en que
-              estado termino.
+              {t('actividad.fantasma.vacio.descripcion')}
             </p>
             <div className="mt-4 flex justify-center">
               <Button asChild>
-                <Link to={ctaTo}>Probar un agente en el Playground</Link>
+                <Link to={ctaTo}>{t('actividad.fantasma.vacio.cta')}</Link>
               </Button>
             </div>
           </div>

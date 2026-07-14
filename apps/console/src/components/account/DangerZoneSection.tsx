@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
 import { useDeleteAccount } from '../../lib/account-mutations';
 import { deleteAccountErrorMessage } from '../../lib/account';
@@ -18,6 +19,7 @@ import { Button } from '../ui/button';
  * como prop desde useAuth().user?.email.
  */
 export function DangerZoneSection({ email }: { email: string | undefined }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const deleteAccount = useDeleteAccount();
 
@@ -39,14 +41,13 @@ export function DangerZoneSection({ email }: { email: string | undefined }) {
         <Trash2 className="h-4 w-4" />
       </span>
       <div className="min-w-0 flex-1">
-        <h2 className="text-[13.5px] font-medium text-[#A32D2D]">Eliminar mi cuenta</h2>
+        <h2 className="text-[13.5px] font-medium text-[#A32D2D]">{t('cuenta.eliminar.zonaTitulo')}</h2>
         <p className="text-xs text-[#5F5E5A]">
-          Borra de forma permanente agentes, credenciales, recetas, tareas, triggers e historial. No
-          se puede deshacer.
+          {t('cuenta.eliminar.zonaDescripcion')}
         </p>
       </div>
       <Button type="button" variant="destructive" size="sm" onClick={openDialog}>
-        Eliminar cuenta
+        {t('cuenta.eliminar.zonaBoton')}
       </Button>
 
       {open && (

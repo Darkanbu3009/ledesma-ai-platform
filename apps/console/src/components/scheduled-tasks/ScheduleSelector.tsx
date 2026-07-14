@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { Clock } from 'lucide-react';
 import { inputClass } from '../ui/Field';
 import { isValidCronExpression, nextCronRun } from '../../lib/cron';
@@ -20,22 +21,22 @@ export interface ScheduleSelection {
   valid: boolean;
 }
 
-const FREQUENCY_OPTIONS: { value: ScheduleFrequency; label: string }[] = [
-  { value: 'hourly', label: 'Cada hora' },
-  { value: 'daily', label: 'Cada dia' },
-  { value: 'weekly', label: 'Cada semana' },
-  { value: 'monthly', label: 'Cada mes' },
+const FREQUENCY_OPTIONS: { value: ScheduleFrequency; labelKey: string }[] = [
+  { value: 'hourly', labelKey: 'tareas.horario.frecuencia.cadaHora' },
+  { value: 'daily', labelKey: 'tareas.horario.frecuencia.cadaDia' },
+  { value: 'weekly', labelKey: 'tareas.horario.frecuencia.cadaSemana' },
+  { value: 'monthly', labelKey: 'tareas.horario.frecuencia.cadaMes' },
 ];
 
-/** Nombres singulares (para el <select> de dia de la semana). Indice 0 = domingo. */
-const WEEKDAY_LABELS = [
-  'Domingo',
-  'Lunes',
-  'Martes',
-  'Miercoles',
-  'Jueves',
-  'Viernes',
-  'Sabado',
+/** Claves de los nombres singulares (para el <select> de dia de la semana). Indice 0 = domingo. */
+const WEEKDAY_LABEL_KEYS = [
+  'tareas.horario.dias.domingo',
+  'tareas.horario.dias.lunes',
+  'tareas.horario.dias.martes',
+  'tareas.horario.dias.miercoles',
+  'tareas.horario.dias.jueves',
+  'tareas.horario.dias.viernes',
+  'tareas.horario.dias.sabado',
 ];
 
 /** Minutos ofrecidos en "cada hora" (paso de 5). El modo avanzado cubre cualquier otro minuto. */
@@ -55,6 +56,7 @@ export function ScheduleSelector({
 }: {
   onChange: (selection: ScheduleSelection) => void;
 }) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<'friendly' | 'advanced'>('friendly');
   const [schedule, setSchedule] = useState<FriendlySchedule>(DEFAULT_SCHEDULE);
   const [rawCron, setRawCron] = useState<string>(scheduleToCron(DEFAULT_SCHEDULE));
@@ -82,13 +84,13 @@ export function ScheduleSelector({
   return (
     <div className="rounded-xl border border-line bg-field p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <span className="text-sm font-medium text-ink">Horario</span>
+        <span className="text-sm font-medium text-ink">{t('tareas.horario.titulo')}</span>
         <button
           type="button"
           onClick={() => (mode === 'friendly' ? switchToAdvanced() : setMode('friendly'))}
           className="text-xs font-medium text-muted underline-offset-2 transition hover:text-brasa hover:underline"
         >
-          {mode === 'friendly' ? 'Modo avanzado (cron)' : 'Volver al modo simple'}
+          {mode === 'friendly' ? t('tareas.horario.modoAvanzado') : t('tareas.horario.modoSimple')}
         </button>
       </div>
 
@@ -109,6 +111,7 @@ function FriendlyMode({
   schedule: FriendlySchedule;
   onScheduleChange: (next: FriendlySchedule) => void;
 }) {
+  const { t } = useTranslation();
   const timeValue = formatTimeOfDay(schedule.hour, schedule.minute);
 
   // El minuto actual siempre debe estar entre las opciones (p.ej. si venia de un HH:MM con minuto
@@ -129,7 +132,7 @@ function FriendlyMode({
       {/* Frecuencia: radiogroup accesible estilado como control segmentado. */}
       <div
         role="radiogroup"
-        aria-label="Con que frecuencia se ejecuta"
+        aria-label={t('tareas.horario.frecuenciaAria')}
         className="grid grid-cols-2 gap-2 sm:grid-cols-4"
       >
         {FREQUENCY_OPTIONS.map((option) => {
@@ -148,7 +151,7 @@ function FriendlyMode({
                   : 'border-line bg-surface text-ink-soft hover:border-brasa-line hover:text-brasa',
               ].join(' ')}
             >
-              {option.label}
+              {t(option.labelKey)}
             </button>
           );
         })}
@@ -157,7 +160,9 @@ function FriendlyMode({
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {schedule.frequency === 'hourly' && (
           <label className="block">
-            <span className="mb-1.5 block text-xs font-medium text-muted">Minuto de cada hora</span>
+            <span className="mb-1.5 block text-xs font-medium text-muted">
+              {t('tareas.horario.minutoLabel')}
+            </span>
             <select
               value={schedule.minute}
               onChange={(e) => onScheduleChange({ ...schedule, minute: Number(e.target.value) })}
@@ -174,15 +179,17 @@ function FriendlyMode({
 
         {schedule.frequency === 'weekly' && (
           <label className="block">
-            <span className="mb-1.5 block text-xs font-medium text-muted">Dia de la semana</span>
+            <span className="mb-1.5 block text-xs font-medium text-muted">
+              {t('tareas.horario.diaSemanaLabel')}
+            </span>
             <select
               value={schedule.weekday}
               onChange={(e) => onScheduleChange({ ...schedule, weekday: Number(e.target.value) })}
               className={inputClass}
             >
-              {WEEKDAY_LABELS.map((label, value) => (
+              {WEEKDAY_LABEL_KEYS.map((labelKey, value) => (
                 <option key={value} value={value}>
-                  {label}
+                  {t(labelKey)}
                 </option>
               ))}
             </select>
@@ -191,7 +198,9 @@ function FriendlyMode({
 
         {schedule.frequency === 'monthly' && (
           <label className="block">
-            <span className="mb-1.5 block text-xs font-medium text-muted">Dia del mes</span>
+            <span className="mb-1.5 block text-xs font-medium text-muted">
+              {t('tareas.horario.diaMesLabel')}
+            </span>
             <select
               value={schedule.dayOfMonth}
               onChange={(e) => onScheduleChange({ ...schedule, dayOfMonth: Number(e.target.value) })}
@@ -199,7 +208,7 @@ function FriendlyMode({
             >
               {Array.from({ length: MAX_FRIENDLY_DAY_OF_MONTH }, (_, i) => i + 1).map((d) => (
                 <option key={d} value={d}>
-                  Dia {d}
+                  {t('tareas.horario.diaN', { dia: d })}
                 </option>
               ))}
             </select>
@@ -208,7 +217,9 @@ function FriendlyMode({
 
         {schedule.frequency !== 'hourly' && (
           <label className="block">
-            <span className="mb-1.5 block text-xs font-medium text-muted">Hora (UTC)</span>
+            <span className="mb-1.5 block text-xs font-medium text-muted">
+              {t('tareas.horario.horaUtcLabel')}
+            </span>
             <input
               type="time"
               value={timeValue}
@@ -232,22 +243,28 @@ function AdvancedMode({
   rawCron: string;
   onRawCronChange: (next: string) => void;
 }) {
+  const { t, i18n } = useTranslation();
   const trimmed = rawCron.trim();
   const isEmpty = trimmed === '';
   const valid = !isEmpty && isValidCronExpression(rawCron);
 
   // Vista previa: descripcion legible (si es una forma conocida) y proximo run estimado (UTC).
+  // describeCron/formatRunAt traducen segun el idioma activo, por eso participa en el memo.
+  const language = i18n.language;
   const preview = useMemo(() => {
+    void language;
     if (!valid) return null;
     const description = describeCron(rawCron);
     const next = nextCronRun(rawCron, new Date());
     return { description, nextRun: formatRunAt(next ? next.toISOString() : null) };
-  }, [rawCron, valid]);
+  }, [rawCron, valid, language]);
 
   return (
     <div className="space-y-2">
       <label className="block">
-        <span className="mb-1.5 block text-xs font-medium text-muted">Expresion cron (5 campos)</span>
+        <span className="mb-1.5 block text-xs font-medium text-muted">
+          {t('tareas.horario.cronLabel')}
+        </span>
         <input
           value={rawCron}
           onChange={(e) => onRawCronChange(e.target.value)}
@@ -259,13 +276,15 @@ function AdvancedMode({
         />
       </label>
       <p className="text-xs text-muted">
-        Orden: minuto hora dia-del-mes mes dia-de-semana. Ejemplo:{' '}
-        <span className="font-mono text-ink-soft">0 8 * * 1</span> = todos los lunes 08:00 UTC.
+        <Trans
+          i18nKey="tareas.horario.cronAyuda"
+          components={{ mono: <span className="font-mono text-ink-soft" /> }}
+        />
       </p>
 
       {!isEmpty && !valid && (
         <p role="alert" className="text-sm text-brasa">
-          Formato de cron invalido (deben ser 5 campos).
+          {t('tareas.horario.cronInvalido')}
         </p>
       )}
 
@@ -273,11 +292,15 @@ function AdvancedMode({
         <div className="space-y-1 rounded-lg border border-line bg-surface px-3.5 py-2.5">
           <p className="flex items-center gap-2 text-sm text-ink">
             <Clock className="h-4 w-4 flex-none text-brasa" />
-            {preview.description ? `Se ejecutara: ${preview.description}` : 'Expresion valida.'}
+            {preview.description
+              ? t('tareas.horario.seEjecutara', { descripcion: preview.description })
+              : t('tareas.horario.expresionValida')}
             <span className="text-xs text-muted-soft">· UTC</span>
           </p>
           {preview.nextRun && (
-            <p className="pl-6 text-xs text-muted">Proximo run estimado: {preview.nextRun}</p>
+            <p className="pl-6 text-xs text-muted">
+              {t('tareas.horario.proximoRun', { fecha: preview.nextRun })}
+            </p>
           )}
         </div>
       )}
@@ -287,10 +310,11 @@ function AdvancedMode({
 
 /** Linea de vista previa del modo amigable. */
 function SchedulePreview({ text }: { text: string }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2.5 text-sm text-ink">
       <Clock className="h-4 w-4 flex-none text-brasa" />
-      Se ejecutara: {text}
+      {t('tareas.horario.seEjecutara', { descripcion: text })}
       <span className="text-xs text-muted-soft">· UTC</span>
     </div>
   );

@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
 import { isValidEmail } from '../lib/email';
 import { AuthLayout } from '../components/login/AuthLayout';
@@ -27,6 +28,7 @@ import {
  * contrasena) puede usar esta misma pantalla para establecer una.
  */
 export function PasswordRecoveryPage() {
+  const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [status, setStatus] = useState<RecoveryStatus>('idle');
   const [errorMsg, setErrorMsg] = useState('');
@@ -36,7 +38,7 @@ export function PasswordRecoveryPage() {
     const trimmed = email.trim();
     if (!isValidEmail(trimmed)) {
       setStatus('error');
-      setErrorMsg('Ingresa un correo válido.');
+      setErrorMsg(t('auth.errores.correoInvalido'));
       return;
     }
     setStatus('submitting');
@@ -46,7 +48,7 @@ export function PasswordRecoveryPage() {
     });
     if (error) {
       setStatus('error');
-      setErrorMsg('No pudimos enviar el correo. Intenta de nuevo en unos minutos.');
+      setErrorMsg(t('auth.recuperar.errorEnvio'));
       return;
     }
     setStatus('sent');

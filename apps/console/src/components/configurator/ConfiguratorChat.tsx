@@ -1,4 +1,5 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowUp, RefreshCw, Sparkles } from 'lucide-react';
 import type { ConfiguratorMessage } from '../../lib/configurator';
 
@@ -23,6 +24,7 @@ export function ConfiguratorChat({
   onSend: (text: string) => void;
   onRetry: () => void;
 }) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -53,7 +55,7 @@ export function ConfiguratorChat({
         ref={scrollRef}
         role="log"
         aria-live="polite"
-        aria-label="Conversacion con el Configurador"
+        aria-label={t('configurador.chat.conversacionAriaLabel')}
         aria-busy={loading}
         className="flex-1 overflow-y-auto px-4 py-4"
       >
@@ -63,7 +65,7 @@ export function ConfiguratorChat({
               <Sparkles className="h-5 w-5" />
             </span>
             <p className="mt-4 max-w-xs text-sm text-muted">
-              Conta que agente queres crear y el Configurador lo arma con vos, paso a paso.
+              {t('configurador.chat.vacio')}
             </p>
           </div>
         ) : (
@@ -91,7 +93,7 @@ export function ConfiguratorChat({
                     className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-brasa-line px-3 py-1 text-xs font-medium text-brasa transition hover:bg-brasa/10 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
-                    Reintentar
+                    {t('configurador.chat.reintentar')}
                   </button>
                 </div>
               </div>
@@ -103,7 +105,7 @@ export function ConfiguratorChat({
       <div className="border-t border-line p-3">
         <div className="flex items-end gap-2.5">
           <label htmlFor="configurador-input" className="sr-only">
-            Mensaje para el Configurador
+            {t('configurador.chat.mensajeLabel')}
           </label>
           <textarea
             id="configurador-input"
@@ -111,14 +113,14 @@ export function ConfiguratorChat({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Escribi lo que queres que haga tu agente..."
+            placeholder={t('configurador.chat.placeholder')}
             className="min-w-0 flex-1 resize-none rounded-xl border border-line bg-field px-3.5 py-2.5 text-sm text-ink outline-none transition placeholder:text-muted-soft focus:border-brasa focus:ring-2 focus:ring-brasa/20"
           />
           <button
             type="button"
             onClick={send}
             disabled={loading || draft.trim() === ''}
-            aria-label="Enviar mensaje"
+            aria-label={t('configurador.chat.enviarAriaLabel')}
             className="inline-flex h-10 w-10 flex-none items-center justify-center rounded-xl bg-brasa text-white transition-colors hover:bg-brasa-hover disabled:cursor-not-allowed disabled:bg-line disabled:text-muted"
           >
             <ArrowUp className="h-5 w-5" />
@@ -150,8 +152,9 @@ function AssistantBubble({ text }: { text: string }) {
 }
 
 function TypingIndicator() {
+  const { t } = useTranslation();
   return (
-    <div className="flex justify-start" aria-label="El Configurador esta escribiendo">
+    <div className="flex justify-start" aria-label={t('configurador.chat.escribiendoAriaLabel')}>
       <div className="flex items-center gap-1 rounded-2xl border border-line bg-field px-4 py-3">
         <Dot delay="0ms" />
         <Dot delay="150ms" />

@@ -1,24 +1,22 @@
 import { type JSX } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Eyebrow } from './eyebrow';
 
 const STEPS = [
   {
     num: '01',
-    title: 'Nos cuentas tu proceso',
-    description:
-      'Nos dices qué quieres automatizar: cuentas por pagar, cotizaciones, soporte o el flujo que tu operación necesite. Identificamos dónde un agente aporta más valor.'
+    tituloKey: 'landing.comoFunciona.pasos.paso1.titulo',
+    descripcionKey: 'landing.comoFunciona.pasos.paso1.descripcion'
   },
   {
     num: '02',
-    title: 'Lo configuramos e integramos',
-    description:
-      'Montamos el agente sobre nuestra plataforma, con el modelo que elijas (BYOK), y lo conectamos a tus sistemas. Como la infraestructura ya está lista, lo tienes en semanas, no en meses.'
+    tituloKey: 'landing.comoFunciona.pasos.paso2.titulo',
+    descripcionKey: 'landing.comoFunciona.pasos.paso2.descripcion'
   },
   {
     num: '03',
-    title: 'Queda operando en tu negocio',
-    description:
-      'El agente trabaja dentro de tus sistemas, ejecutando trabajo real. Lo ajustamos y sumamos nuevos agentes conforme crece tu operación.'
+    tituloKey: 'landing.comoFunciona.pasos.paso3.titulo',
+    descripcionKey: 'landing.comoFunciona.pasos.paso3.descripcion'
   }
 ];
 
@@ -26,17 +24,18 @@ const STEPS = [
  * Seccion "Como funciona": los tres pasos del showroom (01 / 02 / 03).
  */
 export function HowItWorks(): JSX.Element {
+  const { t } = useTranslation();
+
   return (
     <section id="como-funciona" className="border-t border-border">
       <div className="mx-auto max-w-6xl px-6 py-20">
         <div className="max-w-2xl">
-          <Eyebrow>Cómo funciona</Eyebrow>
+          <Eyebrow>{t('landing.comoFunciona.eyebrow')}</Eyebrow>
           <h2 className="mt-5 font-display text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-            De tu proceso a un agente en producción
+            {t('landing.comoFunciona.titulo')}
           </h2>
           <p className="mt-4 text-lg text-foreground-secondary">
-            Sin proyectos de meses. La plataforma ya está construida; nosotros configuramos e
-            integramos el agente a la medida de tu operación.
+            {t('landing.comoFunciona.descripcion')}
           </p>
         </div>
 
@@ -45,10 +44,10 @@ export function HowItWorks(): JSX.Element {
             <li key={step.num} className="border-t border-border pt-6">
               <p className="font-jetbrains text-3xl font-semibold text-accent">{step.num}</p>
               <h3 className="mt-3 font-display text-lg font-semibold text-foreground">
-                {step.title}
+                {t(step.tituloKey)}
               </h3>
               <p className="mt-2 text-sm leading-relaxed text-foreground-secondary">
-                {step.description}
+                {t(step.descripcionKey)}
               </p>
             </li>
           ))}

@@ -1,4 +1,5 @@
 import { useId, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import { useTestTool } from '../../lib/mutations';
 import { tryParseJsonObject } from '../../lib/tool-schema';
@@ -22,6 +23,7 @@ export function TestToolDialog({
   initialInput: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [input, setInput] = useState(initialInput);
   const [jsonError, setJsonError] = useState<string | null>(null);
   const testTool = useTestTool(agentId);
@@ -36,7 +38,7 @@ export function TestToolDialog({
   function handleRun() {
     const parsed = tryParseJsonObject(input);
     if (!parsed) {
-      setJsonError('El input debe ser un objeto JSON valido');
+      setJsonError(t('agentes.probarTool.inputInvalido'));
       return;
     }
     setJsonError(null);
@@ -52,13 +54,13 @@ export function TestToolDialog({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={`Probar ${toolName}`}
+        aria-label={t('agentes.probarTool.titulo', { name: toolName })}
         className="relative w-full max-w-lg rounded-xl border border-grafito-border bg-grafito p-6 shadow-2xl shadow-black/40"
       >
-        <h2 className="font-display text-lg font-semibold text-hueso">Probar {toolName}</h2>
-        <p className="mt-2 text-sm text-hueso-muted">
-          Se enviara un POST firmado al webhook con la version guardada de la herramienta.
-        </p>
+        <h2 className="font-display text-lg font-semibold text-hueso">
+          {t('agentes.probarTool.titulo', { name: toolName })}
+        </h2>
+        <p className="mt-2 text-sm text-hueso-muted">{t('agentes.probarTool.descripcion')}</p>
 
         <label htmlFor={inputId} className="mb-2 mt-4 block text-sm font-medium text-hueso">
           Input (JSON)
@@ -81,7 +83,7 @@ export function TestToolDialog({
 
         {testTool.isError && (
           <p role="alert" className="mt-3 text-sm text-brasa">
-            No pudimos ejecutar la prueba. Intenta de nuevo.
+            {t('agentes.probarTool.errorEjecutar')}
           </p>
         )}
 
@@ -111,7 +113,7 @@ export function TestToolDialog({
             onClick={onClose}
             className="rounded-lg border border-grafito-border px-4 py-2 text-sm text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
           >
-            Cerrar
+            {t('agentes.comun.cerrar')}
           </button>
           <button
             type="button"
@@ -122,7 +124,7 @@ export function TestToolDialog({
             {testTool.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
             ) : null}
-            {testTool.isPending ? 'Ejecutando...' : 'Ejecutar prueba'}
+            {testTool.isPending ? t('agentes.probarTool.ejecutando') : t('agentes.probarTool.ejecutar')}
           </button>
         </div>
       </div>

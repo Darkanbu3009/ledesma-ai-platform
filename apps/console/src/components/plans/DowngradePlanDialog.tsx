@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { useDialog } from '../ui/useDialog';
 
 /**
@@ -26,6 +27,7 @@ export function DowngradePlanDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const cancelRef = useRef<HTMLButtonElement>(null);
   // Con la mutacion EN VUELO no se permite descartar (ni Escape ni click en el fondo): cerrar en ese
   // momento pareceria una cancelacion, pero el cambio de plan ya viajo y se aplicaria igual.
@@ -44,16 +46,20 @@ export function DowngradePlanDialog({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Cambiar de plan"
+        aria-label={t('planes.dialogo.titulo')}
         className="relative w-full max-w-sm rounded-2xl border border-line bg-surface p-6 shadow-card-hover"
       >
-        <h2 className="font-display text-lg font-bold text-ink">Cambiar de plan</h2>
+        <h2 className="font-display text-lg font-bold text-ink">{t('planes.dialogo.titulo')}</h2>
         <p className="mt-2 text-sm text-muted">
-          Vas a cambiar al plan <span className="font-medium text-ink">{planName}</span>.
+          <Trans
+            i18nKey="planes.dialogo.cuerpo"
+            values={{ plan: planName }}
+            components={{ nombre: <span className="font-medium text-ink" /> }}
+          />
           {losses.length > 0 && (
             <>
               {' '}
-              Perderas acceso a {losses.join(' y a ')} en cuanto se aplique el cambio.
+              {t('planes.dialogo.perdidas', { perdidas: losses.join(t('planes.dialogo.perdidasSeparador')) })}
             </>
           )}
         </p>
@@ -65,7 +71,7 @@ export function DowngradePlanDialog({
             disabled={busy}
             className="rounded-[10px] border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Cancelar
+            {t('planes.dialogo.cancelar')}
           </button>
           <button
             type="button"
@@ -73,7 +79,7 @@ export function DowngradePlanDialog({
             disabled={busy}
             className="rounded-[10px] bg-brasa px-4 py-2 text-sm font-semibold text-white transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {busy ? 'Cambiando...' : `Cambiar a ${planName}`}
+            {busy ? t('planes.dialogo.cambiando') : t('planes.dialogo.cambiarA', { plan: planName })}
           </button>
         </div>
       </div>

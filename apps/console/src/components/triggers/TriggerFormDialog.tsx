@@ -1,7 +1,9 @@
 import { type FormEvent, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Link2, Loader2, ShieldCheck, X } from 'lucide-react';
 import { ApiError } from '../../lib/api';
+import i18n from '../../i18n';
 import { providerLabel } from '../../lib/agents';
 import { compatibleCredentials } from '../../lib/credentials';
 import { useAgents, useCredentials } from '../../lib/queries';
@@ -20,39 +22,37 @@ import { useDialog } from '../ui/useDialog';
 /** Traduce el error del backend a un mensaje en espanol. */
 function backendMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.status === 401) return 'Tu sesion expiro. Vuelve a iniciar sesion.';
-    if (error.status === 403) return 'Crear triggers requiere el plan Autonomo (tier autonomous).';
-    if (error.status === 404) return 'El agente o la credencial ya no existen. Actualiza y prueba de nuevo.';
-    if (error.status === 400) return 'El backend rechazo el trigger. Revisa el agente, la credencial y el mensaje.';
+    if (error.status === 401) return i18n.t('triggers.form.errorSesion');
+    if (error.status === 403) return i18n.t('triggers.form.errorPlan');
+    if (error.status === 404) return i18n.t('triggers.form.errorNoExiste');
+    if (error.status === 400) return i18n.t('triggers.form.errorRechazo');
   }
-  return 'No pudimos crear el trigger. Intenta de nuevo.';
+  return i18n.t('triggers.form.errorCrear');
 }
 
-/** Una opcion del selector de modo de auth. */
+/** Una opcion del selector de modo de auth (los textos son CLAVES de traduccion; se resuelven en el render). */
 const AUTH_OPTIONS: Array<{
   value: TriggerAuthMode;
-  title: string;
-  tag: string;
+  titleKey: string;
+  tagKey: string;
   tagTone: 'good' | 'warn';
-  description: string;
+  descriptionKey: string;
   icon: typeof ShieldCheck;
 }> = [
   {
     value: 'hmac',
-    title: 'HMAC (firma)',
-    tag: 'Recomendado - mas seguro',
+    titleKey: 'triggers.form.authHmacTitulo',
+    tagKey: 'triggers.form.authHmacTag',
     tagTone: 'good',
-    description:
-      'Tu sistema firma cada peticion con un secreto. Si la URL se filtra, no alcanza para dispararlo.',
+    descriptionKey: 'triggers.form.authHmacDescripcion',
     icon: ShieldCheck,
   },
   {
     value: 'url_token',
-    title: 'Token en URL',
-    tag: 'Simple - menos seguro',
+    titleKey: 'triggers.form.authTokenTitulo',
+    tagKey: 'triggers.form.authTokenTag',
     tagTone: 'warn',
-    description:
-      'Un token viaja en la URL. Es facil de integrar, pero si la URL se filtra, cualquiera puede disparar el agente.',
+    descriptionKey: 'triggers.form.authTokenDescripcion',
     icon: Link2,
   },
 ];
@@ -70,6 +70,7 @@ export function TriggerFormDialog({
   onClose: () => void;
   onCreated: (result: CreateTriggerResponse) => void;
 }) {
+  const { t } = useTranslation();
   const { data: agents, isLoading: agentsLoading } = useAgents();
   const { data: credentials, isLoading: credentialsLoading } = useCredentials();
   const createTrigger = useCreateTrigger();
@@ -141,16 +142,16 @@ export function TriggerFormDialog({
         <div className="flex items-start justify-between gap-4 border-b border-line-soft px-6 py-5">
           <div>
             <h2 id="trigger-form-title" className="font-display text-lg font-bold text-ink">
-              Crear trigger
+              {t('triggers.crearTrigger')}
             </h2>
             <p className="mt-1 text-sm text-muted">
-              Una URL de webhook que ejecuta tu agente cuando un evento externo la llama.
+              {t('triggers.form.subtitulo')}
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Cerrar"
+            aria-label={t('triggers.form.cerrarAria')}
             className="flex h-8 w-8 flex-none items-center justify-center rounded-lg text-muted transition hover:bg-line-soft hover:text-ink"
           >
             <X className="h-[18px] w-[18px]" />
@@ -169,14 +170,14 @@ export function TriggerFormDialog({
 
           {noAgents ? (
             <div className="rounded-xl border border-line bg-field px-4 py-3 text-sm text-muted">
-              Primero necesitas un agente.{' '}
+              {t('triggers.form.sinAgentes')}{' '}
               <Link to="/agentes" className="font-medium text-brasa hover:underline">
-                Crea uno en Agentes
+                {t('triggers.form.sinAgentesLink')}
               </Link>
               .
             </div>
           ) : (
-            <Field label="Agente" error={errors.agentId}>
+            <Field label={t('triggers.form.agenteLabel')} error={errors.agentId}>
               <select
                 ref={agentRef}
                 value={agentId}
@@ -185,7 +186,7 @@ export function TriggerFormDialog({
                 disabled={agentsLoading}
               >
                 <option value="">
-                  {agentsLoading ? 'Cargando agentes...' : 'Elige un agente...'}
+                  {agentsLoading ? t('triggers.form.cargandoAgentes') : t('triggers.form.eligeAgente')}
                 </option>
                 {agents?.map((agent) => (
                   <option key={agent.id} value={agent.id}>
@@ -196,19 +197,19 @@ export function TriggerFormDialog({
             </Field>
           )}
 
-          <Field label="Credencial" error={errors.credentialId}>
+          <Field label={t('triggers.form.credencialLabel')} error={errors.credentialId}>
             {(field) =>
               !selectedAgent ? (
                 <div className="rounded-xl border border-line bg-field px-4 py-3 text-sm text-muted">
-                  Elige primero un agente para ver sus credenciales.
+                  {t('triggers.form.eligePrimeroAgente')}
                 </div>
               ) : credentialsLoading ? (
                 <div className="h-11 animate-pulse rounded-xl border border-line bg-field" />
               ) : compatible.length === 0 ? (
                 <div className="rounded-xl border border-line bg-field px-4 py-3 text-sm text-muted">
-                  No tienes credenciales de {providerLabel(selectedAgent.providerId)}.{' '}
+                  {t('triggers.form.sinCredenciales', { proveedor: providerLabel(selectedAgent.providerId) })}{' '}
                   <Link to="/credenciales" className="font-medium text-brasa hover:underline">
-                    Agrega una en Credenciales
+                    {t('triggers.form.sinCredencialesLink')}
                   </Link>
                   .
                 </div>
@@ -222,7 +223,7 @@ export function TriggerFormDialog({
                   }}
                   className={inputClass}
                 >
-                  <option value="">Elige una credencial...</option>
+                  <option value="">{t('triggers.form.eligeCredencial')}</option>
                   {compatible.map((cred) => (
                     <option key={cred.id} value={cred.id}>
                       {cred.label}
@@ -234,9 +235,9 @@ export function TriggerFormDialog({
           </Field>
 
           <Field
-            label="Mensaje base"
+            label={t('triggers.form.mensajeLabel')}
             error={errors.message}
-            hint="El agente ejecutara este mensaje al dispararse. El evento entrante puede sumar sus datos (cuerpo JSON) como contexto extra."
+            hint={t('triggers.form.mensajeHint')}
           >
             <textarea
               value={message}
@@ -245,13 +246,13 @@ export function TriggerFormDialog({
                 setErrors((prev) => ({ ...prev, message: undefined }));
               }}
               className={`${inputClass} min-h-[96px] resize-y`}
-              placeholder="Procesa el evento entrante y registra un resumen."
+              placeholder={t('triggers.form.mensajePlaceholder')}
               maxLength={10000}
             />
           </Field>
 
           <fieldset>
-            <legend className="mb-2 block text-sm font-medium text-ink">Modo de autenticacion</legend>
+            <legend className="mb-2 block text-sm font-medium text-ink">{t('triggers.form.modoAuthLegend')}</legend>
             <div className="space-y-2.5">
               {AUTH_OPTIONS.map((option) => {
                 const selected = authMode === option.value;
@@ -277,7 +278,7 @@ export function TriggerFormDialog({
                       <span className="flex flex-wrap items-center gap-2">
                         <span className="inline-flex items-center gap-1.5 font-display text-sm font-bold text-ink">
                           <option.icon className="h-4 w-4 text-muted" />
-                          {option.title}
+                          {t(option.titleKey)}
                         </span>
                         <span
                           className={[
@@ -287,11 +288,11 @@ export function TriggerFormDialog({
                               : 'bg-[#FBF3D9] text-[#7A5600]',
                           ].join(' ')}
                         >
-                          {option.tag}
+                          {t(option.tagKey)}
                         </span>
                       </span>
                       <span className="mt-1 block text-xs leading-relaxed text-muted">
-                        {option.description}
+                        {t(option.descriptionKey)}
                       </span>
                     </span>
                   </label>
@@ -311,7 +312,7 @@ export function TriggerFormDialog({
               onClick={onClose}
               className="rounded-[10px] border border-line bg-surface px-4 py-2.5 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
             >
-              Cancelar
+              {t('triggers.comunes.cancelar')}
             </button>
             <button
               type="submit"
@@ -319,7 +320,7 @@ export function TriggerFormDialog({
               className="inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-2.5 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
               {createTrigger.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              {createTrigger.isPending ? 'Creando...' : 'Crear trigger'}
+              {createTrigger.isPending ? t('triggers.form.creando') : t('triggers.crearTrigger')}
             </button>
           </div>
         </form>

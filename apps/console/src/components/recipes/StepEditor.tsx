@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
 import { addStep, moveStep, removeStep, updateStep, RECIPE_STEP_MAX } from '../../lib/recipes';
 import { inputClass } from '../ui/Field';
@@ -26,18 +27,19 @@ export function StepEditor({
   error?: string;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   const single = steps.length === 1;
 
   return (
     <div>
       <div className="flex items-center justify-between">
         <label className="block text-sm font-medium text-ink" id="recipe-steps-label">
-          Pasos
+          {t('recetas.pasos.label')}
         </label>
-        <span className="text-xs text-muted">{steps.length} paso{steps.length === 1 ? '' : 's'}</span>
+        <span className="text-xs text-muted">{t('recetas.pasosContador', { count: steps.length })}</span>
       </div>
       <p className="mb-2.5 mt-1 text-xs text-muted">
-        Se ejecutan en orden, de arriba hacia abajo. El resultado de cada paso alimenta al siguiente.
+        {t('recetas.pasos.descripcion')}
       </p>
 
       <ol className="space-y-3" aria-labelledby="recipe-steps-label">
@@ -51,14 +53,14 @@ export function StepEditor({
             >
               <div className="mb-2 flex items-center justify-between gap-2">
                 <label htmlFor={stepId} className="text-[13px] font-semibold text-ink">
-                  Paso {position}
+                  {t('recetas.pasos.pasoN', { numero: position })}
                 </label>
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
                     onClick={() => onChange(moveStep(steps, index, -1))}
                     disabled={disabled || index === 0}
-                    aria-label={`Subir paso ${position}`}
+                    aria-label={t('recetas.pasos.subirAria', { numero: position })}
                     className="flex h-7 w-7 items-center justify-center rounded-md border border-line bg-surface text-muted transition hover:border-brasa-line hover:text-brasa disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <ArrowUp className="h-4 w-4" />
@@ -67,7 +69,7 @@ export function StepEditor({
                     type="button"
                     onClick={() => onChange(moveStep(steps, index, 1))}
                     disabled={disabled || index === steps.length - 1}
-                    aria-label={`Bajar paso ${position}`}
+                    aria-label={t('recetas.pasos.bajarAria', { numero: position })}
                     className="flex h-7 w-7 items-center justify-center rounded-md border border-line bg-surface text-muted transition hover:border-brasa-line hover:text-brasa disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <ArrowDown className="h-4 w-4" />
@@ -76,8 +78,8 @@ export function StepEditor({
                     type="button"
                     onClick={() => onChange(removeStep(steps, index))}
                     disabled={disabled || single}
-                    aria-label={`Eliminar paso ${position}`}
-                    title={single ? 'Una receta necesita al menos un paso' : undefined}
+                    aria-label={t('recetas.pasos.eliminarAria', { numero: position })}
+                    title={single ? t('recetas.pasos.minimoTitle') : undefined}
                     className="flex h-7 w-7 items-center justify-center rounded-md border border-line bg-surface text-muted transition hover:border-[rgba(192,73,43,0.35)] hover:bg-[rgba(192,73,43,0.05)] hover:text-[#C0492B] disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -92,8 +94,8 @@ export function StepEditor({
                 className={`${inputClass} min-h-[76px] resize-y`}
                 placeholder={
                   index === 0
-                    ? 'Ej: Busca los pedidos pendientes de hoy y resume su estado.'
-                    : 'Ej: Con ese resumen, redacta un borrador de respuesta.'
+                    ? t('recetas.pasos.placeholderPrimero')
+                    : t('recetas.pasos.placeholderSiguiente')
                 }
                 maxLength={RECIPE_STEP_MAX}
               />
@@ -109,7 +111,7 @@ export function StepEditor({
         className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border-[1.5px] border-dashed border-line py-2.5 text-[13px] font-semibold text-muted transition hover:border-brasa-line hover:bg-brasa/[0.03] hover:text-brasa disabled:cursor-not-allowed disabled:opacity-60"
       >
         <Plus className="h-4 w-4" />
-        Agregar paso
+        {t('recetas.pasos.agregar')}
       </button>
 
       {error && (

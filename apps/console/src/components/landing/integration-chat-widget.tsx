@@ -1,4 +1,5 @@
 import { type CSSProperties, type JSX, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Activity,
   AlertTriangle,
@@ -51,7 +52,8 @@ import { cn } from '../../lib/utils';
 type AgentKey = 'sales' | 'ap' | 'ops' | 'support';
 
 interface Agent {
-  name: string;
+  /** Clave i18n del nombre visible del agente. */
+  nameKey: string;
   icon: LucideIcon;
   /** Valor para `--widget-accent`: un color CSS completo (no canales RGB sueltos). */
   accent: string;
@@ -59,25 +61,30 @@ interface Agent {
 
 /**
  * Mensaje del guion. El motor inserta el indicador de "escribiendo" antes de cada respuesta
- * de texto o tarjeta del agente, asi que el guion solo declara el contenido. La alerta de
- * Operaciones es la excepcion: entra sin "escribiendo" porque es una salida proactiva.
+ * de texto o tarjeta del agente, asi que el guion solo declara el contenido (`textKey` es la
+ * clave i18n del texto). La alerta de Operaciones es la excepcion: entra sin "escribiendo"
+ * porque es una salida proactiva.
  */
 type ScriptMessage =
-  | { kind: 'user'; text: string }
-  | { kind: 'agent'; text: string }
+  | { kind: 'user'; textKey: string }
+  | { kind: 'agent'; textKey: string }
   | { kind: 'report' }
   | { kind: 'validation' }
   | { kind: 'alert' };
 
 const AGENTS: Record<AgentKey, Agent> = {
   // Sales Analysis: azul LOCAL del widget (no es token de marca; vive solo aqui).
-  sales: { name: 'Sales Analysis', icon: LineChart, accent: '#2D6FB3' },
+  sales: { nameKey: 'landing.chatWidget.agentes.ventas', icon: LineChart, accent: '#2D6FB3' },
   // Facturacion: verde LOCAL del widget.
-  ap: { name: 'Facturación', icon: FileCheck, accent: '#2F855A' },
+  ap: { nameKey: 'landing.chatWidget.agentes.facturacion', icon: FileCheck, accent: '#2F855A' },
   // Operaciones: morado LOCAL del widget.
-  ops: { name: 'Operaciones', icon: Activity, accent: '#6D4AB8' },
+  ops: { nameKey: 'landing.chatWidget.agentes.operaciones', icon: Activity, accent: '#6D4AB8' },
   // Customer Success: reusa el acento de marca del tema claro (brasa).
-  support: { name: 'Customer Success', icon: Headphones, accent: 'rgb(var(--ll-accent))' }
+  support: {
+    nameKey: 'landing.chatWidget.agentes.customerSuccess',
+    icon: Headphones,
+    accent: 'rgb(var(--ll-accent))'
+  }
 };
 
 /** Orden del ciclo: arranca en Sales Analysis y termina en Customer Success, luego repite. */
@@ -85,60 +92,36 @@ const AGENT_ORDER: readonly AgentKey[] = ['sales', 'ap', 'ops', 'support'];
 
 const SCRIPTS: Record<AgentKey, readonly ScriptMessage[]> = {
   sales: [
-    { kind: 'user', text: 'Dame el análisis de ventas del último trimestre.' },
+    { kind: 'user', textKey: 'landing.chatWidget.guiones.ventas.usuario1' },
     { kind: 'report' },
-    { kind: 'user', text: '¿Qué explica la caída de octubre?' },
-    {
-      kind: 'agent',
-      text: 'El quiebre de stock en la categoría estrella (12 días sin inventario) y menor tráfico tras la promoción. Sin ese quiebre, octubre habría cerrado en ~$2.1M.'
-    },
-    { kind: 'user', text: '¿Y la proyección del próximo trimestre?' },
-    {
-      kind: 'agent',
-      text: 'Proyecto $7.4M (intervalo 95%: $6.9M–$7.9M). El mayor riesgo sigue siendo el inventario de la categoría estrella.'
-    }
+    { kind: 'user', textKey: 'landing.chatWidget.guiones.ventas.usuario2' },
+    { kind: 'agent', textKey: 'landing.chatWidget.guiones.ventas.agente1' },
+    { kind: 'user', textKey: 'landing.chatWidget.guiones.ventas.usuario3' },
+    { kind: 'agent', textKey: 'landing.chatWidget.guiones.ventas.agente2' }
   ],
   ap: [
-    { kind: 'user', text: 'Procesa esta factura y valídala.' },
+    { kind: 'user', textKey: 'landing.chatWidget.guiones.facturacion.usuario1' },
     { kind: 'validation' },
-    { kind: 'user', text: '¿El duplicado es real?' },
-    {
-      kind: 'agent',
-      text: 'Sí: mismo proveedor y monto que el folio A-1182 del 03 de junio. Te recomiendo no pagar A-1207 hasta confirmarlo. ¿La marco en revisión?'
-    },
-    { kind: 'user', text: 'Márcala.' },
-    {
-      kind: 'agent',
-      text: 'Hecho. La factura A-1207 quedó en revisión y notifiqué al responsable de pagos.'
-    }
+    { kind: 'user', textKey: 'landing.chatWidget.guiones.facturacion.usuario2' },
+    { kind: 'agent', textKey: 'landing.chatWidget.guiones.facturacion.agente1' },
+    { kind: 'user', textKey: 'landing.chatWidget.guiones.facturacion.usuario3' },
+    { kind: 'agent', textKey: 'landing.chatWidget.guiones.facturacion.agente2' }
   ],
   ops: [
-    { kind: 'agent', text: 'Revisé los pagos de hoy y encontré algo que necesita tu atención.' },
+    { kind: 'agent', textKey: 'landing.chatWidget.guiones.operaciones.agente1' },
     { kind: 'alert' },
-    { kind: 'user', text: '¿Qué recomiendas?' },
-    {
-      kind: 'agent',
-      text: 'Retener el segundo pago (folio A-1207) hasta aclarar con el proveedor. Ya preparé la nota de aclaración. ¿La envío?'
-    },
-    { kind: 'user', text: 'Sí, adelante.' },
-    {
-      kind: 'agent',
-      text: 'Listo. Retuve el pago y envié la aclaración. Te aviso en cuanto el proveedor responda.'
-    }
+    { kind: 'user', textKey: 'landing.chatWidget.guiones.operaciones.usuario1' },
+    { kind: 'agent', textKey: 'landing.chatWidget.guiones.operaciones.agente2' },
+    { kind: 'user', textKey: 'landing.chatWidget.guiones.operaciones.usuario2' },
+    { kind: 'agent', textKey: 'landing.chatWidget.guiones.operaciones.agente3' }
   ],
   support: [
-    { kind: 'user', text: '¿Dónde reviso el estatus de mi pedido?' },
-    {
-      kind: 'agent',
-      text: 'Tu pedido va en camino y llega mañana. Te comparto la guía de rastreo y el detalle de la orden.'
-    },
-    { kind: 'user', text: '¿Puedo cambiar la dirección de entrega?' },
-    {
-      kind: 'agent',
-      text: 'Claro. Actualicé la dirección a tu nueva sucursal y la paquetería ya lo confirmó.'
-    },
-    { kind: 'user', text: 'Perfecto, gracias.' },
-    { kind: 'agent', text: 'Para eso estoy. ¿Algo más en lo que te pueda ayudar?' }
+    { kind: 'user', textKey: 'landing.chatWidget.guiones.customerSuccess.usuario1' },
+    { kind: 'agent', textKey: 'landing.chatWidget.guiones.customerSuccess.agente1' },
+    { kind: 'user', textKey: 'landing.chatWidget.guiones.customerSuccess.usuario2' },
+    { kind: 'agent', textKey: 'landing.chatWidget.guiones.customerSuccess.agente2' },
+    { kind: 'user', textKey: 'landing.chatWidget.guiones.customerSuccess.usuario3' },
+    { kind: 'agent', textKey: 'landing.chatWidget.guiones.customerSuccess.agente3' }
   ]
 };
 
@@ -154,37 +137,37 @@ const STATE = {
 } as const;
 
 /** KPIs de la tarjeta de analisis (delta hacia arriba en verde, hacia abajo en rojo). */
-const REPORT_KPIS: readonly { value: string; label: string; delta: string; trend: 'up' | 'down' }[] = [
-  { value: '$6.2M', label: 'Ventas totales', delta: '▲ 18% vs Q2', trend: 'up' },
-  { value: '$3,840', label: 'Ticket promedio', delta: '▲ 6%', trend: 'up' },
-  { value: '3.1%', label: 'Conversión', delta: '▼ 0.4 pts', trend: 'down' }
+const REPORT_KPIS: readonly { value: string; labelKey: string; delta: string; trend: 'up' | 'down' }[] = [
+  { value: '$6.2M', labelKey: 'landing.chatWidget.reporte.kpis.ventasTotales', delta: '▲ 18% vs Q2', trend: 'up' },
+  { value: '$3,840', labelKey: 'landing.chatWidget.reporte.kpis.ticketPromedio', delta: '▲ 6%', trend: 'up' },
+  { value: '3.1%', labelKey: 'landing.chatWidget.reporte.kpis.conversion', delta: '▼ 0.4 pts', trend: 'down' }
 ];
 
 /** Mini-grafica: alto de cada barra en % del area (Jul, Ago, Oct, Nov, Dic). */
-const REPORT_BARS: readonly { label: string; height: number }[] = [
-  { label: 'Jul', height: 62 },
-  { label: 'Ago', height: 48 },
-  { label: 'Oct', height: 38 },
-  { label: 'Nov', height: 78 },
-  { label: 'Dic', height: 100 }
+const REPORT_BARS: readonly { labelKey: string; height: number }[] = [
+  { labelKey: 'landing.chatWidget.reporte.meses.jul', height: 62 },
+  { labelKey: 'landing.chatWidget.reporte.meses.ago', height: 48 },
+  { labelKey: 'landing.chatWidget.reporte.meses.oct', height: 38 },
+  { labelKey: 'landing.chatWidget.reporte.meses.nov', height: 78 },
+  { labelKey: 'landing.chatWidget.reporte.meses.dic', height: 100 }
 ];
 
 /** Datos extraidos de la factura (tarjeta de validacion de Facturacion). */
-const VALIDATION_FIELDS: readonly { label: string; value: string }[] = [
-  { label: 'Proveedor', value: 'Aceros del Norte' },
-  { label: 'RFC', value: 'ANO080514QF2' },
-  { label: 'Folio', value: 'A-1207' },
-  { label: 'Subtotal', value: '$41,552.00' },
-  { label: 'IVA 16%', value: '$6,648.00' },
-  { label: 'Total', value: '$48,200.00' }
+const VALIDATION_FIELDS: readonly { labelKey: string; value: string }[] = [
+  { labelKey: 'landing.chatWidget.validacion.campos.proveedor', value: 'Aceros del Norte' },
+  { labelKey: 'landing.chatWidget.validacion.campos.rfc', value: 'ANO080514QF2' },
+  { labelKey: 'landing.chatWidget.validacion.campos.folio', value: 'A-1207' },
+  { labelKey: 'landing.chatWidget.validacion.campos.subtotal', value: '$41,552.00' },
+  { labelKey: 'landing.chatWidget.validacion.campos.iva', value: '$6,648.00' },
+  { labelKey: 'landing.chatWidget.validacion.campos.total', value: '$48,200.00' }
 ];
 
 /** Checklist de validacion: tres en orden y un aviso (posible duplicado). */
-const VALIDATION_CHECKS: readonly { text: string; status: 'ok' | 'warn' }[] = [
-  { text: 'RFC válido ante el SAT', status: 'ok' },
-  { text: 'Monto coincide con la OC-4471', status: 'ok' },
-  { text: 'IVA del 16% correcto', status: 'ok' },
-  { text: 'Posible duplicado: folio A-1182 el 03/jun', status: 'warn' }
+const VALIDATION_CHECKS: readonly { textKey: string; status: 'ok' | 'warn' }[] = [
+  { textKey: 'landing.chatWidget.validacion.checks.rfcValido', status: 'ok' },
+  { textKey: 'landing.chatWidget.validacion.checks.montoCoincide', status: 'ok' },
+  { textKey: 'landing.chatWidget.validacion.checks.ivaCorrecto', status: 'ok' },
+  { textKey: 'landing.chatWidget.validacion.checks.posibleDuplicado', status: 'warn' }
 ];
 
 /** Tiempos del motor (en ms). Mismo ritmo natural del mockup. */
@@ -262,22 +245,24 @@ function TypingIndicator(): JSX.Element {
  * (azul mientras corre Sales Analysis, que es cuando aparece la tarjeta).
  */
 function ReportCard(): JSX.Element {
+  const { t } = useTranslation();
+
   return (
     <div className="mr-auto w-[94%] rounded-2xl rounded-bl-sm border border-border bg-background p-4 shadow-sm motion-safe:[animation:cw-pop_0.4s_ease_both]">
       <div className="mb-3 flex items-center gap-2 font-jetbrains text-[10px] uppercase tracking-[0.08em] text-foreground-secondary">
         <span style={accentSoftStyle} className="rounded-full border px-2 py-0.5">
           Q3 2026
         </span>
-        Análisis de ventas · 3 meses
+        {t('landing.chatWidget.reporte.etiqueta')}
       </div>
 
       <div className="mb-3.5 grid grid-cols-3 gap-2.5">
         {REPORT_KPIS.map((kpi) => (
-          <div key={kpi.label}>
+          <div key={kpi.labelKey}>
             <div className="font-display text-lg font-extrabold leading-none tracking-tight text-foreground">
               {kpi.value}
             </div>
-            <div className="mt-1 text-[11px] text-foreground-secondary">{kpi.label}</div>
+            <div className="mt-1 text-[11px] text-foreground-secondary">{t(kpi.labelKey)}</div>
             <div
               className="mt-1 font-jetbrains text-[10px] font-medium"
               style={{ color: kpi.trend === 'up' ? STATE.ok : STATE.bad }}
@@ -293,7 +278,7 @@ function ReportCard(): JSX.Element {
         <div className="flex h-[68px] items-end gap-2">
           {REPORT_BARS.map((bar, index) => (
             <div
-              key={bar.label}
+              key={bar.labelKey}
               style={{
                 ...accentSurfaceStyle,
                 height: `${bar.height}%`,
@@ -308,10 +293,10 @@ function ReportCard(): JSX.Element {
         <div className="mt-1.5 flex gap-2">
           {REPORT_BARS.map((bar) => (
             <div
-              key={bar.label}
+              key={bar.labelKey}
               className="flex-1 text-center font-jetbrains text-[9px] text-foreground-secondary"
             >
-              {bar.label}
+              {t(bar.labelKey)}
             </div>
           ))}
         </div>
@@ -327,20 +312,22 @@ function ReportCard(): JSX.Element {
  * usan la paleta de estado del widget (verde ok / ambar aviso).
  */
 function ValidationCard(): JSX.Element {
+  const { t } = useTranslation();
+
   return (
     <div className="mr-auto w-[94%] rounded-2xl rounded-bl-sm border border-border bg-background p-4 shadow-sm motion-safe:[animation:cw-pop_0.4s_ease_both]">
       <div className="mb-3 flex items-center gap-2 font-jetbrains text-[10px] uppercase tracking-[0.08em] text-foreground-secondary">
         <span style={accentSoftStyle} className="rounded-full border px-2 py-0.5">
-          Factura · CFDI
+          {t('landing.chatWidget.validacion.pill')}
         </span>
-        Datos extraídos y validados
+        {t('landing.chatWidget.validacion.etiqueta')}
       </div>
 
       <div className="mb-3.5 grid grid-cols-3 gap-x-3 gap-y-2.5">
         {VALIDATION_FIELDS.map((field) => (
-          <div key={field.label} className="flex flex-col">
+          <div key={field.labelKey} className="flex flex-col">
             <span className="font-jetbrains text-[9.5px] uppercase tracking-[0.04em] text-foreground-secondary">
-              {field.label}
+              {t(field.labelKey)}
             </span>
             <span className="mt-0.5 text-[13px] font-semibold text-foreground">{field.value}</span>
           </div>
@@ -352,7 +339,7 @@ function ValidationCard(): JSX.Element {
           const CheckIcon = check.status === 'ok' ? Check : AlertTriangle;
           return (
             <div
-              key={check.text}
+              key={check.textKey}
               className={cn(
                 'flex items-start gap-2 text-[12.5px] leading-snug',
                 check.status === 'ok' ? 'text-foreground-secondary' : 'text-foreground'
@@ -364,7 +351,7 @@ function ValidationCard(): JSX.Element {
                 strokeWidth={check.status === 'ok' ? 3 : 2.4}
                 aria-hidden="true"
               />
-              {check.text}
+              {t(check.textKey)}
             </div>
           );
         })}
@@ -379,6 +366,8 @@ function ValidationCard(): JSX.Element {
  * acento del agente.
  */
 function AlertCard(): JSX.Element {
+  const { t } = useTranslation();
+
   return (
     <div
       className="mr-auto flex w-[94%] gap-3 rounded-2xl rounded-bl-sm border p-3.5 motion-safe:[animation:cw-pop_0.4s_ease_both]"
@@ -395,11 +384,10 @@ function AlertCard(): JSX.Element {
       />
       <div>
         <div className="mb-0.5 font-display text-sm font-bold text-foreground">
-          Cargo duplicado detectado
+          {t('landing.chatWidget.alerta.titulo')}
         </div>
         <div className="text-[13px] leading-snug text-foreground-secondary">
-          Aceros del Norte facturó dos veces la OC-4471 (folios A-1182 y A-1207). Riesgo de doble
-          pago: $48,200.
+          {t('landing.chatWidget.alerta.detalle')}
         </div>
       </div>
     </div>
@@ -408,20 +396,22 @@ function AlertCard(): JSX.Element {
 
 /** Una entrada del cuerpo del chat segun su tipo (usuario / agente texto / tarjetas). */
 function ChatItem({ item }: { item: ScriptMessage }): JSX.Element {
+  const { t } = useTranslation();
+
   if (item.kind === 'user') {
     return (
       <div
         style={accentSurfaceStyle}
         className="ml-auto max-w-[84%] rounded-2xl rounded-br-sm px-3.5 py-2.5 text-sm font-medium text-white motion-safe:[animation:cw-pop_0.35s_ease_both]"
       >
-        {item.text}
+        {t(item.textKey)}
       </div>
     );
   }
   if (item.kind === 'agent') {
     return (
       <div className="mr-auto max-w-[84%] rounded-2xl rounded-bl-sm border border-border bg-background-tertiary px-3.5 py-2.5 text-sm text-foreground-secondary motion-safe:[animation:cw-pop_0.35s_ease_both]">
-        {item.text}
+        {t(item.textKey)}
       </div>
     );
   }
@@ -435,6 +425,7 @@ function ChatItem({ item }: { item: ScriptMessage }): JSX.Element {
  * de acento, animaciones, disparo por viewport y movimiento reducido.
  */
 export function IntegrationChatWidget(): JSX.Element {
+  const { t } = useTranslation();
   // Se calcula una vez al montar: define si animamos o mostramos el estado final estatico.
   const [reduceMotion] = useState(prefersReducedMotion);
 
@@ -518,7 +509,7 @@ export function IntegrationChatWidget(): JSX.Element {
         setTyping(true);
         await sleep(
           message.kind === 'agent'
-            ? typingDuration(message.text)
+            ? typingDuration(t(message.textKey))
             : CARD_TIMING[message.kind].typing
         );
         if (cancelled) return;
@@ -565,7 +556,7 @@ export function IntegrationChatWidget(): JSX.Element {
       cancelled = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [reduceMotion, started]);
+  }, [reduceMotion, started, t]);
 
   // Auto-scroll al ultimo mensaje mientras la conversacion avanza (no en estatico).
   useEffect(() => {
@@ -595,13 +586,13 @@ export function IntegrationChatWidget(): JSX.Element {
         >
           <AgentIcon className="h-[18px] w-[18px]" />
         </span>
-        <span className="font-display text-sm font-semibold text-foreground">{agent.name}</span>
+        <span className="font-display text-sm font-semibold text-foreground">{t(agent.nameKey)}</span>
         <span className="ml-auto inline-flex items-center gap-1.5 font-jetbrains text-[10px] uppercase tracking-[0.06em] text-success">
           <span
             className="h-1.5 w-1.5 rounded-full bg-success shadow-[0_0_7px_rgba(16,185,129,0.6)]"
             aria-hidden="true"
           />
-          En línea
+          {t('landing.chatWidget.enLinea')}
         </span>
       </div>
 
@@ -614,11 +605,11 @@ export function IntegrationChatWidget(): JSX.Element {
 
       <div className="flex items-center gap-2 border-t border-border p-3">
         <div className="flex-1 rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm text-foreground-secondary/60">
-          Escribe tu mensaje
+          {t('landing.chatWidget.escribeTuMensaje')}
         </div>
         <button
           type="button"
-          aria-label="Enviar mensaje"
+          aria-label={t('landing.chatWidget.enviarMensajeAria')}
           style={accentSurfaceStyle}
           className="flex h-10 w-10 flex-none items-center justify-center rounded-xl text-white transition-colors duration-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background-secondary"
         >

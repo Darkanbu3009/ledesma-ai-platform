@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { CheckCircle2, Download, RefreshCw } from 'lucide-react';
 import { apiFetch } from '../lib/api';
@@ -8,8 +9,6 @@ import { Field, inputClass } from '../components/ui/Field';
 import { focusRing } from '../lib/utils';
 import {
   DATA_REQUEST_OPTIONS,
-  requestStatusLabel,
-  requestTypeLabel,
   type DataRequest,
   type DataRequestStatus,
   type DataRequestType,
@@ -17,12 +16,13 @@ import {
 
 const MAX_DETAILS = 5_000;
 
-/** Los tres pasos de la tarjeta "QUE SIGUE AL ENVIAR". Sin folio: la solicitud no muestra un
- * identificador al titular (el historial identifica por tipo + fecha), asi que el paso 01 no lo promete. */
+/** Los tres pasos de la tarjeta "QUE SIGUE AL ENVIAR" (claves de traduccion). Sin folio: la solicitud
+ * no muestra un identificador al titular (el historial identifica por tipo + fecha), asi que el paso
+ * 01 no lo promete. */
 const PASOS_ENVIO = [
-  'Tu solicitud queda registrada con fecha.',
-  'La atendemos conforme a los plazos de ley.',
-  'Ves la resolucion aqui, en tu historial.',
+  'privacidad.derechos.pasos.paso1',
+  'privacidad.derechos.pasos.paso2',
+  'privacidad.derechos.pasos.paso3',
 ] as const;
 
 const statusClass: Record<DataRequestStatus, string> = {
@@ -33,6 +33,7 @@ const statusClass: Record<DataRequestStatus, string> = {
 };
 
 function StatusBadge({ status }: { status: DataRequestStatus }) {
+  const { t } = useTranslation();
   return (
     <span
       className={[
@@ -40,23 +41,26 @@ function StatusBadge({ status }: { status: DataRequestStatus }) {
         statusClass[status],
       ].join(' ')}
     >
-      {requestStatusLabel(status)}
+      {t(`privacidad.solicitudes.estado.${status}`)}
     </span>
   );
 }
 
 function RequestRow({ request }: { request: DataRequest }) {
+  const { t } = useTranslation();
   return (
     <li className="rounded-2xl border border-line bg-surface p-4 shadow-card">
       <div className="flex items-center justify-between gap-3">
         <span className="font-display text-sm font-bold text-ink">
-          {requestTypeLabel(request.requestType)}
+          {t(`privacidad.solicitudes.tipo.${request.requestType}`)}
         </span>
         <StatusBadge status={request.status} />
       </div>
       {request.details && <p className="mt-2 text-sm text-muted">{request.details}</p>}
       <p className="mt-2 text-xs text-muted-soft">
-        Enviada el {new Date(request.createdAt).toLocaleDateString()}
+        {t('privacidad.derechos.historial.enviadaEl', {
+          fecha: new Date(request.createdAt).toLocaleDateString(),
+        })}
         {request.resolutionNote ? ` - ${request.resolutionNote}` : ''}
       </p>
     </li>
@@ -74,6 +78,7 @@ function RequestRow({ request }: { request: DataRequest }) {
  * (ver INTEGRAL_NOTICE en lib/privacy.ts).
  */
 export function PrivacyRightsPage() {
+  const { t } = useTranslation();
   const { data: requests, isLoading, isError, refetch } = useDataRequests();
   const createRequest = useCreateDataRequest();
 
@@ -90,7 +95,7 @@ export function PrivacyRightsPage() {
       {
         onSuccess: () => {
           setDetails('');
-          setNotice('Solicitud enviada. Le daremos seguimiento.');
+          setNotice(t('privacidad.derechos.noticeEnviada'));
         },
       },
     );
@@ -123,10 +128,10 @@ export function PrivacyRightsPage() {
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
         <div className="max-w-[520px]">
           <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">
-            Privacidad y tus datos
+            {t('privacidad.derechos.titulo')}
           </h1>
           <p className="mt-1.5 text-[13.5px] leading-[1.55] text-[#8A8880]">
-            Tus datos son tuyos. Aqui los consultas, los corriges o los eliminas.
+            {t('privacidad.derechos.subtitulo')}
           </p>
         </div>
         <span className="flex-none rounded-full border-[0.5px] border-[#E9E7DF] px-3 py-1 font-mono text-[11px] tracking-[0.06em] text-[#5F5E5A]">
@@ -140,9 +145,11 @@ export function PrivacyRightsPage() {
           onSubmit={handleSubmit}
           className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-5 shadow-card"
         >
-          <p className="font-display text-sm font-bold text-ink">Ejercer un derecho</p>
+          <p className="font-display text-sm font-bold text-ink">
+            {t('privacidad.derechos.formTitulo')}
+          </p>
           <fieldset>
-            <legend className="sr-only">Tipo de solicitud</legend>
+            <legend className="sr-only">{t('privacidad.derechos.tipoLegend')}</legend>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {DATA_REQUEST_OPTIONS.map((option) => (
                 <label
@@ -161,37 +168,44 @@ export function PrivacyRightsPage() {
                     onChange={() => setType(option.type)}
                     className="sr-only"
                   />
-                  <span className="block text-[13.5px] font-medium text-ink">{option.label}</span>
+                  <span className="block text-[13.5px] font-medium text-ink">
+                    {t(`privacidad.solicitudes.tipo.${option.type}`)}
+                  </span>
                   <span className="mt-0.5 block text-[12px] leading-[1.5] text-[#8A8880]">
-                    {option.description}
+                    {t(`privacidad.derechos.opciones.${option.type}`)}
                   </span>
                 </label>
               ))}
             </div>
           </fieldset>
-          <Field label="Detalle (opcional)" hint="Cuentanos que necesitas para atender tu solicitud.">
+          <Field
+            label={t('privacidad.derechos.detalleLabel')}
+            hint={t('privacidad.derechos.detalleHint')}
+          >
             <textarea
               value={details}
               onChange={(e) => setDetails(e.target.value.slice(0, MAX_DETAILS))}
               rows={3}
-              placeholder="Describe tu solicitud..."
+              placeholder={t('privacidad.derechos.detallePlaceholder')}
               className={inputClass}
             />
           </Field>
           {createRequest.isError && (
             <p className="text-sm text-brasa" role="alert">
-              No pudimos enviar tu solicitud. Intenta de nuevo.
+              {t('privacidad.derechos.errorEnviar')}
             </p>
           )}
           <div className="mt-auto flex flex-wrap items-center justify-between gap-3">
             {/* Sin "folio": el registro no muestra un identificador al titular. */}
-            <p className="text-[12px] text-[#8A8880]">Queda registrada y puedes seguirla abajo.</p>
+            <p className="text-[12px] text-[#8A8880]">{t('privacidad.derechos.registroNota')}</p>
             <button
               type="submit"
               disabled={createRequest.isPending}
               className={`inline-flex flex-none items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white transition hover:bg-brasa-hover disabled:opacity-60 ${focusRing}`}
             >
-              {createRequest.isPending ? 'Enviando...' : 'Enviar solicitud'}
+              {createRequest.isPending
+                ? t('privacidad.derechos.enviando')
+                : t('privacidad.derechos.enviar')}
             </button>
           </div>
         </form>
@@ -200,16 +214,17 @@ export function PrivacyRightsPage() {
         <div className="flex flex-col gap-3">
           <div className="rounded-2xl border border-line bg-surface p-5 shadow-card">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-[13.5px] font-medium text-ink">Tu copia, al instante</p>
+              <p className="text-[13.5px] font-medium text-ink">
+                {t('privacidad.derechos.descarga.titulo')}
+              </p>
               <Download className="h-[15px] w-[15px] flex-none text-[#8A8880]" aria-hidden />
             </div>
             <p className="mt-1.5 text-[12px] leading-[1.5] text-[#8A8880]">
-              Perfil, consentimientos, solicitudes y registros de tratamiento en un JSON. Sin
-              esperas ni solicitudes.
+              {t('privacidad.derechos.descarga.descripcion')}
             </p>
             {downloadError && (
               <p className="mt-1.5 text-[12px] text-brasa" role="alert">
-                No pudimos generar la exportacion. Intenta de nuevo.
+                {t('privacidad.derechos.descarga.error')}
               </p>
             )}
             <button
@@ -218,13 +233,15 @@ export function PrivacyRightsPage() {
               disabled={downloading}
               className={`mt-3 inline-flex w-full items-center justify-center gap-2 rounded-[10px] border border-line bg-field px-4 py-2.5 text-sm font-semibold text-ink transition hover:border-brasa disabled:opacity-60 ${focusRing}`}
             >
-              {downloading ? 'Preparando...' : 'Descargar mis datos'}
+              {downloading
+                ? t('privacidad.derechos.descarga.preparando')
+                : t('privacidad.derechos.descarga.descargar')}
             </button>
           </div>
 
           <div className="flex-1 rounded-2xl border border-line bg-[#FAF9F5] p-5">
             <p className="text-[11px] uppercase tracking-[0.06em] text-[#B4B2A9]">
-              Que sigue al enviar
+              {t('privacidad.derechos.pasos.titulo')}
             </p>
             <ol className="mt-3 space-y-2.5">
               {PASOS_ENVIO.map((paso, index) => (
@@ -232,7 +249,7 @@ export function PrivacyRightsPage() {
                   <span className="flex-none font-mono text-[11px] text-[#B4B2A9]">
                     {String(index + 1).padStart(2, '0')}
                   </span>
-                  <span className="text-[12px] leading-[1.5] text-[#5F5E5A]">{paso}</span>
+                  <span className="text-[12px] leading-[1.5] text-[#5F5E5A]">{t(paso)}</span>
                 </li>
               ))}
             </ol>
@@ -249,28 +266,33 @@ export function PrivacyRightsPage() {
 
       {/* Lista de solicitudes del titular. */}
       <div className="mt-8">
-        <h2 className="font-display text-lg font-bold text-ink">Tus solicitudes</h2>
+        <h2 className="font-display text-lg font-bold text-ink">
+          {t('privacidad.derechos.historial.titulo')}
+        </h2>
         {isLoading ? (
           <div className="mt-4 space-y-3">
             {[0, 1].map((i) => (
-              <div key={i} className="h-20 animate-pulse rounded-2xl border border-line bg-surface" />
+              <div
+                key={i}
+                className="h-20 animate-pulse rounded-2xl border border-line bg-surface"
+              />
             ))}
           </div>
         ) : isError ? (
           <div className="mt-4 rounded-2xl border border-line bg-surface p-6 text-center shadow-card">
-            <p className="text-sm text-muted">No pudimos cargar tus solicitudes.</p>
+            <p className="text-sm text-muted">{t('privacidad.derechos.historial.errorCargar')}</p>
             <button
               type="button"
               onClick={() => void refetch()}
               className="mt-3 inline-flex items-center gap-2 rounded-xl border border-line bg-field px-4 py-2 text-sm font-medium text-ink transition hover:border-brasa"
             >
               <RefreshCw className="h-4 w-4" />
-              Reintentar
+              {t('privacidad.reintentar')}
             </button>
           </div>
         ) : !hasRequests ? (
           <p className="mt-4 rounded-2xl border border-dashed border-line bg-surface p-6 text-center text-sm text-muted">
-            Aun no has enviado solicitudes.
+            {t('privacidad.derechos.historial.vacio')}
           </p>
         ) : (
           <ul className="mt-4 space-y-3">
@@ -282,11 +304,15 @@ export function PrivacyRightsPage() {
       </div>
 
       <p className="mt-8 text-sm text-muted">
-        Consulta el{' '}
-        <Link to="/aviso-de-privacidad" className="font-medium text-brasa hover:underline">
-          aviso de privacidad
-        </Link>{' '}
-        para conocer como tratamos tus datos.
+        <Trans
+          t={t}
+          i18nKey="privacidad.derechos.avisoFooter"
+          components={{
+            aviso: (
+              <Link to="/aviso-de-privacidad" className="font-medium text-brasa hover:underline" />
+            ),
+          }}
+        />
       </p>
     </div>
   );

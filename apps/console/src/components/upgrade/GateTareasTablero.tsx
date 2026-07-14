@@ -1,4 +1,5 @@
 import { Fragment } from 'react';
+import { useTranslation } from 'react-i18next';
 
 /**
  * Tablero semanal ESTATICO para el gate de Tareas programadas: prueba visual de "una semana asi"
@@ -11,30 +12,32 @@ import { Fragment } from 'react';
 
 type Marca = 'ejecutada' | 'corriendo' | 'programada' | null;
 
+// `label` guarda la CLAVE de traduccion del dia; se resuelve con t(...) en el render.
 const DIAS: { label: string; actual?: boolean; finde?: boolean }[] = [
-  { label: 'lun' },
-  { label: 'mar' },
-  { label: 'mié', actual: true },
-  { label: 'jue' },
-  { label: 'vie' },
-  { label: 'sab', finde: true },
-  { label: 'dom', finde: true },
+  { label: 'gates.tareas.dias.lun' },
+  { label: 'gates.tareas.dias.mar' },
+  { label: 'gates.tareas.dias.mie', actual: true },
+  { label: 'gates.tareas.dias.jue' },
+  { label: 'gates.tareas.dias.vie' },
+  { label: 'gates.tareas.dias.sab', finde: true },
+  { label: 'gates.tareas.dias.dom', finde: true },
 ];
 
+// `nombre` y `horario` guardan CLAVES de traduccion; se resuelven con t(...) en el render.
 const TAREAS: { nombre: string; horario: string; marcas: Marca[] }[] = [
   {
-    nombre: 'Reporte de ventas',
-    horario: 'dias habiles 7:30',
+    nombre: 'gates.tareas.tarea1Nombre',
+    horario: 'gates.tareas.tarea1Horario',
     marcas: ['ejecutada', 'ejecutada', 'corriendo', 'programada', 'programada', null, null],
   },
   {
-    nombre: 'Cierre de facturas',
-    horario: 'lunes 8:00',
+    nombre: 'gates.tareas.tarea2Nombre',
+    horario: 'gates.tareas.tarea2Horario',
     marcas: ['ejecutada', null, null, null, null, null, null],
   },
   {
-    nombre: 'Respaldo de datos',
-    horario: 'diario 23:00',
+    nombre: 'gates.tareas.tarea3Nombre',
+    horario: 'gates.tareas.tarea3Horario',
     marcas: [
       'ejecutada',
       'ejecutada',
@@ -53,13 +56,15 @@ const marcaClass: Record<Exclude<Marca, null>, string> = {
   programada: 'border border-[#D3D1C7]',
 };
 
+// `label` guarda la CLAVE de traduccion del item de leyenda; se resuelve con t(...) en el render.
 const LEYENDA: { label: string; marca: Exclude<Marca, null> }[] = [
-  { label: 'ejecutada', marca: 'ejecutada' },
-  { label: 'corriendo ahora', marca: 'corriendo' },
-  { label: 'programada', marca: 'programada' },
+  { label: 'gates.tareas.leyendaEjecutada', marca: 'ejecutada' },
+  { label: 'gates.tareas.leyendaCorriendo', marca: 'corriendo' },
+  { label: 'gates.tareas.leyendaProgramada', marca: 'programada' },
 ];
 
 export function GateTareasTablero() {
+  const { t } = useTranslation();
   return (
     <div
       aria-hidden="true"
@@ -69,7 +74,7 @@ export function GateTareasTablero() {
         <div className="grid min-w-[540px] grid-cols-[120px_repeat(7,minmax(0,1fr))] md:grid-cols-[170px_repeat(7,minmax(0,1fr))]">
           {/* Fila header: etiqueta + dias. Sab/dom llevan bg marfil en toda su columna. */}
           <div className="flex items-center border-b-[0.5px] border-[#F1EFE8] px-4 py-3 text-[11px] uppercase tracking-[0.07em] text-[#B4B2A9]">
-            Una semana asi
+            {t('gates.tareas.encabezado')}
           </div>
           {DIAS.map((dia) => (
             <div
@@ -78,7 +83,7 @@ export function GateTareasTablero() {
                 dia.finde ? 'bg-[#FAF9F5] text-[#B4B2A9]' : dia.actual ? 'font-medium text-ink' : 'text-[#5F5E5A]'
               }`}
             >
-              <span>{dia.label}</span>
+              <span>{t(dia.label)}</span>
               {dia.actual && <span className="mt-1 h-1 w-1 rounded-full bg-[#E5511E]" />}
             </div>
           ))}
@@ -89,9 +94,9 @@ export function GateTareasTablero() {
             return (
               <Fragment key={tarea.nombre}>
                 <div className={`flex min-w-0 flex-col justify-center px-4 py-3 ${borde}`}>
-                  <span className="truncate text-[12.5px] font-medium text-ink">{tarea.nombre}</span>
+                  <span className="truncate text-[12.5px] font-medium text-ink">{t(tarea.nombre)}</span>
                   <span className="hidden truncate font-mono text-[10.5px] text-[#8A8880] md:block">
-                    {tarea.horario}
+                    {t(tarea.horario)}
                   </span>
                 </div>
                 {DIAS.map((dia, col) => {
@@ -121,13 +126,11 @@ export function GateTareasTablero() {
           {LEYENDA.map((item) => (
             <span key={item.label} className="flex items-center gap-2 text-[11.5px] text-[#5F5E5A]">
               <span className={`h-[9px] w-[9px] flex-none rounded-[3px] ${marcaClass[item.marca]}`} />
-              {item.label}
+              {t(item.label)}
             </span>
           ))}
         </div>
-        <span className="font-mono text-[11.5px] text-[#8A8880]">
-          12 corridas esta semana, 0 fallos, 0 intervenciones
-        </span>
+        <span className="font-mono text-[11.5px] text-[#8A8880]">{t('gates.tareas.resumen')}</span>
       </div>
     </div>
   );

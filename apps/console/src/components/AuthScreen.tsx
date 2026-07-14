@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { BrandMark } from './BrandMark';
 
 /**
@@ -49,13 +50,14 @@ export function AuthScreen({ children, footer }: { children: ReactNode; footer?:
  */
 export function SubmitButton({
   pending = false,
-  pendingLabel = 'Enviando...',
+  pendingLabel,
   children,
 }: {
   pending?: boolean;
   pendingLabel?: string;
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
   return (
     <button
       type="submit"
@@ -68,7 +70,7 @@ export function SubmitButton({
             className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"
             aria-hidden="true"
           />
-          {pendingLabel}
+          {pendingLabel ?? t('auth.comun.enviando')}
         </span>
       ) : (
         children

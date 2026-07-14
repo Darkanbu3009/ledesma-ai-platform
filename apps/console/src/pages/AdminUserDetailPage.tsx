@@ -1,6 +1,7 @@
 import { type ReactNode, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Loader2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useAdminUser, useAdminUserActivity } from '../lib/queries';
 import { accountTypeLabel, formatUserDate, roleLabel, type AdminUserDetail } from '../lib/admin';
 import {
@@ -18,13 +19,14 @@ import { ChangeTierSection } from '../components/admin/ChangeTierSection';
 
 /** Enlace de regreso a la lista, arriba del encabezado. */
 function BackLink() {
+  const { t } = useTranslation();
   return (
     <Link
       to="/admin"
       className="inline-flex items-center gap-1.5 text-sm font-medium text-muted transition hover:text-brasa"
     >
       <ArrowLeft className="h-4 w-4" />
-      Volver a la lista
+      {t('admin.ficha.volver')}
     </Link>
   );
 }
@@ -51,51 +53,53 @@ function DataRow({ label, value }: { label: string; value: ReactNode }) {
 
 /** Badge Si/No para banderas booleanas (identidad verificada). */
 function BoolBadge({ value }: { value: boolean }) {
+  const { t } = useTranslation();
   return value ? (
     <span className="inline-flex items-center rounded-md border border-ok/30 bg-ok/10 px-2 py-0.5 text-xs font-medium text-ok">
-      Si
+      {t('admin.ficha.si')}
     </span>
   ) : (
     <span className="inline-flex items-center rounded-md border border-line bg-line-soft px-2 py-0.5 text-xs font-medium text-muted">
-      No
+      {t('admin.ficha.no')}
     </span>
   );
 }
 
 /** SECCION DATOS: perfil + email + suscripcion + uso. */
 function DataSection({ detail }: { detail: AdminUserDetail }) {
+  const { t } = useTranslation();
   const { profile, email, subscription, usageCounter } = detail;
   return (
     <section>
-      <SectionHeading title="Datos" description="Perfil, suscripcion y uso del usuario." />
+      <SectionHeading title={t('admin.ficha.datosTitulo')} description={t('admin.ficha.datosDescripcion')} />
       <div className="rounded-2xl border border-line bg-surface p-5 shadow-card">
         <dl>
-          <DataRow label="Nombre" value={profile.fullName || 'Sin nombre'} />
-          <DataRow label="Email" value={email ?? 'Sin email'} />
-          <DataRow label="Tipo de cuenta" value={accountTypeLabel(profile.accountType)} />
-          <DataRow label="Rol" value={roleLabel(profile.role)} />
-          <DataRow label="Identidad verificada" value={<BoolBadge value={profile.identityVerified} />} />
-          <DataRow label="Registro" value={formatUserDate(profile.createdAt)} />
+          <DataRow label={t('admin.ficha.nombre')} value={profile.fullName || t('admin.comun.sinNombre')} />
+          <DataRow label={t('admin.ficha.email')} value={email ?? t('admin.comun.sinEmail')} />
+          <DataRow label={t('admin.ficha.tipoCuenta')} value={accountTypeLabel(profile.accountType)} />
+          <DataRow label={t('admin.comun.rol')} value={roleLabel(profile.role)} />
+          <DataRow label={t('admin.ficha.identidadVerificada')} value={<BoolBadge value={profile.identityVerified} />} />
+          <DataRow label={t('admin.comun.registro')} value={formatUserDate(profile.createdAt)} />
         </dl>
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="rounded-2xl border border-line bg-surface p-5 shadow-card">
           <h3 className="text-[13px] font-semibold uppercase tracking-wide text-muted-soft">
-            Suscripcion
+            {t('admin.ficha.suscripcion')}
           </h3>
           {subscription ? (
             <dl className="mt-3">
-              <DataRow label="Plan" value={subscription.plan} />
-              <DataRow label="Estado" value={subscription.status} />
+              <DataRow label={t('admin.comun.plan')} value={subscription.plan} />
+              <DataRow label={t('admin.ficha.estado')} value={subscription.status} />
             </dl>
           ) : (
-            <p className="mt-3 text-sm text-muted">Sin suscripcion.</p>
+            <p className="mt-3 text-sm text-muted">{t('admin.ficha.sinSuscripcion')}</p>
           )}
         </div>
 
         <div className="rounded-2xl border border-line bg-surface p-5 shadow-card">
-          <h3 className="text-[13px] font-semibold uppercase tracking-wide text-muted-soft">Uso</h3>
+          <h3 className="text-[13px] font-semibold uppercase tracking-wide text-muted-soft">{t('admin.ficha.uso')}</h3>
           {usageCounter ? (
             <>
               <p className="mt-3 font-display text-2xl font-bold tabular-nums text-ink">
@@ -103,11 +107,11 @@ function DataSection({ detail }: { detail: AdminUserDetail }) {
                 <span className="text-muted"> / {usageCounter.runsLimit.toLocaleString('es-MX')}</span>
               </p>
               <p className="mt-0.5 text-xs text-muted">
-                Ejecuciones usadas ({usageCounter.periodKind})
+                {t('admin.ficha.ejecucionesUsadas', { periodo: usageCounter.periodKind })}
               </p>
             </>
           ) : (
-            <p className="mt-3 text-sm text-muted">Sin datos de uso.</p>
+            <p className="mt-3 text-sm text-muted">{t('admin.ficha.sinDatosUso')}</p>
           )}
         </div>
       </div>
@@ -117,6 +121,7 @@ function DataSection({ detail }: { detail: AdminUserDetail }) {
 
 /** SECCION ACTIVIDAD: los tres ejes del usuario objetivo, reusando la vista del dashboard. */
 function ActivitySection({ userId }: { userId: string }) {
+  const { t } = useTranslation();
   const [preset, setPreset] = useState<DashboardRangePreset>('30d');
   const range = useMemo(() => dashboardRangeFromPreset(preset), [preset]);
   const { data, isLoading, isError, refetch, isFetching } = useAdminUserActivity(userId, range);
@@ -126,10 +131,9 @@ function ActivitySection({ userId }: { userId: string }) {
     <section>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="font-display text-lg font-bold text-ink">Actividad</h2>
+          <h2 className="font-display text-lg font-bold text-ink">{t('admin.ficha.actividadTitulo')}</h2>
           <p className="mt-0.5 text-[13px] text-muted">
-            Operaciones, ejecuciones y gasto del usuario. El gasto es consumo sobre la propia key del
-            usuario (BYOK), no un cobro de Ledesma.
+            {t('admin.ficha.actividadDescripcion')}
           </p>
         </div>
         <span
@@ -140,7 +144,7 @@ function ActivitySection({ userId }: { userId: string }) {
           {refreshing && (
             <>
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Actualizando
+              {t('admin.ficha.actualizando')}
             </>
           )}
         </span>
@@ -154,13 +158,13 @@ function ActivitySection({ userId }: { userId: string }) {
         <SkeletonList count={3} cardClassName="h-40" className="space-y-4" />
       ) : isError || !data ? (
         <ErrorState
-          title="No pudimos cargar la actividad"
+          title={t('admin.ficha.errorActividad')}
           onRetry={() => void refetch()}
           className="mt-0"
         />
       ) : !hasDashboardData(data) ? (
         <div className="rounded-2xl border border-line bg-surface p-8 text-center text-sm text-muted shadow-card">
-          Este usuario aun no registra actividad en este periodo.
+          {t('admin.ficha.sinActividad')}
         </div>
       ) : (
         <DashboardSummaryView summary={data} />
@@ -176,6 +180,7 @@ function ActivitySection({ userId }: { userId: string }) {
  * detras del AdminGate; el backend igual gatea por rol.
  */
 export function AdminUserDetailPage() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const { data: detail, isLoading, isError, error, refetch } = useAdminUser(id);
 
@@ -191,30 +196,30 @@ export function AdminUserDetailPage() {
 
       {isLoading ? (
         <>
-          <PageHeader title="Usuario" subtitle="Cargando la ficha del usuario..." />
+          <PageHeader title={t('admin.comun.usuario')} subtitle={t('admin.ficha.cargandoFicha')} />
           <SkeletonList count={3} cardClassName="h-40" className="mt-6 space-y-4" />
         </>
       ) : notFound ? (
         <div className="rounded-2xl border border-line bg-surface p-8 text-center shadow-card">
-          <p className="font-display text-lg font-bold text-ink">Usuario no encontrado</p>
+          <p className="font-display text-lg font-bold text-ink">{t('admin.ficha.usuarioNoEncontrado')}</p>
           <p className="mt-2 text-sm text-muted">
-            No encontramos a este usuario. Es posible que ya no exista.
+            {t('admin.comun.usuarioNoExiste')}
           </p>
           <Link
             to="/admin"
             className="mt-5 inline-flex items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
           >
             <ArrowLeft className="h-4 w-4" />
-            Volver a la lista
+            {t('admin.ficha.volver')}
           </Link>
         </div>
       ) : isError || !detail || !id ? (
-        <ErrorState title="No pudimos cargar la ficha del usuario" onRetry={() => void refetch()} />
+        <ErrorState title={t('admin.ficha.errorFicha')} onRetry={() => void refetch()} />
       ) : (
         <>
           <PageHeader
-            title={detail.profile.fullName || detail.email || 'Usuario'}
-            subtitle={detail.email ?? 'Sin email'}
+            title={detail.profile.fullName || detail.email || t('admin.comun.usuario')}
+            subtitle={detail.email ?? t('admin.comun.sinEmail')}
             action={
               <div className="flex flex-wrap items-center gap-2">
                 <TierBadge tier={detail.profile.tier} />
@@ -228,12 +233,12 @@ export function AdminUserDetailPage() {
 
             <section>
               <SectionHeading
-                title="Licencia"
-                description="El plan del usuario. Cambiarlo opera la monetizacion: se hace con confirmacion."
+                title={t('admin.ficha.licenciaTitulo')}
+                description={t('admin.ficha.licenciaDescripcion')}
               />
               <ChangeTierSection
                 userId={id}
-                userName={detail.profile.fullName || detail.email || 'este usuario'}
+                userName={detail.profile.fullName || detail.email || t('admin.ficha.esteUsuario')}
                 currentTier={detail.profile.tier}
               />
             </section>

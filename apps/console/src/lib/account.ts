@@ -3,6 +3,8 @@
 // (igual que registration.ts / env.ts). El hook con efectos (apiFetch + signOut + redirect) vive aparte
 // en account-mutations.ts, para no acoplar este modulo puro a supabase.
 
+import i18n from '../i18n';
+
 /**
  * Que paso con auth.users en el backend (espeja AuthUserDeletionOutcome del motor). La consola NO ramifica
  * por este valor: en los cuatro casos la cuenta del usuario quedo borrada (sus datos se fueron) y el
@@ -52,10 +54,10 @@ export function deleteAccountErrorMessage(err: unknown): string {
       : null;
   switch (status) {
     case 400:
-      return 'El email no coincide con el de tu cuenta. Escríbelo tal como aparece arriba.';
+      return i18n.t('cuenta.errores.eliminar400');
     case 401:
-      return 'Tu sesión expiró. Vuelve a iniciar sesión.';
+      return i18n.t('cuenta.errores.eliminar401');
     default:
-      return 'No pudimos eliminar tu cuenta. Intenta de nuevo en un momento.';
+      return i18n.t('cuenta.errores.eliminarGenerico');
   }
 }

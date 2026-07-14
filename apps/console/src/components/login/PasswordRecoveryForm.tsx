@@ -1,5 +1,6 @@
 import type { FormEvent } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Mail } from 'lucide-react';
 import { inputClass, monoLabelClass, SubmitButton } from './LoginForm';
 import { AuthNotice } from './AuthNotice';
@@ -30,14 +31,15 @@ export function PasswordRecoveryForm({
   onEmailChange,
   onSubmit,
 }: PasswordRecoveryFormProps) {
+  const { t } = useTranslation();
   if (status === 'sent') {
     return (
       <AuthNotice
         icon={Mail}
-        title="Revisa tu correo"
-        body="Si ese correo tiene cuenta, te enviamos un enlace para restablecer tu contraseña."
+        title={t('auth.comun.revisaCorreoTitulo')}
+        body={t('auth.recuperar.confirmacionCuerpo')}
         linkTo="/login"
-        linkLabel="Volver a iniciar sesión"
+        linkLabel={t('auth.recuperar.volverIniciarSesion')}
       />
     );
   }
@@ -46,17 +48,17 @@ export function PasswordRecoveryForm({
     <div>
       <div className="mb-7">
         <h1 className="font-display text-[22px] font-medium text-ink">
-          Restablecer tu contraseña
+          {t('auth.recuperar.titulo')}
         </h1>
         <p className="mt-1.5 text-sm leading-relaxed text-muted">
-          Escribe tu correo y te enviaremos un enlace para elegir una nueva contraseña.
+          {t('auth.recuperar.subtitulo')}
         </p>
       </div>
 
       <form onSubmit={onSubmit} className="space-y-4">
         <div>
           <label htmlFor="email" className={`${monoLabelClass} mb-2 block tracking-[3px]`}>
-            Correo
+            {t('auth.campos.correo')}
           </label>
           <input
             id="email"
@@ -64,7 +66,7 @@ export function PasswordRecoveryForm({
             autoComplete="email"
             value={email}
             onChange={(e) => onEmailChange(e.target.value)}
-            placeholder="tu@correo.com"
+            placeholder={t('auth.campos.correoPlaceholder')}
             className={inputClass}
           />
         </div>
@@ -73,14 +75,17 @@ export function PasswordRecoveryForm({
             {errorMsg}
           </p>
         )}
-        <SubmitButton pending={status === 'submitting'} pendingLabel="Enviando enlace...">
-          Enviar enlace para restablecer
+        <SubmitButton
+          pending={status === 'submitting'}
+          pendingLabel={t('auth.recuperar.enviandoEnlace')}
+        >
+          {t('auth.recuperar.enviarEnlace')}
         </SubmitButton>
       </form>
 
       <p className="mt-7 text-center text-sm text-muted">
         <Link to="/login" className="font-medium text-brasa transition hover:text-brasa-hover">
-          Volver a iniciar sesión
+          {t('auth.recuperar.volverIniciarSesion')}
         </Link>
       </p>
     </div>

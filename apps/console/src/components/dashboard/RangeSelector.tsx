@@ -1,10 +1,12 @@
+import { useTranslation } from 'react-i18next';
 import { focusRing } from '../../lib/utils';
 import type { DashboardRangePreset } from '../../lib/dashboard';
 
+// `label` guarda la CLAVE de traduccion; se resuelve con t(...) en el render.
 const OPTIONS: Array<{ value: DashboardRangePreset; label: string }> = [
-  { value: '7d', label: '7 dias' },
-  { value: '30d', label: '30 dias' },
-  { value: '90d', label: '90 dias' },
+  { value: '7d', label: 'panel.rango.dias7' },
+  { value: '30d', label: 'panel.rango.dias30' },
+  { value: '90d', label: 'panel.rango.dias90' },
 ];
 
 /**
@@ -19,10 +21,11 @@ export function RangeSelector({
   value: DashboardRangePreset;
   onChange: (next: DashboardRangePreset) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       role="group"
-      aria-label="Rango de tiempo"
+      aria-label={t('panel.rango.etiqueta')}
       className="inline-flex rounded-xl border border-line bg-surface p-1"
     >
       {OPTIONS.map((option) => {
@@ -39,7 +42,7 @@ export function RangeSelector({
               active ? 'bg-[#F1EFE8] text-ink' : 'text-[#8A8880] hover:text-ink',
             ].join(' ')}
           >
-            {option.label}
+            {t(option.label)}
           </button>
         );
       })}

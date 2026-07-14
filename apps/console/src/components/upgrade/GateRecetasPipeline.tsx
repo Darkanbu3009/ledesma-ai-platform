@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { Check, Clock } from 'lucide-react';
 
 /**
@@ -8,25 +9,27 @@ import { Check, Clock } from 'lucide-react';
  * fila "running". Resto neutros calidos. Sin box-shadow.
  */
 
+// `titulo` y `descripcion` guardan CLAVES de traduccion; se resuelven con t(...) en el render.
 const PASOS_COMPLETADOS = [
   {
-    titulo: 'Recolectar facturas del correo',
-    descripcion: 'Lee los PDF que llegaron a tu bandeja en la semana.',
+    titulo: 'gates.recetas.paso1Titulo',
+    descripcion: 'gates.recetas.paso1Descripcion',
     duracion: '3.2s',
   },
   {
-    titulo: 'Extraer proveedor, monto y fecha',
-    descripcion: 'Convierte cada documento en datos estructurados.',
+    titulo: 'gates.recetas.paso2Titulo',
+    descripcion: 'gates.recetas.paso2Descripcion',
     duracion: '6.8s',
   },
 ] as const;
 
 const PASO_ACTIVO = {
-  titulo: 'Registrar en tu sistema y avisar',
-  descripcion: 'Sube los datos via HTTP y te manda el resumen por correo.',
+  titulo: 'gates.recetas.paso3Titulo',
+  descripcion: 'gates.recetas.paso3Descripcion',
 } as const;
 
 export function GateRecetasPipeline() {
+  const { t } = useTranslation();
   return (
     <div
       aria-hidden="true"
@@ -39,7 +42,7 @@ export function GateRecetasPipeline() {
           <span className="truncate font-mono text-[12.5px] text-ink">cierre-semanal-facturas</span>
         </span>
         <span className="flex-none rounded-full border-[0.5px] border-[#E9E7DF] px-[9px] py-[2px] text-[11px] uppercase tracking-[0.07em] text-[#B4B2A9]">
-          Ejemplo
+          {t('gates.ejemplo')}
         </span>
       </div>
 
@@ -51,8 +54,8 @@ export function GateRecetasPipeline() {
         >
           <Check className="mt-[2px] h-3.5 w-3.5 flex-none text-[#1D9E75]" />
           <div className="min-w-0 flex-1">
-            <p className="text-[13px] text-ink">{paso.titulo}</p>
-            <p className="text-[12px] text-[#8A8880]">{paso.descripcion}</p>
+            <p className="text-[13px] text-ink">{t(paso.titulo)}</p>
+            <p className="text-[12px] text-[#8A8880]">{t(paso.descripcion)}</p>
           </div>
           <span className="flex-none font-mono text-[11px] text-[#B4B2A9]">{paso.duracion}</span>
         </div>
@@ -64,8 +67,8 @@ export function GateRecetasPipeline() {
           <span className="h-1.5 w-1.5 rounded-full bg-[#E5511E]" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-medium text-ink">{PASO_ACTIVO.titulo}</p>
-          <p className="text-[12px] text-[#8A8880]">{PASO_ACTIVO.descripcion}</p>
+          <p className="text-[13px] font-medium text-ink">{t(PASO_ACTIVO.titulo)}</p>
+          <p className="text-[12px] text-[#8A8880]">{t(PASO_ACTIVO.descripcion)}</p>
         </div>
         <span className="flex-none font-mono text-[11px] text-[#5F5E5A]">running</span>
       </div>
@@ -74,9 +77,9 @@ export function GateRecetasPipeline() {
       <div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-2 bg-[#FAF9F5] px-[18px] py-[11px]">
         <span className="flex items-center gap-2 text-[11.5px] text-[#5F5E5A]">
           <Clock className="h-[13px] w-[13px] flex-none text-[#B4B2A9]" />
-          Esta receta corre cada lunes a las 8:00, nadie tiene que ejecutarla.
+          {t('gates.recetas.pie')}
         </span>
-        <span className="font-mono text-[11.5px] text-[#8A8880]">47 corridas, 0 intervenciones</span>
+        <span className="font-mono text-[11.5px] text-[#8A8880]">{t('gates.recetas.resumen')}</span>
       </div>
     </div>
   );

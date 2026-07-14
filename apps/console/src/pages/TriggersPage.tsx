@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowRight, Lock, Plus, Webhook } from 'lucide-react';
 import { useAgents, useCredentials, useMe, useTriggers } from '../lib/queries';
 import { useDeleteTrigger, useUpdateTrigger } from '../lib/mutations';
@@ -38,21 +39,21 @@ type Reveal = { data: TriggerReveal; context: 'created' | 'rotated' };
  * (SchedulingLocked lo tiene inline); extraerlo a un sub-componente queda como deuda.
  */
 function TriggersLocked() {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-4">
       <section className="mx-auto flex w-full max-w-[520px] flex-col items-center pb-12 pt-14 text-center">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-[#F1EFE8] px-3 py-[5px]">
           <Lock className="h-3 w-3 flex-none text-[#5F5E5A]" aria-hidden="true" />
           <span className="text-[11px] uppercase tracking-[0.08em] text-[#5F5E5A]">
-            Planes Pro y Business
+            {t('triggers.gate.badge')}
           </span>
         </span>
         <h1 className="mt-5 text-[26px] font-medium leading-[1.15] tracking-[-0.02em] text-ink">
-          Una funcion de los planes con autonomia
+          {t('triggers.gate.titulo')}
         </h1>
         <p className="mt-3 text-[14px] leading-[1.6] text-[#5F5E5A]">
-          Los triggers dejan que un evento externo dispare tus agentes a traves de una URL de
-          webhook. Estan disponibles en los planes Pro y Business.
+          {t('triggers.gate.descripcion')}
         </p>
         <ChoosePlanCta className="mt-6" />
       </section>
@@ -63,6 +64,7 @@ function TriggersLocked() {
 
 /** Estado vacio editorial, consistente con /tareas y /credenciales. */
 function TriggersEmptyState({ onAdd }: { onAdd: () => void }) {
+  const { t } = useTranslation();
   return (
     <EmptyState
       media={
@@ -86,16 +88,16 @@ function TriggersEmptyState({ onAdd }: { onAdd: () => void }) {
           </div>
         </div>
       }
-      eyebrow="EMPIEZA AQUI"
-      title="Crea tu primer trigger"
-      description="Elige un agente y un mensaje base, y obtendras una URL de webhook. Cuando un evento externo la llame, la plataforma ejecuta tu agente sola."
+      eyebrow={t('triggers.vacio.eyebrow')}
+      title={t('triggers.vacio.titulo')}
+      description={t('triggers.vacio.descripcion')}
       action={
         <button
           type="button"
           onClick={onAdd}
           className="group inline-flex h-11 items-center gap-3 rounded-full bg-brasa pl-6 pr-[7px] text-sm font-medium text-white transition hover:bg-brasa-hover"
         >
-          Crear trigger
+          {t('triggers.crearTrigger')}
           <span className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-white text-brasa transition group-hover:translate-x-0.5">
             <ArrowRight className="h-[18px] w-[18px]" />
           </span>
@@ -106,6 +108,7 @@ function TriggersEmptyState({ onAdd }: { onAdd: () => void }) {
 }
 
 export function TriggersPage() {
+  const { t } = useTranslation();
   const me = useMe();
   // Capacidad derivada del modulo central de planes (Pro y Business la tienen), no de un tier literal.
   const isAutonomous = tierAllowsAutonomy(me.data?.profile?.tier);
@@ -150,9 +153,9 @@ export function TriggersPage() {
       { id: trigger.id, update: { isActive: !trigger.isActive } },
       {
         onSuccess: () =>
-          setNotice({ kind: 'ok', text: trigger.isActive ? 'Trigger pausado.' : 'Trigger activado.' }),
+          setNotice({ kind: 'ok', text: trigger.isActive ? t('triggers.avisos.pausado') : t('triggers.avisos.activado') }),
         onError: () =>
-          setNotice({ kind: 'error', text: 'No pudimos actualizar el trigger. Intenta de nuevo.' }),
+          setNotice({ kind: 'error', text: t('triggers.errores.actualizar') }),
         // Solo limpiamos el spinner de ESTE trigger: dos toggles concurrentes no se pisan el estado.
         onSettled: () => setTogglingId((cur) => (cur === trigger.id ? null : cur)),
       },
@@ -164,7 +167,7 @@ export function TriggersPage() {
     if (data) {
       setReveal({ data, context: 'created' });
     } else {
-      setNotice({ kind: 'error', text: 'Creamos el trigger pero no pudimos mostrar el secreto. Rotalo para obtener uno nuevo.' });
+      setNotice({ kind: 'error', text: t('triggers.errores.secretoCrear') });
     }
   }
 
@@ -184,7 +187,7 @@ export function TriggersPage() {
           if (data) {
             setReveal({ data, context: 'rotated' });
           } else {
-            setNotice({ kind: 'error', text: 'Rotamos el secreto pero no pudimos mostrarlo. Intenta de nuevo.' });
+            setNotice({ kind: 'error', text: t('triggers.errores.secretoRotar') });
           }
         },
       },
@@ -201,14 +204,14 @@ export function TriggersPage() {
     deleteTrigger.mutate(toDelete.id, {
       onSuccess: () => {
         setToDelete(null);
-        setNotice({ kind: 'ok', text: 'Trigger eliminado.' });
+        setNotice({ kind: 'ok', text: t('triggers.avisos.eliminado') });
       },
     });
   }
 
   function describeTrigger(trigger: Trigger | null): string {
     if (!trigger) return '';
-    const agentName = agentsById.get(trigger.agentId)?.name ?? 'agente eliminado';
+    const agentName = agentsById.get(trigger.agentId)?.name ?? t('triggers.agenteEliminadoMin');
     return `${agentName} · ${authModeLabel(trigger.authMode)}`;
   }
 
@@ -217,14 +220,14 @@ export function TriggersPage() {
       {/* En el estado bloqueado el hero del gate reemplaza al titulo y subtitulo de la pagina. */}
       {(me.isLoading || isAutonomous) && (
         <PageHeader
-          title="Triggers"
-          subtitle="Crea URLs de webhook que ejecutan un agente cuando un evento externo las llama."
+          title={t('triggers.titulo')}
+          subtitle={t('triggers.subtitulo')}
           action={
             isAutonomous &&
             hasTriggers && (
               <button type="button" onClick={() => setFormOpen(true)} className={addButtonClass}>
                 <Plus className="h-[17px] w-[17px]" />
-                Crear trigger
+                {t('triggers.crearTrigger')}
               </button>
             )
           }
@@ -240,7 +243,7 @@ export function TriggersPage() {
       ) : listLoading ? (
         <SkeletonList cardClassName="h-[148px]" />
       ) : isError ? (
-        <ErrorState title="No pudimos cargar tus triggers" onRetry={() => void refetch()} />
+        <ErrorState title={t('triggers.errores.cargarLista')} onRetry={() => void refetch()} />
       ) : !hasTriggers ? (
         <TriggersEmptyState onAdd={() => setFormOpen(true)} />
       ) : (
@@ -263,7 +266,7 @@ export function TriggersPage() {
             className="flex w-full items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed border-line p-4 text-sm font-semibold text-muted transition hover:border-brasa-line hover:bg-brasa/[0.03] hover:text-brasa"
           >
             <Plus className="h-[18px] w-[18px]" />
-            Crear trigger
+            {t('triggers.crearTrigger')}
           </button>
         </div>
       )}
@@ -276,7 +279,7 @@ export function TriggersPage() {
         open={toRotate !== null}
         authMode={toRotate?.authMode ?? 'hmac'}
         busy={rotateTrigger.isPending}
-        error={rotateTrigger.isError ? 'No pudimos rotar el secreto. Intenta de nuevo.' : undefined}
+        error={rotateTrigger.isError ? t('triggers.errores.rotar') : undefined}
         onConfirm={confirmRotate}
         onCancel={() => setToRotate(null)}
       />
@@ -285,7 +288,7 @@ export function TriggersPage() {
         open={toDelete !== null}
         description={describeTrigger(toDelete)}
         busy={deleteTrigger.isPending}
-        error={deleteTrigger.isError ? 'No pudimos eliminar el trigger. Intenta de nuevo.' : undefined}
+        error={deleteTrigger.isError ? t('triggers.errores.eliminar') : undefined}
         onConfirm={confirmDelete}
         onCancel={() => setToDelete(null)}
       />

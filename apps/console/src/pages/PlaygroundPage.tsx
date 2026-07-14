@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
   ArrowUp,
@@ -31,10 +32,10 @@ import { PlaygroundCredential } from '../components/agents/PlaygroundCredential'
 const ACEPTA_IMAGENES = 'image/png,image/jpeg,image/webp,image/gif';
 const ACEPTA_DOCUMENTOS = '.pdf,.docx,.xlsx,.xls';
 
-/** Opciones del menu "+": etiqueta, icono y el accept que cada una pasa al file picker. */
+/** Opciones del menu "+": clave i18n de la etiqueta, icono y el accept que cada una pasa al file picker. */
 const OPCIONES_ADJUNTO = [
-  { label: 'Imagen', Icono: ImageIcon, accept: ACEPTA_IMAGENES },
-  { label: 'Documento', Icono: FileText, accept: ACEPTA_DOCUMENTOS },
+  { labelKey: 'playground.adjuntos.imagen', Icono: ImageIcon, accept: ACEPTA_IMAGENES },
+  { labelKey: 'playground.adjuntos.documento', Icono: FileText, accept: ACEPTA_DOCUMENTOS },
 ] as const;
 
 /** Icono de la miniatura segun la categoria del adjunto. */
@@ -59,6 +60,7 @@ function MenuAdjuntar({
   titulo: string;
   onElegir: (accept: string) => void;
 }) {
+  const { t } = useTranslation();
   const [abierto, setAbierto] = useState(false);
   const contenedorRef = useRef<HTMLDivElement | null>(null);
 
@@ -94,7 +96,7 @@ function MenuAdjuntar({
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={abierto}
-        aria-label="Adjuntar archivo"
+        aria-label={t('playground.adjuntos.adjuntarArchivo')}
         title={titulo}
         className="inline-flex items-center justify-center rounded-lg p-1.5 text-hueso-muted transition hover:bg-line-soft hover:text-hueso disabled:cursor-not-allowed disabled:opacity-60"
       >
@@ -105,16 +107,16 @@ function MenuAdjuntar({
           role="menu"
           className="absolute bottom-full left-0 z-10 mb-2 min-w-[11rem] overflow-hidden rounded-lg border border-grafito-border bg-grafito py-1 shadow-lg"
         >
-          {OPCIONES_ADJUNTO.map(({ label, Icono, accept }) => (
+          {OPCIONES_ADJUNTO.map(({ labelKey, Icono, accept }) => (
             <button
-              key={label}
+              key={labelKey}
               type="button"
               role="menuitem"
               onClick={() => elegir(accept)}
               className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-hueso-muted transition hover:bg-carbon hover:text-hueso"
             >
               <Icono className="h-4 w-4 shrink-0" />
-              {label}
+              {t(labelKey)}
             </button>
           ))}
         </div>
@@ -131,6 +133,7 @@ type ViewItem =
   | { kind: 'error'; code: string; message?: string; retryText: string };
 
 export function PlaygroundPage() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const { data: agent, isLoading, isError, refetch } = useAgent(id);
 
@@ -350,15 +353,15 @@ export function PlaygroundPage() {
         </div>
       ) : isError || !agent ? (
         <div className="mt-10 rounded-xl border border-grafito-border bg-grafito p-8 text-center">
-          <p className="font-display text-lg text-hueso">No pudimos cargar el agente</p>
-          <p className="mt-2 text-sm text-hueso-muted">Revisa tu conexion e intenta de nuevo.</p>
+          <p className="font-display text-lg text-hueso">{t('playground.errorCargaTitulo')}</p>
+          <p className="mt-2 text-sm text-hueso-muted">{t('playground.errorCargaDescripcion')}</p>
           <button
             type="button"
             onClick={() => void refetch()}
             className="mt-5 inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2 text-sm text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
           >
             <RefreshCw className="h-4 w-4" />
-            Reintentar
+            {t('playground.reintentar')}
           </button>
         </div>
       ) : (
@@ -370,13 +373,13 @@ export function PlaygroundPage() {
             className="inline-flex items-center gap-1.5 text-sm text-hueso-muted transition hover:text-hueso"
           >
             <ArrowLeft className="h-4 w-4" />
-            Mis agentes
+            {t('playground.misAgentes')}
           </Link>
 
           <div className="mt-3 flex items-center justify-between gap-4">
             <div className="min-w-0">
               <h1 className="truncate font-display text-2xl font-bold text-hueso">
-                Playground: {agent.name}
+                {t('playground.titulo', { name: agent.name })}
               </h1>
               <p className="mt-1 text-sm text-hueso-muted">
                 {providerLabel(agent.providerId)} · <span className="font-mono">{agent.model}</span>
@@ -388,7 +391,7 @@ export function PlaygroundPage() {
               className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-grafito-border px-4 py-2 text-sm text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
             >
               <Pencil className="h-4 w-4" />
-              Editar
+              {t('playground.editar')}
             </Link>
           </div>
 
@@ -410,19 +413,17 @@ export function PlaygroundPage() {
             ref={scrollRef}
             role="log"
             aria-live="polite"
-            aria-label="Conversacion con el agente"
+            aria-label={t('playground.conversacionAria')}
             aria-busy={running}
             className={`mt-4 h-[26rem] overflow-y-auto rounded-xl border border-grafito-border ${fondoSegunKey} p-4 transition-colors duration-300`}
           >
             {credMissing ? (
               <div className="flex h-full items-center justify-center">
-                <p className="text-sm text-hueso-muted">
-                  Elegi una credencial o pega tu API key para probar el agente.
-                </p>
+                <p className="text-sm text-hueso-muted">{t('playground.eligeCredencial')}</p>
               </div>
             ) : vista.length === 0 ? (
               <div className="flex h-full items-center justify-center">
-                <p className="text-sm text-hueso-muted">Escribe un mensaje para empezar.</p>
+                <p className="text-sm text-hueso-muted">{t('playground.escribeParaEmpezar')}</p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -478,7 +479,10 @@ export function PlaygroundPage() {
                     case 'usage':
                       return (
                         <p key={i} className="text-center text-xs text-hueso-muted">
-                          {item.inputTokens} in / {item.outputTokens} out tokens
+                          {t('playground.usoTokens', {
+                            input: item.inputTokens,
+                            output: item.outputTokens,
+                          })}
                         </p>
                       );
                     case 'error':
@@ -487,7 +491,7 @@ export function PlaygroundPage() {
                           <div className="max-w-[80%] rounded-xl border border-brasa/40 bg-brasa/10 px-4 py-2.5 text-sm text-brasa">
                             <p className="font-mono text-xs font-semibold">{item.code}</p>
                             <p className="mt-1">
-                              {item.message ?? 'Revisa tu key o el identificador del modelo.'}
+                              {item.message ?? t('playground.errorFallback')}
                             </p>
                             <button
                               type="button"
@@ -496,7 +500,7 @@ export function PlaygroundPage() {
                               className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-brasa/40 px-3 py-1 text-xs font-medium text-brasa transition hover:border-brasa disabled:cursor-not-allowed disabled:opacity-60"
                             >
                               <RefreshCw className="h-3.5 w-3.5" />
-                              Reintentar
+                              {t('playground.reintentar')}
                             </button>
                           </div>
                         </div>
@@ -522,7 +526,7 @@ export function PlaygroundPage() {
                       <button
                         type="button"
                         onClick={() => quitarAdjunto(i)}
-                        aria-label={`Quitar ${a.name}`}
+                        aria-label={t('playground.adjuntos.quitarAria', { name: a.name })}
                         className="text-hueso-muted transition hover:text-brasa"
                       >
                         <X className="h-3.5 w-3.5" />
@@ -533,7 +537,7 @@ export function PlaygroundPage() {
                 {subiendo && (
                   <span className="inline-flex items-center gap-1.5 text-xs text-hueso-muted">
                     <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                    Subiendo...
+                    {t('playground.adjuntos.subiendo')}
                   </span>
                 )}
               </div>
@@ -559,17 +563,17 @@ export function PlaygroundPage() {
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={handleKeyDown}
                   disabled={credMissing}
-                  aria-label="Mensaje para el agente"
+                  aria-label={t('playground.mensajeAria')}
                   className="w-full resize-none bg-transparent px-3.5 pt-2.5 text-sm text-ink outline-none transition placeholder:text-muted-soft disabled:cursor-not-allowed disabled:opacity-60"
-                  placeholder="Escribe un mensaje..."
+                  placeholder={t('playground.mensajePlaceholder')}
                 />
                 <div className="flex items-center px-2 pb-2">
                   <MenuAdjuntar
                     disabled={credMissing || subiendo || adjuntos.length >= MAX_ADJUNTOS}
                     titulo={
                       adjuntos.length >= MAX_ADJUNTOS
-                        ? `Maximo ${MAX_ADJUNTOS} archivos`
-                        : 'Adjuntar archivo'
+                        ? t('playground.adjuntos.maximoArchivos', { count: MAX_ADJUNTOS })
+                        : t('playground.adjuntos.adjuntarArchivo')
                     }
                     onElegir={abrirSelector}
                   />
@@ -580,8 +584,8 @@ export function PlaygroundPage() {
                 <button
                   type="button"
                   onClick={() => abortRef.current?.abort()}
-                  aria-label="Detener"
-                  title="Detener"
+                  aria-label={t('playground.detener')}
+                  title={t('playground.detener')}
                   className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brasa text-carbon transition-colors duration-300 hover:bg-brasa-hover"
                 >
                   <Square className="h-4 w-4" />
@@ -592,8 +596,8 @@ export function PlaygroundPage() {
                   type="button"
                   onClick={() => send()}
                   disabled={credMissing || subiendo || (draft.trim() === '' && adjuntos.length === 0)}
-                  aria-label="Enviar"
-                  title="Enviar"
+                  aria-label={t('playground.enviar')}
+                  title={t('playground.enviar')}
                   className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brasa text-carbon transition-colors duration-300 hover:bg-brasa-hover disabled:cursor-not-allowed disabled:bg-line disabled:text-muted"
                 >
                   <ArrowUp className="h-5 w-5" />

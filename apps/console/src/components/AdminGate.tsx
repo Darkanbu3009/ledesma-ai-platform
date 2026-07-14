@@ -1,4 +1,5 @@
 import { Navigate, Outlet } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useIsAdmin } from '../lib/queries';
 
 /**
@@ -14,12 +15,13 @@ import { useIsAdmin } from '../lib/queries';
  * evitamos mostrar un area que no le aplica (UX).
  */
 export function AdminGate() {
+  const { t } = useTranslation();
   const { isAdmin, isLoading } = useIsAdmin();
 
   if (isLoading) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center">
-        <span className="text-sm text-muted">Cargando...</span>
+        <span className="text-sm text-muted">{t('ui.estado.cargando')}</span>
       </div>
     );
   }

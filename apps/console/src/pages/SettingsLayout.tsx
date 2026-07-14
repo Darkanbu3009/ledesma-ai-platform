@@ -1,4 +1,5 @@
 import { Outlet } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { PageHeader } from '../components/ui/PageHeader';
 
 /**
@@ -8,11 +9,12 @@ import { PageHeader } from '../components/ui/PageHeader';
  * "Mejorar Plan" del sidebar (misma URL de siempre, /configuracion/paquetes).
  */
 export function SettingsLayout() {
+  const { t } = useTranslation();
   return (
     <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col">
       <PageHeader
-        title="Configuración"
-        subtitle="Administra los datos de tu cuenta y el plan de tu espacio."
+        title={t('configuracion.titulo')}
+        subtitle={t('configuracion.subtitulo')}
       />
 
       <div className="flex-1">

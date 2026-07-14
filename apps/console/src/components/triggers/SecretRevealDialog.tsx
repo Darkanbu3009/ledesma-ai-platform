@@ -1,4 +1,5 @@
 import { type ReactNode, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { KeyRound, Link2, ShieldCheck, TriangleAlert } from 'lucide-react';
 import type { TriggerReveal } from '../../lib/triggers';
 import { CopyButton } from '../ui/CopyButton';
@@ -26,6 +27,7 @@ export function SecretRevealDialog({
   context: 'created' | 'rotated';
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const closeRef = useRef<HTMLButtonElement>(null);
   // Foco inicial en el boton de cerrar (accion segura, no un campo editable), trampa de Tab dentro
   // del modal y restauracion del foco al cerrar, via el hook compartido. `closeOnEscape=false` a
@@ -34,13 +36,13 @@ export function SecretRevealDialog({
 
   const subtitle =
     context === 'created'
-      ? 'Tu trigger quedo creado. Guarda esto antes de cerrar.'
-      : 'Rotaste el secreto. El anterior ya no sirve: guarda el nuevo antes de cerrar.';
+      ? t('triggers.reveal.subtituloCreado')
+      : t('triggers.reveal.subtituloRotado');
 
   const warning =
     reveal.authMode === 'hmac'
-      ? 'Este es el unico momento en que veras el secreto HMAC. No se vuelve a mostrar. Si lo pierdes, tendras que rotarlo (y actualizar tu sistema).'
-      : 'Este es el unico momento en que veras la URL con el token. No se vuelve a mostrar. Si la pierdes, tendras que rotar el token (y actualizar tu sistema).';
+      ? t('triggers.reveal.advertenciaHmac')
+      : t('triggers.reveal.advertenciaToken');
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center px-4 py-8">
@@ -64,7 +66,7 @@ export function SecretRevealDialog({
           </span>
           <div>
             <h2 id="secret-reveal-title" className="font-display text-lg font-bold text-ink">
-              Copia esto ahora
+              {t('triggers.reveal.titulo')}
             </h2>
             <p className="mt-1 text-sm text-muted">{subtitle}</p>
           </div>
@@ -84,15 +86,15 @@ export function SecretRevealDialog({
             <>
               <SecretValue
                 icon={<Link2 className="h-4 w-4" />}
-                label="URL del webhook"
+                label={t('triggers.reveal.urlLabel')}
                 value={reveal.webhookUrl}
-                hint="Configura tu sistema para hacer POST a esta URL cuando ocurra el evento."
+                hint={t('triggers.reveal.urlHint')}
               />
               <SecretValue
                 icon={<KeyRound className="h-4 w-4" />}
-                label="Secreto HMAC"
+                label={t('triggers.reveal.secretoLabel')}
                 value={reveal.hmacSecret}
-                hint="Firma cada peticion con este secreto. No se guarda en claro ni se vuelve a mostrar."
+                hint={t('triggers.reveal.secretoHint')}
                 prominent
               />
               <SignatureGuide reveal={reveal} />
@@ -100,9 +102,9 @@ export function SecretRevealDialog({
           ) : (
             <SecretValue
               icon={<Link2 className="h-4 w-4" />}
-              label="URL del webhook (con token)"
+              label={t('triggers.reveal.urlTokenLabel')}
               value={reveal.webhookUrl}
-              hint="Pega esta URL en tu sistema. El token viaja en la URL: tratala como un secreto y no la compartas."
+              hint={t('triggers.reveal.urlTokenHint')}
               prominent
             />
           )}
@@ -115,7 +117,7 @@ export function SecretRevealDialog({
             onClick={onClose}
             className="inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-2.5 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:bg-brasa-hover"
           >
-            Ya lo copie
+            {t('triggers.reveal.yaLoCopie')}
           </button>
         </div>
       </div>
@@ -166,20 +168,20 @@ function SecretValue({
 
 /** Guia de firma para HMAC: los nombres de header y el formato que el sistema externo debe mandar. */
 function SignatureGuide({ reveal }: { reveal: Extract<TriggerReveal, { authMode: 'hmac' }> }) {
+  const { t } = useTranslation();
   const { signature } = reveal;
   const rows: Array<{ term: string; value: string }> = [
-    { term: 'Algoritmo', value: signature.algorithm },
-    { term: 'Cuerpo firmado', value: signature.signedPayload },
-    { term: 'Header de firma', value: `${signature.signatureHeader}: ${signature.signatureFormat}` },
-    { term: 'Header de timestamp', value: `${signature.timestampHeader} (Unix en segundos)` },
-    { term: 'Ventana anti-replay', value: `${signature.toleranceSeconds}s` },
+    { term: t('triggers.guia.algoritmo'), value: signature.algorithm },
+    { term: t('triggers.guia.cuerpoFirmado'), value: signature.signedPayload },
+    { term: t('triggers.guia.headerFirma'), value: `${signature.signatureHeader}: ${signature.signatureFormat}` },
+    { term: t('triggers.guia.headerTimestamp'), value: t('triggers.guia.timestampUnix', { header: signature.timestampHeader }) },
+    { term: t('triggers.guia.ventanaAntiReplay'), value: `${signature.toleranceSeconds}s` },
   ];
   return (
     <div className="rounded-xl border border-line bg-field px-4 py-3.5">
-      <p className="text-sm font-medium text-ink">Como firmar cada peticion</p>
+      <p className="text-sm font-medium text-ink">{t('triggers.guia.titulo')}</p>
       <p className="mt-1 text-xs text-muted">
-        Tu sistema calcula el HMAC del cuerpo y lo manda en estos headers. Sin firma valida, el webhook
-        responde 401.
+        {t('triggers.guia.descripcion')}
       </p>
       <dl className="mt-3 space-y-2">
         {rows.map((row) => (

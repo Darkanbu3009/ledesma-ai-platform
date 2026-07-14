@@ -1,4 +1,5 @@
 import { type JSX, type ReactNode, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 /**
  * Mini-conversacion ANIMADA de la tarjeta Configurador del estado vacio de Agentes. Es
@@ -24,21 +25,12 @@ import { type JSX, type ReactNode, useEffect, useState } from 'react';
 
 type Role = 'user' | 'config';
 
-/** Guion fijo de la demo (no viene de API). */
-const SCRIPT: readonly { role: Role; text: string }[] = [
-  {
-    role: 'user',
-    text: 'Quiero un agente que revise las facturas que llegan a mi correo y las registre en mi sistema',
-  },
-  {
-    role: 'config',
-    text: 'Entendido. ¿Las facturas llegan como PDF adjunto o como enlace? Con eso armo la extracción…',
-  },
-  { role: 'user', text: 'Como PDF adjunto' },
-  {
-    role: 'config',
-    text: 'Perfecto. Agente listo: lee el PDF, extrae proveedor, monto y fecha, y lo registra vía HTTP. ¿Lo probamos?',
-  },
+/** Guion fijo de la demo (no viene de API): claves de traduccion de cada mensaje. */
+const SCRIPT: readonly { role: Role; textKey: string }[] = [
+  { role: 'user', textKey: 'configurador.demo.usuario1' },
+  { role: 'config', textKey: 'configurador.demo.configurador2' },
+  { role: 'user', textKey: 'configurador.demo.usuario3' },
+  { role: 'config', textKey: 'configurador.demo.configurador4' },
 ];
 
 // tinte brasa de la demo de chat: uno de los tres puntos de brasa declarados en esta
@@ -128,6 +120,7 @@ interface BubbleState {
 }
 
 export function ChatDemoConfigurador(): JSX.Element {
+  const { t } = useTranslation();
   // Se calcula una vez al montar: define si animamos o mostramos las burbujas estaticas.
   const [reduceMotion] = useState(prefersReducedMotion);
   const [bubbles, setBubbles] = useState<BubbleState[]>([]);
@@ -178,7 +171,7 @@ export function ChatDemoConfigurador(): JSX.Element {
           await sleep(message.role === 'config' ? TIMING.dots : TIMING.userStart);
           if (cancelled) return;
           if (message.role === 'config') patchBubble(index, { dots: false });
-          await typeMessage(index, message.text);
+          await typeMessage(index, t(message.textKey));
           if (cancelled) return;
           await sleep(TIMING.betweenMessages);
           if (cancelled) return;
@@ -199,15 +192,15 @@ export function ChatDemoConfigurador(): JSX.Element {
       cancelled = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [reduceMotion]);
+  }, [reduceMotion, t]);
 
   // Movimiento reducido: la conversacion completa, estatica y sin motor ni cursor.
   if (reduceMotion) {
     return (
       <div className="mt-4 flex flex-col gap-2" aria-hidden="true">
         {SCRIPT.map((message, index) => (
-          <Burbuja key={index} role={message.role} fullText={message.text}>
-            {message.text}
+          <Burbuja key={index} role={message.role} fullText={t(message.textKey)}>
+            {t(message.textKey)}
           </Burbuja>
         ))}
       </div>
@@ -227,7 +220,7 @@ export function ChatDemoConfigurador(): JSX.Element {
               message.role === 'user' ? 'self-end' : 'self-start'
             }`}
           >
-            {message.text}
+            {t(message.textKey)}
           </p>
         ))}
       </div>
@@ -237,7 +230,8 @@ export function ChatDemoConfigurador(): JSX.Element {
         }`}
       >
         {bubbles.map((bubble) => {
-          const fullText = SCRIPT[bubble.index]?.text ?? '';
+          const messageKey = SCRIPT[bubble.index]?.textKey;
+          const fullText = messageKey ? t(messageKey) : '';
           return (
             <Burbuja key={bubble.index} role={bubble.role} fullText={fullText}>
               {bubble.dots ? (

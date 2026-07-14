@@ -1,4 +1,5 @@
 import { type FormEvent, useId, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { Eye, EyeOff, KeyRound, ShieldCheck } from 'lucide-react';
 import { providerLabel, type ProviderId } from '../../lib/agents';
@@ -33,6 +34,7 @@ export function CredentialSessionForm({
   onReady: (session: CredentialSession) => void;
   onCancel?: () => void;
 }) {
+  const { t } = useTranslation();
   const { data: credentials, isLoading: loadingCreds } = useCredentials();
 
   const [mode, setMode] = useState<Mode>(initial?.mode ?? 'saved');
@@ -65,8 +67,8 @@ export function CredentialSessionForm({
 
   function submitSaved() {
     const errors: SavedErrors = {};
-    if (!selectedCredential) errors.credentialId = 'Elegi una credencial guardada';
-    if (savedModel.trim() === '') errors.model = 'El modelo es obligatorio';
+    if (!selectedCredential) errors.credentialId = t('configurador.credencial.errorElegiCredencial');
+    if (savedModel.trim() === '') errors.model = t('configurador.credencial.errorModeloObligatorio');
     setSavedErrors(errors);
     if (!selectedCredential || Object.keys(errors).length > 0) return;
     onReady({
@@ -128,32 +130,31 @@ export function CredentialSessionForm({
       noValidate
     >
       <div className="mb-5">
-        <h2 className="font-display text-base font-bold text-ink">Credencial de la sesion</h2>
+        <h2 className="font-display text-base font-bold text-ink">{t('configurador.credencial.titulo')}</h2>
         <p className="mt-1 text-sm text-muted">
-          Con que key conversa el Configurador. La usas solo para esta sesion; nunca se guarda en la
-          plataforma.
+          {t('configurador.credencial.descripcion')}
         </p>
       </div>
 
       {/* Selector de modo (radiogroup accesible). */}
       <div
         role="radiogroup"
-        aria-label="Origen de la credencial"
+        aria-label={t('configurador.credencial.origenAriaLabel')}
         className="mb-5 grid grid-cols-1 gap-2 sm:grid-cols-2"
       >
         <ModeOption
           name={groupName}
           checked={mode === 'saved'}
           onSelect={() => setMode('saved')}
-          title="Credencial guardada"
-          description="Reusa una de tu boveda"
+          title={t('configurador.credencial.guardadaTitulo')}
+          description={t('configurador.credencial.guardadaDescripcion')}
         />
         <ModeOption
           name={groupName}
           checked={mode === 'paste'}
           onSelect={() => setMode('paste')}
-          title="Pegar al momento"
-          description="Una key solo para esta sesion"
+          title={t('configurador.credencial.pegarTitulo')}
+          description={t('configurador.credencial.pegarDescripcion')}
         />
       </div>
 
@@ -163,15 +164,15 @@ export function CredentialSessionForm({
             <div className="h-11 animate-pulse rounded-xl border border-line bg-field" />
           ) : !credentials || credentials.length === 0 ? (
             <div className="rounded-xl border border-line bg-field px-4 py-3 text-sm text-muted">
-              No tenes credenciales guardadas todavia. Pega una al momento o{' '}
+              {t('configurador.credencial.sinCredenciales')}{' '}
               <Link to="/credenciales" className="font-medium text-brasa hover:underline">
-                agregala en Credenciales
+                {t('configurador.credencial.sinCredencialesLink')}
               </Link>
               .
             </div>
           ) : (
             <>
-              <Field label="Credencial" error={savedErrors.credentialId}>
+              <Field label={t('configurador.credencial.credencialLabel')} error={savedErrors.credentialId}>
                 <select
                   value={credentialId}
                   onChange={(e) => {
@@ -180,7 +181,7 @@ export function CredentialSessionForm({
                   }}
                   className={inputClass}
                 >
-                  <option value="">Elegi una credencial...</option>
+                  <option value="">{t('configurador.credencial.elegiCredencial')}</option>
                   {credentials.map((cred) => (
                     <option key={cred.id} value={cred.id}>
                       {cred.label} ({providerLabel(cred.providerId)})
@@ -190,9 +191,9 @@ export function CredentialSessionForm({
               </Field>
 
               <Field
-                label="Modelo"
+                label={t('configurador.credencial.modeloLabel')}
                 error={savedErrors.model}
-                hint="El proveedor sale de la credencial; elegis el modelo a usar."
+                hint={t('configurador.credencial.modeloHint')}
               >
                 {(field) => (
                   <>
@@ -226,7 +227,7 @@ export function CredentialSessionForm({
         </div>
       ) : (
         <div className="space-y-5">
-          <Field label="Proveedor">
+          <Field label={t('configurador.credencial.proveedorLabel')}>
             <select
               value={pasteProvider}
               onChange={(e) => handlePasteProviderChange(e.target.value as ProviderId)}
@@ -243,7 +244,7 @@ export function CredentialSessionForm({
           <Field
             label="API key"
             error={pasteErrors.apiKey}
-            hint="Viaja cifrada en cada turno y no se guarda en la plataforma."
+            hint={t('configurador.credencial.apiKeyHint')}
           >
             {(field) => (
               <div className="relative">
@@ -260,7 +261,7 @@ export function CredentialSessionForm({
                 <button
                   type="button"
                   onClick={() => setShowKey((v) => !v)}
-                  aria-label={showKey ? 'Ocultar API key' : 'Mostrar API key'}
+                  aria-label={showKey ? t('configurador.credencial.ocultarKey') : t('configurador.credencial.mostrarKey')}
                   className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-muted transition hover:text-ink"
                 >
                   {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -273,7 +274,7 @@ export function CredentialSessionForm({
             <Field
               label="Base URL"
               error={pasteErrors.baseUrl}
-              hint="URL base del endpoint compatible con OpenAI."
+              hint={t('configurador.credencial.baseUrlHint')}
             >
               <input
                 value={pasteBaseUrl}
@@ -284,7 +285,7 @@ export function CredentialSessionForm({
             </Field>
           )}
 
-          <Field label="Modelo" error={pasteErrors.model}>
+          <Field label={t('configurador.credencial.modeloLabel')} error={pasteErrors.model}>
             {(field) => (
               <>
                 <input
@@ -309,8 +310,7 @@ export function CredentialSessionForm({
       <div className="mt-5 flex items-start gap-2 rounded-xl border border-line bg-field px-3.5 py-3 text-xs text-muted">
         <ShieldCheck className="mt-px h-4 w-4 flex-none text-ok" />
         <span>
-          La key viaja por una conexion segura y solo se usa para esta sesion del Configurador. La
-          consola no la persiste.
+          {t('configurador.credencial.notaSeguridad')}
         </span>
       </div>
 
@@ -321,7 +321,7 @@ export function CredentialSessionForm({
             onClick={onCancel}
             className="rounded-[10px] border border-line bg-surface px-4 py-2.5 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
           >
-            Cancelar
+            {t('configurador.credencial.cancelar')}
           </button>
         )}
         <button
@@ -329,7 +329,7 @@ export function CredentialSessionForm({
           className="inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-2.5 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:bg-brasa-hover"
         >
           <KeyRound className="h-4 w-4" />
-          {initial ? 'Actualizar credencial' : 'Empezar a configurar'}
+          {initial ? t('configurador.credencial.actualizar') : t('configurador.credencial.empezar')}
         </button>
       </div>
     </form>

@@ -1,4 +1,5 @@
 import { type FormEvent, useMemo, useRef, useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { Loader2, X } from 'lucide-react';
 import { ApiError } from '../../lib/api';
@@ -16,15 +17,15 @@ import { Field, inputClass } from '../ui/Field';
 import { useDialog } from '../ui/useDialog';
 import { ScheduleSelector, type ScheduleSelection } from './ScheduleSelector';
 
-/** Traduce el error del backend a un mensaje en espanol. */
-function backendMessage(error: unknown): string {
+/** Traduce el error del backend a la CLAVE i18n del mensaje; se resuelve con t() en el render. */
+function backendMessageKey(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.status === 401) return 'Tu sesion expiro. Vuelve a iniciar sesion.';
-    if (error.status === 403) return 'Programar tareas requiere el plan Autonomo (tier autonomous).';
-    if (error.status === 404) return 'El agente o la credencial ya no existen. Actualiza y prueba de nuevo.';
-    if (error.status === 400) return 'El backend rechazo la tarea. Revisa el horario y el mensaje.';
+    if (error.status === 401) return 'tareas.errores.sesionExpirada';
+    if (error.status === 403) return 'tareas.errores.requierePlan';
+    if (error.status === 404) return 'tareas.errores.noExisten';
+    if (error.status === 400) return 'tareas.errores.rechazada';
   }
-  return 'No pudimos programar la tarea. Intenta de nuevo.';
+  return 'tareas.errores.generico';
 }
 
 /**
@@ -40,6 +41,7 @@ export function ScheduledTaskFormDialog({
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const { t } = useTranslation();
   const { data: agents, isLoading: agentsLoading } = useAgents();
   const { data: credentials, isLoading: credentialsLoading } = useCredentials();
   const createTask = useCreateScheduledTask();
@@ -119,16 +121,14 @@ export function ScheduledTaskFormDialog({
         <div className="flex items-start justify-between gap-4 border-b border-line-soft px-6 py-5">
           <div>
             <h2 id="scheduled-task-form-title" className="font-display text-lg font-bold text-ink">
-              Programar tarea
+              {t('tareas.programarTarea')}
             </h2>
-            <p className="mt-1 text-sm text-muted">
-              Elige un agente, que mensaje ejecuta y cada cuanto corre solo.
-            </p>
+            <p className="mt-1 text-sm text-muted">{t('tareas.form.subtitulo')}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Cerrar"
+            aria-label={t('tareas.form.cerrar')}
             className="flex h-8 w-8 flex-none items-center justify-center rounded-lg text-muted transition hover:bg-line-soft hover:text-ink"
           >
             <X className="h-[18px] w-[18px]" />
@@ -141,20 +141,21 @@ export function ScheduledTaskFormDialog({
               role="alert"
               className="rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa"
             >
-              {backendMessage(createTask.error)}
+              {t(backendMessageKey(createTask.error))}
             </div>
           )}
 
           {noAgents ? (
             <div className="rounded-xl border border-line bg-field px-4 py-3 text-sm text-muted">
-              Primero necesitas un agente.{' '}
-              <Link to="/agentes" className="font-medium text-brasa hover:underline">
-                Crea uno en Agentes
-              </Link>
-              .
+              <Trans
+                i18nKey="tareas.form.sinAgentes"
+                components={{
+                  enlace: <Link to="/agentes" className="font-medium text-brasa hover:underline" />,
+                }}
+              />
             </div>
           ) : (
-            <Field label="Agente" error={errors.agentId}>
+            <Field label={t('tareas.form.agenteLabel')} error={errors.agentId}>
               <select
                 ref={agentRef}
                 value={agentId}
@@ -163,7 +164,7 @@ export function ScheduledTaskFormDialog({
                 disabled={agentsLoading}
               >
                 <option value="">
-                  {agentsLoading ? 'Cargando agentes...' : 'Elige un agente...'}
+                  {agentsLoading ? t('tareas.form.cargandoAgentes') : t('tareas.form.eligeAgente')}
                 </option>
                 {agents?.map((agent) => (
                   <option key={agent.id} value={agent.id}>
@@ -174,21 +175,25 @@ export function ScheduledTaskFormDialog({
             </Field>
           )}
 
-          <Field label="Credencial" error={errors.credentialId}>
+          <Field label={t('tareas.form.credencialLabel')} error={errors.credentialId}>
             {(field) =>
               !selectedAgent ? (
                 <div className="rounded-xl border border-line bg-field px-4 py-3 text-sm text-muted">
-                  Elige primero un agente para ver sus credenciales.
+                  {t('tareas.form.eligePrimeroAgente')}
                 </div>
               ) : credentialsLoading ? (
                 <div className="h-11 animate-pulse rounded-xl border border-line bg-field" />
               ) : compatible.length === 0 ? (
                 <div className="rounded-xl border border-line bg-field px-4 py-3 text-sm text-muted">
-                  No tienes credenciales de {providerLabel(selectedAgent.providerId)}.{' '}
-                  <Link to="/credenciales" className="font-medium text-brasa hover:underline">
-                    Agrega una en Credenciales
-                  </Link>
-                  .
+                  <Trans
+                    i18nKey="tareas.form.sinCredenciales"
+                    values={{ proveedor: providerLabel(selectedAgent.providerId) }}
+                    components={{
+                      enlace: (
+                        <Link to="/credenciales" className="font-medium text-brasa hover:underline" />
+                      ),
+                    }}
+                  />
                 </div>
               ) : (
                 <select
@@ -200,7 +205,7 @@ export function ScheduledTaskFormDialog({
                   }}
                   className={inputClass}
                 >
-                  <option value="">Elige una credencial...</option>
+                  <option value="">{t('tareas.form.eligeCredencial')}</option>
                   {compatible.map((cred) => (
                     <option key={cred.id} value={cred.id}>
                       {cred.label}
@@ -212,9 +217,9 @@ export function ScheduledTaskFormDialog({
           </Field>
 
           <Field
-            label="Mensaje"
+            label={t('tareas.form.mensajeLabel')}
             error={errors.message}
-            hint="El agente ejecutara este mensaje en cada corrida."
+            hint={t('tareas.form.mensajeHint')}
           >
             <textarea
               value={message}
@@ -223,7 +228,7 @@ export function ScheduledTaskFormDialog({
                 setErrors((prev) => ({ ...prev, message: undefined }));
               }}
               className={`${inputClass} min-h-[96px] resize-y`}
-              placeholder="Genera el resumen de ventas de hoy y envialo por correo."
+              placeholder={t('tareas.form.mensajePlaceholder')}
               maxLength={10000}
             />
           </Field>
@@ -243,7 +248,7 @@ export function ScheduledTaskFormDialog({
               onClick={onClose}
               className="rounded-[10px] border border-line bg-surface px-4 py-2.5 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
             >
-              Cancelar
+              {t('tareas.cancelar')}
             </button>
             <button
               type="submit"
@@ -251,7 +256,7 @@ export function ScheduledTaskFormDialog({
               className="inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-2.5 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
               {createTask.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              {createTask.isPending ? 'Programando...' : 'Programar tarea'}
+              {createTask.isPending ? t('tareas.form.programando') : t('tareas.programarTarea')}
             </button>
           </div>
         </form>

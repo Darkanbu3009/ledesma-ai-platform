@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../lib/supabase';
 import { isValidEmail } from '../lib/email';
 import { useAuth } from '../auth/useAuth';
@@ -22,6 +23,7 @@ import { LedesmaLogo } from '../components/login/LedesmaLogo';
  * (GET /v1/me, needsRegistration -> /registro) no cambia.
  */
 export function LoginPage() {
+  const { t } = useTranslation();
   const { session, loading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -37,12 +39,12 @@ export function LoginPage() {
     const trimmed = email.trim();
     if (!isValidEmail(trimmed)) {
       setStatus('error');
-      setErrorMsg('Ingresa un correo válido.');
+      setErrorMsg(t('auth.errores.correoInvalido'));
       return;
     }
     if (!password) {
       setStatus('error');
-      setErrorMsg('Ingresa tu contraseña.');
+      setErrorMsg(t('auth.errores.contrasenaRequerida'));
       return;
     }
     setStatus('submitting');
@@ -51,12 +53,12 @@ export function LoginPage() {
     if (error) {
       setStatus('error');
       if (error.code === 'email_not_confirmed') {
-        setErrorMsg('Confirma tu correo antes de iniciar sesión. Revisa tu bandeja.');
+        setErrorMsg(t('auth.errores.confirmaCorreo'));
       } else if (error.status === 400) {
         // Mismo mensaje exista o no el correo: no se filtra si una cuenta existe.
-        setErrorMsg('Correo o contraseña incorrectos.');
+        setErrorMsg(t('auth.errores.credencialesIncorrectas'));
       } else {
-        setErrorMsg('No pudimos iniciar sesión. Intenta de nuevo.');
+        setErrorMsg(t('auth.errores.loginGenerico'));
       }
       return;
     }

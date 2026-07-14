@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { useDialog } from '../ui/useDialog';
 
 /**
@@ -21,6 +22,7 @@ export function DeleteCredentialDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useDialog({ open, onClose: onCancel, initialFocus: cancelRef });
 
@@ -33,13 +35,19 @@ export function DeleteCredentialDialog({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Eliminar credencial"
+        aria-label={t('credenciales.eliminar.titulo')}
         className="relative w-full max-w-sm rounded-2xl border border-line bg-surface p-6 shadow-card-hover"
       >
-        <h2 className="font-display text-lg font-bold text-ink">Eliminar credencial</h2>
+        <h2 className="font-display text-lg font-bold text-ink">
+          {t('credenciales.eliminar.titulo')}
+        </h2>
         <p className="mt-2 text-sm text-muted">
-          Vas a eliminar <span className="font-medium text-ink">{label}</span>. Esta accion no se
-          puede deshacer.
+          <Trans
+            t={t}
+            i18nKey="credenciales.eliminar.confirmacion"
+            values={{ etiqueta: label }}
+            components={{ nombre: <span className="font-medium text-ink" /> }}
+          />
         </p>
         {error && (
           <div
@@ -56,7 +64,7 @@ export function DeleteCredentialDialog({
             onClick={onCancel}
             className="rounded-[10px] border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
           >
-            Cancelar
+            {t('credenciales.cancelar')}
           </button>
           <button
             type="button"
@@ -64,7 +72,7 @@ export function DeleteCredentialDialog({
             disabled={busy}
             className="rounded-[10px] bg-brasa px-4 py-2 text-sm font-semibold text-white transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {busy ? 'Eliminando...' : 'Eliminar'}
+            {busy ? t('credenciales.eliminar.eliminando') : t('credenciales.eliminar.eliminar')}
           </button>
         </div>
       </div>

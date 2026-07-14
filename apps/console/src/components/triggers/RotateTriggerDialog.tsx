@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { RotateCcw } from 'lucide-react';
 import type { TriggerAuthMode } from '../../lib/triggers';
 import { useDialog } from '../ui/useDialog';
@@ -25,12 +26,13 @@ export function RotateTriggerDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useDialog({ open, onClose: onCancel, initialFocus: cancelRef });
 
   if (!open) return null;
 
-  const material = authMode === 'hmac' ? 'secreto HMAC' : 'token';
+  const material = authMode === 'hmac' ? t('triggers.rotarDialog.materialHmac') : t('triggers.rotarDialog.materialToken');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
@@ -39,14 +41,12 @@ export function RotateTriggerDialog({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Rotar el secreto del trigger"
+        aria-label={t('triggers.rotarDialog.aria')}
         className="relative w-full max-w-sm rounded-2xl border border-line bg-surface p-6 shadow-card-hover"
       >
-        <h2 className="font-display text-lg font-bold text-ink">Rotar {material}</h2>
+        <h2 className="font-display text-lg font-bold text-ink">{t('triggers.rotarDialog.titulo', { material })}</h2>
         <p className="mt-2 text-sm text-muted">
-          Se generara un {material} nuevo de inmediato y el anterior dejara de servir. Tu sistema
-          externo dejara de disparar el trigger hasta que lo actualices con el valor nuevo, que veras
-          UNA sola vez.
+          {t('triggers.rotarDialog.cuerpo', { material })}
         </p>
         {error && (
           <div
@@ -63,7 +63,7 @@ export function RotateTriggerDialog({
             onClick={onCancel}
             className="rounded-[10px] border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
           >
-            Cancelar
+            {t('triggers.comunes.cancelar')}
           </button>
           <button
             type="button"
@@ -72,7 +72,7 @@ export function RotateTriggerDialog({
             className="inline-flex items-center gap-2 rounded-[10px] bg-brasa px-4 py-2 text-sm font-semibold text-white transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busy ? <RotateCcw className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-            {busy ? 'Rotando...' : 'Rotar'}
+            {busy ? t('triggers.rotarDialog.rotando') : t('triggers.rotarDialog.rotar')}
           </button>
         </div>
       </div>

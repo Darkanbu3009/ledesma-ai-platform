@@ -9,6 +9,8 @@
  * admin gestiona la conversion). El enforcement de tier server-side queda intacto.
  */
 
+import i18n from '../i18n';
+
 /** Planes SOLICITABLES: el universo de tier MENOS 'free'. Hoy 'autonomous' desbloquea las features premium
  *  ('pro' existe para un futuro plan intermedio). Coincide con el enum del backend. */
 export type RequestedTier = 'pro' | 'autonomous';
@@ -84,10 +86,10 @@ export function requestUpgradeErrorMessage(err: unknown): string {
       : null;
   switch (status) {
     case 401:
-      return 'Tu sesion expiro. Vuelve a iniciar sesion.';
+      return i18n.t('planes.solicitudUpgrade.errorSesion');
     case 400:
-      return 'No pudimos registrar tu solicitud. Intenta de nuevo.';
+      return i18n.t('planes.solicitudUpgrade.errorRegistrar');
     default:
-      return 'No pudimos enviar tu solicitud. Intenta de nuevo.';
+      return i18n.t('planes.solicitudUpgrade.errorEnviar');
   }
 }

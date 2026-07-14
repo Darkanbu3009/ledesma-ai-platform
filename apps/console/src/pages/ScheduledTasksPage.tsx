@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowRight, CalendarClock, Lock, Plus } from 'lucide-react';
 import { useAgents, useCredentials, useMe, useScheduledTasks } from '../lib/queries';
 import { useDeleteScheduledTask, useUpdateScheduledTask } from '../lib/mutations';
@@ -26,21 +27,21 @@ const addButtonClass =
  * se activa al instante; el desbloqueo ya no pasa por upgrade_requests.
  */
 function SchedulingLocked() {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-4">
       <section className="mx-auto flex w-full max-w-[520px] flex-col items-center pb-12 pt-14 text-center">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-[#F1EFE8] px-3 py-[5px]">
           <Lock className="h-3 w-3 flex-none text-[#5F5E5A]" aria-hidden="true" />
           <span className="text-[11px] uppercase tracking-[0.08em] text-[#5F5E5A]">
-            Planes Pro y Business
+            {t('tareas.gate.badge')}
           </span>
         </span>
         <h1 className="mt-5 text-[26px] font-medium leading-[1.15] tracking-[-0.02em] text-ink">
-          Una funcion de los planes con autonomia
+          {t('tareas.gate.titulo')}
         </h1>
         <p className="mt-3 text-[14px] leading-[1.6] text-[#5F5E5A]">
-          Las tareas programadas ejecutan tus agentes solos, en el horario que elijas. Estan
-          disponibles en los planes Pro y Business.
+          {t('tareas.gate.descripcion')}
         </p>
         <ChoosePlanCta className="mt-6" />
       </section>
@@ -51,6 +52,7 @@ function SchedulingLocked() {
 
 /** Estado vacio editorial, consistente con /credenciales. */
 function TasksEmptyState({ onAdd }: { onAdd: () => void }) {
+  const { t } = useTranslation();
   return (
     <EmptyState
       media={
@@ -76,16 +78,16 @@ function TasksEmptyState({ onAdd }: { onAdd: () => void }) {
           </div>
         </div>
       }
-      eyebrow="EMPIEZA AQUI"
-      title="Programa tu primer agente"
-      description="Elige un agente, el mensaje que ejecutara y cada cuanto corre. La plataforma lo dispara sola en el horario que definas."
+      eyebrow={t('tareas.vacio.eyebrow')}
+      title={t('tareas.vacio.titulo')}
+      description={t('tareas.vacio.descripcion')}
       action={
         <button
           type="button"
           onClick={onAdd}
           className="group inline-flex h-11 items-center gap-3 rounded-full bg-brasa pl-6 pr-[7px] text-sm font-medium text-white transition hover:bg-brasa-hover"
         >
-          Programar tarea
+          {t('tareas.programarTarea')}
           <span className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-white text-brasa transition group-hover:translate-x-0.5">
             <ArrowRight className="h-[18px] w-[18px]" />
           </span>
@@ -96,6 +98,7 @@ function TasksEmptyState({ onAdd }: { onAdd: () => void }) {
 }
 
 export function ScheduledTasksPage() {
+  const { t } = useTranslation();
   const me = useMe();
   // Capacidad derivada del modulo central de planes (Pro y Business la tienen), no de un tier literal.
   const isAutonomous = tierAllowsAutonomy(me.data?.profile?.tier);
@@ -136,9 +139,11 @@ export function ScheduledTasksPage() {
       { id: task.id, patch: { isActive: !task.isActive } },
       {
         onSuccess: () =>
-          setNotice({ kind: 'ok', text: task.isActive ? 'Tarea pausada.' : 'Tarea activada.' }),
-        onError: () =>
-          setNotice({ kind: 'error', text: 'No pudimos actualizar la tarea. Intenta de nuevo.' }),
+          setNotice({
+            kind: 'ok',
+            text: task.isActive ? t('tareas.avisos.pausada') : t('tareas.avisos.activada'),
+          }),
+        onError: () => setNotice({ kind: 'error', text: t('tareas.avisos.errorActualizar') }),
         onSettled: () => setTogglingId(null),
       },
     );
@@ -154,14 +159,14 @@ export function ScheduledTasksPage() {
     deleteTask.mutate(toDelete.id, {
       onSuccess: () => {
         setToDelete(null);
-        setNotice({ kind: 'ok', text: 'Tarea eliminada.' });
+        setNotice({ kind: 'ok', text: t('tareas.avisos.eliminada') });
       },
     });
   }
 
   function deleteDescription(task: ScheduledTask | null): string {
     if (!task) return '';
-    const agentName = agentsById.get(task.agentId)?.name ?? 'agente eliminado';
+    const agentName = agentsById.get(task.agentId)?.name ?? t('tareas.eliminar.agenteEliminado');
     const schedule = describeCron(task.cronExpression) ?? task.cronExpression;
     return `${agentName} · ${schedule}`;
   }
@@ -171,14 +176,14 @@ export function ScheduledTasksPage() {
       {/* En el estado bloqueado el hero del gate reemplaza al titulo y subtitulo de la pagina. */}
       {(me.isLoading || isAutonomous) && (
         <PageHeader
-          title="Tareas programadas"
-          subtitle="Programa a tus agentes para que se ejecuten solos, en el horario que elijas."
+          title={t('tareas.header.titulo')}
+          subtitle={t('tareas.header.subtitulo')}
           action={
             isAutonomous &&
             hasTasks && (
               <button type="button" onClick={() => setFormOpen(true)} className={addButtonClass}>
                 <Plus className="h-[17px] w-[17px]" />
-                Programar tarea
+                {t('tareas.programarTarea')}
               </button>
             )
           }
@@ -194,7 +199,7 @@ export function ScheduledTasksPage() {
       ) : listLoading ? (
         <SkeletonList cardClassName="h-[104px]" />
       ) : isError ? (
-        <ErrorState title="No pudimos cargar tus tareas" onRetry={() => void refetch()} />
+        <ErrorState title={t('tareas.errorCargar')} onRetry={() => void refetch()} />
       ) : !hasTasks ? (
         <TasksEmptyState onAdd={() => setFormOpen(true)} />
       ) : (
@@ -216,7 +221,7 @@ export function ScheduledTasksPage() {
             className="flex w-full items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed border-line p-4 text-sm font-semibold text-muted transition hover:border-brasa-line hover:bg-brasa/[0.03] hover:text-brasa"
           >
             <Plus className="h-[18px] w-[18px]" />
-            Programar tarea
+            {t('tareas.programarTarea')}
           </button>
         </div>
       )}
@@ -224,7 +229,7 @@ export function ScheduledTasksPage() {
       {formOpen && isAutonomous && (
         <ScheduledTaskFormDialog
           onClose={() => setFormOpen(false)}
-          onCreated={() => setNotice({ kind: 'ok', text: 'Tarea programada.' })}
+          onCreated={() => setNotice({ kind: 'ok', text: t('tareas.avisos.programada') })}
         />
       )}
 
@@ -232,7 +237,7 @@ export function ScheduledTasksPage() {
         open={toDelete !== null}
         description={deleteDescription(toDelete)}
         busy={deleteTask.isPending}
-        error={deleteTask.isError ? 'No pudimos eliminar la tarea. Intenta de nuevo.' : undefined}
+        error={deleteTask.isError ? t('tareas.eliminar.error') : undefined}
         onConfirm={confirmDelete}
         onCancel={() => setToDelete(null)}
       />

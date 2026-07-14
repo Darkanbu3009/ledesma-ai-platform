@@ -1,4 +1,5 @@
 import { type CSSProperties, type JSX, type RefObject } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Cpu, ArrowRightLeft } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -69,6 +70,7 @@ const activeChipStyle: CSSProperties = {
  * la tarjeta lleva un aria-label que describe que el cerebro es intercambiable.
  */
 export function BrainSwap({ providers, active, cardRef, onSelect }: BrainSwapProps): JSX.Element {
+  const { t } = useTranslation();
   const activeProvider = providers[active] ?? providers[0];
   const activeLabel = activeProvider?.label ?? '';
 
@@ -78,7 +80,7 @@ export function BrainSwap({ providers, active, cardRef, onSelect }: BrainSwapPro
       <div
         ref={cardRef}
         className="relative isolate flex h-full w-full flex-col overflow-hidden rounded-2xl border border-border bg-background-secondary p-8 shadow-md"
-        aria-label={`Modelo intercambiable: el modelo de IA cambia entre Claude, ChatGPT y modelos open source sin rehacer el agente. Modelo activo: ${activeLabel}.`}
+        aria-label={t('landing.brainSwap.cartaAria', { label: activeLabel })}
       >
         {/* Glow radial sutil detras del cerebro, tenido con el acento activo */}
         <div
@@ -93,14 +95,14 @@ export function BrainSwap({ providers, active, cardRef, onSelect }: BrainSwapPro
             quepan sin partirse ni superponerse incluso en el ancho minimo de la carta. */}
         <div className="flex items-center justify-between gap-2">
           <span className="font-jetbrains text-[0.5625rem] uppercase tracking-[0.06em] text-foreground-secondary whitespace-nowrap">
-            Modelo activo
+            {t('landing.brainSwap.modeloActivo')}
           </span>
           <span
             className="inline-flex items-center gap-1 font-jetbrains text-[0.5625rem] uppercase tracking-[0.06em] whitespace-nowrap transition-colors duration-500"
             style={accentTextStyle}
           >
             <ArrowRightLeft className="h-3 w-3" aria-hidden="true" />
-            Intercambiable
+            {t('landing.brainSwap.intercambiable')}
           </span>
         </div>
 
@@ -128,7 +130,7 @@ export function BrainSwap({ providers, active, cardRef, onSelect }: BrainSwapPro
             {activeLabel}
           </p>
           <p className="mt-1 text-center text-sm text-foreground-secondary">
-            Cambia el modelo que mueve al agente, sin rehacer nada.
+            {t('landing.brainSwap.subtitulo')}
           </p>
         </div>
 
@@ -146,7 +148,7 @@ export function BrainSwap({ providers, active, cardRef, onSelect }: BrainSwapPro
                 type="button"
                 onClick={() => onSelect(index)}
                 aria-pressed={isActive}
-                aria-label={`Cambiar modelo a ${provider.label}`}
+                aria-label={t('landing.brainSwap.cambiarModeloAria', { label: provider.label })}
                 className={cn(
                   'flex items-center justify-center whitespace-nowrap rounded-lg border px-4 py-3 font-jetbrains text-sm font-medium transition-colors duration-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background-secondary',
                   !isActive && 'border-border bg-background text-foreground-secondary hover:text-foreground'

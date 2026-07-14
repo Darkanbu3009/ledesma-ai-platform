@@ -8,6 +8,8 @@
  * payload (dato sensible) y trunca last_error; aca solo lo mostramos.
  */
 
+import i18n from '../i18n';
+
 /** Tipo inferido del job (del payload, sin exponerlo): receta multi-paso o mensaje suelto. */
 export type JobType = 'recipe' | 'simple';
 
@@ -46,33 +48,33 @@ export const JOBS_REFETCH_MS = 10_000;
 export type JobStatusFilter = JobStatus | 'all';
 
 /** Opciones del selector de filtro por estado (orden de aparicion en la UI). */
-export const JOB_STATUS_FILTERS: { value: JobStatusFilter; label: string }[] = [
-  { value: 'all', label: 'Todas' },
-  { value: 'pending', label: 'Pendiente' },
-  { value: 'running', label: 'En curso' },
-  { value: 'completed', label: 'Completada' },
-  { value: 'failed', label: 'Fallida' },
+export const JOB_STATUS_FILTERS: { value: JobStatusFilter; labelKey: string }[] = [
+  { value: 'all', labelKey: 'actividad.filtros.todas' },
+  { value: 'pending', labelKey: 'actividad.jobEstado.pendiente' },
+  { value: 'running', labelKey: 'actividad.jobEstado.enCurso' },
+  { value: 'completed', labelKey: 'actividad.jobEstado.completada' },
+  { value: 'failed', labelKey: 'actividad.jobEstado.fallida' },
 ];
 
 /** Etiqueta legible del estado de un job. */
 export function jobStatusLabel(status: JobStatus): string {
   switch (status) {
     case 'pending':
-      return 'Pendiente';
+      return i18n.t('actividad.jobEstado.pendiente');
     case 'running':
-      return 'En curso';
+      return i18n.t('actividad.jobEstado.enCurso');
     case 'completed':
-      return 'Completada';
+      return i18n.t('actividad.jobEstado.completada');
     case 'failed':
-      return 'Fallida';
+      return i18n.t('actividad.jobEstado.fallida');
     default:
       return status;
   }
 }
 
-/** Etiqueta legible del tipo de job: 'Receta' (multi-paso) o 'Mensaje' (suelto). */
+/** Etiqueta legible del tipo de job: receta (multi-paso) o mensaje (suelto). */
 export function jobTypeLabel(type: JobType): string {
-  return type === 'recipe' ? 'Receta' : 'Mensaje';
+  return type === 'recipe' ? i18n.t('actividad.jobTipo.receta') : i18n.t('actividad.jobTipo.mensaje');
 }
 
 /** Un job pending o running sigue "en vuelo": su estado puede cambiar y justifica auto-refrescar. */

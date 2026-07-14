@@ -94,9 +94,9 @@ export function Sidebar({
           <button
             type="button"
             onClick={onToggleCollapse}
-            aria-label={collapsed ? 'Expandir panel' : 'Colapsar panel'}
+            aria-label={collapsed ? t('ui.sidebar.expandirPanel') : t('ui.sidebar.colapsarPanel')}
             aria-expanded={collapsed === false}
-            title={collapsed ? 'Expandir panel' : 'Colapsar panel'}
+            title={collapsed ? t('ui.sidebar.expandirPanel') : t('ui.sidebar.colapsarPanel')}
             className={`rounded-lg p-1.5 text-muted transition hover:bg-line-soft hover:text-ink ${focusRing}`}
           >
             {/* Mismo glifo en ambos estados (identico al de Claude): el panel simple sin flechas.

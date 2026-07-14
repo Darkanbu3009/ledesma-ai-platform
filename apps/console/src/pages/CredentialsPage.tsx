@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { KeyRound, Plus } from 'lucide-react';
 import { useCredentials } from '../lib/queries';
 import { useDeleteCredential } from '../lib/mutations';
@@ -15,19 +16,19 @@ import { focusRing } from '../lib/utils';
 const addButtonClass =
   'inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:-translate-y-px hover:bg-brasa-hover hover:shadow-[0_2px_6px_rgba(31,30,28,0.14)]';
 
-/** Las tres garantias de la franja inferior de la tarjeta de ejemplo. */
+/** Las tres garantias de la franja inferior de la tarjeta de ejemplo (claves de traduccion). */
 const GARANTIAS = [
   {
-    titulo: 'Cifrada al guardar',
-    texto: 'AES-256-GCM en la boveda. Ni el equipo puede leerla.',
+    tituloKey: 'credenciales.vacio.garantias.cifradaTitulo',
+    textoKey: 'credenciales.vacio.garantias.cifradaTexto',
   },
   {
-    titulo: 'Nunca se vuelve a mostrar',
-    texto: 'Solo veras la mascara. Tus agentes la usan al ejecutar.',
+    tituloKey: 'credenciales.vacio.garantias.mascaraTitulo',
+    textoKey: 'credenciales.vacio.garantias.mascaraTexto',
   },
   {
-    titulo: 'Tuya, siempre',
-    texto: 'Es tu key y tu gasto. La borras cuando quieras.',
+    tituloKey: 'credenciales.vacio.garantias.tuyaTitulo',
+    textoKey: 'credenciales.vacio.garantias.tuyaTexto',
   },
 ] as const;
 
@@ -42,16 +43,16 @@ const GARANTIAS = [
  * Resto neutros calidos. Sin box-shadow.
  */
 function CredentialsEmptyState({ onAdd }: { onAdd: () => void }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
         <div className="max-w-[520px]">
           <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">
-            Credenciales
+            {t('credenciales.titulo')}
           </h1>
           <p className="mt-1.5 text-[13.5px] leading-[1.55] text-[#5F5E5A]">
-            Guarda las API keys de tus proveedores una sola vez. Tus agentes las usan desde la
-            boveda, sin volver a pegarlas.
+            {t('credenciales.vacio.subtitulo')}
           </p>
         </div>
         <button
@@ -60,7 +61,7 @@ function CredentialsEmptyState({ onAdd }: { onAdd: () => void }) {
           className={`inline-flex flex-none items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white transition hover:bg-brasa-hover ${focusRing}`}
         >
           <Plus className="h-[17px] w-[17px]" />
-          Agregar credencial
+          {t('credenciales.agregar')}
         </button>
       </div>
 
@@ -68,10 +69,10 @@ function CredentialsEmptyState({ onAdd }: { onAdd: () => void }) {
         {/* Header de la tarjeta: label + badge delineado "Ejemplo" (mismo estilo que los gates). */}
         <div className="flex items-center justify-between gap-3 border-b-[0.5px] border-[#F1EFE8] px-[18px] py-[12px]">
           <span className="text-[11px] uppercase tracking-[0.07em] text-[#B4B2A9]">
-            Asi se guarda tu llave
+            {t('credenciales.vacio.tarjetaLabel')}
           </span>
           <span className="flex-none rounded-full border-[0.5px] border-[#E9E7DF] px-[9px] py-[2px] text-[11px] uppercase tracking-[0.07em] text-[#B4B2A9]">
-            Ejemplo
+            {t('credenciales.vacio.ejemploBadge')}
           </span>
         </div>
 
@@ -85,40 +86,45 @@ function CredentialsEmptyState({ onAdd }: { onAdd: () => void }) {
           </span>
           <span className="min-w-0">
             <span className="block truncate text-[13.5px] font-medium text-ink">
-              Anthropic · produccion
+              {t('credenciales.vacio.ejemploNombre')}
             </span>
             <span className="block truncate font-mono text-[11.5px] text-[#8A8880]">
               sk-ant-••••••••••••••••••••7Kq2
             </span>
           </span>
           <span className="flex-none rounded-full bg-[#E1F5EE] px-2 py-[2px] font-mono text-[11px] text-[#0F6E56]">
-            cifrada
+            {t('credenciales.vacio.ejemploCifrada')}
           </span>
-          <span className="flex-none font-mono text-[11px] text-[#B4B2A9]">3 agentes la usan</span>
+          <span className="flex-none font-mono text-[11px] text-[#B4B2A9]">
+            {t('credenciales.vacio.ejemploUso')}
+          </span>
         </div>
 
         {/* Franja de garantias: 3 columnas en desktop, apilada en angosto. */}
         <div className="grid grid-cols-1 bg-[#FAF9F5] sm:grid-cols-3">
           {GARANTIAS.map((garantia) => (
             <div
-              key={garantia.titulo}
+              key={garantia.tituloKey}
               className="border-[#F1EFE8] px-[18px] py-[14px] [&:not(:last-child)]:border-b-[0.5px] sm:[&:not(:last-child)]:border-b-0 sm:[&:not(:last-child)]:border-r-[0.5px]"
             >
-              <h3 className="text-[12.5px] font-medium text-ink">{garantia.titulo}</h3>
-              <p className="mt-1 text-[12px] leading-[1.5] text-[#8A8880]">{garantia.texto}</p>
+              <h3 className="text-[12.5px] font-medium text-ink">{t(garantia.tituloKey)}</h3>
+              <p className="mt-1 text-[12px] leading-[1.5] text-[#8A8880]">
+                {t(garantia.textoKey)}
+              </p>
             </div>
           ))}
         </div>
       </div>
 
       <p className="text-center text-[12px] text-[#8A8880]">
-        Compatible con Anthropic, OpenAI y proveedores con API compatible.
+        {t('credenciales.vacio.compatibilidad')}
       </p>
     </div>
   );
 }
 
 export function CredentialsPage() {
+  const { t } = useTranslation();
   const { data: credentials, isLoading, isError, refetch } = useCredentials();
   const deleteCredential = useDeleteCredential();
 
@@ -148,7 +154,7 @@ export function CredentialsPage() {
     deleteCredential.mutate(toDelete.id, {
       onSuccess: () => {
         setToDelete(null);
-        setNotice('Credencial eliminada.');
+        setNotice(t('credenciales.noticeEliminada'));
       },
     });
   }
@@ -157,13 +163,13 @@ export function CredentialsPage() {
     <div className="mx-auto flex min-h-full max-w-4xl flex-col">
       {!showEmpty && (
         <PageHeader
-          title="Credenciales"
-          subtitle="Guarda las API keys de tus proveedores de IA para reutilizarlas en tus agentes."
+          title={t('credenciales.titulo')}
+          subtitle={t('credenciales.subtitulo')}
           action={
             hasCredentials && (
               <button type="button" onClick={() => setFormOpen(true)} className={addButtonClass}>
                 <Plus className="h-[17px] w-[17px]" />
-                Agregar credencial
+                {t('credenciales.agregar')}
               </button>
             )
           }
@@ -175,7 +181,7 @@ export function CredentialsPage() {
       {isLoading ? (
         <SkeletonList cardClassName="h-[88px]" />
       ) : isError ? (
-        <ErrorState title="No pudimos cargar tus credenciales" onRetry={() => void refetch()} />
+        <ErrorState title={t('credenciales.errorCargar')} onRetry={() => void refetch()} />
       ) : !hasCredentials ? (
         <CredentialsEmptyState onAdd={() => setFormOpen(true)} />
       ) : (
@@ -193,7 +199,7 @@ export function CredentialsPage() {
             className="flex w-full items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed border-line p-4 text-sm font-semibold text-muted transition hover:border-brasa-line hover:bg-brasa/[0.03] hover:text-brasa"
           >
             <Plus className="h-[18px] w-[18px]" />
-            Agregar credencial
+            {t('credenciales.agregar')}
           </button>
         </div>
       )}
@@ -201,7 +207,7 @@ export function CredentialsPage() {
       {formOpen && (
         <CredentialFormDialog
           onClose={() => setFormOpen(false)}
-          onCreated={() => setNotice('Credencial guardada.')}
+          onCreated={() => setNotice(t('credenciales.noticeGuardada'))}
         />
       )}
 
@@ -209,11 +215,7 @@ export function CredentialsPage() {
         open={toDelete !== null}
         label={toDelete?.label ?? ''}
         busy={deleteCredential.isPending}
-        error={
-          deleteCredential.isError
-            ? 'No pudimos eliminar la credencial. Intenta de nuevo.'
-            : undefined
-        }
+        error={deleteCredential.isError ? t('credenciales.eliminar.error') : undefined}
         onConfirm={confirmDelete}
         onCancel={() => setToDelete(null)}
       />

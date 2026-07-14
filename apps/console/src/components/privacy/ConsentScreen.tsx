@@ -1,13 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { ShieldCheck } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { LedesmaLogo } from '../login/LedesmaLogo';
 import { useAcceptConsents } from '../../lib/mutations';
-import {
-  SIMPLIFIED_NOTICE,
-  pendingConsentBodies,
-  type ConsentsState,
-} from '../../lib/privacy';
+import { SIMPLIFIED_NOTICE, pendingConsentBodies, type ConsentsState } from '../../lib/privacy';
 
 /**
  * Pantalla de CONSENTIMIENTO (Fase 5.6). Se muestra cuando al titular le falta aceptar la version vigente
@@ -20,6 +17,7 @@ import {
  * check (estado en React, sin localStorage) al leer el documento.
  */
 export function ConsentScreen({ state }: { state: ConsentsState }) {
+  const { t } = useTranslation();
   const [accepted, setAccepted] = useState(false);
   const acceptConsents = useAcceptConsents();
 
@@ -45,10 +43,10 @@ export function ConsentScreen({ state }: { state: ConsentsState }) {
             tabIndex={-1}
             className="mt-5 font-display text-2xl font-semibold tracking-tight text-ink focus:outline-none"
           >
-            Antes de continuar
+            {t('privacidad.consentimiento.titulo')}
           </h1>
           <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.24em] text-muted">
-            AVISO DE PRIVACIDAD
+            {t('privacidad.consentimiento.kicker')}
           </p>
         </div>
 
@@ -58,8 +56,7 @@ export function ConsentScreen({ state }: { state: ConsentsState }) {
               <ShieldCheck className="h-5 w-5" />
             </span>
             <p className="text-sm leading-relaxed text-muted">
-              La plataforma opera agentes de IA de forma autonoma que procesan datos. Para continuar,
-              necesitamos tu consentimiento sobre como los tratamos.
+              {t('privacidad.consentimiento.intro')}
             </p>
           </div>
 
@@ -67,29 +64,33 @@ export function ConsentScreen({ state }: { state: ConsentsState }) {
               aviso integral (enlazado abajo). */}
           <div className="mt-6 rounded-xl border border-line bg-field p-4">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-soft">
-              Aviso simplificado
+              {t('privacidad.consentimiento.avisoSimplificadoTitulo')}
             </p>
             <ul className="mt-2 space-y-1.5">
               {SIMPLIFIED_NOTICE.sections.map((section) => (
                 <li key={section.id} className="flex gap-2 text-sm text-ink-soft">
                   <span className="text-brasa">-</span>
-                  {section.heading}
+                  {t(`privacidad.avisoSimplificado.secciones.${section.id}.titulo`)}
                 </li>
               ))}
             </ul>
           </div>
 
           <div className="mt-4 text-sm text-muted">
-            Consulta el{' '}
-            <a
-              href="/aviso-de-privacidad"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-medium text-brasa hover:underline"
-            >
-              aviso de privacidad integral
-            </a>
-            .
+            <Trans
+              t={t}
+              i18nKey="privacidad.consentimiento.consultaIntegral"
+              components={{
+                integral: (
+                  <a
+                    href="/aviso-de-privacidad"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium text-brasa hover:underline"
+                  />
+                ),
+              }}
+            />
           </div>
 
           {/* Check EXPLICITO, no pre-marcado. Sin el, el boton queda deshabilitado. */}
@@ -100,14 +101,12 @@ export function ConsentScreen({ state }: { state: ConsentsState }) {
               onChange={(e) => setAccepted(e.target.checked)}
               className="mt-0.5 h-4 w-4 flex-none accent-brasa"
             />
-            <span className="text-sm text-ink">
-              He leido y acepto el Aviso de Privacidad de la plataforma.
-            </span>
+            <span className="text-sm text-ink">{t('privacidad.consentimiento.aceptacion')}</span>
           </label>
 
           {acceptConsents.isError && (
             <p className="mt-4 text-sm text-brasa" role="alert">
-              No pudimos registrar tu aceptacion. Intenta de nuevo.
+              {t('privacidad.consentimiento.error')}
             </p>
           )}
 
@@ -117,7 +116,9 @@ export function ConsentScreen({ state }: { state: ConsentsState }) {
             disabled={!accepted || acceptConsents.isPending}
             className="mt-6 w-full rounded-lg bg-brasa px-4 py-2.5 text-sm font-medium text-white transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {acceptConsents.isPending ? 'Registrando...' : 'Aceptar y continuar'}
+            {acceptConsents.isPending
+              ? t('privacidad.consentimiento.registrando')
+              : t('privacidad.consentimiento.aceptar')}
           </button>
         </div>
 
@@ -127,7 +128,7 @@ export function ConsentScreen({ state }: { state: ConsentsState }) {
             onClick={() => void supabase.auth.signOut()}
             className="text-xs text-muted-soft transition hover:text-ink"
           >
-            Cerrar sesion
+            {t('privacidad.consentimiento.cerrarSesion')}
           </button>
         </div>
       </div>

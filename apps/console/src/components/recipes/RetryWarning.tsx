@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { AlertTriangle } from 'lucide-react';
 
 /**
@@ -9,6 +10,7 @@ import { AlertTriangle } from 'lucide-react';
  * la lea al armar la receta. Se muestra en el formulario de alta/edicion.
  */
 export function RetryWarning() {
+  const { t } = useTranslation();
   return (
     <div
       role="note"
@@ -16,11 +18,9 @@ export function RetryWarning() {
     >
       <AlertTriangle className="mt-0.5 h-[18px] w-[18px] flex-none text-amber-600" />
       <div className="text-[13px] leading-[1.55] text-amber-900">
-        <p className="font-semibold">Si una corrida falla, se reintenta desde el primer paso.</p>
+        <p className="font-semibold">{t('recetas.retry.titulo')}</p>
         <p className="mt-0.5 text-amber-900/85">
-          No hay checkpoint por paso: un reintento vuelve a ejecutar toda la receta. Evita acciones
-          irreversibles (enviar correos, cobros, publicar) en los primeros pasos, o hazlas de forma que
-          repetirlas no cause dano.
+          {t('recetas.retry.detalle')}
         </p>
       </div>
     </div>

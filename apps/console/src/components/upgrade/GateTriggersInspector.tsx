@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { ArrowRight } from 'lucide-react';
 
 /**
@@ -11,10 +12,16 @@ import { ArrowRight } from 'lucide-react';
  */
 
 type EventoDemo = {
+  /** Timestamp literal; en la fila activa es una CLAVE de traduccion ("ahora"). */
   hora: string;
+  /** CLAVE de traduccion del nombre del evento. */
   evento: string;
+  /** CLAVE de traduccion del nombre del agente. */
   agente: string;
-  /** Texto del estado; en la fila activa se pinta con el dot brasa. */
+  /**
+   * Texto del estado; en la fila activa se pinta con el dot brasa y es una CLAVE de traduccion
+   * ("corriendo"); en las demas es el literal tecnico ("200 ok 1.8s").
+   */
   resultado: string;
   activo: boolean;
 };
@@ -22,28 +29,29 @@ type EventoDemo = {
 const EVENTOS: EventoDemo[] = [
   {
     hora: '10:42:07',
-    evento: 'Factura de proveedor recibida',
-    agente: 'Cuentas por pagar',
+    evento: 'gates.triggers.eventoFactura',
+    agente: 'gates.triggers.agenteCuentas',
     resultado: '200 ok 1.8s',
     activo: false,
   },
   {
     hora: '11:15:33',
-    evento: 'Solicitud de cotizacion nueva',
-    agente: 'Cotizaciones',
+    evento: 'gates.triggers.eventoCotizacion',
+    agente: 'gates.triggers.agenteCotizaciones',
     resultado: '200 ok 2.4s',
     activo: false,
   },
   {
-    hora: 'ahora',
-    evento: 'Factura de proveedor recibida',
-    agente: 'Cuentas por pagar',
-    resultado: 'corriendo',
+    hora: 'gates.triggers.ahora',
+    evento: 'gates.triggers.eventoFactura',
+    agente: 'gates.triggers.agenteCuentas',
+    resultado: 'gates.triggers.corriendo',
     activo: true,
   },
 ];
 
 export function GateTriggersInspector() {
+  const { t } = useTranslation();
   return (
     <div
       aria-hidden="true"
@@ -58,7 +66,7 @@ export function GateTriggersInspector() {
           </span>
         </span>
         <span className="flex-none rounded-full border-[0.5px] border-[#E9E7DF] px-[9px] py-[2px] text-[11px] uppercase tracking-[0.07em] text-[#B4B2A9]">
-          Ejemplo
+          {t('gates.ejemplo')}
         </span>
       </div>
 
@@ -79,14 +87,14 @@ export function GateTriggersInspector() {
                   item.activo ? 'text-[#5F5E5A]' : 'text-[#B4B2A9]'
                 }`}
               >
-                {item.hora}
+                {item.activo ? t(item.hora) : item.hora}
               </span>
               <span
                 className={`truncate text-[12.5px] ${
                   item.activo ? 'font-medium text-ink' : 'text-[#5F5E5A]'
                 }`}
               >
-                {item.evento}
+                {t(item.evento)}
               </span>
               <span className="flex min-w-0 items-center gap-1.5">
                 <ArrowRight
@@ -97,13 +105,13 @@ export function GateTriggersInspector() {
                     item.activo ? 'text-[#5F5E5A]' : 'text-[#8A8880]'
                   }`}
                 >
-                  {item.agente}
+                  {t(item.agente)}
                 </span>
               </span>
               {item.activo ? (
                 <span className="flex items-center justify-end gap-1.5">
                   <span className="h-1.5 w-1.5 flex-none rounded-full bg-[#E5511E]" />
-                  <span className="font-mono text-[11px] text-[#5F5E5A]">{item.resultado}</span>
+                  <span className="font-mono text-[11px] text-[#5F5E5A]">{t(item.resultado)}</span>
                 </span>
               ) : (
                 <span className="text-right font-mono text-[11px] text-[#0F6E56]">
@@ -117,12 +125,8 @@ export function GateTriggersInspector() {
 
       {/* Pie: la frase de valor + resumen mono. */}
       <div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-2 border-t-[0.5px] border-[#F1EFE8] bg-[#FAF9F5] px-[18px] py-[11px]">
-        <span className="text-[12.5px] text-[#5F5E5A]">
-          Cada llamada a la URL ejecuta al agente al instante, sin que nadie este conectado.
-        </span>
-        <span className="font-mono text-[11.5px] text-[#8A8880]">
-          31 eventos este mes, 0 perdidos
-        </span>
+        <span className="text-[12.5px] text-[#5F5E5A]">{t('gates.triggers.pie')}</span>
+        <span className="font-mono text-[11.5px] text-[#8A8880]">{t('gates.triggers.resumen')}</span>
       </div>
     </div>
   );

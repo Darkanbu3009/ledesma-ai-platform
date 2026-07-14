@@ -2,6 +2,8 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Lock, Pencil, Sparkles, Zap } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { ApiError } from '../lib/api';
 import { playgroundPath, providerLabel } from '../lib/agents';
 import { cn } from '../lib/utils';
@@ -24,23 +26,23 @@ import { tierAllowsAutonomy } from '../lib/plans';
 /** Traduce el error de un turno del Configurador a un mensaje en espanol para el chat. */
 function turnErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.status === 401) return 'Tu sesion expiro. Volve a iniciar sesion.';
+    if (error.status === 401) return i18n.t('configurador.errores.sesionExpirada');
     if (error.status === 403)
-      return 'El modo autonomo requiere el plan correspondiente. Volve al modo asistente para continuar.';
+      return i18n.t('configurador.errores.autonomoRequierePlan');
     if (error.status === 404)
-      return 'La credencial guardada no esta disponible. Elegi otra o pega una al momento.';
-    if (error.status === 400) return 'El Configurador rechazo la peticion. Revisa la credencial y el modelo.';
+      return i18n.t('configurador.errores.credencialNoDisponible');
+    if (error.status === 400) return i18n.t('configurador.errores.peticionRechazada');
   }
-  return 'No pudimos contactar al Configurador. Intenta de nuevo.';
+  return i18n.t('configurador.errores.sinContacto');
 }
 
 /** Traduce el error de la creacion del agente (POST /v1/agents). */
 function createErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.status === 401) return 'Tu sesion expiro. Volve a iniciar sesion.';
-    if (error.status === 400) return 'El backend rechazo el agente. Revisa el preview.';
+    if (error.status === 401) return i18n.t('configurador.errores.sesionExpirada');
+    if (error.status === 400) return i18n.t('configurador.errores.agenteRechazado');
   }
-  return 'No pudimos crear el agente. Intenta de nuevo.';
+  return i18n.t('configurador.errores.crearFallo');
 }
 
 type MobileTab = 'chat' | 'preview';
@@ -59,6 +61,7 @@ type MobileTab = 'chat' | 'preview';
  * Todo el estado (sesion de credencial, historial, spec) vive en React; nada se persiste en el cliente.
  */
 export function ConfiguratorPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const createAgent = useCreateAgentFromSpec();
@@ -162,7 +165,7 @@ export function ConfiguratorPage() {
       ? ''
       : session.mode === 'saved'
         ? session.label
-        : `${providerLabel(session.providerId)} (al momento)`;
+        : t('configurador.pagina.sesionAlMomento', { provider: providerLabel(session.providerId) });
   const readyForPreview = validation?.ok === true;
 
   return (
@@ -171,12 +174,12 @@ export function ConfiguratorPage() {
         <div>
           <h1 className="flex items-center gap-2.5 font-display text-3xl font-extrabold tracking-tight text-ink">
             <Sparkles className="h-7 w-7 text-brasa" />
-            Configurador
+            {t('configurador.pagina.titulo')}
           </h1>
           <p className="mt-1.5 text-[15px] text-muted">
             {autonomousActive
-              ? 'Describi el agente que queres y se crea solo cuando esta listo y valido.'
-              : 'Describi el agente que queres y armalo conversando. Vos confirmas antes de crearlo.'}
+              ? t('configurador.pagina.subtituloAutonomo')
+              : t('configurador.pagina.subtituloAsistente')}
           </p>
         </div>
         <Link
@@ -184,7 +187,7 @@ export function ConfiguratorPage() {
           className="inline-flex flex-none items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2 text-sm font-medium text-muted transition hover:border-ink-soft hover:text-ink"
         >
           <ArrowLeft className="h-4 w-4" />
-          Volver
+          {t('configurador.pagina.volver')}
         </Link>
       </div>
 
@@ -200,7 +203,7 @@ export function ConfiguratorPage() {
         <>
           <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3 shadow-card">
             <p className="text-sm text-muted">
-              Usando: <span className="font-medium text-ink">{sessionLabel}</span>
+              {t('configurador.pagina.usando')} <span className="font-medium text-ink">{sessionLabel}</span>
               <span className="mx-2 text-muted-soft">·</span>
               <span className="font-mono text-ink">{session.model}</span>
             </p>
@@ -210,7 +213,7 @@ export function ConfiguratorPage() {
               className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-xs font-medium text-muted transition hover:border-ink-soft hover:text-ink"
             >
               <Pencil className="h-3.5 w-3.5" />
-              Cambiar
+              {t('configurador.pagina.cambiar')}
             </button>
           </div>
 
@@ -224,15 +227,14 @@ export function ConfiguratorPage() {
             <div className="mt-4 flex flex-col items-start gap-3">
               <p className="inline-flex items-center gap-1.5 text-xs text-muted-soft">
                 <Lock className="h-3.5 w-3.5" />
-                El modo autonomo, que crea el agente sin confirmacion, es parte de los planes Pro y
-                Business.
+                {t('configurador.pagina.gateAutonomo')}
               </p>
               <ChoosePlanCta className="items-start text-left" />
             </div>
           )}
 
           {/* Tabs en pantallas chicas: chat y preview se apilan detras de una pestana cada uno. */}
-          <div className="mt-6 flex gap-2 lg:hidden" role="tablist" aria-label="Vistas del configurador">
+          <div className="mt-6 flex gap-2 lg:hidden" role="tablist" aria-label={t('configurador.pagina.tabsAriaLabel')}>
             <TabButton active={mobileTab === 'chat'} onClick={() => setMobileTab('chat')}>
               Chat
             </TabButton>
@@ -241,7 +243,7 @@ export function ConfiguratorPage() {
               onClick={() => setMobileTab('preview')}
               dot={readyForPreview && mobileTab === 'chat'}
             >
-              Vista previa
+              {t('configurador.pagina.tabVistaPrevia')}
             </TabButton>
           </div>
 
@@ -266,7 +268,7 @@ export function ConfiguratorPage() {
             </section>
 
             <section
-              aria-label="Vista previa del agente"
+              aria-label={t('configurador.preview.titulo')}
               className={cn(
                 'h-[34rem] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-card lg:flex lg:h-[38rem]',
                 mobileTab === 'preview' ? 'flex' : 'hidden',
@@ -299,28 +301,29 @@ function ModeSelector({
   onChange: (mode: ConfiguratorMode) => void;
   disabled: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="mt-4">
       <div
         className="inline-flex rounded-xl border border-line bg-field p-1"
         role="radiogroup"
-        aria-label="Modo del configurador"
+        aria-label={t('configurador.pagina.modoAriaLabel')}
       >
         <ModeButton
           active={mode === 'assistant'}
           onClick={() => onChange('assistant')}
           disabled={disabled}
           icon={<Pencil className="h-3.5 w-3.5" />}
-          title="Asistente"
-          hint="reviso y confirmo"
+          title={t('configurador.pagina.modoAsistente')}
+          hint={t('configurador.pagina.modoAsistenteHint')}
         />
         <ModeButton
           active={mode === 'autonomous'}
           onClick={() => onChange('autonomous')}
           disabled={disabled}
           icon={<Zap className="h-3.5 w-3.5" />}
-          title="Autonomo"
-          hint="crear automaticamente"
+          title={t('configurador.pagina.modoAutonomo')}
+          hint={t('configurador.pagina.modoAutonomoHint')}
         />
       </div>
     </div>

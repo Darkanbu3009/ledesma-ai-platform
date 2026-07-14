@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../lib/supabase';
 
 /**
@@ -24,6 +25,7 @@ import { supabase } from '../../lib/supabase';
  * el boton no quede colgado en una pagina restaurada desde el bfcache.
  */
 export function GoogleAuthButton() {
+  const { t } = useTranslation();
   const [pending, setPending] = useState(false);
   // Cancelacion o fallo en Google: el retorno llega sin sesion y con el error
   // en el hash (#error=access_denied...). detectSessionInUrl no establece
@@ -33,7 +35,7 @@ export function GoogleAuthButton() {
   // simplemente no se muestra nada.
   const [errorMsg, setErrorMsg] = useState(() =>
     new URLSearchParams(window.location.hash.slice(1)).has('error')
-      ? 'No se completó el acceso con Google. Intenta de nuevo.'
+      ? t('auth.google.errorRetorno')
       : '',
   );
 
@@ -65,7 +67,7 @@ export function GoogleAuthButton() {
     });
     if (error) {
       setPending(false);
-      setErrorMsg('No pudimos conectar con Google. Intenta de nuevo.');
+      setErrorMsg(t('auth.google.errorConexion'));
       return;
     }
     // Sin error el navegador esta redirigiendo a Google; se deja el boton en
@@ -76,7 +78,7 @@ export function GoogleAuthButton() {
     <div>
       <div className="my-6 flex items-center gap-3">
         <span className="h-px flex-1 bg-[rgba(31,30,28,0.14)]" aria-hidden="true" />
-        <span className="text-[11px] text-muted">o</span>
+        <span className="text-[11px] text-muted">{t('auth.comun.divisorO')}</span>
         <span className="h-px flex-1 bg-[rgba(31,30,28,0.14)]" aria-hidden="true" />
       </div>
       <button
@@ -86,7 +88,7 @@ export function GoogleAuthButton() {
         className="flex h-[42px] w-full items-center justify-center gap-2.5 rounded-lg border border-[#B4B2A9] bg-white px-4 text-sm font-medium text-ink transition hover:bg-[rgba(31,30,28,0.03)] disabled:cursor-not-allowed disabled:opacity-60"
       >
         <GoogleLogo />
-        {pending ? 'Conectando con Google...' : 'Continuar con Google'}
+        {pending ? t('auth.google.conectando') : t('auth.google.continuar')}
       </button>
       {errorMsg && (
         <p className="mt-3 text-sm text-brasa" role="alert">

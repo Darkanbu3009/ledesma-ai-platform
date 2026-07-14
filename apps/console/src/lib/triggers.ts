@@ -10,6 +10,8 @@
  * momento de crear/rotar y desaparece al cerrar el modal.
  */
 
+import i18n from '../i18n';
+
 export type TriggerAuthMode = 'hmac' | 'url_token';
 
 /** Un mensaje del payload base que ejecuta el agente al dispararse (mismo shape que un job). */
@@ -180,16 +182,16 @@ export type TriggerDraftErrors = Partial<
 export function validateTriggerDraft(draft: TriggerDraft): TriggerDraftErrors {
   const errors: TriggerDraftErrors = {};
   if (draft.agentId.trim() === '') {
-    errors.agentId = 'Elige el agente que se va a ejecutar.';
+    errors.agentId = i18n.t('triggers.validacion.agente');
   }
   if (draft.credentialId.trim() === '') {
-    errors.credentialId = 'Elige la credencial que va a usar.';
+    errors.credentialId = i18n.t('triggers.validacion.credencial');
   }
   if (draft.message.trim() === '') {
-    errors.message = 'Escribe el mensaje base que ejecutara el agente.';
+    errors.message = i18n.t('triggers.validacion.mensaje');
   }
   if (draft.authMode !== 'hmac' && draft.authMode !== 'url_token') {
-    errors.authMode = 'Elige el modo de autenticacion.';
+    errors.authMode = i18n.t('triggers.validacion.authMode');
   }
   return errors;
 }
@@ -212,5 +214,5 @@ export function toTriggerApiInput(draft: TriggerDraft): CreateTriggerInput {
 
 /** Etiqueta corta del modo de auth para badges/listado. */
 export function authModeLabel(mode: TriggerAuthMode): string {
-  return mode === 'hmac' ? 'HMAC (firma)' : 'Token en URL';
+  return mode === 'hmac' ? i18n.t('triggers.authModeEtiqueta.hmac') : i18n.t('triggers.authModeEtiqueta.urlToken');
 }

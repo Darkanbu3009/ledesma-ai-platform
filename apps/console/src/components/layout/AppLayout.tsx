@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Menu } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { focusRing } from '../../lib/utils';
 import { Sidebar } from './Sidebar';
 
 export function AppLayout() {
+  const { t } = useTranslation();
   const [mobileOpen, setMobileOpen] = useState(false);
   // Colapso del sidebar de escritorio (estilo Claude): estado de sesion en React, sin persistencia
   // (el proyecto no guarda preferencias de UI en storage del navegador). El drawer movil no participa.
@@ -40,7 +42,7 @@ export function AppLayout() {
           <button
             onClick={() => setMobileOpen(true)}
             className={`rounded-md text-muted transition hover:text-ink ${focusRing}`}
-            aria-label="Abrir menú"
+            aria-label={t('ui.layout.abrirMenu')}
             aria-expanded={mobileOpen}
             aria-controls="mobile-nav"
           >

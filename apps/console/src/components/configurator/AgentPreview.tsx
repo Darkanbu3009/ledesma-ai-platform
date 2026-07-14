@@ -1,4 +1,5 @@
 import { type ReactNode, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AlertCircle, Bot, CheckCircle2, Loader2, Plug, Wrench, Zap } from 'lucide-react';
 import { providerLabel, type ProviderId } from '../../lib/agents';
 import type {
@@ -44,6 +45,7 @@ export function AgentPreview({
   autonomous?: boolean;
   autonomousValidation?: ConfiguratorValidation | null;
 }) {
+  const { t } = useTranslation();
   const ready = validation?.ok === true;
   const hasSpec = spec !== null && Object.keys(spec).length > 0;
 
@@ -51,22 +53,23 @@ export function AgentPreview({
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 border-b border-line px-5 py-3.5">
         <Bot className="h-[18px] w-[18px] text-muted" />
-        <h2 className="font-display text-sm font-bold text-ink">Vista previa del agente</h2>
+        <h2 className="font-display text-sm font-bold text-ink">{t('configurador.preview.titulo')}</h2>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
         {!hasSpec ? (
           <div className="flex h-full flex-col items-center justify-center text-center">
             <p className="max-w-xs text-sm text-muted">
-              El agente va a aparecer aca a medida que converses. Empeza describiendo para que lo
-              queres.
+              {t('configurador.preview.vacio')}
             </p>
           </div>
         ) : (
           <div className="space-y-4">
             <SpecHeader spec={spec} />
 
-            {spec.description && <PreviewBlock label="Descripcion">{spec.description}</PreviewBlock>}
+            {spec.description && (
+              <PreviewBlock label={t('configurador.preview.descripcionLabel')}>{spec.description}</PreviewBlock>
+            )}
 
             {spec.systemPrompt && (
               <PreviewBlock label="System prompt">
@@ -107,7 +110,7 @@ export function AgentPreview({
               className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:bg-line disabled:text-muted disabled:shadow-none"
             >
               {creating && <Loader2 className="h-4 w-4 animate-spin" />}
-              {creating ? 'Creando agente...' : 'Crear agente'}
+              {creating ? t('configurador.preview.creandoAgente') : t('configurador.preview.crearAgente')}
             </button>
           </>
         )}
@@ -129,11 +132,12 @@ function AutonomousFooter({
   validation: ConfiguratorValidation | null;
   hasSpec: boolean;
 }) {
+  const { t } = useTranslation();
   if (validation?.ok) {
     return (
       <div className="flex items-center gap-2 rounded-xl border border-ok/30 bg-ok/10 px-3.5 py-2.5 text-sm font-medium text-ok">
         <Loader2 className="h-4 w-4 flex-none animate-spin" />
-        Listo y valido: creando el agente...
+        {t('configurador.preview.autonomoCreando')}
       </div>
     );
   }
@@ -142,15 +146,15 @@ function AutonomousFooter({
     <div className="rounded-xl border border-line bg-field px-3.5 py-2.5">
       <div className="flex items-center gap-2 text-sm font-medium text-ink">
         <Zap className="h-4 w-4 flex-none text-brasa" />
-        Modo automatico: el agente se creara solo apenas este completo y valido.
+        {t('configurador.preview.autonomoNota')}
       </div>
       {errors.length > 0 ? (
         <ErrorList errors={errors} />
       ) : (
         <p className="mt-1 pl-7 text-xs text-muted">
           {hasSpec
-            ? 'Segui conversando para completar el agente.'
-            : 'Empeza describiendo para que queres el agente.'}
+            ? t('configurador.preview.seguiConversando')
+            : t('configurador.preview.empezaDescribiendo')}
         </p>
       )}
     </div>
@@ -158,12 +162,13 @@ function AutonomousFooter({
 }
 
 function SpecHeader({ spec }: { spec: AgentSpecDraft }) {
+  const { t } = useTranslation();
   const badge = spec.providerId ? PROVIDER_BADGE[spec.providerId] : undefined;
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="font-display text-lg font-bold text-ink">
-          {spec.name || <span className="text-muted-soft">Sin nombre todavia</span>}
+          {spec.name || <span className="text-muted-soft">{t('configurador.preview.sinNombre')}</span>}
         </h3>
         {spec.providerId && (
           <span
@@ -204,9 +209,10 @@ function ParamsRow({ spec }: { spec: AgentSpecDraft }) {
 }
 
 function ToolsBlock({ tools }: { tools: AgentSpecTool[] }) {
+  const { t } = useTranslation();
   if (tools.length === 0) return null;
   return (
-    <PreviewBlock label={`Herramientas (${tools.length})`}>
+    <PreviewBlock label={t('configurador.preview.herramientasLabel', { total: tools.length })}>
       <ul className="space-y-2">
         {tools.map((tool, i) => (
           <li
@@ -221,7 +227,7 @@ function ToolsBlock({ tools }: { tools: AgentSpecTool[] }) {
               )}
               <span className="font-mono text-[13px] text-ink">{tool.name}</span>
               <span className="rounded-full border border-line bg-surface px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted">
-                {tool.kind === 'webhook' ? 'Webhook' : 'Nativa'}
+                {tool.kind === 'webhook' ? 'Webhook' : t('configurador.preview.herramientaNativa')}
               </span>
             </div>
             {tool.kind === 'webhook' && tool.description && (
@@ -241,31 +247,32 @@ function ValidationSummary({
   validation: ConfiguratorValidation | null;
   hasSpec: boolean;
 }) {
+  const { t } = useTranslation();
   if (validation?.ok) {
     return (
       <div className="flex items-center gap-2 rounded-xl border border-ok/30 bg-ok/10 px-3.5 py-2.5 text-sm font-medium text-ok">
         <CheckCircle2 className="h-4 w-4 flex-none" />
-        Listo para crear.
+        {t('configurador.preview.listoParaCrear')}
       </div>
     );
   }
   const errors = validation && !validation.ok ? validation.errors : [];
   if (!hasSpec && errors.length === 0) {
     return (
-      <p className="text-sm text-muted">Segui conversando para completar el agente.</p>
+      <p className="text-sm text-muted">{t('configurador.preview.seguiConversando')}</p>
     );
   }
   return (
     <div className="rounded-xl border border-line bg-field px-3.5 py-2.5">
       <div className="flex items-center gap-2 text-sm font-medium text-ink">
         <AlertCircle className="h-4 w-4 flex-none text-muted" />
-        Falta para poder crear:
+        {t('configurador.preview.faltaParaCrear')}
       </div>
       {errors.length > 0 ? (
         <ErrorList errors={errors} />
       ) : (
         <p className="mt-1 pl-7 text-xs text-muted">
-          Completa el nombre, el proveedor y el modelo del agente.
+          {t('configurador.preview.completaBasicos')}
         </p>
       )}
     </div>
@@ -295,6 +302,7 @@ function PreviewBlock({ label, children }: { label: string; children: ReactNode 
 }
 
 function CollapsibleText({ text }: { text: string }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const isLong = text.length > PROMPT_PREVIEW_CHARS;
   const shown = expanded || !isLong ? text : `${text.slice(0, PROMPT_PREVIEW_CHARS)}...`;
@@ -307,7 +315,7 @@ function CollapsibleText({ text }: { text: string }) {
           onClick={() => setExpanded((v) => !v)}
           className="mt-1 text-xs font-medium text-brasa hover:underline"
         >
-          {expanded ? 'Ver menos' : 'Ver mas'}
+          {expanded ? t('configurador.preview.verMenos') : t('configurador.preview.verMas')}
         </button>
       )}
     </div>

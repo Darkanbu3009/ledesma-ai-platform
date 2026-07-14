@@ -1,3 +1,5 @@
+import i18n, { currentLanguage } from '../i18n';
+
 export interface AgentUsageTotals {
   runs: number;
   completed: number;
@@ -82,18 +84,17 @@ export function formatUSD(value: number): string {
 export function formatDayLabel(isoDate: string): string {
   const [year, month, day] = isoDate.split('-').map(Number);
   if (!year || !month || !day) return isoDate;
-  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString('es-MX', {
-    day: 'numeric',
-    month: 'short',
-    timeZone: 'UTC',
-  });
+  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString(
+    currentLanguage() === 'en' ? 'en' : 'es-MX',
+    { day: 'numeric', month: 'short', timeZone: 'UTC' },
+  );
 }
 
 /** ISO -> fecha corta es-MX, p.ej. '10 jun, 14:32'. */
 export function formatRunDate(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString('es-MX', {
+  return date.toLocaleString(currentLanguage() === 'en' ? 'en' : 'es-MX', {
     day: 'numeric',
     month: 'short',
     hour: '2-digit',
@@ -105,11 +106,11 @@ export function formatRunDate(iso: string): string {
 export function statusLabel(status: string): { label: string; tone: 'ok' | 'error' | 'muted' } {
   switch (status) {
     case 'completed':
-      return { label: 'Completada', tone: 'ok' };
+      return { label: i18n.t('uso.estado.completada'), tone: 'ok' };
     case 'error':
-      return { label: 'Error', tone: 'error' };
+      return { label: i18n.t('uso.estado.error'), tone: 'error' };
     case 'aborted':
-      return { label: 'Detenida', tone: 'muted' };
+      return { label: i18n.t('uso.estado.detenida'), tone: 'muted' };
     default:
       return { label: status, tone: 'muted' };
   }

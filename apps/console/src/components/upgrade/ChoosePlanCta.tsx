@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { cn, focusRing } from '../../lib/utils';
 
@@ -13,13 +14,14 @@ const linkClass = cn(
  * (que sigue existiendo solo como canal de contacto/leads); el acceso lo da el plan real elegido.
  */
 export function ChoosePlanCta({ className }: { className?: string }) {
+  const { t } = useTranslation();
   return (
     <div className={cn('flex flex-col items-center gap-3 text-center', className)}>
       <Link to="/configuracion/paquetes" className={linkClass}>
-        Elegir plan
+        {t('gates.elegirPlan.cta')}
       </Link>
       <p className="max-w-xs text-[12px] leading-[1.5] text-muted-soft">
-        Activa un plan con autonomia desde el catalogo de paquetes. El cambio aplica al instante.
+        {t('gates.elegirPlan.nota')}
       </p>
     </div>
   );

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useChangeTier } from '../../lib/mutations';
 import { TIER_ORDER, changeTierErrorMessage, tierLabel, tierMeta } from '../../lib/admin';
 import type { ProfileTier } from '../../lib/registration';
@@ -25,6 +26,7 @@ export function ChangeTierSection({
   userName: string;
   currentTier: ProfileTier;
 }) {
+  const { t } = useTranslation();
   // El tier que el admin selecciono y espera confirmacion. null = sin dialogo abierto.
   const [pendingTier, setPendingTier] = useState<ProfileTier | null>(null);
   const [feedback, setFeedback] = useState<NoticeData | null>(null);
@@ -49,7 +51,7 @@ export function ChangeTierSection({
       { id: userId, tier: target },
       {
         onSuccess: () => {
-          setFeedback({ kind: 'ok', text: `Tier actualizado a ${tierLabel(target)}.` });
+          setFeedback({ kind: 'ok', text: t('admin.cambioTier.exito', { tier: tierLabel(target) }) });
           setPendingTier(null);
         },
         // En error dejamos el dialogo abierto mostrando el motivo (el admin reintenta o cancela).
@@ -60,17 +62,17 @@ export function ChangeTierSection({
   return (
     <div className="rounded-2xl border border-line bg-surface p-5 shadow-card">
       <div className="flex flex-wrap items-center gap-3">
-        <span className="text-sm text-muted">Tier actual:</span>
+        <span className="text-sm text-muted">{t('admin.cambioTier.tierActual')}</span>
         <TierBadge tier={currentTier} />
       </div>
 
       <p className="mt-4 text-[13px] text-muted">
-        Cambia el plan del usuario. Es una acción deliberada: se te pedirá confirmación antes de aplicarla.
+        {t('admin.cambioTier.instruccion')}
       </p>
 
       <div
         role="group"
-        aria-label="Cambiar tier del usuario"
+        aria-label={t('admin.cambioTier.grupoAria')}
         className="mt-3 inline-flex flex-wrap gap-2"
       >
         {TIER_ORDER.map((tier) => {

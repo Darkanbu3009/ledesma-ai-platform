@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowRight, ListChecks, Lock, Plus } from 'lucide-react';
 import { ApiError } from '../lib/api';
+import i18n from '../i18n';
 import { useAgents, useCredentials, useMe, useRecipes } from '../lib/queries';
 import { useDeleteRecipe, useRunRecipe, useUpdateRecipe } from '../lib/mutations';
 import type { RecipeSummary } from '../lib/recipes';
@@ -22,11 +24,11 @@ const addButtonClass =
 /** Mensaje de error al intentar ejecutar una receta. */
 function runErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.status === 403) return 'Ejecutar recetas requiere un plan con autonomia (Pro o Business).';
-    if (error.status === 404) return 'La receta ya no existe. Actualiza la lista.';
-    if (error.status === 400) return 'La receta esta pausada. Activala para ejecutarla.';
+    if (error.status === 403) return i18n.t('recetas.errores.ejecutarPlan');
+    if (error.status === 404) return i18n.t('recetas.errores.ejecutarNoExiste');
+    if (error.status === 400) return i18n.t('recetas.errores.ejecutarPausada');
   }
-  return 'No pudimos encolar la receta. Intenta de nuevo.';
+  return i18n.t('recetas.errores.ejecutarGenerico');
 }
 
 /**
@@ -37,21 +39,21 @@ function runErrorMessage(error: unknown): string {
  * Tareas y Triggers (lo tienen inline); extraerlo a un sub-componente queda como deuda.
  */
 function RecipesLocked() {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-4">
       <section className="mx-auto flex w-full max-w-[520px] flex-col items-center pb-12 pt-14 text-center">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-[#F1EFE8] px-3 py-[5px]">
           <Lock className="h-3 w-3 flex-none text-[#5F5E5A]" aria-hidden="true" />
           <span className="text-[11px] uppercase tracking-[0.08em] text-[#5F5E5A]">
-            Planes Pro y Business
+            {t('recetas.gate.badge')}
           </span>
         </span>
         <h1 className="mt-5 text-[26px] font-medium leading-[1.15] tracking-[-0.02em] text-ink">
-          Una funcion de los planes con autonomia
+          {t('recetas.gate.titulo')}
         </h1>
         <p className="mt-3 text-[14px] leading-[1.6] text-[#5F5E5A]">
-          Las recetas encadenan varios pasos y tu agente los ejecuta en orden, solo. Estan
-          disponibles en los planes Pro y Business.
+          {t('recetas.gate.descripcion')}
         </p>
         <ChoosePlanCta className="mt-6" />
       </section>
@@ -62,6 +64,7 @@ function RecipesLocked() {
 
 /** Estado vacio editorial, consistente con /tareas y /triggers. */
 function RecipesEmptyState({ onAdd }: { onAdd: () => void }) {
+  const { t } = useTranslation();
   return (
     <EmptyState
       media={
@@ -87,16 +90,16 @@ function RecipesEmptyState({ onAdd }: { onAdd: () => void }) {
           </div>
         </div>
       }
-      eyebrow="EMPIEZA AQUI"
-      title="Crea tu primera receta"
-      description="Encadena varios pasos en un solo flujo: tu agente los ejecuta en orden y el resultado de cada uno alimenta al siguiente."
+      eyebrow={t('recetas.vacio.eyebrow')}
+      title={t('recetas.vacio.titulo')}
+      description={t('recetas.vacio.descripcion')}
       action={
         <button
           type="button"
           onClick={onAdd}
           className="group inline-flex h-11 items-center gap-3 rounded-full bg-brasa pl-6 pr-[7px] text-sm font-medium text-white transition hover:bg-brasa-hover"
         >
-          Crear receta
+          {t('recetas.vacio.boton')}
           <span className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-white text-brasa transition group-hover:translate-x-0.5">
             <ArrowRight className="h-[18px] w-[18px]" />
           </span>
@@ -107,6 +110,7 @@ function RecipesEmptyState({ onAdd }: { onAdd: () => void }) {
 }
 
 export function RecipesPage() {
+  const { t } = useTranslation();
   const me = useMe();
   // Capacidad derivada del modulo central de planes (Pro y Business la tienen), no de un tier literal.
   const isAutonomous = tierAllowsAutonomy(me.data?.profile?.tier);
@@ -158,7 +162,7 @@ export function RecipesPage() {
     setRunningId(recipe.id);
     runRecipe.mutate(recipe.id, {
       onSuccess: () =>
-        setNotice({ kind: 'ok', text: 'Receta encolada. Se ejecutara en segundo plano.' }),
+        setNotice({ kind: 'ok', text: t('recetas.avisos.encolada') }),
       onError: (error) => setNotice({ kind: 'error', text: runErrorMessage(error) }),
       onSettled: () => setRunningId(null),
     });
@@ -170,9 +174,9 @@ export function RecipesPage() {
       { id: recipe.id, patch: { isActive: !recipe.isActive } },
       {
         onSuccess: () =>
-          setNotice({ kind: 'ok', text: recipe.isActive ? 'Receta pausada.' : 'Receta activada.' }),
+          setNotice({ kind: 'ok', text: recipe.isActive ? t('recetas.avisos.pausada') : t('recetas.avisos.activada') }),
         onError: () =>
-          setNotice({ kind: 'error', text: 'No pudimos actualizar la receta. Intenta de nuevo.' }),
+          setNotice({ kind: 'error', text: t('recetas.errores.actualizar') }),
         onSettled: () => setTogglingId(null),
       },
     );
@@ -188,7 +192,7 @@ export function RecipesPage() {
     deleteRecipe.mutate(toDelete.id, {
       onSuccess: () => {
         setToDelete(null);
-        setNotice({ kind: 'ok', text: 'Receta eliminada.' });
+        setNotice({ kind: 'ok', text: t('recetas.avisos.eliminada') });
       },
     });
   }
@@ -198,14 +202,14 @@ export function RecipesPage() {
       {/* En el estado bloqueado el hero del gate reemplaza al titulo y subtitulo de la pagina. */}
       {(me.isLoading || isAutonomous) && (
         <PageHeader
-          title="Recetas"
-          subtitle="Encadena pasos en un flujo. Corre solo, en segundo plano."
+          title={t('recetas.titulo')}
+          subtitle={t('recetas.subtitulo')}
           action={
             isAutonomous &&
             hasRecipes && (
               <button type="button" onClick={openNew} className={addButtonClass}>
                 <Plus className="h-[17px] w-[17px]" />
-                Nueva receta
+                {t('recetas.nuevaReceta')}
               </button>
             )
           }
@@ -221,7 +225,7 @@ export function RecipesPage() {
       ) : listLoading ? (
         <SkeletonList cardClassName="h-[112px]" />
       ) : isError ? (
-        <ErrorState title="No pudimos cargar tus recetas" onRetry={() => void refetch()} />
+        <ErrorState title={t('recetas.errores.cargarLista')} onRetry={() => void refetch()} />
       ) : !hasRecipes ? (
         <RecipesEmptyState onAdd={openNew} />
       ) : (
@@ -246,7 +250,7 @@ export function RecipesPage() {
             className="flex w-full items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed border-line p-4 text-sm font-semibold text-muted transition hover:border-brasa-line hover:bg-brasa/[0.03] hover:text-brasa"
           >
             <Plus className="h-[18px] w-[18px]" />
-            Nueva receta
+            {t('recetas.nuevaReceta')}
           </button>
         </div>
       )}
@@ -261,7 +265,7 @@ export function RecipesPage() {
           onSaved={(mode) =>
             setNotice({
               kind: 'ok',
-              text: mode === 'edit' ? 'Receta actualizada.' : 'Receta creada.',
+              text: mode === 'edit' ? t('recetas.avisos.actualizada') : t('recetas.avisos.creada'),
             })
           }
         />
@@ -271,7 +275,7 @@ export function RecipesPage() {
         open={toDelete !== null}
         name={toDelete?.name ?? ''}
         busy={deleteRecipe.isPending}
-        error={deleteRecipe.isError ? 'No pudimos eliminar la receta. Intenta de nuevo.' : undefined}
+        error={deleteRecipe.isError ? t('recetas.errores.eliminar') : undefined}
         onConfirm={confirmDelete}
         onCancel={() => setToDelete(null)}
       />
