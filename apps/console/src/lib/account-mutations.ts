@@ -14,7 +14,7 @@ import type { DeleteAccountResponse } from './account';
  * Al EXITO (200): la cuenta ya no existe. El JWT es STATELESS -> el backend no puede revocar el token; la
  * sesion se invalida del lado CLIENTE con signOut(). Se hace SIEMPRE ante un 200, sin ramificar por
  * `authUser`: en los cuatro outcomes los datos del usuario ya se borraron, asi que la sesion no debe
- * persistir. Tras cerrar sesion se redirige a /login (fuera de la consola). Es best-effort: aunque el
+ * persistir. Tras cerrar sesion se redirige a la landing publica (/, fuera de la consola). Es best-effort: aunque el
  * signOut falle (p.ej. el revoke de red da error porque la identidad ya no existe), NO dejamos al usuario
  * dentro de una consola cuya cuenta se borro -> el redirect ocurre igual.
  *
@@ -30,15 +30,15 @@ export function useDeleteAccount() {
         body: JSON.stringify({ confirmEmail }),
       }),
     onSuccess: async () => {
-      // Cerrar sesion del lado cliente ANTES de navegar: /login rebota a /agentes si aun hay sesion
-      // (LoginPage), asi que primero invalidamos la sesion y luego salimos. try/catch: un fallo del
+      // Cerrar sesion del lado cliente ANTES de navegar: la landing (/) rebota a /agentes si aun hay
+      // sesion (HomePage), asi que primero invalidamos la sesion y luego salimos. try/catch: un fallo del
       // signOut no debe impedir el redirect (la cuenta ya se borro; la sesion no debe quedar viva).
       try {
         await supabase.auth.signOut();
       } catch {
         // Ignorado a proposito: el redirect de abajo saca al usuario aunque el signOut falle.
       }
-      navigate('/login', { replace: true });
+      navigate('/', { replace: true });
     },
   });
 }

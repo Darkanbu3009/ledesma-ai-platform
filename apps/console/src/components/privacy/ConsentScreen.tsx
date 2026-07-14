@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Trans, useTranslation } from 'react-i18next';
 import { ShieldCheck } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
@@ -20,6 +21,13 @@ export function ConsentScreen({ state }: { state: ConsentsState }) {
   const { t } = useTranslation();
   const [accepted, setAccepted] = useState(false);
   const acceptConsents = useAcceptConsents();
+  const navigate = useNavigate();
+
+  // Tras cerrar sesion se aterriza en la landing publica (/), no en /login.
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    navigate('/', { replace: true });
+  }
 
   // Al montar, mueve el foco al titulo (h1, tabindex -1) para que el lector de pantalla anuncie la
   // pantalla de consentimiento en vez de dejar el foco en el body (hallazgo B13).
@@ -125,7 +133,7 @@ export function ConsentScreen({ state }: { state: ConsentsState }) {
         <div className="mt-6 text-center">
           <button
             type="button"
-            onClick={() => void supabase.auth.signOut()}
+            onClick={() => void handleSignOut()}
             className="text-xs text-muted-soft transition hover:text-ink"
           >
             {t('privacidad.consentimiento.cerrarSesion')}

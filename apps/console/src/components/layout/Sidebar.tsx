@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Activity,
@@ -50,6 +50,7 @@ export function Sidebar({
   onToggleCollapse?: () => void;
 }) {
   const { user } = useAuth();
+  const navigate = useNavigate();
   // t re-renderiza el sidebar cuando cambia el idioma (selector de Configuracion o modal de la landing).
   const { t } = useTranslation();
   // full_name para el menu de usuario: misma fuente que el encabezado de identidad de Mi cuenta
@@ -64,6 +65,9 @@ export function Sidebar({
 
   async function handleLogout() {
     await supabase.auth.signOut();
+    // Tras cerrar sesion se aterriza en la landing publica (/), no en /login: es la puerta de
+    // entrada donde el usuario decide volver a entrar o crear cuenta.
+    navigate('/', { replace: true });
   }
 
   function itemClass(isActive: boolean) {

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -11,13 +11,18 @@ import { SplashCarga } from '../components/SplashCarga';
 
 type Mode = 'empresa' | 'individual';
 
-/** Salir de la cuenta actual. AuthProvider detecta el cambio y ProtectedRoute redirige a /login. */
+/** Salir de la cuenta actual. Tras cerrar sesion se aterriza en la landing publica (/). */
 function SignOutLink() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    navigate('/', { replace: true });
+  }
   return (
     <button
       type="button"
-      onClick={() => void supabase.auth.signOut()}
+      onClick={() => void handleSignOut()}
       className="text-xs text-muted-soft transition hover:text-ink"
     >
       {t('registro.cerrarSesion')}
