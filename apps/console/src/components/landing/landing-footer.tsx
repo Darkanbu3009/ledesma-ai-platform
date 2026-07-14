@@ -31,29 +31,34 @@ const EMAIL = 'contacto@ledesma-ai-labs.com';
 const FACEBOOK_URL = 'https://www.facebook.com/profile.php?id=61590323732335';
 
 const linkClass =
-  'rounded-sm text-foreground-secondary underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background';
+  'rounded-sm text-cream underline-offset-4 transition-colors hover:text-white hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-brasa';
 
 /**
  * Footer de la landing. Incluye contacto (WhatsApp, correo, Facebook) y accesos directos
  * a crear cuenta / iniciar sesion.
+ *
+ * Bloque de color brasa solido (#E5511E, token `brasa`) que cierra la pagina: la tinta
+ * pasa a hueso (`cream`) / blanco para leerse sobre el fondo saturado. El logo se fuerza
+ * a monocromo con `[&_rect]:fill-current` porque su cuadrito de acento es naranja fijo
+ * y desapareceria sobre brasa.
  */
 export function LandingFooter(): JSX.Element {
   const { t } = useTranslation();
 
   return (
-    <footer className="border-t border-border bg-background/80">
+    <footer className="bg-brasa">
       <div className="mx-auto max-w-6xl px-6 py-12">
         <div className="flex flex-col gap-10 min-[900px]:flex-row min-[900px]:justify-between">
           <div className="max-w-sm">
-            <Logo className="h-8 w-auto" />
-            <p className="mt-4 text-sm text-foreground-secondary">
+            <Logo className="h-8 w-auto text-cream [&_rect]:fill-current" />
+            <p className="mt-4 text-sm text-cream/85">
               {t('landing.footer.descripcion')}
             </p>
           </div>
 
           <div className="grid grid-cols-2 gap-10 sm:gap-16">
             <div>
-              <p className="font-jetbrains text-xs uppercase tracking-[0.16em] text-foreground-secondary">
+              <p className="font-jetbrains text-xs uppercase tracking-[0.16em] text-white">
                 {t('landing.footer.contacto')}
               </p>
               <ul className="mt-4 space-y-3 text-sm">
@@ -85,7 +90,7 @@ export function LandingFooter(): JSX.Element {
             </div>
 
             <div>
-              <p className="font-jetbrains text-xs uppercase tracking-[0.16em] text-foreground-secondary">
+              <p className="font-jetbrains text-xs uppercase tracking-[0.16em] text-white">
                 {t('landing.footer.cuenta')}
               </p>
               <ul className="mt-4 space-y-3 text-sm">
@@ -104,8 +109,8 @@ export function LandingFooter(): JSX.Element {
           </div>
         </div>
 
-        <div className="mt-10 border-t border-border pt-6">
-          <p className="font-jetbrains text-xs text-foreground-secondary">
+        <div className="mt-10 border-t border-cream/25 pt-6">
+          <p className="font-jetbrains text-xs text-cream/85">
             {t('landing.footer.tagline')}
           </p>
         </div>
