@@ -17,7 +17,7 @@ const KEYFRAMES_CURSOR = '@keyframes hero-blink { 0%, 100% { opacity: 1; } 50% {
 
 /** Clases del h1 del titular, compartidas por la variante animada y la estatica. */
 const CLASES_TITULO =
-  'font-display text-4xl font-bold leading-[1.05] tracking-tight text-foreground sm:text-5xl min-[900px]:text-6xl';
+  'font-display text-3xl font-bold leading-[1.1] tracking-tight text-foreground min-[420px]:text-4xl sm:text-5xl min-[900px]:text-6xl';
 
 function prefersReducedMotion(): boolean {
   return (
@@ -138,20 +138,20 @@ export function Hero(): JSX.Element {
   return (
     <section className="relative isolate overflow-hidden">
       <PixelCloud />
-      <div className="relative z-10 mx-auto grid max-w-6xl items-center gap-12 px-6 py-20 min-[900px]:grid-cols-2 min-[900px]:py-28">
+      <div className="relative z-10 mx-auto grid max-w-6xl items-center gap-10 px-4 py-14 sm:gap-12 sm:px-6 sm:py-20 min-[900px]:grid-cols-2 min-[900px]:py-28">
         <div>
           <TituloTypewriter />
-          <p className="mt-6 max-w-xl text-lg leading-relaxed text-foreground-secondary">
+          <p className="mt-5 max-w-xl text-base leading-relaxed text-foreground-secondary sm:mt-6 sm:text-lg sm:leading-relaxed">
             {t('landing.hero.descripcion')}
           </p>
-          <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <Button asChild size="lg">
+          <div className="mt-8 flex flex-col gap-3 sm:mt-9 sm:flex-row sm:items-center">
+            <Button asChild size="lg" className="w-full sm:w-auto">
               <Link to="/crear-cuenta">
                 {t('landing.comun.crearCuenta')}
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </Button>
-            <Button asChild variant="secondary" size="lg">
+            <Button asChild variant="secondary" size="lg" className="w-full sm:w-auto">
               <a href={demoWhatsappUrl} target="_blank" rel="noopener noreferrer">
                 {t('landing.hero.solicitarDemo')}
               </a>

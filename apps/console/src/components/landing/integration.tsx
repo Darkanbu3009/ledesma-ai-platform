@@ -118,15 +118,15 @@ export function Integration(): JSX.Element {
 
   return (
     <section id="integracion" className="border-t border-border">
-      <div className="mx-auto max-w-6xl px-6 py-20">
+      <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20">
         <div className="max-w-2xl">
           <span className="font-jetbrains text-xs font-medium uppercase tracking-[0.18em] text-foreground-secondary">
             {t('landing.integracion.eyebrow')}
           </span>
-          <h2 className="mt-5 font-display text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+          <h2 className="mt-5 font-display text-2xl font-bold tracking-tight text-foreground min-[420px]:text-3xl sm:text-4xl">
             {t('landing.integracion.titulo')}
           </h2>
-          <p className="mt-4 text-lg text-foreground-secondary">
+          <p className="mt-4 text-base text-foreground-secondary sm:text-lg">
             {t('landing.integracion.descripcion')}
           </p>
         </div>

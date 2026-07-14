@@ -771,7 +771,9 @@
       "plataforma": "Plataforma",
       "ejemplos": "Ejemplos",
       "comoFunciona": "Cómo funciona",
-      "seccionesAria": "Secciones"
+      "seccionesAria": "Secciones",
+      "abrirMenu": "Abrir menú de navegación",
+      "cerrarMenu": "Cerrar menú de navegación"
     },
     "hero": {
       "titulo": "Agentes verticales de IA, con el modelo que tú elijas",

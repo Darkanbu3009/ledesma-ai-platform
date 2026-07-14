@@ -28,13 +28,13 @@ export function HowItWorks(): JSX.Element {
 
   return (
     <section id="como-funciona" className="border-t border-border">
-      <div className="mx-auto max-w-6xl px-6 py-20">
+      <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20">
         <div className="max-w-2xl">
           <Eyebrow>{t('landing.comoFunciona.eyebrow')}</Eyebrow>
-          <h2 className="mt-5 font-display text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+          <h2 className="mt-5 font-display text-2xl font-bold tracking-tight text-foreground min-[420px]:text-3xl sm:text-4xl">
             {t('landing.comoFunciona.titulo')}
           </h2>
-          <p className="mt-4 text-lg text-foreground-secondary">
+          <p className="mt-4 text-base text-foreground-secondary sm:text-lg">
             {t('landing.comoFunciona.descripcion')}
           </p>
         </div>
