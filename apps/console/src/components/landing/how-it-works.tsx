@@ -1,6 +1,7 @@
 import { type JSX } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Eyebrow } from './eyebrow';
+import { REVEAL_KEYFRAMES, revealAnimationClass, useRevealOnScroll } from './use-reveal-on-scroll';
 
 const STEPS = [
   {
@@ -25,9 +26,11 @@ const STEPS = [
  */
 export function HowItWorks(): JSX.Element {
   const { t } = useTranslation();
+  const { ref: listRef, revealed } = useRevealOnScroll<HTMLOListElement>();
 
   return (
     <section id="como-funciona" className="border-t border-border">
+      <style>{REVEAL_KEYFRAMES}</style>
       <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20">
         <div className="max-w-2xl">
           <Eyebrow>{t('landing.comoFunciona.eyebrow')}</Eyebrow>
@@ -39,9 +42,13 @@ export function HowItWorks(): JSX.Element {
           </p>
         </div>
 
-        <ol className="mt-12 grid gap-8 min-[900px]:grid-cols-3">
-          {STEPS.map((step) => (
-            <li key={step.num} className="border-t border-border pt-6">
+        <ol ref={listRef} className="mt-12 grid gap-8 min-[900px]:grid-cols-3">
+          {STEPS.map((step, index) => (
+            <li
+              key={step.num}
+              className={`border-t border-border pt-6 ${revealAnimationClass(revealed)}`}
+              style={{ animationDelay: `${index * 80}ms` }}
+            >
               <p className="font-jetbrains text-3xl font-semibold text-accent">{step.num}</p>
               <h3 className="mt-3 font-display text-lg font-semibold text-foreground">
                 {t(step.tituloKey)}
