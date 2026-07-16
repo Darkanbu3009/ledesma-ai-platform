@@ -39,7 +39,7 @@ export interface DeleteAccountParams {
  * transaccion. La atomicidad real es solo la del paso de datos; el cross-sistema se maneja con una
  * semantica HONESTA (no se finge una atomicidad que no existe):
  *
- *   1. deleteAccountData (Postgres, ATOMICO): borra/anonimiza las 16 tablas en una transaccion. Si FALLA,
+ *   1. deleteAccountData (Postgres, ATOMICO): borra/anonimiza las 17 tablas en una transaccion. Si FALLA,
  *      re-lanza -> la cuenta queda INTACTA (rollback), auth.users NUNCA se toca, y el llamador reintenta.
  *   2. Solo si el paso 1 tuvo EXITO y se pidio deleteAuthUser, se intenta borrar auth.users:
  *        - sin authDeleter (SERVICE_ROLE_KEY ausente) -> 'not_configured' (datos ya borrados; se loguea).
