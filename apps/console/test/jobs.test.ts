@@ -40,9 +40,10 @@ describe('jobStatusLabel', () => {
 });
 
 describe('jobTypeLabel', () => {
-  it('recipe -> Receta, simple -> Mensaje', () => {
+  it('recipe -> Receta, simple -> Mensaje, sitio -> Sitio', () => {
     expect(jobTypeLabel('recipe')).toBe('Receta');
     expect(jobTypeLabel('simple')).toBe('Mensaje');
+    expect(jobTypeLabel('sitio')).toBe('Sitio');
   });
 });
 

@@ -370,7 +370,9 @@ function classifyFailure(error: unknown): { status: AgentRunRecord['status']; er
 /** Arma la fila de agent_runs (AgentRunRecord) de una ejecucion, con el shape exacto que espera record(). */
 function buildRunRecord(
   job: Job,
-  attribution: { providerId: string; model: string },
+  // agentId viaja DENTRO de la atribucion (no de job.agentId, que es nullable desde V026): si hay
+  // atribucion es que el agente se resolvio, y con el vino su id no-nulo.
+  attribution: { agentId: string; providerId: string; model: string },
   usage: MutableTokenUsage,
   status: AgentRunRecord['status'],
   stopReason: string | null,
@@ -378,7 +380,7 @@ function buildRunRecord(
   startedAt: number,
 ): AgentRunRecord {
   return {
-    agentId: job.agentId,
+    agentId: attribution.agentId,
     ownerId: job.ownerId,
     providerId: attribution.providerId,
     model: attribution.model,
@@ -439,7 +441,7 @@ export async function processClaimedJob(
   // valido). Nada de esto cambia la ejecucion: solo se AGREGA la escritura del resultado.
   const startedAt = Date.now();
   const usage: MutableTokenUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
-  let attribution: { providerId: string; model: string } | null = null;
+  let attribution: { agentId: string; providerId: string; model: string } | null = null;
   let stopReason: string | null = null;
   try {
     // 1. GATE POR TIER (server-side, antes de gastar nada): la ejecucion autonoma es premium. La
@@ -464,17 +466,27 @@ export async function processClaimedJob(
       return;
     }
 
-    // 2. Cargar el agente (config autoritativa: provider/model/tools/...).
-    const agent = await deps.loadAgent(job.agentId);
-    if (!agent) {
-      throw new Error(`agente ${job.agentId} no encontrado`);
+    // 1.6. DEFENSA post-V026: agent_id/credential_id son nullables SOLO para los jobs de sitios (ya
+    //      ramificados y retornados arriba). Un job simple/receta sin ellos es un dato corrupto que
+    //      jamas podra ejecutar -> fallo permanente con mensaje claro, sin tocar el motor.
+    const { agentId, credentialId } = job;
+    if (agentId === null || credentialId === null) {
+      throw new PermanentExecutionError(
+        'job sin agente o credencial: solo los jobs de sitios conectados pueden omitirlos',
+      );
     }
-    // Atribucion del run (provider/model del agente) para agent_runs: disponible desde aca (tras resolver
+
+    // 2. Cargar el agente (config autoritativa: provider/model/tools/...).
+    const agent = await deps.loadAgent(agentId);
+    if (!agent) {
+      throw new Error(`agente ${agentId} no encontrado`);
+    }
+    // Atribucion del run (agente + provider/model) para agent_runs: disponible desde aca (tras resolver
     // el agente) para el cierre exitoso Y para un fallo posterior (ambos consumieron tokens del agente).
-    attribution = { providerId: agent.providerId, model: agent.model };
+    attribution = { agentId, providerId: agent.providerId, model: agent.model };
 
     // 3. Resolver la credencial de la boveda por owner + credential (descifra server-side).
-    const credential = await deps.resolveCredential(job.ownerId, job.credentialId);
+    const credential = await deps.resolveCredential(job.ownerId, credentialId);
 
     // 4. Defensa: una credencial guardada solo sirve contra un agente del MISMO proveedor (igual que la
     //    ruta /v1/run/:agentId). Sin esto la key de un proveedor iria al endpoint de otro.

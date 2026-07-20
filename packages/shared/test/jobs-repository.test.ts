@@ -406,18 +406,31 @@ describe('JobsRepository', () => {
       expect(sqlValues(sql)).toEqual(['user-1', 'failed', 10, 0]);
     });
 
-    it('infiere type=recipe cuando payload_kind es \'recipe\', y simple en cualquier otro caso', async () => {
+    it('infiere el type del payload_kind: recipe, los tres kinds de sitio, y simple para el resto', async () => {
       const sql = makeSqlReturning([
         makeSummaryRow({ id: 'j-recipe', payload_kind: 'recipe' }),
         makeSummaryRow({ id: 'j-simple', payload_kind: null }),
         makeSummaryRow({ id: 'j-otro', payload_kind: 'algo-raro' }),
+        makeSummaryRow({ id: 'j-conectar', payload_kind: 'conectar_sitio' }),
+        makeSummaryRow({ id: 'j-confirmar', payload_kind: 'confirmar_conexion' }),
+        makeSummaryRow({ id: 'j-desconectar', payload_kind: 'desconectar_sitio' }),
       ]);
       const jobs = await new JobsRepository(sql).listByOwner('user-1', { limit: 10, offset: 0 });
       expect(jobs.map((j) => [j.id, j.type])).toEqual([
         ['j-recipe', 'recipe'],
         ['j-simple', 'simple'],
         ['j-otro', 'simple'],
+        ['j-conectar', 'sitio'],
+        ['j-confirmar', 'sitio'],
+        ['j-desconectar', 'sitio'],
       ]);
+    });
+
+    it('agent_id nulo (job de sitio, V026) se mapea a agentId null', async () => {
+      const sql = makeSqlReturning([makeSummaryRow({ agent_id: null, payload_kind: 'conectar_sitio' })]);
+      const [job] = await new JobsRepository(sql).listByOwner('user-1', { limit: 10, offset: 0 });
+      expect(job?.agentId).toBeNull();
+      expect(job?.type).toBe('sitio');
     });
 
     it('mapea el resumen a camelCase y NO incluye payload ni ownerId', async () => {
@@ -440,6 +453,44 @@ describe('JobsRepository', () => {
       // Explicito: el resumen no filtra datos sensibles ni redundantes.
       expect(job).not.toHaveProperty('payload');
       expect(job).not.toHaveProperty('ownerId');
+    });
+  });
+
+  describe('getSummaryForOwner', () => {
+    function makeSummaryRow(overrides: Record<string, unknown> = {}) {
+      return {
+        id: '99999999-9999-9999-9999-999999999999',
+        agent_id: null,
+        status: 'completed',
+        payload_kind: 'conectar_sitio',
+        attempts: 1,
+        last_error: null,
+        scheduled_for: null,
+        created_at: '2026-06-30T00:00:00.000Z',
+        started_at: '2026-06-30T00:01:00.000Z',
+        finished_at: '2026-06-30T00:02:00.000Z',
+        ...overrides,
+      };
+    }
+
+    it('AISLAMIENTO: consulta por id + owner_id y devuelve el resumen sin payload', async () => {
+      const sql = makeSqlReturning([makeSummaryRow()]);
+      const job = await new JobsRepository(sql).getSummaryForOwner('job-1', 'user-1');
+      const texto = sqlText(sql);
+      expect(texto).toContain('where id = ');
+      expect(texto).toContain('and owner_id = ');
+      expect(texto).toContain("payload->>'kind' as payload_kind");
+      expect(texto).not.toContain('select *');
+      expect(sqlValues(sql)).toEqual(['job-1', 'user-1']);
+      expect(job).toMatchObject({ id: '99999999-9999-9999-9999-999999999999', type: 'sitio', agentId: null });
+      expect(job).not.toHaveProperty('payload');
+      expect(job).not.toHaveProperty('ownerId');
+    });
+
+    it('job ajeno o inexistente -> null (0 filas)', async () => {
+      const sql = makeSqlReturning([]);
+      const job = await new JobsRepository(sql).getSummaryForOwner('job-1', 'user-2');
+      expect(job).toBeNull();
     });
   });
 });
