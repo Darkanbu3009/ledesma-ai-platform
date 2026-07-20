@@ -5,6 +5,7 @@
     "recetas": "Recetas",
     "tareas": "Tareas",
     "triggers": "Triggers",
+    "sitios": "Sitios",
     "actividad": "Actividad",
     "credenciales": "Credenciales",
     "privacidad": "Privacidad",
@@ -1667,7 +1668,8 @@
       "fin": "Fin: {{fecha}}",
       "intentos_one": "{{count}} intento",
       "intentos_other": "{{count}} intentos",
-      "intentos_many": "{{count}} intentos"
+      "intentos_many": "{{count}} intentos",
+      "sitios": "Sitios conectados"
     },
     "filtros": {
       "todas": "Todas"
@@ -1680,7 +1682,66 @@
     },
     "jobTipo": {
       "receta": "Receta",
-      "mensaje": "Mensaje"
+      "mensaje": "Mensaje",
+      "sitio": "Sitio"
+    }
+  },
+  "sitios": {
+    "titulo": "Sitios conectados",
+    "subtitulo": "Conecta sitios donde tú inicias sesión para que tus agentes trabajen dentro de tu cuenta.",
+    "gate": {
+      "badge": "Función de planes con autonomía",
+      "titulo": "Conecta tus sitios con login",
+      "descripcion": "Con un plan con autonomía puedes conectar sitios donde tú inicias sesión, en un navegador seguro, y dejar que tus agentes trabajen ahí. Tu contraseña nunca pasa por Ledesma."
+    },
+    "conectar": {
+      "label": "URL del sitio",
+      "placeholder": "https://app.tusitio.com/login",
+      "boton": "Conectar sitio",
+      "urlInvalida": "Pega una URL válida (por ejemplo https://app.tusitio.com/login).",
+      "abriendo": "Abriendo el navegador seguro",
+      "fallo": "No pudimos abrir el navegador seguro para {{dominio}}. Intenta conectarlo de nuevo en unos minutos."
+    },
+    "modal": {
+      "titulo": "Inicia sesión en {{dominio}}",
+      "instruccion": "Inicia sesión aquí como lo harías normalmente. Nadie más ve tus datos. Tu contraseña no pasa por Ledesma.",
+      "iframeTitulo": "Navegador seguro para iniciar sesión en {{dominio}}",
+      "pie": "La sesión se abre en un navegador remoto seguro y expira sola si no confirmas.",
+      "confirmar": "Ya inicié sesión",
+      "confirmando": "Confirmando",
+      "cerrarAria": "Cerrar la vista de inicio de sesión"
+    },
+    "estado": {
+      "esperandoLogin": "Esperando login",
+      "activo": "Activo",
+      "caducado": "Caducado",
+      "error": "Error"
+    },
+    "lista": {
+      "ultimoUso": "Último uso: {{fecha}}",
+      "sinUso": "Sin uso todavía",
+      "desconectar": "Desconectar",
+      "desconectando": "Desconectando"
+    },
+    "desconectarDialog": {
+      "titulo": "¿Desconectar este sitio?",
+      "cuerpoAntes": "Se cerrará la sesión guardada y se borrará de forma permanente la conexión con",
+      "cuerpoDespues": "Es un borrado definitivo: para volver a usar el sitio tendrás que conectarlo e iniciar sesión de nuevo.",
+      "desconectar": "Desconectar",
+      "desconectando": "Desconectando"
+    },
+    "comunes": {
+      "cancelar": "Cancelar",
+      "entendido": "Entendido"
+    },
+    "errores": {
+      "sesion": "Tu sesión expiró. Vuelve a iniciar sesión en la consola.",
+      "plan": "Tu plan no incluye sitios conectados. Elige un plan con autonomía.",
+      "noExiste": "Ese sitio ya no existe.",
+      "rechazo": "La solicitud fue rechazada. Revisa los datos e intenta de nuevo.",
+      "generico": "Algo salió mal. Intenta de nuevo.",
+      "cargarLista": "No pudimos cargar tus sitios conectados",
+      "desconectarFallo": "No pudimos completar la desconexión. Intenta de nuevo en unos minutos."
     }
   }
 }

@@ -22,6 +22,8 @@ const JobStatusSchema = z.enum(['pending', 'running', 'completed', 'failed']);
 
 // Querystring del listado: filtro opcional por estado + paginacion. limit/offset llegan como strings del
 // querystring, por eso z.coerce; ambos con default y acotados (limit <= 50, offset >= 0).
+const JobIdParamSchema = z.object({ id: z.string().uuid() });
+
 const ListJobsQuerySchema = z.object({
   status: JobStatusSchema.optional(),
   limit: z.coerce.number().int().min(1).max(MAX_LIMIT).default(DEFAULT_LIMIT),
@@ -70,7 +72,7 @@ export function jobsRoutes(
   config: Env,
   deps?: {
     verifier?: JwtVerifier;
-    jobsRepo?: Pick<JobsRepository, 'listByOwner'>;
+    jobsRepo?: Pick<JobsRepository, 'listByOwner' | 'getSummaryForOwner'>;
   },
 ) {
   return async function (app: FastifyInstance): Promise<void> {
@@ -99,5 +101,22 @@ export function jobsRoutes(
         },
       });
     });
+
+    // DETALLE de UN job del owner, para que la UI haga POLLING del estado de un job que ella misma
+    // encolo (p.ej. conectar/confirmar/desconectar un sitio, 7.1c). MISMO DTO seguro que el listado
+    // (sin payload, last_error truncado) y mismo aislamiento: un job ajeno o inexistente -> 404.
+    app.get(
+      '/v1/jobs/:id',
+      async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+        const user = await requireUser(request, verifier);
+        const params = JobIdParamSchema.safeParse(request.params);
+        if (!params.success) {
+          throw new AppError('VALIDATION_ERROR', 400, 'Invalid job id', params.error.issues);
+        }
+        const job = await jobsRepo.getSummaryForOwner(params.data.id, user.id);
+        if (!job) throw new AppError('NOT_FOUND', 404, 'Job not found');
+        return reply.send({ job: toJobActivity(job) });
+      },
+    );
   };
 }

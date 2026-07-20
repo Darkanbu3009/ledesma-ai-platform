@@ -11,12 +11,12 @@ export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
 /** Una tarea de la cola, tal como vive en la tabla `jobs`. snake_case -> camelCase. */
 export interface Job {
   id: string;
-  /** Agente a ejecutar. */
-  agentId: string;
+  /** Agente a ejecutar. null SOLO en jobs de sitios conectados (V026): no ejecutan ningun modelo. */
+  agentId: string | null;
   /** Dueno de la tarea (sub del JWT), misma tenancy que agents.owner_id. */
   ownerId: string;
-  /** Credencial de la boveda a usar al ejecutar (provider_credentials.id). */
-  credentialId: string;
+  /** Credencial de la boveda a usar al ejecutar (provider_credentials.id). null solo en jobs de sitios. */
+  credentialId: string | null;
   status: JobStatus;
   /** Mensajes/input de la tarea (mismo shape que el body de /v1/run/:agentId). */
   payload: unknown;
@@ -30,11 +30,12 @@ export interface Job {
   finishedAt: string | null;
 }
 
-/** Campos para encolar una tarea nueva. El resto (status, attempts, timestamps) lo pone la base. */
+/** Campos para encolar una tarea nueva. El resto (status, attempts, timestamps) lo pone la base.
+ *  agentId/credentialId van en null SOLO para jobs de sitios conectados (no ejecutan modelo). */
 export interface CreateJobInput {
-  agentId: string;
+  agentId: string | null;
   ownerId: string;
-  credentialId: string;
+  credentialId: string | null;
   payload: unknown;
   /** null/ausente = ASAP. Acepta Date o ISO string. */
   scheduledFor?: Date | string | null;
@@ -42,11 +43,12 @@ export interface CreateJobInput {
 
 /**
  * Tipo de un job INFERIDO del payload (para OBSERVABILIDAD): 'recipe' si el payload lleva el
- * discriminador kind === 'recipe' (ver recipe-payload.ts), 'simple' en cualquier otro caso (el job de
- * un mensaje suelto). Es lo unico que se puede saber del payload SIN exponerlo: el origen
- * (scheduler/trigger/manual) NO es inferible sin cambios de esquema, asi que no se modela aqui.
+ * discriminador kind === 'recipe' (ver recipe-payload.ts), 'sitio' si lleva uno de los tres kinds de
+ * sitios conectados (ver sitio-payload.ts), y 'simple' en cualquier otro caso (el job de un mensaje
+ * suelto). Es lo unico que se puede saber del payload SIN exponerlo: el origen (scheduler/trigger/
+ * manual) NO es inferible sin cambios de esquema, asi que no se modela aqui.
  */
-export type JobType = 'recipe' | 'simple';
+export type JobType = 'recipe' | 'simple' | 'sitio';
 
 /**
  * RESUMEN de un job para el historial de ejecuciones (listado de OBSERVABILIDAD). Deliberadamente NO
@@ -56,10 +58,10 @@ export type JobType = 'recipe' | 'simple';
  */
 export interface JobSummary {
   id: string;
-  /** Agente que ejecuto (o ejecutara) el job. */
-  agentId: string;
+  /** Agente que ejecuto (o ejecutara) el job. null en jobs de sitios conectados (sin agente). */
+  agentId: string | null;
   status: JobStatus;
-  /** Tipo inferido del payload: 'recipe' o 'simple'. Sin exponer el payload. */
+  /** Tipo inferido del payload: 'recipe', 'sitio' o 'simple'. Sin exponer el payload. */
   type: JobType;
   attempts: number;
   /** Detalle del ultimo fallo (COMPLETO aqui; la ruta lo trunca). null si nunca fallo. */

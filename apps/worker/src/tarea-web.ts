@@ -242,7 +242,14 @@ export async function procesarTareaWeb(deps: TareaWebDeps | undefined, job: Job)
   }
 
   // La key del modelo sale de la boveda del owner (misma via que todo job). La navegacion usa un
-  // modelo Claude (TAREA_WEB_MODEL): la credencial debe ser de anthropic.
+  // modelo Claude (TAREA_WEB_MODEL): la credencial debe ser de anthropic. credential_id es nullable
+  // desde V026 (solo para jobs de sitios): una tarea web sin credencial es un dato corrupto (la tool
+  // siempre la pone al encolar) -> fallo permanente, sin abrir sesion.
+  if (job.credentialId === null) {
+    throw new PermanentExecutionError(
+      'job de tarea web sin credencial: encola la tarea via la tool del agente',
+    );
+  }
   const credential = await deps.resolveCredential(job.ownerId, job.credentialId);
   if (credential.providerId !== 'anthropic') {
     throw new PermanentExecutionError(

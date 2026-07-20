@@ -17,6 +17,7 @@ import { upgradeRequestRoutes } from './routes/upgrade-requests.js';
 import { subscriptionRoutes } from './routes/subscription.js';
 import { adminUpgradeRequestsRoutes } from './routes/admin-upgrade-requests.js';
 import { jobsRoutes } from './routes/jobs.js';
+import { sitiosRoutes } from './routes/sitios.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { triggerRoutes } from './routes/triggers.js';
 import { incomingTriggerRoutes } from './routes/incoming-triggers.js';
@@ -101,6 +102,9 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
   await app.register(subscriptionRoutes(config));
   // Observabilidad de la ejecucion autonoma (solo lectura): historial de jobs del owner. Aditivo.
   await app.register(jobsRoutes(config));
+  // Sitios conectados (7.1c): conectar/confirmar/listar/desconectar. Solo encola jobs de 7.1b; el
+  // login lo hace el usuario en la vista en vivo del proveedor (jamas pasa por este backend).
+  await app.register(sitiosRoutes(config));
   // Resumen AGREGADO del dashboard (solo lectura): los tres ejes (actividad, operaciones, gasto) por
   // owner. Aditivo: lee agent_runs, jobs y los repos de recursos; no escribe nada.
   await app.register(dashboardRoutes(config));

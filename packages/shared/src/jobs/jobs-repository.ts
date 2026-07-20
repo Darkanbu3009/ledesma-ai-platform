@@ -10,6 +10,7 @@ import type {
   ReapedJob,
 } from './types.js';
 import { RECIPE_JOB_KIND } from './recipe-payload.js';
+import { SITIO_JOB_KINDS } from './sitio-payload.js';
 
 /**
  * Cliente postgres (tagged template) que el repositorio recibe por inyeccion, IGUAL que los
@@ -23,9 +24,9 @@ export type Sql = postgres.Sql;
 /** Fila cruda de la tabla `jobs` (snake_case). */
 interface JobRow {
   id: string;
-  agent_id: string;
+  agent_id: string | null;
   owner_id: string;
-  credential_id: string;
+  credential_id: string | null;
   status: string;
   payload: unknown;
   scheduled_for: Date | string | null;
@@ -72,7 +73,7 @@ function rowToJob(row: JobRow): Job {
  */
 interface JobSummaryRow {
   id: string;
-  agent_id: string;
+  agent_id: string | null;
   status: string;
   payload_kind: string | null;
   attempts: number;
@@ -88,9 +89,14 @@ function rowToSummary(row: JobSummaryRow): JobSummary {
     id: row.id,
     agentId: row.agent_id,
     status: row.status as JobStatus,
-    // Mismo criterio que isRecipeJobPayload (payload.kind === 'recipe'), pero evaluado sobre el escalar
-    // que trajo la query. Cualquier otro valor (null incluido) es un job simple.
-    type: row.payload_kind === RECIPE_JOB_KIND ? 'recipe' : 'simple',
+    // Mismo criterio que isRecipeJobPayload / isSitioJobPayload (payload.kind), pero evaluado sobre el
+    // escalar que trajo la query. Cualquier otro valor (null incluido) es un job simple.
+    type:
+      row.payload_kind === RECIPE_JOB_KIND
+        ? 'recipe'
+        : (SITIO_JOB_KINDS as readonly string[]).includes(row.payload_kind ?? '')
+          ? 'sitio'
+          : 'simple',
     attempts: Number(row.attempts ?? 0),
     lastError: row.last_error,
     scheduledFor: toIso(row.scheduled_for),
@@ -213,6 +219,23 @@ export class JobsRepository {
             limit ${limit} offset ${offset}
           `;
     return rows.map(rowToSummary);
+  }
+
+  /**
+   * RESUMEN de UN job del owner, para que la UI haga polling del estado de un job que ella misma
+   * encolo (p.ej. conectar/confirmar/desconectar un sitio, 7.1c). Mismo DTO seguro que listByOwner
+   * (sin payload; solo payload->>'kind' para inferir el tipo) y AISLADO por owner_id: un job ajeno o
+   * inexistente devuelve null, jamas datos de otro dueno.
+   */
+  async getSummaryForOwner(id: string, ownerId: string): Promise<JobSummary | null> {
+    const rows = await this.sql<JobSummaryRow[]>`
+      select id, agent_id, status, payload->>'kind' as payload_kind, attempts, last_error,
+        scheduled_for, created_at, started_at, finished_at
+      from jobs
+      where id = ${id} and owner_id = ${ownerId}
+    `;
+    const row = rows[0];
+    return row ? rowToSummary(row) : null;
   }
 
   /**
