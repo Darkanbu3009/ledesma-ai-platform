@@ -8,6 +8,7 @@ export * from './jobs/types.js';
 export * from './jobs/jobs-repository.js';
 export * from './jobs/recipe-payload.js';
 export * from './jobs/sitio-payload.js';
+export * from './jobs/tarea-web-payload.js';
 export * from './pricing/pricing.js';
 export * from './plans/plans.js';
 export { FakeProvider } from './testing/fake-provider.js';

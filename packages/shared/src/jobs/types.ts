@@ -82,6 +82,20 @@ export interface ReapedJob {
   attempts: number;
 }
 
+/**
+ * VISTA de un job para la TOOL DE CONSULTA del agente (7.1d): el estado de cola + el resultado (si
+ * termino) + el ultimo error (si fallo). Deliberadamente NO incluye el payload ni el owner: la tool
+ * ya consulta acotada por owner_id y el agente solo necesita saber en que quedo el job.
+ */
+export interface JobConsulta {
+  id: string;
+  status: JobStatus;
+  /** Resultado que el worker guardo al completar (jobs.resultado, V026). null si no hay. */
+  resultado: unknown;
+  /** Detalle del ultimo fallo. null si nunca fallo. */
+  lastError: string | null;
+}
+
 /** Opciones del listado paginado por owner (observabilidad). status opcional = todos los estados. */
 export interface ListJobsByOwnerOptions {
   /** Maximo de filas a devolver (la ruta lo acota; el repo confia en el valor ya validado). */

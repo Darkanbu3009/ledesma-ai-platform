@@ -443,3 +443,42 @@ describe('JobsRepository', () => {
     });
   });
 });
+
+describe('JobsRepository (7.1d: resultado de jobs)', () => {
+  describe('guardarResultado', () => {
+    it('escribe jobs.resultado como json SOLO sobre un job running', async () => {
+      const sql = makeSqlReturning([]);
+      await new JobsRepository(sql).guardarResultado('job-1', { estado: 'ok', resumen: 'listo' });
+      const text = sqlText(sql);
+      expect(text).toContain('update jobs set resultado =');
+      expect(text).toContain("status = 'running'");
+      expect(sqlValues(sql)).toEqual([{ estado: 'ok', resumen: 'listo' }, 'job-1']);
+    });
+  });
+
+  describe('obtenerJobDeOwner', () => {
+    it('devuelve estado + resultado + lastError acotado por owner', async () => {
+      const sql = makeSqlReturning([
+        { id: 'job-1', status: 'completed', resultado: { estado: 'ok' }, last_error: null },
+      ]);
+      const job = await new JobsRepository(sql).obtenerJobDeOwner('job-1', 'user-1');
+      expect(job).toEqual({ id: 'job-1', status: 'completed', resultado: { estado: 'ok' }, lastError: null });
+      expect(sqlText(sql)).toContain('owner_id = <param>');
+      expect(sqlValues(sql)).toEqual(['job-1', 'user-1']);
+    });
+
+    it('null si el job no existe o es de otro owner (jamas su resultado)', async () => {
+      const sql = makeSqlReturning([]);
+      const job = await new JobsRepository(sql).obtenerJobDeOwner('job-1', 'otro-user');
+      expect(job).toBeNull();
+    });
+
+    it('resultado ausente normaliza a null', async () => {
+      const sql = makeSqlReturning([
+        { id: 'job-1', status: 'pending', resultado: null, last_error: null },
+      ]);
+      const job = await new JobsRepository(sql).obtenerJobDeOwner('job-1', 'user-1');
+      expect(job?.resultado).toBeNull();
+    });
+  });
+});

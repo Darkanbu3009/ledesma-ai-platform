@@ -2,6 +2,7 @@ import type postgres from 'postgres';
 import type {
   CreateJobInput,
   Job,
+  JobConsulta,
   JobStatus,
   JobStatusCounts,
   JobSummary,
@@ -295,6 +296,41 @@ export class JobsRepository {
         updated_at = now()
       where id = ${id} and status = 'running'
     `;
+  }
+
+  /**
+   * Guarda el RESULTADO de un job (7.1d, columna jobs.resultado de V026) ANTES de marcarlo completado.
+   * Es el canal de vuelta hacia la tool de consulta del agente (obtenerJobDeOwner): la cola pasa de
+   * "solo estado" a "estado + resultado" SIN tocar las transiciones (markCompleted sigue siendo el
+   * cierre). Solo escribe sobre un job 'running' (el que este worker posee): un job ya cerrado o
+   * re-transicionado por el reaper no se pisa.
+   */
+  async guardarResultado(id: string, resultado: unknown): Promise<void> {
+    await this.sql`
+      update jobs set resultado = ${this.sql.json(resultado as Parameters<Sql['json']>[0])}, updated_at = now()
+      where id = ${id} and status = 'running'
+    `;
+  }
+
+  /**
+   * CONSULTA de un job para la tool del agente (7.1d): estado + resultado + ultimo error, SIEMPRE
+   * acotada por owner_id (un job ajeno -> null, jamas su resultado). No trae el payload: la tool no
+   * lo necesita y es dato sensible.
+   */
+  async obtenerJobDeOwner(id: string, ownerId: string): Promise<JobConsulta | null> {
+    const rows = await this.sql<Array<{ id: string; status: string; resultado: unknown; last_error: string | null }>>`
+      select id, status, resultado, last_error
+      from jobs
+      where id = ${id} and owner_id = ${ownerId}
+    `;
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      id: row.id,
+      status: row.status as JobStatus,
+      resultado: row.resultado ?? null,
+      lastError: row.last_error,
+    };
   }
 
   /**
