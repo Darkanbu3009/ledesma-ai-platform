@@ -27,6 +27,7 @@ const verifier: JwtVerifier = {
 };
 
 const listByOwner = vi.fn();
+const getSummaryForOwner = vi.fn();
 
 /** Resumen de job tal como lo devuelve JobsRepository.listByOwner (camelCase, sin payload). */
 function makeJobSummary(overrides: Record<string, unknown> = {}) {
@@ -49,7 +50,7 @@ async function makeApp(): Promise<FastifyInstance> {
   const config = parseEnv(BASE);
   const app = Fastify();
   registerErrorHandler(app, config);
-  await app.register(jobsRoutes(config, { verifier, jobsRepo: { listByOwner } }));
+  await app.register(jobsRoutes(config, { verifier, jobsRepo: { listByOwner, getSummaryForOwner } }));
   return app;
 }
 
@@ -57,6 +58,7 @@ let app: FastifyInstance;
 beforeEach(async () => {
   vi.clearAllMocks();
   listByOwner.mockResolvedValue([]);
+  getSummaryForOwner.mockResolvedValue(null);
   app = await makeApp();
 });
 
@@ -239,5 +241,59 @@ describe('GET /v1/jobs: last_error truncado y sin payload', () => {
       attempts: 1,
       createdAt: '2026-06-30T00:00:00.000Z',
     });
+  });
+});
+
+describe('GET /v1/jobs/:id: detalle para polling', () => {
+  it('sin JWT -> 401 (no toca el repo)', async () => {
+    const res = await app.inject({ method: 'GET', url: `/v1/jobs/${JOB_ID}` });
+    expect(res.statusCode).toBe(401);
+    expect(getSummaryForOwner).not.toHaveBeenCalled();
+  });
+
+  it('devuelve el job del owner con el mismo DTO seguro del listado (sin payload)', async () => {
+    getSummaryForOwner.mockResolvedValue(makeJobSummary({ type: 'sitio', agentId: null }));
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/jobs/${JOB_ID}`,
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(getSummaryForOwner).toHaveBeenCalledWith(JOB_ID, 'user-1');
+    const { job } = res.json();
+    expect(job).not.toHaveProperty('payload');
+    expect(job).not.toHaveProperty('ownerId');
+    expect(job).toMatchObject({ id: JOB_ID, type: 'sitio', agentId: null, status: 'completed' });
+  });
+
+  it('job ajeno o inexistente -> 404 (el repo devuelve null)', async () => {
+    getSummaryForOwner.mockResolvedValue(null);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/jobs/${JOB_ID}`,
+      headers: { authorization: 'Bearer valid-user-2' },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(getSummaryForOwner).toHaveBeenCalledWith(JOB_ID, 'user-2');
+  });
+
+  it('id no-uuid -> 400 (no consulta)', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/jobs/no-es-uuid',
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(getSummaryForOwner).not.toHaveBeenCalled();
+  });
+
+  it('trunca last_error largo tambien en el detalle', async () => {
+    getSummaryForOwner.mockResolvedValue(makeJobSummary({ lastError: 'x'.repeat(600), status: 'failed' }));
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/jobs/${JOB_ID}`,
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(res.json().job.lastError).toBe(`${'x'.repeat(500)}...`);
   });
 });
