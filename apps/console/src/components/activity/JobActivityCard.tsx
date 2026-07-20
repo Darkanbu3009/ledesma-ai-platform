@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { AlertCircle, Bot, ChefHat, Clock, Loader2, MessageSquare } from 'lucide-react';
+import { AlertCircle, Bot, ChefHat, Clock, Globe, Loader2, MessageSquare } from 'lucide-react';
 import { formatRunAt } from '../../lib/schedule';
 import { jobStatusLabel, jobTypeLabel, type JobActivity, type JobStatus } from '../../lib/jobs';
 
@@ -36,9 +36,12 @@ function StatusBadge({ status }: { status: JobStatus }) {
  */
 export function JobActivityCard({ job, agentName }: { job: JobActivity; agentName: string | null }) {
   const { t } = useTranslation();
-  const TypeIcon = job.type === 'recipe' ? ChefHat : MessageSquare;
+  const TypeIcon = job.type === 'recipe' ? ChefHat : job.type === 'sitio' ? Globe : MessageSquare;
   const created = formatRunAt(job.createdAt) ?? '—';
   const finished = formatRunAt(job.finishedAt);
+  // Un job de sitios conectados no tiene agente: el titular es la seccion, no "agente eliminado".
+  const title =
+    job.type === 'sitio' ? t('actividad.card.sitios') : (agentName ?? t('actividad.card.agenteEliminado'));
 
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-5 shadow-card sm:flex-row sm:items-start sm:justify-between">
@@ -49,8 +52,12 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="inline-flex min-w-0 items-center gap-1.5 truncate font-display text-[15px] font-bold text-ink">
-              <Bot className="h-4 w-4 flex-none text-muted" />
-              <span className="truncate">{agentName ?? t('actividad.card.agenteEliminado')}</span>
+              {job.type === 'sitio' ? (
+                <Globe className="h-4 w-4 flex-none text-muted" />
+              ) : (
+                <Bot className="h-4 w-4 flex-none text-muted" />
+              )}
+              <span className="truncate">{title}</span>
             </h3>
             <span className="flex-none rounded-full border border-line bg-line-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
               {jobTypeLabel(job.type)}

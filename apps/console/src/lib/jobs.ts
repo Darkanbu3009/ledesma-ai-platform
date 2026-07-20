@@ -10,8 +10,8 @@
 
 import i18n from '../i18n';
 
-/** Tipo inferido del job (del payload, sin exponerlo): receta multi-paso o mensaje suelto. */
-export type JobType = 'recipe' | 'simple';
+/** Tipo inferido del job (del payload, sin exponerlo): receta multi-paso, mensaje suelto o sitio conectado. */
+export type JobType = 'recipe' | 'simple' | 'sitio';
 
 /** Estados de la cola (mismos que el backend / el CHECK de V008). */
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
@@ -20,8 +20,8 @@ export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
 export interface JobActivity {
   id: string;
   type: JobType;
-  /** Agente que ejecuto (la pantalla resuelve el nombre con useAgents). */
-  agentId: string;
+  /** Agente que ejecuto (la pantalla resuelve el nombre con useAgents). null en jobs de sitios. */
+  agentId: string | null;
   status: JobStatus;
   attempts: number;
   /** Detalle del ultimo fallo (ya truncado por el backend). null si nunca fallo. */
@@ -72,9 +72,11 @@ export function jobStatusLabel(status: JobStatus): string {
   }
 }
 
-/** Etiqueta legible del tipo de job: receta (multi-paso) o mensaje (suelto). */
+/** Etiqueta legible del tipo de job: receta (multi-paso), mensaje (suelto) o sitio conectado. */
 export function jobTypeLabel(type: JobType): string {
-  return type === 'recipe' ? i18n.t('actividad.jobTipo.receta') : i18n.t('actividad.jobTipo.mensaje');
+  if (type === 'recipe') return i18n.t('actividad.jobTipo.receta');
+  if (type === 'sitio') return i18n.t('actividad.jobTipo.sitio');
+  return i18n.t('actividad.jobTipo.mensaje');
 }
 
 /** Un job pending o running sigue "en vuelo": su estado puede cambiar y justifica auto-refrescar. */

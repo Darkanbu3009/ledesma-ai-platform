@@ -30,6 +30,7 @@ import type {
 } from './registration';
 import type { Consent, CreateConsentInput, CreateDataRequestInput, DataRequest } from './privacy';
 import type { CreateUpgradeRequestInput, CreateUpgradeRequestResult } from './upgrade-requests';
+import type { ConexionAceptada, SitioJobAceptado } from './sitios';
 import type { PlanId } from './plans';
 
 /** Registra al usuario actual como individuo: queda activo de inmediato. */
@@ -332,6 +333,51 @@ export function useRunRecipe() {
   return useMutation({
     mutationFn: (id: string) => apiFetch<RunRecipeResult>(`/v1/recipes/${id}/run`, { method: 'POST' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['recipes'] }),
+  });
+}
+
+/**
+ * CONECTAR UN SITIO (POST /v1/sitios/conectar): encola kind:'conectar_sitio' con la URL que pego el
+ * usuario (LA UNICA entrada humana del flujo: jamas viaja una contrasena por aqui). Devuelve el jobId
+ * para que la pagina siga el job con useJobSeguimiento y el dominio para ubicar la fila que
+ * aparecera en 'esperando_login' con su vista en vivo. Refresca la lista al aceptarse.
+ */
+export function useConectarSitio() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (url: string) =>
+      apiFetch<ConexionAceptada>('/v1/sitios/conectar', {
+        method: 'POST',
+        body: JSON.stringify({ url }),
+      }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['sitios'] }),
+  });
+}
+
+/**
+ * CONFIRMAR el login de un sitio (POST /v1/sitios/:id/confirmar): el usuario avisa que YA inicio
+ * sesion en la vista en vivo; se encola kind:'confirmar_conexion' (el worker hereda y cifra el
+ * contexto y marca 'activo'). Refresca la lista; el auto-refresh de useSitios sigue la transicion.
+ */
+export function useConfirmarSitio() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<SitioJobAceptado>(`/v1/sitios/${id}/confirmar`, { method: 'POST' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['sitios'] }),
+  });
+}
+
+/**
+ * DESCONECTAR un sitio (DELETE /v1/sitios/:id): encola kind:'desconectar_sitio' (el borrado ARCO:
+ * proveedor + constancia + fila local; PERMANENTE). La UI SIEMPRE lo dispara tras una confirmacion
+ * explicita (DesconectarSitioDialog). Refresca la lista; la fila desaparece cuando el worker borra.
+ */
+export function useDesconectarSitio() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<SitioJobAceptado>(`/v1/sitios/${id}`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['sitios'] }),
   });
 }
 

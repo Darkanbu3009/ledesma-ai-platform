@@ -5,6 +5,7 @@
     "recetas": "Recipes",
     "tareas": "Tasks",
     "triggers": "Triggers",
+    "sitios": "Sites",
     "actividad": "Activity",
     "credenciales": "Credentials",
     "privacidad": "Privacy",
@@ -1667,7 +1668,8 @@
       "fin": "Finished: {{fecha}}",
       "intentos_one": "{{count}} attempt",
       "intentos_other": "{{count}} attempts",
-      "intentos_many": "{{count}} attempts"
+      "intentos_many": "{{count}} attempts",
+      "sitios": "Connected sites"
     },
     "filtros": {
       "todas": "All"
@@ -1680,7 +1682,66 @@
     },
     "jobTipo": {
       "receta": "Recipe",
-      "mensaje": "Message"
+      "mensaje": "Message",
+      "sitio": "Site"
+    }
+  },
+  "sitios": {
+    "titulo": "Connected sites",
+    "subtitulo": "Connect sites where you sign in yourself so your agents can work inside your account.",
+    "gate": {
+      "badge": "Feature of plans with autonomy",
+      "titulo": "Connect your sites with login",
+      "descripcion": "With a plan with autonomy you can connect sites where you sign in yourself, in a secure browser, and let your agents work there. Your password never goes through Ledesma."
+    },
+    "conectar": {
+      "label": "Site URL",
+      "placeholder": "https://app.yoursite.com/login",
+      "boton": "Connect site",
+      "urlInvalida": "Paste a valid URL (for example https://app.yoursite.com/login).",
+      "abriendo": "Opening the secure browser",
+      "fallo": "We could not open the secure browser for {{dominio}}. Try connecting it again in a few minutes."
+    },
+    "modal": {
+      "titulo": "Sign in to {{dominio}}",
+      "instruccion": "Sign in here just like you normally would. Nobody else sees your data. Your password never goes through Ledesma.",
+      "iframeTitulo": "Secure browser to sign in to {{dominio}}",
+      "pie": "The session opens in a secure remote browser and expires on its own if you do not confirm.",
+      "confirmar": "I signed in",
+      "confirmando": "Confirming",
+      "cerrarAria": "Close the sign-in view"
+    },
+    "estado": {
+      "esperandoLogin": "Waiting for login",
+      "activo": "Active",
+      "caducado": "Expired",
+      "error": "Error"
+    },
+    "lista": {
+      "ultimoUso": "Last used: {{fecha}}",
+      "sinUso": "Not used yet",
+      "desconectar": "Disconnect",
+      "desconectando": "Disconnecting"
+    },
+    "desconectarDialog": {
+      "titulo": "Disconnect this site?",
+      "cuerpoAntes": "The saved session will be closed and the connection will be permanently deleted for",
+      "cuerpoDespues": "This deletion is final: to use the site again you will have to connect it and sign in again.",
+      "desconectar": "Disconnect",
+      "desconectando": "Disconnecting"
+    },
+    "comunes": {
+      "cancelar": "Cancel",
+      "entendido": "Got it"
+    },
+    "errores": {
+      "sesion": "Your session expired. Sign in to the console again.",
+      "plan": "Your plan does not include connected sites. Choose a plan with autonomy.",
+      "noExiste": "That site no longer exists.",
+      "rechazo": "The request was rejected. Check the data and try again.",
+      "generico": "Something went wrong. Try again.",
+      "cargarLista": "We could not load your connected sites",
+      "desconectarFallo": "We could not complete the disconnection. Try again in a few minutes."
     }
   }
 }

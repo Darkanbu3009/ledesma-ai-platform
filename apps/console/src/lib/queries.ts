@@ -11,8 +11,10 @@ import { deriveIsAdmin } from './registration';
 import type { ScheduledTask } from './scheduled-tasks';
 import type { Trigger } from './triggers';
 import type { Recipe, RecipeSummary } from './recipes';
-import type { JobsPage, JobStatusFilter } from './jobs';
-import { JOB_PAGE_SIZE, JOBS_REFETCH_MS, buildJobsQuery, hasInFlightJobs } from './jobs';
+import type { JobActivity, JobsPage, JobStatusFilter } from './jobs';
+import { JOB_PAGE_SIZE, JOBS_REFETCH_MS, buildJobsQuery, hasInFlightJobs, isJobInFlight } from './jobs';
+import type { SitioConectado } from './sitios';
+import { JOB_SEGUIMIENTO_REFETCH_MS, SITIOS_REFETCH_MS, haySitiosEnTransicion } from './sitios';
 import type { ConsentsState, DataRequest } from './privacy';
 import type { AdminUserDetail, AdminUsersResponse } from './admin';
 import { ADMIN_USERS_PAGE_SIZE, buildAdminUsersQuery } from './admin';
@@ -112,6 +114,43 @@ export function useJobs(status: JobStatusFilter = 'all') {
     refetchInterval: (query) => {
       const jobs = query.state.data?.pages.flatMap((page) => page.jobs) ?? [];
       return hasInFlightJobs(jobs) ? JOBS_REFETCH_MS : false;
+    },
+  });
+}
+
+/**
+ * SITIOS CONECTADOS del usuario (GET /v1/sitios). AUTO-REFRESH PRUDENTE, mismo criterio que useJobs:
+ * reconsulta cada SITIOS_REFETCH_MS SOLO mientras hay una conexion en transicion (esperando_login) o
+ * mientras `pollingExtra` (evaluado sobre la lista ya cargada) lo pida: la pagina lo usa cuando un
+ * job de conectar/desconectar sigue en vuelo y su efecto aun no se refleja en la lista. Si todo esta
+ * estable, no toca el API. Polling via refetchInterval de react-query, sin useEffect.
+ */
+export function useSitios(pollingExtra?: (sitios: SitioConectado[]) => boolean) {
+  return useQuery({
+    queryKey: ['sitios'],
+    queryFn: () => apiFetch<{ sitios: SitioConectado[] }>('/v1/sitios').then((r) => r.sitios),
+    refetchInterval: (query) => {
+      const sitios = query.state.data ?? [];
+      const extra = pollingExtra ? pollingExtra(sitios) : false;
+      return extra || haySitiosEnTransicion(sitios) ? SITIOS_REFETCH_MS : false;
+    },
+  });
+}
+
+/**
+ * SEGUIMIENTO de UN job encolado por la propia pagina (GET /v1/jobs/:id): el patron de polling del
+ * historial (V017) aplicado a un job puntual. Reconsulta cada JOB_SEGUIMIENTO_REFETCH_MS mientras el
+ * job sigue en vuelo (pending/running, mismo isJobInFlight del historial) y se detiene sola al llegar
+ * a un estado terminal. Solo corre con un jobId presente. Polling con react-query, sin useEffect.
+ */
+export function useJobSeguimiento(jobId: string | null) {
+  return useQuery({
+    queryKey: ['jobs', 'detalle', jobId],
+    queryFn: () => apiFetch<{ job: JobActivity }>(`/v1/jobs/${jobId}`).then((r) => r.job),
+    enabled: Boolean(jobId),
+    refetchInterval: (query) => {
+      const job = query.state.data;
+      return !job || isJobInFlight(job.status) ? JOB_SEGUIMIENTO_REFETCH_MS : false;
     },
   });
 }

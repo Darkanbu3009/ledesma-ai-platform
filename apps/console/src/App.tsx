@@ -14,6 +14,7 @@ import { ScheduledTasksPage } from './pages/ScheduledTasksPage';
 import { TriggersPage } from './pages/TriggersPage';
 import { RecipesPage } from './pages/RecipesPage';
 import { ActivityPage } from './pages/ActivityPage';
+import { SitiosConectadosPage } from './pages/SitiosConectadosPage';
 import { PlaygroundPage } from './pages/PlaygroundPage';
 import { ConnectPage } from './pages/ConnectPage';
 import { UsagePage } from './pages/UsagePage';
@@ -99,6 +100,9 @@ export function App() {
               <Route path="/tareas" element={<ScheduledTasksPage />} />
               <Route path="/triggers" element={<TriggersPage />} />
               <Route path="/recetas" element={<RecipesPage />} />
+              {/* Sitios conectados (7.1c): conectar un sitio con login (el usuario se autentica EL
+                  MISMO en la vista en vivo), listar y desconectar. Ejecutar tareas alli es 7.1d. */}
+              <Route path="/sitios" element={<SitiosConectadosPage />} />
               {/* Observabilidad: historial de ejecuciones (jobs). Solo lectura, sin gate por tier. */}
               <Route path="/actividad" element={<ActivityPage />} />
               {/* Configuracion: shell con dos sub-vistas. "Mi cuenta" es la vista principal (la

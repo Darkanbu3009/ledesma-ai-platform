@@ -135,7 +135,11 @@ export function ActivityPage() {
       ) : (
         <div className="mt-6 space-y-3">
           {jobs.map((job) => (
-            <JobActivityCard key={job.id} job={job} agentName={agentsById.get(job.agentId) ?? null} />
+            <JobActivityCard
+              key={job.id}
+              job={job}
+              agentName={job.agentId !== null ? (agentsById.get(job.agentId) ?? null) : null}
+            />
           ))}
           {hasNextPage && (
             <button
