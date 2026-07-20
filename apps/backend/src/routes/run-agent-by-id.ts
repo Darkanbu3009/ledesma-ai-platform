@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { ContentBlock, NormalizedMessage, ProviderId } from '@ledesma-platform/shared';
+import { JobsRepository } from '@ledesma-platform/shared';
 import type { Env } from '../config/env.js';
 import { extractDocumentText, truncateText } from '../attachments/extract.js';
 import { AppError } from '../errors/app-error.js';
@@ -14,6 +15,7 @@ import { ProviderCredentialRepository } from '../credentials/provider-credential
 import { resolveStoredCredential } from '../credentials/resolve-stored-credential.js';
 import { AGENT_LIMITS } from '../agent/index.js';
 import { assembleAgentRun } from '../execution/assemble-agent-run.js';
+import { SitiosConectadosRepository } from '../sitios/sitios-conectados-repository.js';
 import { streamAgentRun } from './sse-runner.js';
 
 // Adjuntos por referencia (URL): imagenes a vision nativa, documentos a texto extraido.
@@ -134,6 +136,10 @@ export function runAgentByIdRoutes(
   return async function (app: FastifyInstance): Promise<void> {
     const repo = new AgentRepository(getSql(config));
     const runRepo = new AgentRunRepository(getSql(config));
+    // TOOLS DE SITIOS (7.1d): repos para encolar tarea_web y consultar su resultado. Solo se usan
+    // en el camino x-credential-id (unico con owner + credencial de boveda establecidos).
+    const jobsRepo = new JobsRepository(getSql(config));
+    const sitiosRepo = new SitiosConectadosRepository(getSql(config));
     const credentialRepo = deps?.credentialRepo ?? new ProviderCredentialRepository(getSql(config));
     const verifier = deps?.verifier ?? createSupabaseJwtVerifier(config);
 
@@ -159,6 +165,10 @@ export function runAgentByIdRoutes(
       // proveedor/baseUrl los define el agente (comportamiento intacto). storedCredential queda en
       // null salvo en el camino de la boveda, y eso habilita la validacion de proveedor de mas abajo.
       let storedCredential: { providerId: ProviderId; baseUrl: string | null } | null = null;
+      // Contexto de tenancy para las TOOLS DE SITIOS (7.1d): solo el camino x-credential-id lo
+      // puede establecer (owner autenticado + credencial de la boveda). En los otros caminos queda
+      // null y el ensamblado no inyecta las tools (flujos intactos).
+      let sitioToolsCtx: { ownerId: string; agentId: string; credentialId: string } | null = null;
       if (typeof sessionToken === 'string' && sessionToken !== '') {
         apiKey = verifySessionToken(sessionToken, agentId, config.SESSION_TOKEN_SECRET).providerKey;
       } else {
@@ -175,6 +185,7 @@ export function runAgentByIdRoutes(
           );
           apiKey = credential.apiKey;
           storedCredential = { providerId: credential.providerId, baseUrl: credential.baseUrl };
+          sitioToolsCtx = { ownerId: user.id, agentId, credentialId: credentialIdHeader };
         } else {
           throw new AppError('VALIDATION_ERROR', 400, 'Missing x-provider-key header');
         }
@@ -220,6 +231,10 @@ export function runAgentByIdRoutes(
         nativeTools: { workerUrl: config.WEB_WORKER_URL, workerSecret: config.WEB_WORKER_SECRET },
         limits: { maxTokens: config.RUN_MAX_TOKENS, runTimeoutMs: config.RUN_TIMEOUT_SECONDS * 1000 },
         ...(parsed.data.maxIterations !== undefined ? { maxIterations: parsed.data.maxIterations } : {}),
+        // TOOLS DE SITIOS (7.1d): solo con contexto de tenancy completo (camino x-credential-id).
+        ...(sitioToolsCtx
+          ? { sitios: { context: sitioToolsCtx, deps: { jobs: jobsRepo, sitios: sitiosRepo } } }
+          : {}),
         warn: (message) => request.log.warn(message),
       });
 

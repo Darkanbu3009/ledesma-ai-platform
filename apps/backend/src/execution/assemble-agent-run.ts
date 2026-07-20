@@ -4,6 +4,14 @@ import type { AgentRunInput, ToolExecutor } from '../agent/index.js';
 import { createDemoRegistry } from '../tools/demo-registry.js';
 import { createWebhookExecutor, storedToolsToDefinitions } from '../tools/webhook-tools.js';
 import { createNativeExecutor, nativeToolsToDefinitions, NATIVE_TOOL_NAMES } from '../tools/native-tools.js';
+import {
+  BLOQUE_SEPARACION_INSTRUCCION_CONTENIDO,
+  createSitioToolsExecutor,
+  sitioToolsToDefinitions,
+  SITIO_TOOL_NAMES,
+  type SitioToolsContext,
+  type SitioToolsDeps,
+} from '../tools/sitio-tools.js';
 
 /**
  * Credencial YA RESUELTA que la capa recibe. La RESOLUCION queda AFUERA a proposito: cada llamador la
@@ -49,6 +57,18 @@ export interface AssembleAgentRunParams {
   maxIterations?: number;
   /** Sumidero de advertencias (colision de tools, fallos de webhook). Por defecto no-op. */
   warn?: (message: string) => void;
+  /**
+   * TOOLS DE SITIOS CONECTADOS (7.1d), OPCIONALES: se inyectan SOLO cuando el llamador puede
+   * establecer el contexto de tenancy completo (owner + credencial de la BOVEDA con la que el
+   * worker ejecutara la tarea). El route las pasa unicamente en el camino x-credential-id; los
+   * demas caminos (key al momento / token de sesion / worker) quedan INTACTOS sin este parametro.
+   * Cuando esta presente, ademas se appendea al system prompt el bloque de separacion
+   * instruccion-vs-contenido (unica alteracion permitida de los flujos existentes).
+   */
+  sitios?: {
+    context: SitioToolsContext;
+    deps: SitioToolsDeps;
+  };
 }
 
 export interface AssembledAgentRun {
@@ -81,17 +101,22 @@ export function assembleAgentRun(params: AssembleAgentRunParams): AssembledAgent
   const workerSecret = nativeTools.workerSecret;
   const nativasActivas = Boolean(workerUrl && workerSecret);
   const hasStoredTools = agent.tools.length > 0;
+  // Tools de SITIOS CONECTADOS (7.1d): activas solo si el llamador paso el contexto completo.
+  const sitiosActivos = params.sitios !== undefined;
 
-  // Defs del modelo: nativas (si activas) + las del cliente. El demo solo cuando no hay ninguna.
+  // Defs del modelo: nativas (si activas) + sitios (si activas) + las del cliente. El demo solo
+  // cuando no hay ninguna de las tres.
   const nativeDefs = nativasActivas ? nativeToolsToDefinitions() : [];
+  const sitioDefs = sitiosActivos ? sitioToolsToDefinitions() : [];
   const clientDefs = hasStoredTools ? storedToolsToDefinitions(agent.tools) : [];
-  const registry = !nativasActivas && !hasStoredTools ? createDemoRegistry() : null;
+  const registry = !nativasActivas && !hasStoredTools && !sitiosActivos ? createDemoRegistry() : null;
 
-  // Dedupe defensivo: las nativas tienen precedencia; el modelo nunca recibe dos tools con el mismo
-  // name (el prefijo reservado platform_ ya lo evita al crear, esto es cinturon y tirantes).
-  const nativeNames = new Set(nativeDefs.map((d) => d.name));
+  // Dedupe defensivo: las de plataforma (nativas + sitios) tienen precedencia; el modelo nunca
+  // recibe dos tools con el mismo name (el prefijo reservado platform_ ya lo evita al crear, esto
+  // es cinturon y tirantes).
+  const platformNames = new Set([...nativeDefs.map((d) => d.name), ...sitioDefs.map((d) => d.name)]);
   const clientDefsSinColision = clientDefs.filter((d) => {
-    if (nativeNames.has(d.name)) {
+    if (platformNames.has(d.name)) {
       warn(`tool de cliente '${d.name}' descartada por colision con una tool nativa de la plataforma`);
       return false;
     }
@@ -99,10 +124,10 @@ export function assembleAgentRun(params: AssembleAgentRunParams): AssembledAgent
   });
   const toolDefinitions = registry
     ? registry.toToolDefinitions()
-    : [...nativeDefs, ...clientDefsSinColision];
+    : [...nativeDefs, ...sitioDefs, ...clientDefsSinColision];
 
-  // Ejecutor con dispatch por nombre: las nativas van primero (defensa anti-colision), el resto al
-  // ejecutor de cliente (webhook o demo). El flujo de cliente queda intacto.
+  // Ejecutor con dispatch por nombre: las de plataforma van primero (defensa anti-colision), el
+  // resto al ejecutor de cliente (webhook o demo). El flujo de cliente queda intacto.
   const clientExec = hasStoredTools
     ? createWebhookExecutor(agent.tools, agent.webhookSecret, undefined, { warn })
     : registry
@@ -112,14 +137,24 @@ export function assembleAgentRun(params: AssembleAgentRunParams): AssembledAgent
     workerUrl && workerSecret
       ? createNativeExecutor(workerUrl, workerSecret, undefined, { warn })
       : null;
+  const sitioExec = params.sitios
+    ? createSitioToolsExecutor(params.sitios.context, params.sitios.deps)
+    : null;
   const executeTool: ToolExecutor = (call, abortSignal) => {
     if (nativeExec && NATIVE_TOOL_NAMES.has(call.name)) return nativeExec(call, abortSignal);
+    if (sitioExec && SITIO_TOOL_NAMES.has(call.name)) return sitioExec(call, abortSignal);
     if (clientExec) return clientExec(call, abortSignal);
     return Promise.resolve({ content: `Tool desconocida: ${call.name}`, isError: true });
   };
 
+  // System prompt: el del agente, y -- SOLO con las tools de sitios activas -- el bloque de
+  // separacion instruccion-vs-contenido appendeado (7.1d). Sin sitios, byte a byte igual que antes.
+  const system = sitiosActivos
+    ? `${agent.systemPrompt ?? ''}${BLOQUE_SEPARACION_INSTRUCCION_CONTENIDO}`.trim()
+    : agent.systemPrompt;
+
   const normalizedRequest: NormalizedRequest = {
-    ...(agent.systemPrompt ? { system: agent.systemPrompt } : {}),
+    ...(system ? { system } : {}),
     messages,
     tools: toolDefinitions,
     modelConfig: {
