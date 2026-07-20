@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { isRecipeJobPayload, parseRecipeJobPayload, tierAllowsAutonomy } from '@ledesma-platform/shared';
+import {
+  isRecipeJobPayload,
+  isSitioJobPayload,
+  parseRecipeJobPayload,
+  tierAllowsAutonomy,
+} from '@ledesma-platform/shared';
 import type {
   AgentEvent,
   Job,
@@ -22,6 +27,8 @@ import type {
   DecryptedProviderCredential,
   ProfileTier,
 } from '@ledesma-platform/backend/execution';
+import { procesarJobDeSitio } from './sitios.js';
+import type { SitiosJobDeps } from './sitios.js';
 import type { Logger } from './logger.js';
 
 /**
@@ -91,36 +98,10 @@ const COMPLETION_RETRY_BASE_MS = 200;
  */
 const RECIPE_MAX_CONTEXT_CHARS = 200_000;
 
-/**
- * Fallo PERMANENTE: no tiene sentido reintentar porque no se va a arreglar solo (hoy: tier
- * insuficiente). Va directo a 'failed' SIN consumir los reintentos, a diferencia de un fallo
- * transitorio (error de proveedor, timeout) que si se reintenta.
- */
-export class PermanentExecutionError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'PermanentExecutionError';
-  }
-}
-
-/** El run supero el deadline de pared del worker: fallo TRANSITORIO del intento (cuenta para reintentos). */
-export class RunTimeoutError extends Error {
-  constructor(timeoutMs: number) {
-    super(`el run supero el timeout de pared de ${timeoutMs}ms`);
-    this.name = 'RunTimeoutError';
-  }
-}
-
-/**
- * El worker se esta apagando (SIGTERM/SIGINT) y aborto el run en curso. NO es culpa del job: se devuelve
- * a 'pending' para que se re-reclame, sin marcarlo failed aunque haya agotado intentos.
- */
-export class ShutdownAbortError extends Error {
-  constructor() {
-    super('ejecucion abortada por apagado del worker');
-    this.name = 'ShutdownAbortError';
-  }
-}
+// Clases de error movidas a errores.ts (modulo sin dependencias) para que sitios.ts las comparta sin
+// un ciclo de imports con este modulo. Se RE-EXPORTAN aca: la superficie publica no cambia.
+import { PermanentExecutionError, RunTimeoutError, ShutdownAbortError } from './errores.js';
+export { PermanentExecutionError, RunTimeoutError, ShutdownAbortError };
 
 /** Subconjunto del JobsRepository que la ejecucion necesita (facil de mockear en tests). */
 export interface JobQueue {
@@ -182,6 +163,13 @@ export interface JobRunnerDeps {
    * recordRunBestEffort). Se cablea en index.ts con el mismo cliente sql del worker; en tests es un vi.fn().
    */
   recordRun?: (run: AgentRunRecord) => Promise<void>;
+  /**
+   * Dependencias de los JOBS DE SITIOS CONECTADOS (7.1b): repositorio de 7.1a + puerto al proveedor
+   * de navegador remoto + encadenado ARCO. OPCIONAL: index.ts lo cablea SOLO si BROWSERBASE_API_KEY
+   * y BROWSERBASE_PROJECT_ID estan en el entorno; sin cablear, un job de sitio falla permanente con
+   * mensaje claro (procesarJobDeSitio) y el resto del worker no cambia en nada.
+   */
+  sitios?: SitiosJobDeps;
 }
 
 /** Mensajes del payload de un job: mismo shape que el body de /v1/run/:agentId. */
@@ -460,6 +448,20 @@ export async function processClaimedJob(
     const tier = await deps.getProfileTier(job.ownerId);
     if (!tierAllowsAutonomy(tier)) {
       throw new PermanentExecutionError('autonomous execution requires a plan with autonomy');
+    }
+
+    // 1.5. RAMIFICAR los jobs de SITIOS CONECTADOS (7.1b) ANTES de tocar agente/credencial/motor:
+    //      estos jobs no ejecutan ningun modelo (hay un humano manejando el navegador) y no tienen
+    //      agente ni credencial que resolver. El gate por tier de arriba SI aplica (la conexion de
+    //      sitios es parte de la suite autonoma). La discriminacion por payload.kind es inequivoca,
+    //      igual que la de recetas. procesarJobDeSitio lanza en fallo (handleFailure decide
+    //      reintento/permanente como con cualquier job); sin telemetria de agent_runs: no hay
+    //      provider/model ni tokens que registrar.
+    if (isSitioJobPayload(job.payload)) {
+      await procesarJobDeSitio(deps.sitios, job);
+      await markCompletedWithRetry(deps, job.id);
+      logger.info('job de sitio conectado completado', { jobId: job.id });
+      return;
     }
 
     // 2. Cargar el agente (config autoritativa: provider/model/tools/...).

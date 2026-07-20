@@ -6,11 +6,12 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/index.js",
+    "start": "node --experimental-websocket dist/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@browserbasehq/sdk": "^2.16.0",
     "@ledesma-platform/backend": "*",
     "@ledesma-platform/shared": "*",
     "postgres": "3.4.9",
