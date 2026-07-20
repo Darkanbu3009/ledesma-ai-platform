@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   isRecipeJobPayload,
   isSitioJobPayload,
+  isTareaWebJobPayload,
   parseRecipeJobPayload,
   tierAllowsAutonomy,
 } from '@ledesma-platform/shared';
@@ -29,6 +30,8 @@ import type {
 } from '@ledesma-platform/backend/execution';
 import { procesarJobDeSitio } from './sitios.js';
 import type { SitiosJobDeps } from './sitios.js';
+import { procesarTareaWeb } from './tarea-web.js';
+import type { TareaWebDeps } from './tarea-web.js';
 import type { Logger } from './logger.js';
 
 /**
@@ -170,6 +173,13 @@ export interface JobRunnerDeps {
    * mensaje claro (procesarJobDeSitio) y el resto del worker no cambia en nada.
    */
   sitios?: SitiosJobDeps;
+  /**
+   * Dependencias del JOB DE TAREA WEB (7.1d): navegacion por IA dentro de la sesion activa de un
+   * sitio conectado. OPCIONAL con el mismo criterio que `sitios`: index.ts lo cablea SOLO si la
+   * config de Browserbase esta completa; sin cablear, un job de tarea web falla permanente con
+   * mensaje claro (procesarTareaWeb) y el resto del worker no cambia en nada.
+   */
+  tareaWeb?: TareaWebDeps;
 }
 
 /** Mensajes del payload de un job: mismo shape que el body de /v1/run/:agentId. */
@@ -461,6 +471,19 @@ export async function processClaimedJob(
       await procesarJobDeSitio(deps.sitios, job);
       await markCompletedWithRetry(deps, job.id);
       logger.info('job de sitio conectado completado', { jobId: job.id });
+      return;
+    }
+
+    // 1.6. RAMIFICAR el job de TAREA WEB (7.1d) con el mismo criterio que los de sitios: aca SI corre
+    //      un modelo (Stagehand), pero con su PROPIA credencial resuelta adentro (la del job, via
+    //      deps.tareaWeb.resolveCredential) y su propio deadline; no pasa por agente/assemble. El
+    //      gate por tier de arriba SI aplica. procesarTareaWeb lanza en fallo; TODOS sus fallos
+    //      posteriores a abrir la sesion son PERMANENTES (no se re-ejecuta una navegacion a medias
+    //      sobre la cuenta real del usuario), asi que handleFailure no los reintenta.
+    if (isTareaWebJobPayload(job.payload)) {
+      await procesarTareaWeb(deps.tareaWeb, job);
+      await markCompletedWithRetry(deps, job.id);
+      logger.info('job de tarea web completado', { jobId: job.id });
       return;
     }
 

@@ -54,6 +54,17 @@ const EnvSchema = z.object({
   BROWSERBASE_PROXY_SERVER: z.string().min(1).optional(),
   BROWSERBASE_PROXY_USERNAME: z.string().min(1).optional(),
   BROWSERBASE_PROXY_PASSWORD: z.string().min(1).optional(),
+  // MODELO de la TAREA WEB (7.1d): el que corre la navegacion por IA dentro de la sesion del
+  // usuario. Mismo patron de modelo-por-env que la validacion e2e (scripts/validacion-e2e/lib/
+  // env.mjs): configurable por despliegue, con REGLA DE PLATAFORMA dura: NUNCA Haiku para trabajo
+  // de agente. Formato proveedor/modelo (lo consume Stagehand). Default: Claude Sonnet.
+  TAREA_WEB_MODEL: z
+    .string()
+    .min(1)
+    .default('anthropic/claude-sonnet-4-6')
+    .refine((model) => !/haiku/i.test(model), {
+      message: 'TAREA_WEB_MODEL no permite Haiku para trabajo de agente (regla de plataforma); usa p.ej. anthropic/claude-sonnet-4-6',
+    }),
 });
 
 export type WorkerEnv = z.infer<typeof EnvSchema>;

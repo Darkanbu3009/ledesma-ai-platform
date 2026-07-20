@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@browserbasehq/sdk": "^2.16.0",
+    "@browserbasehq/stagehand": "3.6.0",
     "@ledesma-platform/backend": "*",
     "@ledesma-platform/shared": "*",
     "postgres": "3.4.9",
