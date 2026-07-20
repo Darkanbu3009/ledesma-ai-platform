@@ -1,4 +1,5 @@
 import { claimAndProcessOne, MAX_ATTEMPTS, reapThresholdsMs, type JobRunnerDeps } from './execution.js';
+import { barrerLoginsVencidos } from './sitios.js';
 import type { Logger } from './logger.js';
 
 /**
@@ -88,14 +89,21 @@ export function startWorker(params: {
   let lastReapAtMs = 0;
 
   /**
-   * Una pasada del worker: primero RECUPERA huerfanos (throttled), luego DRENA la cola. Corre entera
-   * dentro del guard `inFlight`, asi el reaper nunca se solapa con un job en vuelo de este proceso.
+   * Una pasada del worker: primero RECUPERA huerfanos y BARRE logins de sitios abandonados (ambos
+   * throttled con el mismo intervalo), luego DRENA la cola. Corre entera dentro del guard `inFlight`,
+   * asi ni el reaper ni el barrido se solapan con un job en vuelo de este proceso.
    */
   const runPass = async (): Promise<void> => {
     const now = Date.now();
     if (now - lastReapAtMs >= REAP_INTERVAL_MS) {
       lastReapAtMs = now;
       await reapOrphans(deps);
+      // BARRIDO de sitios (7.1b): cierra sesiones de login sin confirmar tras 10 min (nunca se dejan
+      // sesiones colgadas: cuestan minutos del proveedor). Solo si sitios esta cableado (env de
+      // Browserbase presente). Best-effort: sus fallos se loguean adentro y jamas rompen la pasada.
+      if (deps.sitios && !shutdown.signal.aborted) {
+        await barrerLoginsVencidos(deps.sitios, new Date(now));
+      }
     }
     if (shutdown.signal.aborted) return;
     await drainQueue(deps, shutdown.signal);

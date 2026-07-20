@@ -98,8 +98,11 @@ npm run build -w packages/shared && npm run build -w apps/backend && npm run bui
 npm run start -w apps/worker
 ```
 
-Equivale a `node dist/index.js` dentro de `apps/worker` (ver `apps/worker/package.json:9`). Tambien
-funciona `node apps/worker/dist/index.js` desde la raiz.
+Equivale a `node --experimental-websocket dist/index.js` dentro de `apps/worker` (ver
+`apps/worker/package.json`). Si se invoca `node` a mano, hay que conservar el flag: en Node 20 el
+`WebSocket` global (que usa la navegacion CDP de los sitios conectados, `src/cdp.ts`) existe solo
+detras de `--experimental-websocket`; sin el, los jobs de sitios fallan con un mensaje que apunta a
+este flag (el resto del worker no lo necesita).
 
 ## Variables de entorno
 
@@ -129,6 +132,11 @@ esta mal formada, `parseEnv` lanza y el proceso hace `exit(1)` **al arrancar** (
 | `RESEND_API_KEY` | opcional, no vacio (`env.ts`) | **Alertas de fallo por correo.** Key de la API de Resend. Sin ella no se envian alertas (se loguea y se sigue) |
 | `RESEND_FROM_EMAIL` | opcional, email (`env.ts`) | Remitente verificado en Resend de las alertas (ej. `alertas@send.ledesma-ai-labs.com`). Si falta, no se notifica |
 | `CONSOLE_BASE_URL` | opcional, URL (`env.ts`) | Base de la consola para el enlace a `/actividad` del correo (ej. `https://app.ledesma-ai-labs.com`). Si falta, el correo va sin enlace |
+| `BROWSERBASE_API_KEY` | opcional, no vacio (`env.ts`) | **Sitios conectados (7.1b).** Key de la API de Browserbase. Sin ella (o sin `BROWSERBASE_PROJECT_ID`) el worker arranca igual: los jobs `conectar_sitio`/`confirmar_conexion`/`desconectar_sitio` fallan permanente con mensaje claro y el barrido de logins no corre |
+| `BROWSERBASE_PROJECT_ID` | opcional, no vacio (`env.ts`) | Proyecto de Browserbase donde se crean contextos y sesiones de login. Va en par con `BROWSERBASE_API_KEY` |
+| `BROWSERBASE_PROXY_SERVER` | opcional, no vacio (`env.ts`) | Proxy **externo propio con IP estatica** (recomendado en produccion): el pool gestionado de Browserbase es best-effort y no garantiza la misma IP entre sesiones; con proxy propio la salida pineada por dominio es realmente fija. Si esta, las conexiones NUEVAS salen por el (las existentes respetan su pin) |
+| `BROWSERBASE_PROXY_USERNAME` | opcional, no vacio (`env.ts`) | Usuario del proxy externo (si el proxy lo exige) |
+| `BROWSERBASE_PROXY_PASSWORD` | opcional, no vacio (`env.ts`) | Password del proxy externo (si el proxy lo exige). Viaja solo hacia la API de Browserbase al crear la sesion; jamas se persiste ni se loguea |
 
 > **Alertas de fallo (aditivo, best-effort).** Cuando el worker marca un job como `failed` de forma
 > DEFINITIVA (fallo permanente o reintentos agotados) envia **un** correo al dueno del job con el agente,

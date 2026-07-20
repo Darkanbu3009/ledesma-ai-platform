@@ -8,7 +8,10 @@ import {
   resolveStoredCredential,
   RegistrationRepository,
 } from '@ledesma-platform/backend/execution';
+import { DataSubjectRequestRepository, SitiosConectadosRepository } from '@ledesma-platform/backend/sitios';
 import { parseEnv, type WorkerEnv } from './env.js';
+import { NavegadorBrowserbase } from './browserbase.js';
+import type { SitiosJobDeps } from './sitios.js';
 import { createLogger } from './logger.js';
 import { getSql, closeSql } from './db.js';
 import { startWorker } from './worker.js';
@@ -60,6 +63,43 @@ function main(): void {
     logger,
   });
 
+  // SITIOS CONECTADOS (7.1b): se cablea SOLO si la config de Browserbase esta completa; si falta, el
+  // worker corre igual (los jobs de sitios fallan permanente con mensaje claro y el barrido no corre,
+  // mismo espiritu opcional que las alertas). El repositorio de 7.1a cifra el contexto con
+  // VAULT_SECRET server-side; el encadenado ARCO escribe en data_subject_requests (V014) una
+  // solicitud de cancelacion YA RESUELTA por cada desconexion (el borrado ya ocurrio en el mismo job).
+  let sitios: SitiosJobDeps | undefined;
+  if (config.BROWSERBASE_API_KEY !== undefined && config.BROWSERBASE_PROJECT_ID !== undefined) {
+    const sitiosRepo = new SitiosConectadosRepository(sql);
+    const dsrRepo = new DataSubjectRequestRepository(sql);
+    sitios = {
+      repo: sitiosRepo,
+      navegador: new NavegadorBrowserbase({
+        apiKey: config.BROWSERBASE_API_KEY,
+        projectId: config.BROWSERBASE_PROJECT_ID,
+        proxyServer: config.BROWSERBASE_PROXY_SERVER,
+        proxyUsername: config.BROWSERBASE_PROXY_USERNAME,
+        proxyPassword: config.BROWSERBASE_PROXY_PASSWORD,
+      }),
+      vaultSecret: config.VAULT_SECRET,
+      registrarDesconexionArco: async (ownerId, dominio) => {
+        const solicitud = await dsrRepo.createRequest({
+          ownerId,
+          requestType: 'cancellation',
+          details: `desconexion del sitio conectado ${dominio} (borrado de la sesion heredada)`,
+        });
+        await dsrRepo.updateStatus(
+          solicitud.id,
+          'completed',
+          'contexto de sesion borrado en el proveedor de navegador y en la plataforma (7.1b)',
+        );
+      },
+      logger,
+    };
+  } else {
+    logger.info('sitios conectados deshabilitados: falta BROWSERBASE_API_KEY y/o BROWSERBASE_PROJECT_ID');
+  }
+
   const deps: JobRunnerDeps = {
     jobs,
     getProfileTier: (ownerId) => registrationRepo.getProfileTier(ownerId),
@@ -79,6 +119,7 @@ function main(): void {
     // Persistencia best-effort del usage de cada ejecucion autonoma en agent_runs (misma via que la ruta
     // sincrona). Si esto fallara, processClaimedJob lo traga: el job conserva su estado real.
     recordRun: (run) => runRepo.record(run),
+    ...(sitios !== undefined ? { sitios } : {}),
   };
 
   const handle = startWorker({ deps, logger, intervalMs: config.WORKER_POLL_INTERVAL_MS });

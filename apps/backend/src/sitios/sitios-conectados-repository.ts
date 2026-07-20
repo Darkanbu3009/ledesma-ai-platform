@@ -47,6 +47,13 @@ export interface SitioConectado {
   egressIp: string | null;
   /** Referencia del fingerprint de navegador. null = no registrada. */
   fingerprintRef: string | null;
+  /**
+   * Id de la SESION de navegador viva en el proveedor externo (V025). Solo poblado mientras hay un
+   * login manual en curso ('esperando_login'); confirmar/expirar lo limpian. NO es una credencial.
+   */
+  sesionExternaId: string | null;
+  /** URL de la vista en vivo de esa sesion (V025): el entregable de conectar_sitio hacia la UI. */
+  vistaEnVivoUrl: string | null;
   estado: EstadoSitioConectado;
   /** true si hay un contexto de sesion guardado (cifrado). El blob en si jamas se expone. */
   tieneContexto: boolean;
@@ -85,6 +92,29 @@ export interface GuardarContextoInput {
   expiraEn?: string | null;
 }
 
+/**
+ * Insumos para registrar una conexion NUEVA con su sesion de login recien abierta (7.1b). La terna
+ * (contextoExternoId, proxyRef, egressIp) + fingerprintRef que se pasa aca queda PINEADA a
+ * (ownerId, dominio) de por vida: las reaperturas (reabrirParaLogin) no la tocan jamas.
+ */
+export interface RegistrarSesionDeLoginInput {
+  ownerId: string;
+  dominio: string;
+  urlLogin: string;
+  /** Id del contexto de navegador recien creado en el proveedor externo. */
+  contextoExternoId: string;
+  /** Referencia de la salida de red asignada a este dominio (sin rotacion, para siempre). */
+  proxyRef: string;
+  /** IP de salida OBSERVADA al abrir la sesion. null = no observable. */
+  egressIp?: string | null;
+  /** Referencia del fingerprint del navegador. null = no registrada. */
+  fingerprintRef?: string | null;
+  /** Id de la sesion de navegador viva en el proveedor (para reconectar/cerrar). */
+  sesionExternaId: string;
+  /** URL de la vista en vivo que abre el usuario (el entregable hacia la UI). */
+  vistaEnVivoUrl: string;
+}
+
 /** Resultado de borrar: lo necesario para que 7.1b purgue el contexto TAMBIEN en el proveedor. */
 export interface SitioConectadoBorrado {
   id: string;
@@ -102,6 +132,8 @@ interface SitioRow {
   proxy_ref: string | null;
   egress_ip: string | null;
   fingerprint_ref: string | null;
+  sesion_externa_id: string | null;
+  vista_en_vivo_url: string | null;
   estado: string;
   tiene_contexto: boolean;
   creado_en: Date | string;
@@ -129,6 +161,8 @@ function rowToSitio(row: SitioRow): SitioConectado {
     proxyRef: row.proxy_ref,
     egressIp: row.egress_ip,
     fingerprintRef: row.fingerprint_ref,
+    sesionExternaId: row.sesion_externa_id,
+    vistaEnVivoUrl: row.vista_en_vivo_url,
     estado: row.estado as EstadoSitioConectado,
     tieneContexto: row.tiene_contexto === true,
     creadoEn: toIso(row.creado_en) ?? EPOCH_ISO,
@@ -157,8 +191,8 @@ export class SitiosConectadosRepository {
         'esperando_login'
       )
       returning id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip::text as egress_ip,
-        fingerprint_ref, estado, (contexto_cifrado is not null) as tiene_contexto, creado_en,
-        ultimo_uso_en, expira_en
+        fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado,
+        (contexto_cifrado is not null) as tiene_contexto, creado_en, ultimo_uso_en, expira_en
     `;
     return rowToSitio(rows[0] as SitioRow);
   }
@@ -167,8 +201,8 @@ export class SitiosConectadosRepository {
   async obtenerPorDominio(ownerId: string, dominio: string): Promise<SitioConectado | null> {
     const rows = await this.sql<SitioRow[]>`
       select id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip::text as egress_ip,
-        fingerprint_ref, estado, (contexto_cifrado is not null) as tiene_contexto, creado_en,
-        ultimo_uso_en, expira_en
+        fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado,
+        (contexto_cifrado is not null) as tiene_contexto, creado_en, ultimo_uso_en, expira_en
       from sitios_conectados
       where owner_id = ${ownerId} and dominio = ${dominio}
     `;
@@ -180,8 +214,8 @@ export class SitiosConectadosRepository {
   async listarPorOwner(ownerId: string): Promise<SitioConectado[]> {
     const rows = await this.sql<SitioRow[]>`
       select id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip::text as egress_ip,
-        fingerprint_ref, estado, (contexto_cifrado is not null) as tiene_contexto, creado_en,
-        ultimo_uso_en, expira_en
+        fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado,
+        (contexto_cifrado is not null) as tiene_contexto, creado_en, ultimo_uso_en, expira_en
       from sitios_conectados
       where owner_id = ${ownerId}
       order by creado_en desc
@@ -199,8 +233,8 @@ export class SitiosConectadosRepository {
       update sitios_conectados set estado = ${estado}
       where id = ${id} and owner_id = ${ownerId}
       returning id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip::text as egress_ip,
-        fingerprint_ref, estado, (contexto_cifrado is not null) as tiene_contexto, creado_en,
-        ultimo_uso_en, expira_en
+        fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado,
+        (contexto_cifrado is not null) as tiene_contexto, creado_en, ultimo_uso_en, expira_en
     `;
     const row = rows[0];
     return row ? rowToSitio(row) : null;
@@ -228,11 +262,15 @@ export class SitiosConectadosRepository {
         egress_ip = ${input.egressIp ?? null},
         expira_en = ${input.expiraEn ?? null},
         estado = 'activo',
-        ultimo_uso_en = now()
+        ultimo_uso_en = now(),
+        -- La sesion de login en vuelo TERMINO: confirmar hereda el contexto y el llamador cierra la
+        -- sesion del proveedor; estas referencias (V025) solo viven mientras el login esta en curso.
+        sesion_externa_id = null,
+        vista_en_vivo_url = null
       where id = ${id} and owner_id = ${ownerId}
       returning id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip::text as egress_ip,
-        fingerprint_ref, estado, (contexto_cifrado is not null) as tiene_contexto, creado_en,
-        ultimo_uso_en, expira_en
+        fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado,
+        (contexto_cifrado is not null) as tiene_contexto, creado_en, ultimo_uso_en, expira_en
     `;
     const row = rows[0];
     return row ? rowToSitio(row) : null;
@@ -271,6 +309,125 @@ export class SitiosConectadosRepository {
    * El borrado por CUENTA COMPLETA (erasure ARCO via data_subject_requests, V014/V015) lo cubre
    * AccountDeletionRepository, que incluye sitios_conectados en su transaccion.
    */
+  /** Resuelve UNA conexion del owner por id. null si no existe o es ajena (aislamiento por owner). */
+  async obtenerPorId(id: string, ownerId: string): Promise<SitioConectado | null> {
+    const rows = await this.sql<SitioRow[]>`
+      select id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip::text as egress_ip,
+        fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado,
+        (contexto_cifrado is not null) as tiene_contexto, creado_en, ultimo_uso_en, expira_en
+      from sitios_conectados
+      where id = ${id} and owner_id = ${ownerId}
+    `;
+    const row = rows[0];
+    return row ? rowToSitio(row) : null;
+  }
+
+  /**
+   * Registra una conexion NUEVA con su sesion de login recien abierta (7.1b, kind:'conectar_sitio').
+   * A diferencia de crear() (7.1a, solo datos), aca ya se conocen el contexto del proveedor, la
+   * salida de red OBSERVADA y la sesion en vuelo: la fila nace 'esperando_login' con la terna
+   * (contexto_externo_id, proxy_ref, egress_ip) + fingerprint_ref PINEADA a (owner_id, dominio).
+   * El unique de V024 rechaza un duplicado (reconectar un dominio existente va por reabrirParaLogin).
+   */
+  async registrarSesionDeLogin(input: RegistrarSesionDeLoginInput): Promise<SitioConectado> {
+    const rows = await this.sql<SitioRow[]>`
+      insert into sitios_conectados (
+        owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip, fingerprint_ref,
+        sesion_externa_id, vista_en_vivo_url, estado
+      )
+      values (
+        ${input.ownerId},
+        ${input.dominio},
+        ${input.urlLogin},
+        ${input.contextoExternoId},
+        ${input.proxyRef},
+        ${input.egressIp ?? null},
+        ${input.fingerprintRef ?? null},
+        ${input.sesionExternaId},
+        ${input.vistaEnVivoUrl},
+        'esperando_login'
+      )
+      returning id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip::text as egress_ip,
+        fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado,
+        (contexto_cifrado is not null) as tiene_contexto, creado_en, ultimo_uso_en, expira_en
+    `;
+    return rowToSitio(rows[0] as SitioRow);
+  }
+
+  /**
+   * RE-ABRE el login de una conexion EXISTENTE (mismo owner + dominio): apunta la fila a la sesion
+   * nueva y vuelve a 'esperando_login'. DELIBERADAMENTE no toca contexto_externo_id, proxy_ref,
+   * egress_ip ni fingerprint_ref: esa terna quedo PINEADA de por vida en el registro original; el
+   * ejecutor VERIFICA contra ella antes de llamar aca y FALLA si la salida observada difiere.
+   * Tampoco toca contexto_cifrado: el contexto anterior sigue siendo valido hasta que confirmar lo
+   * reemplace. Acotado por id + owner_id.
+   */
+  async reabrirParaLogin(
+    id: string,
+    ownerId: string,
+    input: { urlLogin: string; sesionExternaId: string; vistaEnVivoUrl: string },
+  ): Promise<SitioConectado | null> {
+    const rows = await this.sql<SitioRow[]>`
+      update sitios_conectados set
+        url_login = ${input.urlLogin},
+        sesion_externa_id = ${input.sesionExternaId},
+        vista_en_vivo_url = ${input.vistaEnVivoUrl},
+        estado = 'esperando_login'
+      where id = ${id} and owner_id = ${ownerId}
+      returning id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip::text as egress_ip,
+        fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado,
+        (contexto_cifrado is not null) as tiene_contexto, creado_en, ultimo_uso_en, expira_en
+    `;
+    const row = rows[0];
+    return row ? rowToSitio(row) : null;
+  }
+
+  /**
+   * CIERRA el flujo de login en vuelo de una conexion: estado nuevo ('error' si el login expiro o la
+   * sesion murio; 'esperando_login' jamas) y limpia las referencias de la sesion del proveedor
+   * (V025). No toca la terna pineada ni el contexto cifrado. Acotado por id + owner_id.
+   */
+  async cerrarLogin(
+    id: string,
+    ownerId: string,
+    estado: Exclude<EstadoSitioConectado, 'esperando_login'>,
+  ): Promise<SitioConectado | null> {
+    const rows = await this.sql<SitioRow[]>`
+      update sitios_conectados set
+        estado = ${estado},
+        sesion_externa_id = null,
+        vista_en_vivo_url = null
+      where id = ${id} and owner_id = ${ownerId}
+      returning id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip::text as egress_ip,
+        fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado,
+        (contexto_cifrado is not null) as tiene_contexto, creado_en, ultimo_uso_en, expira_en
+    `;
+    const row = rows[0];
+    return row ? rowToSitio(row) : null;
+  }
+
+  /**
+   * BARRIDO (7.1b): conexiones en 'esperando_login' creadas ANTES del corte, de TODOS los owners (es
+   * una tarea de plataforma, como el reaper de jobs; usa el indice estado+creado_en de V025). El
+   * worker cierra la sesion del proveedor de cada una y luego la marca via cerrarLogin. Devuelve lo
+   * minimo para eso: nunca blobs ni metadata extra.
+   */
+  async listarEsperandoLoginVencidas(
+    cutoffIso: string,
+  ): Promise<Array<{ id: string; ownerId: string; sesionExternaId: string | null }>> {
+    const rows = await this.sql<Array<{ id: string; owner_id: string; sesion_externa_id: string | null }>>`
+      select id, owner_id, sesion_externa_id
+      from sitios_conectados
+      where estado = 'esperando_login' and creado_en < ${cutoffIso}
+      order by creado_en asc
+    `;
+    return rows.map((row) => ({
+      id: row.id,
+      ownerId: row.owner_id,
+      sesionExternaId: row.sesion_externa_id,
+    }));
+  }
+
   async borrar(id: string, ownerId: string): Promise<SitioConectadoBorrado | null> {
     const rows = await this.sql<Array<{ id: string; dominio: string; contexto_externo_id: string | null }>>`
       delete from sitios_conectados

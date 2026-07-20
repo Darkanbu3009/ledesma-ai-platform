@@ -41,6 +41,19 @@ const EnvSchema = z.object({
   RESEND_API_KEY: z.string().min(1).optional(),
   RESEND_FROM_EMAIL: z.string().email().optional(),
   CONSOLE_BASE_URL: z.string().url().optional(),
+  // SITIOS CONECTADOS (Fase 7.1b, aditivo, best-effort como las alertas): credenciales de la API de
+  // Browserbase para abrir la sesion de navegador del login manual. Las DOS son OPCIONALES: si falta
+  // cualquiera, el worker arranca y ejecuta jobs normales igual; los jobs de sitios fallan permanente
+  // con un mensaje claro (procesarJobDeSitio) y el barrido no corre. Se agregan a mano en Railway.
+  BROWSERBASE_API_KEY: z.string().min(1).optional(),
+  BROWSERBASE_PROJECT_ID: z.string().min(1).optional(),
+  // Proxy EXTERNO propio con IP estatica (OPCIONAL, recomendado en produccion): el pool gestionado
+  // de Browserbase es best-effort y NO garantiza la misma IP entre sesiones; con un proxy propio la
+  // salida pineada por dominio es verdaderamente fija. Si BROWSERBASE_PROXY_SERVER esta, las
+  // conexiones NUEVAS salen por el (las existentes respetan su pin). USERNAME/PASSWORD opcionales.
+  BROWSERBASE_PROXY_SERVER: z.string().min(1).optional(),
+  BROWSERBASE_PROXY_USERNAME: z.string().min(1).optional(),
+  BROWSERBASE_PROXY_PASSWORD: z.string().min(1).optional(),
 });
 
 export type WorkerEnv = z.infer<typeof EnvSchema>;
