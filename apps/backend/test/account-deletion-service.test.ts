@@ -5,7 +5,8 @@ import type { AuthUserDeleter } from '../src/account/supabase-admin.js';
 
 const DATA: AccountDataDeletionResult = {
   agents: 1, agentRuns: 1, jobs: 1, scheduledTasks: 1, triggers: 1, recipes: 1, processingRecords: 1,
-  providerCredentials: 1, consents: 1, dataSubjectRequests: 1, upgradeRequests: 1, adminActionsAnonymized: 1,
+  providerCredentials: 1, consents: 1, dataSubjectRequests: 1, upgradeRequests: 1, sitiosConectados: 1,
+  sitiosConectadosContextosExternos: ['ctx-externo-1'], adminActionsAnonymized: 1,
   subscriptions: 1, usageCounters: 1, profiles: 1, organization: 'none',
 };
 

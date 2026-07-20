@@ -26,6 +26,14 @@ export interface AccountDataDeletionResult {
   consents: number;
   dataSubjectRequests: number;
   upgradeRequests: number;
+  sitiosConectados: number;
+  /**
+   * contexto_externo_id de los sitios conectados borrados (los no nulos): referencias de contextos
+   * de navegador que viven en un PROVEEDOR EXTERNO y que el borrado local no alcanza. El purgado en
+   * el proveedor es de 7.1b; se devuelven desde ya para que ese paso tenga su insumo (borrado ARCO
+   * en ambos lados).
+   */
+  sitiosConectadosContextosExternos: string[];
   adminActionsAnonymized: number;
   subscriptions: number;
   usageCounters: number;
@@ -40,7 +48,7 @@ interface IdRow {
 /**
  * MOTOR DE BORRADO DE DATOS DE CUENTA (atomico). Borra/anonimiza TODOS los datos de negocio de un owner en
  * UNA transaccion (this.sql.begin): todo o nada. Es el SUPERCONJUNTO ATOMICO del viejo
- * eraseOwnerOperationalData (6 DELETE sueltos, no atomico -> hallazgo H-01 de la auditoria 8): cubre las 16
+ * eraseOwnerOperationalData (6 DELETE sueltos, no atomico -> hallazgo H-01 de la auditoria 8): cubre las 17
  * tablas, respeta las FKs y protege a los demas owners.
  *
  * NO borra auth.users: eso vive en el sistema de autenticacion de Supabase (sin FK ni transaccion comun con
@@ -53,7 +61,8 @@ interface IdRow {
  *      processing_records.agent_id es NULLABLE: una fila con agent_id null no la alcanzaria el cascade.
  *   3. agents: el `on delete cascade` de sus 6 hijos limpia cualquier remanente (defensa en profundidad).
  *   4. Tablas sueltas por owner_id sin FK: provider_credentials, consents, data_subject_requests,
- *      upgrade_requests.
+ *      upgrade_requests, sitios_conectados (V024; ademas recoge sus contexto_externo_id para el
+ *      purgado en el proveedor externo, que ejecuta 7.1b).
  *   5. admin_actions: se ANONIMIZA (UPDATE actor_id = null), NO se borra, para conservar el audit trail
  *      (guia de la tarea). target_id (NOT NULL) se retiene como id opaco: tras borrar el perfil ya no
  *      resuelve a una persona identificable, y ofuscarlo romperia la correlacion del log.
@@ -101,6 +110,11 @@ export class AccountDeletionRepository {
       const consents = await tx<IdRow[]>`delete from consents where owner_id = ${ownerId} returning id`;
       const dataSubjectRequests = await tx<IdRow[]>`delete from data_subject_requests where owner_id = ${ownerId} returning id`;
       const upgradeRequests = await tx<IdRow[]>`delete from upgrade_requests where owner_id = ${ownerId} returning id`;
+      // sitios_conectados (V024): borra la sesion heredada CIFRADA del owner y recoge los
+      // contexto_externo_id para que el purgado en el proveedor externo (7.1b) tenga su insumo.
+      const sitiosConectados = await tx<Array<{ id: string; contexto_externo_id: string | null }>>`
+        delete from sitios_conectados where owner_id = ${ownerId} returning id, contexto_externo_id
+      `;
 
       // --- (5) admin_actions: ANONIMIZAR (no borrar). Conserva la fila, quita el vinculo personal actor. ---
       const adminActions = await tx<IdRow[]>`
@@ -146,6 +160,10 @@ export class AccountDeletionRepository {
         consents: consents.length,
         dataSubjectRequests: dataSubjectRequests.length,
         upgradeRequests: upgradeRequests.length,
+        sitiosConectados: sitiosConectados.length,
+        sitiosConectadosContextosExternos: sitiosConectados
+          .map((r) => r.contexto_externo_id)
+          .filter((x): x is string => typeof x === 'string' && x.length > 0),
         adminActionsAnonymized: adminActions.length,
         subscriptions: subscriptions.length,
         usageCounters: usageCounters.length,

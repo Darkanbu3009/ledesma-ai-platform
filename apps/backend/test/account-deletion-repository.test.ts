@@ -138,6 +138,10 @@ function evaluate(db: Db, text: string, values: unknown[]): unknown[] {
     const rows = tbl(db, table);
     const removed = rows.filter((r) => r[col] === val);
     db[table] = rows.filter((r) => r[col] !== val);
+    // sitios_conectados devuelve ademas contexto_externo_id (returning id, contexto_externo_id).
+    if (table === 'sitios_conectados') {
+      return removed.map((r) => ({ id: r.id, contexto_externo_id: r.contexto_externo_id ?? null }));
+    }
     return removed.map((r) => ({ id: r.id }));
   }
 
@@ -166,10 +170,10 @@ function mutationTargets(sql: MockSql): string[] {
 const A_COUNTS: Record<string, number> = {
   agent_runs: 2, jobs: 3, scheduled_tasks: 4, triggers: 5, recipes: 6, processing_records: 7,
   agents: 8, provider_credentials: 9, consents: 10, data_subject_requests: 11, upgrade_requests: 12,
-  subscriptions: 13, usage_counters: 14,
+  subscriptions: 13, usage_counters: 14, sitios_conectados: 15,
 };
 
-const OWNER_TABLES = ['agent_runs', 'jobs', 'scheduled_tasks', 'triggers', 'recipes', 'processing_records', 'agents', 'provider_credentials', 'consents', 'data_subject_requests', 'upgrade_requests'];
+const OWNER_TABLES = ['agent_runs', 'jobs', 'scheduled_tasks', 'triggers', 'recipes', 'processing_records', 'agents', 'provider_credentials', 'consents', 'data_subject_requests', 'upgrade_requests', 'sitios_conectados'];
 
 /** DB con dos owners (A y B) en la MISMA org 'org-1', + admin_actions con A como actor y como target. */
 function sharedOrgDb(): Db {
@@ -177,6 +181,12 @@ function sharedOrgDb(): Db {
   for (const t of OWNER_TABLES) {
     db[t] = [...ownedRows('owner-A', A_COUNTS[t] ?? 1), ...ownedRows('owner-B', 1)];
   }
+  // sitios_conectados: dos filas de A con contexto en el proveedor externo (deben volver en
+  // sitiosConectadosContextosExternos) y el resto sin el (contexto_externo_id null: no deben volver).
+  db.sitios_conectados = (db.sitios_conectados ?? []).map((r, i) => ({
+    ...r,
+    contexto_externo_id: r.owner_id === 'owner-A' && i < 2 ? `ctx-${i}` : null,
+  }));
   db.subscriptions = [...ownedRows('owner-A', A_COUNTS.subscriptions ?? 1, 'profile_id'), ...ownedRows('owner-B', 1, 'profile_id')];
   db.usage_counters = [...ownedRows('owner-A', A_COUNTS.usage_counters ?? 1, 'profile_id'), ...ownedRows('owner-B', 1, 'profile_id')];
   db.profiles = [
@@ -218,8 +228,11 @@ describe('AccountDeletionRepository.deleteAccountData', () => {
     expect(result).toMatchObject({
       agentRuns: 2, jobs: 3, scheduledTasks: 4, triggers: 5, recipes: 6, processingRecords: 7,
       agents: 8, providerCredentials: 9, consents: 10, dataSubjectRequests: 11, upgradeRequests: 12,
-      subscriptions: 13, usageCounters: 14, profiles: 1,
+      subscriptions: 13, usageCounters: 14, sitiosConectados: 15, profiles: 1,
     });
+    // Los contexto_externo_id NO NULOS de los sitios borrados vuelven para el purgado en el
+    // proveedor externo (7.1b); los null se filtran.
+    expect(result.sitiosConectadosContextosExternos.sort()).toEqual(['ctx-0', 'ctx-1']);
   });
 
   it('ANONIMIZA admin_actions: nulifica actor_id del owner, CONSERVA las filas y no toca target ajeno', async () => {
