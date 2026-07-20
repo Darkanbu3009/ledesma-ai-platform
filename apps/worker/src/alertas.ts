@@ -1,5 +1,5 @@
 import type { Job, Sql } from '@ledesma-platform/shared';
-import { isRecipeJobPayload } from '@ledesma-platform/shared';
+import { isRecipeJobPayload, isSitioJobPayload } from '@ledesma-platform/shared';
 import type { Logger } from './logger.js';
 
 /**
@@ -38,8 +38,9 @@ export function truncarError(texto: string | null | undefined, max = MAX_ERROR_C
   return `${s.slice(0, max)}...`;
 }
 
-/** Tipo LEGIBLE del job para el correo, inferido del payload (sin exponerlo): receta o mensaje. */
-export function tipoDeJobLegible(job: Job): 'receta' | 'mensaje' {
+/** Tipo LEGIBLE del job para el correo, inferido del payload (sin exponerlo). */
+export function tipoDeJobLegible(job: Job): 'receta' | 'mensaje' | 'conexion de sitio' {
+  if (isSitioJobPayload(job.payload)) return 'conexion de sitio';
   return isRecipeJobPayload(job.payload) ? 'receta' : 'mensaje';
 }
 
@@ -82,7 +83,7 @@ export interface CorreoFallo {
  */
 export function construirCorreoFallo(params: {
   agentName: string;
-  tipo: 'receta' | 'mensaje';
+  tipo: 'receta' | 'mensaje' | 'conexion de sitio';
   reason: string;
   fechaISO: string;
   consoleBaseUrl?: string;
@@ -200,8 +201,12 @@ export function crearNotificadorFallos(deps: NotificadorFallosDeps): Notificador
         return;
       }
 
-      // 4. Nombre del agente (best-effort; cae al id si no se pudo leer).
-      const agentName = (await deps.getAgentName(job.agentId)) ?? job.agentId;
+      // 4. Nombre del agente (best-effort; cae al id si no se pudo leer). Un job de sitios (V026) no
+      //    tiene agente: se etiqueta con un nombre fijo legible en vez de consultar la base.
+      const agentName =
+        job.agentId === null
+          ? 'Sitios conectados'
+          : ((await deps.getAgentName(job.agentId)) ?? job.agentId);
 
       // 5. Armar el correo (nunca incluye el payload) y enviarlo.
       const correo = construirCorreoFallo({
