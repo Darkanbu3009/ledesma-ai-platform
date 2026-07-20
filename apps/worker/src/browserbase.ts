@@ -2,6 +2,7 @@ import Browserbase from '@browserbasehq/sdk';
 import { ClienteCdp } from './cdp.js';
 import { SalidaDeRedNoDisponibleError } from './sitios.js';
 import type { NavegadorRemoto, SesionDeLoginAbierta } from './sitios.js';
+import type { NavegadorParaTarea, SesionDeTareaAbierta } from './tarea-web.js';
 
 /**
  * ADAPTADOR real del puerto NavegadorRemoto (sitios.ts) sobre Browserbase (@browserbasehq/sdk
@@ -60,7 +61,7 @@ interface TargetInfo {
   url: string;
 }
 
-export class NavegadorBrowserbase implements NavegadorRemoto {
+export class NavegadorBrowserbase implements NavegadorRemoto, NavegadorParaTarea {
   private readonly bb: Browserbase;
 
   constructor(private readonly config: BrowserbaseConfig) {
@@ -212,6 +213,130 @@ export class NavegadorBrowserbase implements NavegadorRemoto {
       fingerprintRef: `contexto:${contextoExternoId}`,
       expiraEn: session.expiresAt ?? null,
     };
+  }
+
+  /**
+   * Abre la sesion de una TAREA WEB (7.1d): RECONECTA el contexto guardado y FUERZA la salida
+   * pineada (proxyRef OBLIGATORIO: una tarea jamas sortea salida nueva; resolverProxy lanza
+   * SalidaDeRedNoDisponibleError si el pin no es reconstruible). Observa la egress_ip por el echo
+   * (igual que el login) y DEVUELVE sin navegar a ninguna URL del sitio: la verificacion del pin la
+   * hace el handler ANTES de permitir navegar. keepAlive:true porque Stagehand se conecta y
+   * desconecta por CDP durante la tarea y la sesion debe sobrevivir entre medio.
+   */
+  async abrirSesionParaTarea(params: {
+    contextoExternoId: string;
+    proxyRef: string;
+  }): Promise<SesionDeTareaAbierta> {
+    const { proxies } = this.resolverProxy(params.proxyRef);
+
+    const session = await this.bb.sessions.create({
+      projectId: this.config.projectId,
+      browserSettings: { context: { id: params.contextoExternoId, persist: true } },
+      proxies,
+      keepAlive: true,
+      timeout: SESSION_TIMEOUT_SECONDS,
+    });
+
+    let egressIp: string | null = null;
+    const cdp = await ClienteCdp.conectar(session.connectUrl);
+    try {
+      const sessionId = await this.attachPaginaInicial(cdp);
+      // OBSERVAR la salida real por el echo, ANTES de tocar el sitio. Best-effort: si falla, queda
+      // null y el handler decide (con IP pineada, null NO verifica -> aborta).
+      try {
+        const carga = cdp.esperarEvento('Page.loadEventFired', sessionId);
+        await cdp.enviar('Page.navigate', { url: ECHO_IP_URL }, sessionId);
+        await carga;
+        const evaluado = await cdp.enviar<{ result?: { value?: unknown } }>(
+          'Runtime.evaluate',
+          { expression: 'document.body.innerText.trim()', returnByValue: true },
+          sessionId,
+        );
+        const valor = evaluado.result?.value;
+        if (typeof valor === 'string' && IP_REGEX.test(valor)) egressIp = valor;
+      } catch {
+        egressIp = null;
+      }
+    } catch (error) {
+      cdp.cerrar();
+      await this.cerrarSesionSilencioso(session.id);
+      throw error;
+    }
+    cdp.cerrar();
+
+    return { sesionExternaId: session.id, egressIp };
+  }
+
+  /**
+   * Inyecta el contexto de sesion DESCIFRADO (cookies-cdp-v1, el formato que extraerContexto
+   * serializo) en la sesion viva via Storage.setCookies (browser-level). El claro no se loguea ni
+   * persiste: entra por parametro y muere con este scope.
+   */
+  async inyectarContexto(sesionExternaId: string, contexto: string): Promise<void> {
+    let cookies: unknown[];
+    try {
+      const parsed = JSON.parse(contexto) as { formato?: unknown; cookies?: unknown };
+      if (parsed.formato !== 'cookies-cdp-v1' || !Array.isArray(parsed.cookies)) {
+        throw new Error('formato desconocido');
+      }
+      cookies = parsed.cookies;
+    } catch {
+      // Sin detalle del blob: el contexto guardado no es usable (corrupto o de otra version).
+      throw new Error('el contexto de sesion guardado no es interpretable; reconecta el sitio');
+    }
+    const session = await this.bb.sessions.retrieve(sesionExternaId);
+    if (!session.connectUrl) {
+      throw new Error('la sesion de navegador no expone un connect URL (ya no esta corriendo)');
+    }
+    const cdp = await ClienteCdp.conectar(session.connectUrl);
+    try {
+      await cdp.enviar('Storage.setCookies', { cookies });
+    } finally {
+      cdp.cerrar();
+    }
+  }
+
+  /**
+   * Navega a `url` y detecta DETERMINISTICAMENTE (sin modelo) una pantalla de login: presencia de un
+   * campo de contrasena en el documento. Es el pre-chequeo de caducidad de 7.1d; el resto de la
+   * deteccion (login a mitad de tarea) la hace el prompt del motor con su marcador.
+   */
+  async detectarPantallaDeLogin(sesionExternaId: string, url: string): Promise<boolean> {
+    const session = await this.bb.sessions.retrieve(sesionExternaId);
+    if (!session.connectUrl) {
+      throw new Error('la sesion de navegador no expone un connect URL (ya no esta corriendo)');
+    }
+    const cdp = await ClienteCdp.conectar(session.connectUrl);
+    try {
+      const sessionId = await this.attachPaginaInicial(cdp);
+      const carga = cdp.esperarEvento('Page.loadEventFired', sessionId);
+      const navegacion = await cdp.enviar<{ errorText?: string }>('Page.navigate', { url }, sessionId);
+      if (navegacion.errorText) {
+        throw new Error(`el navegador no pudo abrir el sitio: ${navegacion.errorText}`);
+      }
+      await carga;
+      const evaluado = await cdp.enviar<{ result?: { value?: unknown } }>(
+        'Runtime.evaluate',
+        { expression: "!!document.querySelector('input[type=password]')", returnByValue: true },
+        sessionId,
+      );
+      return evaluado.result?.value === true;
+    } finally {
+      cdp.cerrar();
+    }
+  }
+
+  /** Attach (flatten) al primer tab de la sesion y Page.enable; devuelve el sessionId page-level. */
+  private async attachPaginaInicial(cdp: ClienteCdp): Promise<string> {
+    const { targetInfos } = await cdp.enviar<{ targetInfos: TargetInfo[] }>('Target.getTargets');
+    const pagina = targetInfos.find((t) => t.type === 'page');
+    if (!pagina) throw new Error('la sesion de navegador no expone ninguna pagina');
+    const { sessionId } = await cdp.enviar<{ sessionId: string }>('Target.attachToTarget', {
+      targetId: pagina.targetId,
+      flatten: true,
+    });
+    await cdp.enviar('Page.enable', {}, sessionId);
+    return sessionId;
   }
 
   async estadoDeSesion(sesionExternaId: string): Promise<'viva' | 'muerta'> {

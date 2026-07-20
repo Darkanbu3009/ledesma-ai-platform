@@ -12,6 +12,8 @@ import { DataSubjectRequestRepository, SitiosConectadosRepository } from '@ledes
 import { parseEnv, type WorkerEnv } from './env.js';
 import { NavegadorBrowserbase } from './browserbase.js';
 import type { SitiosJobDeps } from './sitios.js';
+import { MotorStagehand } from './stagehand.js';
+import type { TareaWebDeps } from './tarea-web.js';
 import { createLogger } from './logger.js';
 import { getSql, closeSql } from './db.js';
 import { startWorker } from './worker.js';
@@ -69,18 +71,38 @@ function main(): void {
   // VAULT_SECRET server-side; el encadenado ARCO escribe en data_subject_requests (V014) una
   // solicitud de cancelacion YA RESUELTA por cada desconexion (el borrado ya ocurrio en el mismo job).
   let sitios: SitiosJobDeps | undefined;
+  let tareaWeb: TareaWebDeps | undefined;
   if (config.BROWSERBASE_API_KEY !== undefined && config.BROWSERBASE_PROJECT_ID !== undefined) {
     const sitiosRepo = new SitiosConectadosRepository(sql);
     const dsrRepo = new DataSubjectRequestRepository(sql);
-    sitios = {
+    const navegador = new NavegadorBrowserbase({
+      apiKey: config.BROWSERBASE_API_KEY,
+      projectId: config.BROWSERBASE_PROJECT_ID,
+      proxyServer: config.BROWSERBASE_PROXY_SERVER,
+      proxyUsername: config.BROWSERBASE_PROXY_USERNAME,
+      proxyPassword: config.BROWSERBASE_PROXY_PASSWORD,
+    });
+    // TAREA WEB (7.1d): navegacion por IA dentro de la sesion activa de un sitio conectado. Misma
+    // compuerta de config que los jobs de sitios; el motor (Stagehand) corre con la credencial del
+    // OWNER (boveda) y el modelo de TAREA_WEB_MODEL (Haiku prohibido, validado en env.ts).
+    tareaWeb = {
       repo: sitiosRepo,
-      navegador: new NavegadorBrowserbase({
+      navegador,
+      motor: new MotorStagehand({
         apiKey: config.BROWSERBASE_API_KEY,
         projectId: config.BROWSERBASE_PROJECT_ID,
-        proxyServer: config.BROWSERBASE_PROXY_SERVER,
-        proxyUsername: config.BROWSERBASE_PROXY_USERNAME,
-        proxyPassword: config.BROWSERBASE_PROXY_PASSWORD,
       }),
+      vaultSecret: config.VAULT_SECRET,
+      model: config.TAREA_WEB_MODEL,
+      runTimeoutMs: config.RUN_TIMEOUT_SECONDS * 1000,
+      resolveCredential: (ownerId, credentialId) =>
+        resolveStoredCredential(credentialRepo, ownerId, credentialId, config.VAULT_SECRET),
+      guardarResultado: (jobId, resultado) => jobs.guardarResultado(jobId, resultado),
+      logger,
+    };
+    sitios = {
+      repo: sitiosRepo,
+      navegador,
       vaultSecret: config.VAULT_SECRET,
       registrarDesconexionArco: async (ownerId, dominio) => {
         const solicitud = await dsrRepo.createRequest({
@@ -120,6 +142,7 @@ function main(): void {
     // sincrona). Si esto fallara, processClaimedJob lo traga: el job conserva su estado real.
     recordRun: (run) => runRepo.record(run),
     ...(sitios !== undefined ? { sitios } : {}),
+    ...(tareaWeb !== undefined ? { tareaWeb } : {}),
   };
 
   const handle = startWorker({ deps, logger, intervalMs: config.WORKER_POLL_INTERVAL_MS });

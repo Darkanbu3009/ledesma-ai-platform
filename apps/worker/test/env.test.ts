@@ -41,3 +41,23 @@ describe('parseEnv (worker)', () => {
     );
   });
 });
+
+describe('parseEnv (worker): TAREA_WEB_MODEL, 7.1d)', () => {
+  it('default: Claude Sonnet en formato proveedor/modelo', () => {
+    const env = parseEnv(VALID as NodeJS.ProcessEnv);
+    expect(env.TAREA_WEB_MODEL).toBe('anthropic/claude-sonnet-4-6');
+  });
+
+  it('acepta otro modelo no-Haiku', () => {
+    const env = parseEnv({ ...VALID, TAREA_WEB_MODEL: 'anthropic/claude-opus-4-8' } as NodeJS.ProcessEnv);
+    expect(env.TAREA_WEB_MODEL).toBe('anthropic/claude-opus-4-8');
+  });
+
+  it('RECHAZA Haiku en cualquier casing (regla de plataforma: nunca Haiku para trabajo de agente)', () => {
+    for (const model of ['anthropic/claude-haiku-4-5', 'anthropic/CLAUDE-HAIKU-4-5', 'haiku']) {
+      expect(() => parseEnv({ ...VALID, TAREA_WEB_MODEL: model } as NodeJS.ProcessEnv)).toThrow(
+        /Environment validation failed/,
+      );
+    }
+  });
+});
