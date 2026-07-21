@@ -93,12 +93,12 @@ describe('auth: sin JWT -> 401 en todas las rutas', () => {
 });
 
 describe('POST /v1/sitios/conectar', () => {
-  it('encola conectar_sitio con agentId/credentialId NULOS y responde 202 con jobId y dominio', async () => {
+  it('encola conectar_sitio con agentId/credentialId NULOS, el pais NORMALIZADO y responde 202', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/sitios/conectar',
       headers: { authorization: 'Bearer valid-user-1' },
-      payload: { url: 'https://App.Ejemplo.com/login' },
+      payload: { url: 'https://App.Ejemplo.com/login', pais: 'ar' },
     });
     expect(res.statusCode).toBe(202);
     expect(res.json()).toEqual({ status: 'accepted', jobId: JOB_ID, dominio: 'app.ejemplo.com' });
@@ -106,21 +106,56 @@ describe('POST /v1/sitios/conectar', () => {
       agentId: null,
       ownerId: 'user-1',
       credentialId: null,
-      payload: { kind: 'conectar_sitio', url: 'https://App.Ejemplo.com/login' },
+      payload: { kind: 'conectar_sitio', url: 'https://App.Ejemplo.com/login', pais: 'AR' },
     });
   });
 
-  it('el body SOLO admite la url: no existe ningun campo de contrasena en este flujo', async () => {
+  it('sin pais en el body: lo deriva de Accept-Language (region del primer tag)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/sitios/conectar',
+      headers: { authorization: 'Bearer valid-user-1', 'accept-language': 'es-AR,es;q=0.9,en;q=0.8' },
+      payload: { url: 'https://app.ejemplo.com/login' },
+    });
+    expect(res.statusCode).toBe(202);
+    const payload = createJob.mock.calls[0]?.[0]?.payload as Record<string, unknown>;
+    expect(payload.pais).toBe('AR');
+  });
+
+  it('sin pais derivable (ni body ni Accept-Language): 400 accionable, JAMAS un default silencioso', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/sitios/conectar',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { url: 'https://app.ejemplo.com/login' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.message).toContain('pais');
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it('pais invalido en el body (no ISO-2) -> 400 sin encolar', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/sitios/conectar',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { url: 'https://app.ejemplo.com/login', pais: 'ARG' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it('el body SOLO admite url y pais: no existe ningun campo de contrasena en este flujo', async () => {
     // Un body con password extra no rompe (zod lo descarta), pero JAMAS llega al payload del job.
     const res = await app.inject({
       method: 'POST',
       url: '/v1/sitios/conectar',
       headers: { authorization: 'Bearer valid-user-1' },
-      payload: { url: 'https://app.ejemplo.com/login', password: 'super-secreta' },
+      payload: { url: 'https://app.ejemplo.com/login', pais: 'AR', password: 'super-secreta' },
     });
     expect(res.statusCode).toBe(202);
     const payload = createJob.mock.calls[0]?.[0]?.payload as Record<string, unknown>;
-    expect(Object.keys(payload).sort()).toEqual(['kind', 'url']);
+    expect(Object.keys(payload).sort()).toEqual(['kind', 'pais', 'url']);
     expect(JSON.stringify(payload)).not.toContain('super-secreta');
   });
 
@@ -152,7 +187,7 @@ describe('POST /v1/sitios/conectar', () => {
       method: 'POST',
       url: '/v1/sitios/conectar',
       headers: { authorization: 'Bearer valid-user-1' },
-      payload: { url: 'https://app.ejemplo.com/login' },
+      payload: { url: 'https://app.ejemplo.com/login', pais: 'AR' },
     });
     expect(res.statusCode).toBe(403);
     expect(createJob).not.toHaveBeenCalled();

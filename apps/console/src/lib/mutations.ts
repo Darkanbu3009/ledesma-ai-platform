@@ -343,13 +343,28 @@ export function useRunRecipe() {
  * para que la pagina siga el job con useJobSeguimiento y el dominio para ubicar la fila que
  * aparecera en 'esperando_login' con su vista en vivo. Refresca la lista al aceptarse.
  */
+/**
+ * PAIS del usuario (ISO 3166-1 alpha-2) derivado del navegador con los likely subtags de CLDR
+ * (Intl.Locale#maximize, built-in: 'es-AR' -> AR, 'es' -> ES). Se manda al conectar para que el
+ * worker PINEE la salida de red del dominio a ese pais (la continuidad se verifica por pais, no por
+ * IP exacta). undefined = no derivable: el backend cae a Accept-Language.
+ */
+export function paisDelNavegador(): string | undefined {
+  try {
+    const region = new Intl.Locale(navigator.language).maximize().region;
+    return region && /^[A-Z]{2}$/.test(region) ? region : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function useConectarSitio() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (url: string) =>
       apiFetch<ConexionAceptada>('/v1/sitios/conectar', {
         method: 'POST',
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, pais: paisDelNavegador() }),
       }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['sitios'] }),
   });

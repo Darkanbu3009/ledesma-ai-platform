@@ -39,6 +39,20 @@ export interface ConectarSitioJobPayload {
   kind: typeof CONECTAR_SITIO_JOB_KIND;
   /** URL de login del sitio (el dominio de la conexion se deriva de aca). */
   url: string;
+  /**
+   * PAIS del usuario (ISO 3166-1 alpha-2, mayusculas). El worker fija la geolocalizacion del proxy
+   * a este pais y lo PINEA a (owner, dominio): desde entonces la continuidad de red se verifica por
+   * PAIS de salida, no por IP exacta (los proxies del pool rotan IP dentro del pais).
+   */
+  pais: string;
+}
+
+/** Regex del pais ISO 3166-1 alpha-2 (dos letras; se normaliza a mayusculas al parsear). */
+const PAIS_ISO2_REGEX = /^[A-Za-z]{2}$/;
+
+/** ¿`value` es un codigo de pais ISO 3166-1 alpha-2 (dos letras ASCII)? */
+export function esPaisIso2(value: unknown): value is string {
+  return typeof value === 'string' && PAIS_ISO2_REGEX.test(value);
 }
 
 /** Payload del job que confirma una conexion cuyo login manual ya ocurrio. */
@@ -101,7 +115,11 @@ export function parseSitioJobPayload(value: unknown): SitioJobPayloadParseResult
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
       return { success: false, error: 'url debe ser http(s)' };
     }
-    return { success: true, data: { kind, url: value.url } };
+    if (!esPaisIso2(value.pais)) {
+      return { success: false, error: 'pais debe ser un codigo ISO 3166-1 alpha-2 (dos letras)' };
+    }
+    // El pais viaja SIEMPRE normalizado a mayusculas: es lo que se pinea y se compara.
+    return { success: true, data: { kind, url: value.url, pais: value.pais.toUpperCase() } };
   }
   if (kind === CONFIRMAR_CONEXION_JOB_KIND || kind === DESCONECTAR_SITIO_JOB_KIND) {
     if (typeof value.connectionId !== 'string' || value.connectionId.length === 0) {
