@@ -174,6 +174,22 @@ export interface SitiosJobDeps {
   logger: Logger;
 }
 
+/**
+ * ¿El proveedor dice que el recurso YA NO EXISTE (404 / not found)? Para la desconexion eso es
+ * EXITO, no fallo: el objetivo (que no quede nada alla) ya esta cumplido, tipicamente porque la
+ * sesion expiro sola o un intento previo alcanzo a borrar. Se detecta por FORMA (status/statusCode
+ * 404, o nombre/mensaje "not found") para no importar el SDK del proveedor en este modulo puro; los
+ * fallos reales de red o permisos NO matchean y siguen propagandose.
+ */
+export function esErrorDeRecursoInexistente(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const status =
+    (error as { status?: unknown }).status ?? (error as { statusCode?: unknown }).statusCode;
+  if (status === 404) return true;
+  if (!(error instanceof Error)) return false;
+  return /not[ _-]?found/i.test(`${error.name}: ${error.message}`);
+}
+
 /** Mensaje de error sanitizado (nunca URLs ni contextos; ver describeError de execution.ts). */
 function describir(error: unknown): string {
   if (error instanceof Error) return `${error.name}: ${error.message}`;
@@ -353,10 +369,23 @@ async function desconectarSitio(deps: SitiosJobDeps, job: Job, connectionId: str
     await cerrarSesionBestEffort(deps, sitio.sesionExternaId, 'desconexion del sitio');
   }
 
-  // El lado EXTERNO del borrado NO es best-effort: si el proveedor falla, el job falla (transitorio,
-  // se reintenta) en vez de dejar un contexto huerfano con credenciales de sesion vivas alla.
+  // El lado EXTERNO del borrado NO es best-effort ante FALLOS REALES: si el proveedor falla por red
+  // o permisos, el job falla (transitorio, se reintenta) en vez de dejar un contexto huerfano con
+  // credenciales de sesion vivas alla. PERO "el contexto ya no existe" (404) es EXITO idempotente:
+  // no queda nada que borrar del lado remoto, y la desconexion DEBE completar igual el ARCO y el
+  // borrado local. Sin esto, una fila en 'error' o 'esperando_login' cuya sesion/contexto expiro
+  // queda imposible de desconectar (el job reintenta el 404 para siempre).
   if (sitio.contextoExternoId) {
-    await deps.navegador.borrarContexto(sitio.contextoExternoId);
+    try {
+      await deps.navegador.borrarContexto(sitio.contextoExternoId);
+    } catch (error) {
+      if (!esErrorDeRecursoInexistente(error)) throw error;
+      deps.logger.info('desconectar: el contexto ya no existia en el proveedor (se continua igual)', {
+        jobId: job.id,
+        connectionId: sitio.id,
+        err: describir(error),
+      });
+    }
   }
 
   await deps.registrarDesconexionArco(job.ownerId, sitio.dominio);
