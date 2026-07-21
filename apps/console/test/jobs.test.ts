@@ -26,12 +26,13 @@ function makeJob(overrides: Partial<JobActivity> = {}): JobActivity {
 }
 
 describe('jobStatusLabel', () => {
-  it('traduce los cuatro estados', () => {
+  it('traduce los cinco estados', () => {
     const labels: Record<JobStatus, string> = {
       pending: 'Pendiente',
       running: 'En curso',
       completed: 'Completada',
       failed: 'Fallida',
+      pausado: 'Esperando aprobación',
     };
     (Object.keys(labels) as JobStatus[]).forEach((status) => {
       expect(jobStatusLabel(status)).toBe(labels[status]);

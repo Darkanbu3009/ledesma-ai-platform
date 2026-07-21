@@ -14,6 +14,7 @@ function StatusBadge({ status }: { status: JobStatus }) {
     failed: 'border-[rgba(192,73,43,0.3)] bg-[rgba(192,73,43,0.08)] text-[#C0492B]',
     pending: 'border-line bg-line-soft text-muted',
     running: 'border-line bg-line-soft text-muted',
+    pausado: 'border-brasa-line bg-brasa-soft text-brasa',
   };
   return (
     <span

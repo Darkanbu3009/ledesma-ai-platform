@@ -35,7 +35,7 @@ function summary(runs: number, jobsTotal: number, resourcesActive = 0): Dashboar
     retention: { agentRunsDays: 365, jobsTerminalDays: 90 },
     activity: { totals: { runs, completed: 0, errors: 0 }, byDay: [], lastRunAt: null },
     operations: {
-      jobs: { pending: 0, running: 0, completed: 0, failed: 0, total: jobsTotal },
+      jobs: { pending: 0, running: 0, completed: 0, failed: 0, pausado: 0, total: jobsTotal },
       resources: { scheduledTasksActive: resourcesActive, triggersActive: 0, recipesActive: 0 },
     },
     spend: {

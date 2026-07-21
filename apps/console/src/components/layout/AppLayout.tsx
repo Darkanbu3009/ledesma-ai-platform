@@ -4,6 +4,7 @@ import { Menu } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { focusRing } from '../../lib/utils';
 import { Sidebar } from './Sidebar';
+import { AprobacionBanner } from '../aprobaciones/AprobacionBanner';
 
 export function AppLayout() {
   const { t } = useTranslation();
@@ -51,6 +52,8 @@ export function AppLayout() {
           <span className="font-display font-semibold text-ink">Ledesma AI Labs</span>
         </header>
         <main className="flex-1 px-6 py-8 sm:px-8 lg:px-10">
+          {/* Aviso global de checkpoints de aprobacion pendientes (7.1e); el modal vive en /actividad. */}
+          <AprobacionBanner />
           <Outlet />
         </main>
       </div>

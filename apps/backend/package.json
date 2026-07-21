@@ -11,6 +11,10 @@
     "./sitios": {
       "types": "./dist/sitios/index.d.ts",
       "import": "./dist/sitios/index.js"
+    },
+    "./aprobaciones": {
+      "types": "./dist/aprobaciones/index.d.ts",
+      "import": "./dist/aprobaciones/index.js"
     }
   },
   "scripts": {

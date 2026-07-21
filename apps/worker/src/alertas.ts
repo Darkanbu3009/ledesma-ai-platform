@@ -238,8 +238,10 @@ export function crearNotificadorFallos(deps: NotificadorFallosDeps): Notificador
 /**
  * POST a la API de Resend con timeout de pared (AbortController + setTimeout). No lanza en el camino
  * feliz ni ante un status no-2xx (loguea); una excepcion de red se propaga al try/catch de notificarFallo.
+ * EXPORTADA para que el notificador de APROBACIONES (7.1e, aprobaciones.ts) reuse exactamente el mismo
+ * canal de envio (endpoint, timeout, manejo de errores) sin duplicarlo.
  */
-async function enviarViaResend(
+export async function enviarViaResend(
   fetchImpl: typeof fetch,
   apiKey: string,
   from: string,

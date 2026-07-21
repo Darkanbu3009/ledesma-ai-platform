@@ -10,6 +10,8 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 vi.mock('../src/lib/queries', () => ({
   useIsAdmin: () => ({ isAdmin: false, isLoading: false }),
   useMe: () => ({ data: undefined }),
+  // Sin aprobaciones pendientes: el banner global (7.1e) no se renderiza en estos tests de layout.
+  useAprobacionesPendientes: () => ({ data: [] }),
 }));
 vi.mock('../src/auth/useAuth', () => ({
   useAuth: () => ({ user: { email: 'ada@example.com' }, session: null, loading: false }),

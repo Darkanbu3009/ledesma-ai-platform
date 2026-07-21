@@ -26,7 +26,7 @@ const EMPTY_ACTIVITY: DashboardSummary = {
   retention: { agentRunsDays: 365, jobsTerminalDays: 90 },
   activity: { totals: { runs: 0, completed: 0, errors: 0 }, byDay: [], lastRunAt: null },
   operations: {
-    jobs: { pending: 0, running: 0, completed: 0, failed: 0, total: 0 },
+    jobs: { pending: 0, running: 0, completed: 0, failed: 0, pausado: 0, total: 0 },
     resources: { scheduledTasksActive: 0, triggersActive: 0, recipesActive: 0 },
   },
   spend: {

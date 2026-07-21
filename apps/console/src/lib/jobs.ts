@@ -13,8 +13,8 @@ import i18n from '../i18n';
 /** Tipo inferido del job (del payload, sin exponerlo): receta multi-paso, mensaje suelto o sitio conectado. */
 export type JobType = 'recipe' | 'simple' | 'sitio';
 
-/** Estados de la cola (mismos que el backend / el CHECK de V008). */
-export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
+/** Estados de la cola (mismos que el backend: CHECK de V008 + 'pausado' de V027). */
+export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'pausado';
 
 /** Una ejecucion del historial, tal como la devuelve GET /v1/jobs (sin payload; last_error truncado). */
 export interface JobActivity {
@@ -54,6 +54,7 @@ export const JOB_STATUS_FILTERS: { value: JobStatusFilter; labelKey: string }[] 
   { value: 'running', labelKey: 'actividad.jobEstado.enCurso' },
   { value: 'completed', labelKey: 'actividad.jobEstado.completada' },
   { value: 'failed', labelKey: 'actividad.jobEstado.fallida' },
+  { value: 'pausado', labelKey: 'actividad.jobEstado.pausada' },
 ];
 
 /** Etiqueta legible del estado de un job. */
@@ -67,6 +68,8 @@ export function jobStatusLabel(status: JobStatus): string {
       return i18n.t('actividad.jobEstado.completada');
     case 'failed':
       return i18n.t('actividad.jobEstado.fallida');
+    case 'pausado':
+      return i18n.t('actividad.jobEstado.pausada');
     default:
       return status;
   }
@@ -79,9 +82,10 @@ export function jobTypeLabel(type: JobType): string {
   return i18n.t('actividad.jobTipo.mensaje');
 }
 
-/** Un job pending o running sigue "en vuelo": su estado puede cambiar y justifica auto-refrescar. */
+/** Un job pending, running o pausado sigue "en vuelo": su estado puede cambiar (un pausado espera
+ *  una decision humana y volvera a moverse) y justifica auto-refrescar. */
 export function isJobInFlight(status: JobStatus): boolean {
-  return status === 'pending' || status === 'running';
+  return status === 'pending' || status === 'running' || status === 'pausado';
 }
 
 /**

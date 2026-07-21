@@ -33,6 +33,18 @@ import type { NavegadorParaTarea, SesionDeTareaAbierta } from './tarea-web.js';
  */
 const SESSION_TIMEOUT_SECONDS = 15 * 60;
 
+/**
+ * Timeout propio de la sesion de TAREA WEB (segundos). Mas largo que el de login porque una tarea
+ * puede PAUSARSE en un checkpoint de aprobacion humana (7.1e) y la sesion DEBE seguir viva mientras
+ * la aprobacion este pendiente (el estado del checkout se pierde si se reabre): cubre el deadline de
+ * la corrida (<= 10 min), el TTL de la aprobacion (<= 20 min, ver env.ts), la corrida de la
+ * reanudacion y margen. Doc de Browserbase: `timeout` acepta 60..21600 s y "keepAlive ... keep the
+ * session alive even after disconnections" (https://docs.browserbase.com/reference/api/create-a-session);
+ * el barrido de aprobaciones vencidas cierra la sesion mucho antes en operacion normal, y este
+ * timeout queda de techo duro de costo si el worker muriera.
+ */
+const TAREA_SESSION_TIMEOUT_SECONDS = 45 * 60;
+
 /** Echo de IP para OBSERVAR la salida real del proxy (la API no la expone). Devuelve texto plano. */
 const ECHO_IP_URL = 'https://api.ipify.org';
 
@@ -234,7 +246,7 @@ export class NavegadorBrowserbase implements NavegadorRemoto, NavegadorParaTarea
       browserSettings: { context: { id: params.contextoExternoId, persist: true } },
       proxies,
       keepAlive: true,
-      timeout: SESSION_TIMEOUT_SECONDS,
+      timeout: TAREA_SESSION_TIMEOUT_SECONDS,
     });
 
     let egressIp: string | null = null;
@@ -337,6 +349,74 @@ export class NavegadorBrowserbase implements NavegadorRemoto, NavegadorParaTarea
     });
     await cdp.enviar('Page.enable', {}, sessionId);
     return sessionId;
+  }
+
+  /**
+   * Captura un SCREENSHOT PNG (base64) de la pagina actual de la sesion viva, SIN navegarla ni
+   * tocarla (Page.captureScreenshot es de solo lectura). Es la evidencia que el humano ve en el
+   * modal del checkpoint de aprobacion (7.1e): exactamente lo que el agente tenia en pantalla.
+   */
+  async capturarPantalla(sesionExternaId: string): Promise<string> {
+    const session = await this.bb.sessions.retrieve(sesionExternaId);
+    if (!session.connectUrl) {
+      throw new Error('la sesion de navegador no expone un connect URL (ya no esta corriendo)');
+    }
+    const cdp = await ClienteCdp.conectar(session.connectUrl);
+    try {
+      const sessionId = await this.attachPaginaInicial(cdp);
+      const captura = await cdp.enviar<{ data: string }>(
+        'Page.captureScreenshot',
+        { format: 'png' },
+        sessionId,
+      );
+      return captura.data;
+    } finally {
+      cdp.cerrar();
+    }
+  }
+
+  /**
+   * OBSERVA la egress_ip actual de la sesion viva SIN tocar la pagina de la tarea: abre una PESTANA
+   * NUEVA (Target.createTarget), navega el echo de IP ahi y la cierra. Es la re-verificacion del pin
+   * al REANUDAR un checkpoint (7.1e): navegar la pestana principal al echo destruiria el estado del
+   * checkout que la pausa preservo. Best-effort: si el echo falla devuelve null (y el handler, con
+   * IP pineada, NO verifica -> aborta, igual que en la apertura de 7.1d).
+   */
+  async observarEgress(sesionExternaId: string): Promise<string | null> {
+    const session = await this.bb.sessions.retrieve(sesionExternaId);
+    if (!session.connectUrl) {
+      throw new Error('la sesion de navegador no expone un connect URL (ya no esta corriendo)');
+    }
+    const cdp = await ClienteCdp.conectar(session.connectUrl);
+    try {
+      const { targetId } = await cdp.enviar<{ targetId: string }>('Target.createTarget', {
+        url: 'about:blank',
+      });
+      try {
+        const { sessionId } = await cdp.enviar<{ sessionId: string }>('Target.attachToTarget', {
+          targetId,
+          flatten: true,
+        });
+        await cdp.enviar('Page.enable', {}, sessionId);
+        const carga = cdp.esperarEvento('Page.loadEventFired', sessionId);
+        await cdp.enviar('Page.navigate', { url: ECHO_IP_URL }, sessionId);
+        await carga;
+        const evaluado = await cdp.enviar<{ result?: { value?: unknown } }>(
+          'Runtime.evaluate',
+          { expression: 'document.body.innerText.trim()', returnByValue: true },
+          sessionId,
+        );
+        const valor = evaluado.result?.value;
+        return typeof valor === 'string' && IP_REGEX.test(valor) ? valor : null;
+      } finally {
+        // La pestana del echo se cierra SIEMPRE: la de la tarea queda intacta.
+        await cdp.enviar('Target.closeTarget', { targetId }).catch(() => undefined);
+      }
+    } catch {
+      return null;
+    } finally {
+      cdp.cerrar();
+    }
   }
 
   async estadoDeSesion(sesionExternaId: string): Promise<'viva' | 'muerta'> {

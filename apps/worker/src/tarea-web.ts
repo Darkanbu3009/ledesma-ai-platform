@@ -4,6 +4,7 @@ import type { Job } from '@ledesma-platform/shared';
 // INYECTAN; este modulo no carga en runtime el backend ni el SDK de Stagehand. Los tests pasan
 // fakes y JAMAS llaman a un modelo ni abren un navegador.
 import type { SitioConectado } from '@ledesma-platform/backend/sitios';
+import type { AprobacionWeb } from '@ledesma-platform/backend/aprobaciones';
 import type { DecryptedProviderCredential } from '@ledesma-platform/backend/execution';
 import { PermanentExecutionError } from './errores.js';
 import { SalidaDeRedNoDisponibleError, expiracionDeContexto } from './sitios.js';
@@ -11,31 +12,45 @@ import {
   clasificarDesenlace,
   construirSystemPromptTareaWeb,
 } from './prompt-tarea-web.js';
+import {
+  clasificarTipoAccion,
+  construirReanudacionAprobada,
+  construirReanudacionRechazada,
+  extraerDescripcion,
+  type NotificadorAprobaciones,
+  type RepositorioAprobacionesParaWorker,
+} from './aprobaciones.js';
+import type { SubidorDeScreenshots } from './storage.js';
 import type { Logger } from './logger.js';
 
 /**
- * Handler del JOB DE TAREA WEB (Fase 7.1d): un agente de navegacion por IA (Stagehand) ejecuta el
- * OBJETIVO en lenguaje natural del usuario DENTRO de la sesion que el ya establecio en un sitio
- * conectado (7.1a-7.1c). Cierra el circulo: el usuario conecto su sitio y ahora el agente opera su
- * cuenta real.
+ * Handler del JOB DE TAREA WEB (Fase 7.1d + checkpoints 7.1e): un agente de navegacion por IA
+ * (Stagehand) ejecuta el OBJETIVO en lenguaje natural del usuario DENTRO de la sesion que el ya
+ * establecio en un sitio conectado (7.1a-7.1c).
  *
- * Lineas rojas (espejo de 7.1b, mas las propias de 7.1d):
+ * Lineas rojas (espejo de 7.1b, mas las propias de 7.1d/7.1e):
  *  - El login JAMAS se automatiza ni se reintenta: una pantalla de login/verificacion ABORTA la
- *    tarea al instante, marca el sitio 'caducado' y notifica. CERO reintentos: reintentar contra
- *    una verificacion es lo que quema la cuenta del usuario.
- *  - La salida de red es la PINEADA o ninguna: la egress_ip observada se verifica ANTES de navegar;
- *    si difiere del pin, se aborta y el sitio queda 'error'. PROHIBIDA la rotacion de proxy.
- *  - Acciones irreversibles o financieras NO se ejecutan en este PR: el agente las clasifica, las
- *    BLOQUEA y reporta 'requiere_aprobacion' (el checkpoint de aprobacion es 7.1e).
+ *    tarea al instante, marca el sitio 'caducado' y notifica. CERO reintentos.
+ *  - La salida de red es la PINEADA o ninguna: la egress_ip observada se verifica ANTES de navegar
+ *    y se RE-VERIFICA al reanudar un checkpoint; si difiere del pin, se aborta. PROHIBIDA la
+ *    rotacion de proxy.
+ *  - Una accion irreversible o financiera NO se ejecuta sin una aprobacion humana en estado
+ *    'aprobada' (7.1e): al detectarla, el worker captura un screenshot, crea el checkpoint, PAUSA
+ *    el job y MANTIENE VIVA la sesion (el estado del checkout se pierde si se reabre). El UNICO
+ *    camino que la ejecuta es la reanudacion via construirReanudacionAprobada (aprobaciones.ts),
+ *    que LANZA si la aprobacion no esta 'aprobada'. Sin excepciones por config, env ni plan.
  *  - Un fallo DESPUES de abrir la sesion es PERMANENTE a proposito: re-ejecutar una navegacion a
- *    medias sobre la cuenta real del usuario puede duplicar efectos; mejor fallar claro y que el
- *    usuario decida.
+ *    medias sobre la cuenta real del usuario puede duplicar efectos.
  *  - El contexto descifrado existe SOLO en memoria entre el descifrado y la inyeccion; jamas se
  *    loguea (ni el, ni el objetivo, ni URLs internas: solo ids y dominios).
  */
 
 /** Cap DURO de iteraciones (pasos del agente de navegacion) por tarea. */
 export const MAX_PASOS_TAREA_WEB = 30;
+
+/** Desenlace del handler hacia execution.ts: completada (markCompleted) o pausada (el job ya quedo
+ *  'pausado' esperando la decision humana; NO se marca completado). */
+export type ResultadoTareaWeb = 'completada' | 'pausada';
 
 /** Sesion de navegador abierta para una tarea: referencias minimas (nunca credenciales). */
 export interface SesionDeTareaAbierta {
@@ -67,6 +82,15 @@ export interface NavegadorParaTarea {
   detectarPantallaDeLogin(sesionExternaId: string, url: string): Promise<boolean>;
   /** Extrae el contexto de sesion actualizado (cookies serializadas) para re-cifrarlo. */
   extraerContexto(sesionExternaId: string): Promise<string>;
+  /** Estado actual de una sesion por su id ('viva' | 'muerta'): la reanudacion lo verifica primero. */
+  estadoDeSesion(sesionExternaId: string): Promise<'viva' | 'muerta'>;
+  /** Screenshot PNG (base64) de la pagina actual, sin tocarla (evidencia del checkpoint 7.1e). */
+  capturarPantalla(sesionExternaId: string): Promise<string>;
+  /**
+   * OBSERVA la egress_ip actual de la sesion viva en una PESTANA NUEVA (sin tocar la pagina de la
+   * tarea). null = no observable (con IP pineada, null NO verifica -> el handler aborta).
+   */
+  observarEgress(sesionExternaId: string): Promise<string | null>;
   /** Cierra (libera) la sesion en el proveedor. */
   cerrarSesion(sesionExternaId: string): Promise<void>;
 }
@@ -120,6 +144,16 @@ export interface TareaWebDeps {
   repo: RepositorioSitiosParaTarea;
   navegador: NavegadorParaTarea;
   motor: MotorDeTareaWeb;
+  /** Repositorio de checkpoints de aprobacion (V027): crear al pausar, leer la decision al reanudar. */
+  aprobaciones: RepositorioAprobacionesParaWorker;
+  /** Vida de una aprobacion pendiente, en ms (APROBACION_TTL_MINUTOS; default 15 min). */
+  aprobacionTtlMs: number;
+  /** Pausa el job en la cola ('running' -> 'pausado', JobsRepository.marcarPausado). */
+  marcarJobPausado(jobId: string): Promise<void>;
+  /** Sube el screenshot del checkpoint a Storage (best-effort). OPCIONAL: sin config, sin screenshot. */
+  subidorScreenshots?: SubidorDeScreenshots | undefined;
+  /** Notifica por correo la aprobacion pendiente/expirada (best-effort). OPCIONAL. */
+  notificadorAprobaciones?: NotificadorAprobaciones | undefined;
   /** Secreto de la boveda: descifra el contexto (7.1a) y re-cifra el actualizado. */
   vaultSecret: string;
   /** Modelo de la navegacion (TAREA_WEB_MODEL; Haiku prohibido, validado al parsear el env). */
@@ -207,11 +241,114 @@ async function refrescarContextoBestEffort(
 }
 
 /**
+ * PAUSA la tarea en un CHECKPOINT DE APROBACION (7.1e): captura la evidencia, crea la fila
+ * 'pendiente', deja el job 'pausado' y devuelve 'pausada' para que el llamador NO cierre la sesion
+ * (debe seguir VIVA: el estado del checkout se pierde si se reabre; la cierra la decision o el
+ * barrido de vencidas). Si el checkpoint NO se puede persistir, cae al comportamiento de 7.1d
+ * (bloquear y completar con 'requiere_aprobacion'): jamas se deja una sesion viva que nadie puede
+ * aprobar, y la accion NUNCA se ejecuta en ninguna de las dos ramas.
+ */
+async function pausarEnCheckpoint(
+  deps: TareaWebDeps,
+  job: Job,
+  sitio: SitioConectado,
+  sesionExternaId: string,
+  detalle: string,
+  contexto: string,
+): Promise<ResultadoTareaWeb | 'fallback'> {
+  const descripcion = extraerDescripcion(detalle);
+  const accionTipo = clasificarTipoAccion(detalle);
+
+  // Screenshot best-effort: la evidencia ayuda a decidir, pero su falta jamas bloquea el checkpoint.
+  let screenshotBase64: string | null = null;
+  try {
+    screenshotBase64 = await deps.navegador.capturarPantalla(sesionExternaId);
+  } catch (error) {
+    deps.logger.warn('tarea web: no se pudo capturar el screenshot del checkpoint (se sigue sin el)', {
+      jobId: job.id,
+      err: describir(error),
+    });
+  }
+
+  let aprobacion: AprobacionWeb;
+  try {
+    aprobacion = await deps.aprobaciones.crear({
+      ownerId: job.ownerId,
+      jobId: job.id,
+      connectionId: sitio.id,
+      sesionExternaId,
+      accionTipo,
+      descripcion,
+      screenshotPath: null,
+      expiraEn: new Date(Date.now() + deps.aprobacionTtlMs),
+    });
+  } catch (error) {
+    deps.logger.error(
+      'tarea web: no se pudo crear el checkpoint de aprobacion; se bloquea la accion y se cierra (fallback 7.1d)',
+      { jobId: job.id, err: describir(error) },
+    );
+    return 'fallback';
+  }
+
+  // El path del screenshot incluye el id de la aprobacion, asi que se sube DESPUES de crearla. La
+  // fila se creo con screenshot_path null; la UI tolera su ausencia y el path se persiste si llega.
+  if (screenshotBase64 !== null && deps.subidorScreenshots) {
+    const path = await deps.subidorScreenshots.subir(job.ownerId, aprobacion.id, screenshotBase64);
+    if (path !== null) {
+      try {
+        await deps.aprobaciones.guardarScreenshotPath(aprobacion.id, path);
+        aprobacion = { ...aprobacion, screenshotPath: path };
+      } catch (error) {
+        deps.logger.warn('tarea web: no se pudo guardar el path del screenshot (se sigue sin el)', {
+          jobId: job.id,
+          err: describir(error),
+        });
+      }
+    }
+  }
+
+  // La sesion se uso legitimamente hasta el bloqueo: refresca contexto y ultimo_uso_en como siempre.
+  await refrescarContextoBestEffort(deps, sitio, job.ownerId, sesionExternaId, contexto);
+
+  if (deps.notificadorAprobaciones) {
+    await deps.notificadorAprobaciones.notificarPendiente({
+      ownerId: job.ownerId,
+      jobId: job.id,
+      dominio: sitio.dominio,
+      descripcion,
+      expiraEnIso: aprobacion.expiraEn,
+    });
+  }
+
+  // Resultado (canal de vuelta al agente/UI) ANTES de pausar: guardarResultado escribe sobre 'running'.
+  await deps.guardarResultado(job.id, {
+    estado: 'esperando_aprobacion',
+    aprobacionId: aprobacion.id,
+    descripcion,
+    expiraEn: aprobacion.expiraEn,
+  });
+  await deps.marcarJobPausado(job.id);
+
+  deps.logger.info('tarea web PAUSADA en checkpoint de aprobacion humana (sesion viva)', {
+    jobId: job.id,
+    connectionId: sitio.id,
+    dominio: sitio.dominio,
+    aprobacionId: aprobacion.id,
+    accionTipo,
+  });
+  return 'pausada';
+}
+
+/**
  * kind:'tarea_web': ejecuta el objetivo del usuario dentro de la sesion activa del sitio conectado.
- * Lanza en fallo (execution.ts decide el cierre); el llamador marca completed si esto retorna.
+ * Lanza en fallo (execution.ts decide el cierre). Devuelve 'completada' (el llamador marca
+ * completed) o 'pausada' (el job ya quedo 'pausado' en un checkpoint; NO marcar completed).
  * TODOS los fallos posteriores a la apertura de la sesion son PERMANENTES (ver nota de cabecera).
  */
-export async function procesarTareaWeb(deps: TareaWebDeps | undefined, job: Job): Promise<void> {
+export async function procesarTareaWeb(
+  deps: TareaWebDeps | undefined,
+  job: Job,
+): Promise<ResultadoTareaWeb> {
   if (!deps) {
     throw new PermanentExecutionError(
       'la tarea web no esta configurada en este worker: faltan BROWSERBASE_API_KEY y/o ' +
@@ -242,9 +379,7 @@ export async function procesarTareaWeb(deps: TareaWebDeps | undefined, job: Job)
   }
 
   // La key del modelo sale de la boveda del owner (misma via que todo job). La navegacion usa un
-  // modelo Claude (TAREA_WEB_MODEL): la credencial debe ser de anthropic. credential_id es nullable
-  // desde V026 (solo para jobs de sitios): una tarea web sin credencial es un dato corrupto (la tool
-  // siempre la pone al encolar) -> fallo permanente, sin abrir sesion.
+  // modelo Claude (TAREA_WEB_MODEL): la credencial debe ser de anthropic.
   if (job.credentialId === null) {
     throw new PermanentExecutionError(
       'job de tarea web sin credencial: encola la tarea via la tool del agente',
@@ -257,6 +392,14 @@ export async function procesarTareaWeb(deps: TareaWebDeps | undefined, job: Job)
     );
   }
 
+  // 2.5. REANUDACION (7.1e): si este job tiene un checkpoint DECIDIDO, no se abre sesion nueva; se
+  //      retoma LA MISMA sesion que quedo viva al pausar. Un job recien encolado no tiene aprobacion
+  //      y sigue el camino de siempre.
+  const aprobacion = await deps.aprobaciones.obtenerVigentePorJob(job.id, job.ownerId);
+  if (aprobacion !== null && aprobacion.estado !== 'expirada') {
+    return reanudarTrasDecision(deps, job, sitio, objetivo, credential, contexto, aprobacion);
+  }
+
   // 3. Abrir la sesion RECONECTANDO el contexto guardado y FORZANDO el proxy pineado. El adaptador
   //    lanza SalidaDeRedNoDisponibleError (permanente) si no puede abrir por esa salida.
   const sesion = await deps.navegador.abrirSesionParaTarea({
@@ -264,11 +407,13 @@ export async function procesarTareaWeb(deps: TareaWebDeps | undefined, job: Job)
     proxyRef: sitio.proxyRef,
   });
 
+  // La sesion se cierra SIEMPRE salvo que la tarea quede PAUSADA en un checkpoint: ahi DEBE seguir
+  // viva (el estado del checkout se pierde si se reabre) y la cierran la decision o el barrido.
+  let mantenerSesionViva = false;
   try {
     // 4. VERIFICAR la egress_ip ANTES de navegar: si hay IP pineada y la observada no coincide (o no
-    //    se pudo observar), se ABORTA sin ejecutar nada, el sitio queda 'error' y se notifica (el
-    //    fallo permanente dispara la alerta de execution.ts). Una IP distinta puede costarle la
-    //    sesion al usuario y disparar verificaciones en su cuenta real. JAMAS se degrada.
+    //    se pudo observar), se ABORTA sin ejecutar nada, el sitio queda 'error' y se notifica. Una IP
+    //    distinta puede costarle la sesion al usuario. JAMAS se degrada.
     if (sitio.egressIp !== null && sesion.egressIp !== sitio.egressIp) {
       await marcarSitioBestEffort(deps, sitio, job.ownerId, 'error');
       throw new SalidaDeRedNoDisponibleError(
@@ -292,36 +437,16 @@ export async function procesarTareaWeb(deps: TareaWebDeps | undefined, job: Job)
     }
 
     // 6. Ejecutar el objetivo con el motor de navegacion, bajo el deadline de pared del worker y el
-    //    cap DURO de pasos. El system prompt fija la separacion instruccion-vs-contenido y las
-    //    reglas de abortar ante login y de bloquear acciones irreversibles/financieras.
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), deps.runTimeoutMs);
-    let resultado: { exito: boolean; mensaje: string };
-    try {
-      resultado = await deps.motor.ejecutar({
-        sesionExternaId: sesion.sesionExternaId,
-        objetivo,
-        systemPrompt: construirSystemPromptTareaWeb(),
-        apiKey: credential.apiKey,
-        model: deps.model,
-        maxPasos: MAX_PASOS_TAREA_WEB,
-        signal: controller.signal,
-      });
-    } catch (error) {
-      // Fallo del motor con la sesion ya abierta: PERMANENTE (no se re-ejecuta una navegacion a
-      // medias sobre la cuenta real). El mensaje va sanitizado: nunca el objetivo ni contenido.
-      throw new PermanentExecutionError(`la navegacion fallo: ${describir(error)}`);
-    } finally {
-      clearTimeout(timer);
-    }
+    //    cap DURO de pasos.
+    const resultado = await ejecutarMotor(deps, sesion.sesionExternaId, credential.apiKey, {
+      objetivo,
+      systemPrompt: construirSystemPromptTareaWeb(),
+    });
 
     // 7. Clasificar el desenlace segun los marcadores del prompt.
     const desenlace = clasificarDesenlace(resultado.mensaje);
 
     if (desenlace.tipo === 'sesion_caducada') {
-      // Caducidad a MITAD de tarea: el sitio queda 'caducado' y el fallo PERMANENTE notifica al
-      // owner (alertas de execution.ts) con el mensaje accionable. CERO reintentos de login y CERO
-      // reintentos de la tarea.
       await marcarSitioBestEffort(deps, sitio, job.ownerId, 'caducado');
       throw new PermanentExecutionError(
         `la sesion del sitio ${sitio.dominio} caduco a mitad de la tarea (aparecio una pantalla de ` +
@@ -330,21 +455,25 @@ export async function procesarTareaWeb(deps: TareaWebDeps | undefined, job: Job)
     }
 
     if (desenlace.tipo === 'requiere_aprobacion') {
-      // Accion irreversible/financiera BLOQUEADA: NO es un fallo (el bloqueo es el comportamiento
-      // correcto). El job completa y el resultado le dice al agente que hace falta aprobacion
-      // humana (el checkpoint de aprobacion es 7.1e). La sesion se uso legitimamente hasta el
-      // bloqueo: se refresca el contexto y ultimo_uso_en igual que en el exito.
-      await refrescarContextoBestEffort(deps, sitio, job.ownerId, sesion.sesionExternaId, contexto);
+      // Accion irreversible/financiera detectada y NO ejecutada: checkpoint de aprobacion (7.1e).
+      const pausa = await pausarEnCheckpoint(
+        deps,
+        job,
+        sitio,
+        sesion.sesionExternaId,
+        desenlace.detalle,
+        contexto,
+      );
+      if (pausa === 'pausada') {
+        mantenerSesionViva = true;
+        return 'pausada';
+      }
+      // Fallback (no se pudo persistir el checkpoint): comportamiento 7.1d, bloquear y completar.
       await deps.guardarResultado(job.id, {
         estado: 'requiere_aprobacion',
         detalle: desenlace.detalle,
       });
-      deps.logger.info('tarea web detenida: accion irreversible o financiera bloqueada (requiere aprobacion)', {
-        jobId: job.id,
-        connectionId: sitio.id,
-        dominio: sitio.dominio,
-      });
-      return;
+      return 'completada';
     }
 
     if (!resultado.exito) {
@@ -363,14 +492,186 @@ export async function procesarTareaWeb(deps: TareaWebDeps | undefined, job: Job)
       connectionId: sitio.id,
       dominio: sitio.dominio,
     });
+    return 'completada';
   } finally {
-    // La sesion se cierra SIEMPRE, pase lo que pase (minutos del proveedor + higiene de sesiones).
-    try {
-      await deps.navegador.cerrarSesion(sesion.sesionExternaId);
-    } catch (error) {
-      deps.logger.warn('tarea web: no se pudo cerrar la sesion de navegador (se ignora, best-effort)', {
-        err: describir(error),
+    if (!mantenerSesionViva) {
+      await cerrarSesionBestEffort(deps, sesion.sesionExternaId);
+    }
+  }
+}
+
+/** Cierra la sesion sin propagar (minutos del proveedor + higiene; el desenlace ya esta decidido). */
+async function cerrarSesionBestEffort(deps: TareaWebDeps, sesionExternaId: string): Promise<void> {
+  try {
+    await deps.navegador.cerrarSesion(sesionExternaId);
+  } catch (error) {
+    deps.logger.warn('tarea web: no se pudo cerrar la sesion de navegador (se ignora, best-effort)', {
+      err: describir(error),
+    });
+  }
+}
+
+/** Corre el motor con el deadline de pared del worker (mismo patron AbortController de 7.1d). */
+async function ejecutarMotor(
+  deps: TareaWebDeps,
+  sesionExternaId: string,
+  apiKey: string,
+  prompt: { objetivo: string; systemPrompt: string },
+): Promise<{ exito: boolean; mensaje: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), deps.runTimeoutMs);
+  try {
+    return await deps.motor.ejecutar({
+      sesionExternaId,
+      objetivo: prompt.objetivo,
+      systemPrompt: prompt.systemPrompt,
+      apiKey,
+      model: deps.model,
+      maxPasos: MAX_PASOS_TAREA_WEB,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    // Fallo del motor con la sesion ya abierta: PERMANENTE (no se re-ejecuta una navegacion a
+    // medias sobre la cuenta real). El mensaje va sanitizado: nunca el objetivo ni contenido.
+    throw new PermanentExecutionError(`la navegacion fallo: ${describir(error)}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * REANUDACION de un job pausado en un checkpoint, tras la DECISION humana (7.1e). Retoma LA MISMA
+ * sesion que quedo viva al pausar (mismo proxy pineado):
+ *  - 'rechazada' SIN instruccion: aborta limpio, cierra la sesion, resultado "rechazada por el usuario".
+ *  - 'aprobada': RE-VERIFICA la egress_ip pineada (pestana nueva, sin tocar la pagina) y ejecuta la
+ *    accion aprobada; el prompt de ejecucion SOLO lo produce construirReanudacionAprobada, que LANZA
+ *    si la aprobacion no esta 'aprobada' (restriccion dura).
+ *  - 'rechazada' CON instruccion: misma re-verificacion; la instruccion entra como ajuste del usuario
+ *    y la accion original queda prohibida (las reglas de bloqueo siguen intactas).
+ * Una aprobacion aun 'pendiente' aqui es un estado imposible (el job solo vuelve a 'pending' con la
+ * decision): fallo permanente sin ejecutar nada; el barrido de vencidas cerrara la sesion.
+ */
+async function reanudarTrasDecision(
+  deps: TareaWebDeps,
+  job: Job,
+  sitio: SitioConectado,
+  objetivo: string,
+  credential: DecryptedProviderCredential,
+  contexto: string,
+  aprobacion: AprobacionWeb,
+): Promise<ResultadoTareaWeb> {
+  const sesionExternaId = aprobacion.sesionExternaId;
+
+  if (aprobacion.estado === 'pendiente') {
+    throw new PermanentExecutionError(
+      'el job se reanudo con su aprobacion aun pendiente (estado inconsistente); la accion NO se ' +
+        'ejecuto. El barrido de aprobaciones vencidas cerrara la sesion.',
+    );
+  }
+
+  // La sesion DEBE seguir viva: el checkpoint pauso precisamente para no perder el estado de la
+  // pagina. Muerta (timeout del proveedor, cierre externo) = abortar sin ejecutar nada.
+  const estadoSesion = await deps.navegador.estadoDeSesion(sesionExternaId);
+  if (estadoSesion === 'muerta') {
+    throw new PermanentExecutionError(
+      'la sesion del navegador expiro antes de reanudar el checkpoint; la accion NO se ejecuto. ' +
+        'Vuelve a pedirle la tarea a tu agente.',
+    );
+  }
+
+  let mantenerSesionViva = false;
+  try {
+    if (aprobacion.estado === 'rechazada' && aprobacion.instruccionRechazo === null) {
+      // Rechazo limpio: cero navegacion extra, cero modelo. Cerrar y reportar.
+      await deps.guardarResultado(job.id, {
+        estado: 'rechazada',
+        detalle: 'rechazada por el usuario',
+        aprobacionId: aprobacion.id,
       });
+      deps.logger.info('tarea web abortada: el usuario rechazo la accion del checkpoint', {
+        jobId: job.id,
+        connectionId: sitio.id,
+        aprobacionId: aprobacion.id,
+      });
+      return 'completada';
+    }
+
+    // RE-VERIFICACION del pin de salida (igual que 7.1d, en pestana nueva): la sesion vivio pausada
+    // un rato y el proxy pudo cambiar por debajo. IP distinta (o no observable) = ABORTAR sin
+    // ejecutar nada. JAMAS se degrada.
+    const egressObservada = await deps.navegador.observarEgress(sesionExternaId);
+    if (sitio.egressIp !== null && egressObservada !== sitio.egressIp) {
+      await marcarSitioBestEffort(deps, sitio, job.ownerId, 'error');
+      throw new SalidaDeRedNoDisponibleError(
+        `la salida de red observada al reanudar no coincide con la pineada al dominio ${sitio.dominio} ` +
+          `(observada: ${egressObservada ?? 'ninguna'}); la accion aprobada NO se ejecuto. ` +
+          'Desconecta el sitio y volvelo a conectar para pinear una salida nueva.',
+      );
+    }
+
+    // Prompt de la reanudacion. construirReanudacionAprobada es el UNICO productor del prompt que
+    // autoriza ejecutar la accion pendiente y LANZA si la aprobacion no esta 'aprobada'.
+    const prompt =
+      aprobacion.estado === 'aprobada'
+        ? construirReanudacionAprobada(aprobacion, objetivo)
+        : construirReanudacionRechazada(aprobacion, objetivo, aprobacion.instruccionRechazo ?? '');
+
+    const resultado = await ejecutarMotor(deps, sesionExternaId, credential.apiKey, prompt);
+    const desenlace = clasificarDesenlace(resultado.mensaje);
+
+    if (desenlace.tipo === 'sesion_caducada') {
+      await marcarSitioBestEffort(deps, sitio, job.ownerId, 'caducado');
+      throw new PermanentExecutionError(
+        `la sesion del sitio ${sitio.dominio} caduco al reanudar la tarea; ` +
+          'vuelve a conectarlo desde la consola',
+      );
+    }
+
+    if (desenlace.tipo === 'requiere_aprobacion') {
+      // La tarea reanudada topo con OTRA accion irreversible/financiera: nuevo checkpoint, misma
+      // sesion. La aprobacion anterior ya quedo consumida (decidida); esta es una fila nueva.
+      const pausa = await pausarEnCheckpoint(
+        deps,
+        job,
+        sitio,
+        sesionExternaId,
+        desenlace.detalle,
+        contexto,
+      );
+      if (pausa === 'pausada') {
+        mantenerSesionViva = true;
+        return 'pausada';
+      }
+      await deps.guardarResultado(job.id, {
+        estado: 'requiere_aprobacion',
+        detalle: desenlace.detalle,
+      });
+      return 'completada';
+    }
+
+    if (!resultado.exito) {
+      throw new PermanentExecutionError(
+        'la tarea reanudada no se pudo completar dentro de sus limites (pasos o tiempo); no se ' +
+          'reintenta automaticamente para no repetir acciones sobre la cuenta del usuario',
+      );
+    }
+
+    await refrescarContextoBestEffort(deps, sitio, job.ownerId, sesionExternaId, contexto);
+    await deps.guardarResultado(job.id, {
+      estado: 'ok',
+      resumen: desenlace.resumen,
+      aprobacionId: aprobacion.id,
+    });
+    deps.logger.info('tarea web reanudada y completada tras la decision del checkpoint', {
+      jobId: job.id,
+      connectionId: sitio.id,
+      aprobacionId: aprobacion.id,
+      decision: aprobacion.estado,
+    });
+    return 'completada';
+  } finally {
+    if (!mantenerSesionViva) {
+      await cerrarSesionBestEffort(deps, sesionExternaId);
     }
   }
 }

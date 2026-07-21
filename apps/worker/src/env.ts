@@ -54,6 +54,18 @@ const EnvSchema = z.object({
   BROWSERBASE_PROXY_SERVER: z.string().min(1).optional(),
   BROWSERBASE_PROXY_USERNAME: z.string().min(1).optional(),
   BROWSERBASE_PROXY_PASSWORD: z.string().min(1).optional(),
+  // CHECKPOINTS DE APROBACION HUMANA (7.1e). APROBACION_TTL_MINUTOS: cuanto vive una aprobacion
+  // pendiente antes de expirar (y cancelar la tarea sin ejecutar la accion). Acotado a 1..20 min a
+  // proposito: el techo de la sesion de tarea en Browserbase (TAREA_SESSION_TIMEOUT_SECONDS,
+  // browserbase.ts) cubre corrida + TTL + reanudacion; un TTL mayor dejaria morir la sesion con la
+  // aprobacion aun pendiente. NOTA: el TTL solo regula CUANTO espera el checkpoint, jamas SI existe:
+  // no hay valor de env que permita ejecutar una accion financiera sin aprobacion.
+  APROBACION_TTL_MINUTOS: z.coerce.number().int().min(1).max(20).default(15),
+  // SUPABASE Storage para el SCREENSHOT del checkpoint (best-effort): base del proyecto + service
+  // role key. OPCIONALES con el criterio de siempre: sin ellas, el checkpoint se crea SIN screenshot
+  // (la descripcion en una linea basta para decidir) y nada mas cambia.
+  SUPABASE_URL: z.string().url().optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   // MODELO de la TAREA WEB (7.1d): el que corre la navegacion por IA dentro de la sesion del
   // usuario. Mismo patron de modelo-por-env que la validacion e2e (scripts/validacion-e2e/lib/
   // env.mjs): configurable por despliegue, con REGLA DE PLATAFORMA dura: NUNCA Haiku para trabajo

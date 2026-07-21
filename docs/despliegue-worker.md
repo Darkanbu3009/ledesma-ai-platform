@@ -137,6 +137,9 @@ esta mal formada, `parseEnv` lanza y el proceso hace `exit(1)` **al arrancar** (
 | `BROWSERBASE_PROXY_SERVER` | opcional, no vacio (`env.ts`) | Proxy **externo propio con IP estatica** (recomendado en produccion): el pool gestionado de Browserbase es best-effort y no garantiza la misma IP entre sesiones; con proxy propio la salida pineada por dominio es realmente fija. Si esta, las conexiones NUEVAS salen por el (las existentes respetan su pin) |
 | `BROWSERBASE_PROXY_USERNAME` | opcional, no vacio (`env.ts`) | Usuario del proxy externo (si el proxy lo exige) |
 | `BROWSERBASE_PROXY_PASSWORD` | opcional, no vacio (`env.ts`) | Password del proxy externo (si el proxy lo exige). Viaja solo hacia la API de Browserbase al crear la sesion; jamas se persiste ni se loguea |
+| `APROBACION_TTL_MINUTOS` | opcional, entero 1..20, default 15 (`env.ts`) | **Checkpoints de aprobacion (7.1e).** Cuanto vive una aprobacion pendiente antes de expirar (y cancelar la tarea SIN ejecutar la accion). Acotado a 20 min: el timeout de la sesion de tarea en Browserbase debe cubrir corrida + TTL + reanudacion. El TTL solo regula cuanto se espera, nunca SI se exige aprobacion: no hay valor que permita ejecutar una accion financiera sin aprobacion |
+| `SUPABASE_URL` | opcional, URL (`env.ts`) | Base del proyecto Supabase para subir el **screenshot** del checkpoint al bucket privado `aprobaciones-web` (V027). Sin ella, el checkpoint se crea SIN screenshot y nada mas cambia |
+| `SUPABASE_SERVICE_ROLE_KEY` | opcional, no vacio (`env.ts`) | Service role key para la subida del screenshot (omite RLS). Jamas se loguea. Va en par con `SUPABASE_URL` |
 
 > **Alertas de fallo (aditivo, best-effort).** Cuando el worker marca un job como `failed` de forma
 > DEFINITIVA (fallo permanente o reintentos agotados) envia **un** correo al dueno del job con el agente,

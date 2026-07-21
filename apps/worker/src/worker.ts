@@ -1,5 +1,6 @@
 import { claimAndProcessOne, MAX_ATTEMPTS, reapThresholdsMs, type JobRunnerDeps } from './execution.js';
 import { barrerLoginsVencidos } from './sitios.js';
+import { barrerAprobacionesVencidas } from './aprobaciones.js';
 import type { Logger } from './logger.js';
 
 /**
@@ -103,6 +104,12 @@ export function startWorker(params: {
       // Browserbase presente). Best-effort: sus fallos se loguean adentro y jamas rompen la pasada.
       if (deps.sitios && !shutdown.signal.aborted) {
         await barrerLoginsVencidos(deps.sitios, new Date(now));
+      }
+      // BARRIDO de aprobaciones (7.1e): expira los checkpoints sin decision, cierra su sesion de
+      // navegador (mantenida viva mientras estuvo pendiente) y cierra el job pausado. Best-effort:
+      // sus fallos se loguean adentro y jamas rompen la pasada.
+      if (deps.barridoAprobaciones && !shutdown.signal.aborted) {
+        await barrerAprobacionesVencidas(deps.barridoAprobaciones, new Date(now));
       }
     }
     if (shutdown.signal.aborted) return;

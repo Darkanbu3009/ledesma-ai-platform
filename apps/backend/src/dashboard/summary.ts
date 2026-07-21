@@ -156,7 +156,12 @@ export async function buildDashboardSummary(
 
   const jobs: JobStatusCounts & { total: number } = {
     ...jobCounts,
-    total: jobCounts.pending + jobCounts.running + jobCounts.completed + jobCounts.failed,
+    total:
+      jobCounts.pending +
+      jobCounts.running +
+      jobCounts.completed +
+      jobCounts.failed +
+      jobCounts.pausado,
   };
 
   return {

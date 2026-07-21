@@ -31,7 +31,7 @@ function summaryWithRuns(runs: number): DashboardSummary {
     retention: { agentRunsDays: 365, jobsTerminalDays: 90 },
     activity: { totals: { runs, completed: runs, errors: 0 }, byDay: [], lastRunAt: runs > 0 ? 'x' : null },
     operations: {
-      jobs: { pending: 0, running: 0, completed: 0, failed: 0, total: 0 },
+      jobs: { pending: 0, running: 0, completed: 0, failed: 0, pausado: 0, total: 0 },
       resources: { scheduledTasksActive: 0, triggersActive: 0, recipesActive: 0 },
     },
     spend: {

@@ -9,6 +9,9 @@ import {
   RegistrationRepository,
 } from '@ledesma-platform/backend/execution';
 import { DataSubjectRequestRepository, SitiosConectadosRepository } from '@ledesma-platform/backend/sitios';
+import { AprobacionesWebRepository } from '@ledesma-platform/backend/aprobaciones';
+import { crearNotificadorAprobaciones, type BarridoAprobacionesDeps } from './aprobaciones.js';
+import { crearSubidorDeScreenshots } from './storage.js';
 import { parseEnv, type WorkerEnv } from './env.js';
 import { NavegadorBrowserbase } from './browserbase.js';
 import type { SitiosJobDeps } from './sitios.js';
@@ -72,6 +75,7 @@ function main(): void {
   // solicitud de cancelacion YA RESUELTA por cada desconexion (el borrado ya ocurrio en el mismo job).
   let sitios: SitiosJobDeps | undefined;
   let tareaWeb: TareaWebDeps | undefined;
+  let barridoAprobaciones: BarridoAprobacionesDeps | undefined;
   if (config.BROWSERBASE_API_KEY !== undefined && config.BROWSERBASE_PROJECT_ID !== undefined) {
     const sitiosRepo = new SitiosConectadosRepository(sql);
     const dsrRepo = new DataSubjectRequestRepository(sql);
@@ -82,6 +86,24 @@ function main(): void {
       proxyUsername: config.BROWSERBASE_PROXY_USERNAME,
       proxyPassword: config.BROWSERBASE_PROXY_PASSWORD,
     });
+    // CHECKPOINTS DE APROBACION HUMANA (7.1e): repositorio de V027 + notificador por Resend (mismo
+    // canal que las alertas de fallo, sin cooldown: cada checkpoint es unico y urgente) + subidor de
+    // screenshots (best-effort: solo con SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY).
+    const aprobacionesRepo = new AprobacionesWebRepository(sql);
+    const notificadorAprobaciones = crearNotificadorAprobaciones({
+      ...(config.RESEND_API_KEY !== undefined ? { resendApiKey: config.RESEND_API_KEY } : {}),
+      ...(config.RESEND_FROM_EMAIL !== undefined ? { fromEmail: config.RESEND_FROM_EMAIL } : {}),
+      ...(config.CONSOLE_BASE_URL !== undefined ? { consoleBaseUrl: config.CONSOLE_BASE_URL } : {}),
+      getOwnerEmail: (ownerId) => leerEmailOwner(sql, ownerId, logger),
+      logger,
+    });
+    const subidorScreenshots =
+      config.SUPABASE_URL !== undefined && config.SUPABASE_SERVICE_ROLE_KEY !== undefined
+        ? crearSubidorDeScreenshots(
+            { supabaseUrl: config.SUPABASE_URL, serviceRoleKey: config.SUPABASE_SERVICE_ROLE_KEY },
+            logger,
+          )
+        : undefined;
     // TAREA WEB (7.1d): navegacion por IA dentro de la sesion activa de un sitio conectado. Misma
     // compuerta de config que los jobs de sitios; el motor (Stagehand) corre con la credencial del
     // OWNER (boveda) y el modelo de TAREA_WEB_MODEL (Haiku prohibido, validado en env.ts).
@@ -92,12 +114,26 @@ function main(): void {
         apiKey: config.BROWSERBASE_API_KEY,
         projectId: config.BROWSERBASE_PROJECT_ID,
       }),
+      aprobaciones: aprobacionesRepo,
+      aprobacionTtlMs: config.APROBACION_TTL_MINUTOS * 60 * 1000,
+      marcarJobPausado: (jobId) => jobs.marcarPausado(jobId),
+      subidorScreenshots,
+      notificadorAprobaciones,
       vaultSecret: config.VAULT_SECRET,
       model: config.TAREA_WEB_MODEL,
       runTimeoutMs: config.RUN_TIMEOUT_SECONDS * 1000,
       resolveCredential: (ownerId, credentialId) =>
         resolveStoredCredential(credentialRepo, ownerId, credentialId, config.VAULT_SECRET),
       guardarResultado: (jobId, resultado) => jobs.guardarResultado(jobId, resultado),
+      logger,
+    };
+    // BARRIDO de aprobaciones vencidas (7.1e): expira checkpoints sin decision, cierra su sesion de
+    // navegador y cierra el job pausado. Corre throttled en el loop del worker.
+    barridoAprobaciones = {
+      aprobaciones: aprobacionesRepo,
+      cerrarSesion: (sesionExternaId) => navegador.cerrarSesion(sesionExternaId),
+      marcarJobFallido: (jobId, error) => jobs.marcarPausadoFallido(jobId, error),
+      notificador: notificadorAprobaciones,
       logger,
     };
     sitios = {
@@ -143,6 +179,7 @@ function main(): void {
     recordRun: (run) => runRepo.record(run),
     ...(sitios !== undefined ? { sitios } : {}),
     ...(tareaWeb !== undefined ? { tareaWeb } : {}),
+    ...(barridoAprobaciones !== undefined ? { barridoAprobaciones } : {}),
   };
 
   const handle = startWorker({ deps, logger, intervalMs: config.WORKER_POLL_INTERVAL_MS });

@@ -5,8 +5,13 @@
  * apps/backend/migrations/V008__jobs.sql.
  */
 
-/** Estados REALES de cola (no solo terminales): pending -> running -> completed|failed. */
-export type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
+/**
+ * Estados REALES de cola (no solo terminales): pending -> running -> completed|failed. 'pausado'
+ * (V027, 7.1e) es el estado de un job de tarea web detenido en un checkpoint de aprobacion humana:
+ * el claim no lo toma y el reaper no lo toca; vuelve a 'pending' cuando el humano decide, o a
+ * 'failed' si la aprobacion expira sin decision.
+ */
+export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'pausado';
 
 /** Una tarea de la cola, tal como vive en la tabla `jobs`. snake_case -> camelCase. */
 export interface Job {
@@ -119,4 +124,6 @@ export interface JobStatusCounts {
   running: number;
   completed: number;
   failed: number;
+  /** Jobs detenidos en un checkpoint de aprobacion humana (V027, 7.1e). */
+  pausado: number;
 }
