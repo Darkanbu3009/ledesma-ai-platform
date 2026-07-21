@@ -26,6 +26,8 @@ function makeSitio(overrides: Partial<SitioConectado> = {}): SitioConectado {
     urlLogin: null,
     contextoExternoId: 'ctx-1',
     proxyRef: 'browserbase',
+    proxyCountry: 'AR',
+    proxyState: null,
     egressIp: '203.0.113.7',
     fingerprintRef: null,
     sesionExternaId: null,

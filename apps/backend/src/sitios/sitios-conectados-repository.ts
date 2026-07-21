@@ -43,7 +43,18 @@ export interface SitioConectado {
   contextoExternoId: string | null;
   /** Referencia de la salida de red pineada para este dominio. null = aun no asignada. */
   proxyRef: string | null;
-  /** IP de salida observada al establecer la sesion. null = aun no observada. */
+  /**
+   * PAIS de salida pineado a (owner, dominio) (ISO 3166-1 alpha-2, V028). Es EL criterio de
+   * continuidad de red: toda sesion posterior debe salir por este pais o abortar. null = fila
+   * legada (pineada por IP exacta); operar exige reconectar para pinear el pais.
+   */
+  proxyCountry: string | null;
+  /** Subdivision opcional del pais (p.ej. estado de EEUU, V028). Hoy informativa. */
+  proxyState: string | null;
+  /**
+   * IP de salida observada al establecer la sesion. INFORMATIVA (observabilidad): desde V028 NO es
+   * criterio de aborto; el criterio es proxy_country (los proxies del pool rotan IP dentro del pais).
+   */
   egressIp: string | null;
   /** Referencia del fingerprint de navegador. null = no registrada. */
   fingerprintRef: string | null;
@@ -105,7 +116,11 @@ export interface RegistrarSesionDeLoginInput {
   contextoExternoId: string;
   /** Referencia de la salida de red asignada a este dominio (sin rotacion, para siempre). */
   proxyRef: string;
-  /** IP de salida OBSERVADA al abrir la sesion. null = no observable. */
+  /** PAIS de salida pineado a este dominio (ISO 3166-1 alpha-2). Criterio de continuidad de red. */
+  proxyCountry: string;
+  /** Subdivision opcional del pais (p.ej. estado de EEUU). null = sin afinar. */
+  proxyState?: string | null;
+  /** IP de salida OBSERVADA al abrir la sesion (informativa desde V028). null = no observable. */
   egressIp?: string | null;
   /** Referencia del fingerprint del navegador. null = no registrada. */
   fingerprintRef?: string | null;
@@ -130,6 +145,8 @@ interface SitioRow {
   url_login: string | null;
   contexto_externo_id: string | null;
   proxy_ref: string | null;
+  proxy_country: string | null;
+  proxy_state: string | null;
   egress_ip: string | null;
   fingerprint_ref: string | null;
   sesion_externa_id: string | null;
@@ -159,6 +176,8 @@ function rowToSitio(row: SitioRow): SitioConectado {
     urlLogin: row.url_login,
     contextoExternoId: row.contexto_externo_id,
     proxyRef: row.proxy_ref,
+    proxyCountry: row.proxy_country,
+    proxyState: row.proxy_state,
     egressIp: row.egress_ip,
     fingerprintRef: row.fingerprint_ref,
     sesionExternaId: row.sesion_externa_id,
@@ -190,7 +209,7 @@ export class SitiosConectadosRepository {
         ${input.fingerprintRef ?? null},
         'esperando_login'
       )
-      returning id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip::text as egress_ip,
+      returning id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, proxy_country, proxy_state, egress_ip::text as egress_ip,
         fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado,
         (contexto_cifrado is not null) as tiene_contexto, creado_en, ultimo_uso_en, expira_en
     `;
@@ -200,7 +219,7 @@ export class SitiosConectadosRepository {
   /** Resuelve LA conexion del owner para un dominio. null si no existe o es ajena (aislamiento por owner). */
   async obtenerPorDominio(ownerId: string, dominio: string): Promise<SitioConectado | null> {
     const rows = await this.sql<SitioRow[]>`
-      select id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip::text as egress_ip,
+      select id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, proxy_country, proxy_state, egress_ip::text as egress_ip,
         fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado,
         (contexto_cifrado is not null) as tiene_contexto, creado_en, ultimo_uso_en, expira_en
       from sitios_conectados
@@ -213,7 +232,7 @@ export class SitiosConectadosRepository {
   /** Lista las conexiones del owner (mas nuevas primero). Metadata solamente: jamas blobs. */
   async listarPorOwner(ownerId: string): Promise<SitioConectado[]> {
     const rows = await this.sql<SitioRow[]>`
-      select id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip::text as egress_ip,
+      select id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, proxy_country, proxy_state, egress_ip::text as egress_ip,
         fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado,
         (contexto_cifrado is not null) as tiene_contexto, creado_en, ultimo_uso_en, expira_en
       from sitios_conectados
@@ -232,7 +251,7 @@ export class SitiosConectadosRepository {
     const rows = await this.sql<SitioRow[]>`
       update sitios_conectados set estado = ${estado}
       where id = ${id} and owner_id = ${ownerId}
-      returning id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip::text as egress_ip,
+      returning id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, proxy_country, proxy_state, egress_ip::text as egress_ip,
         fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado,
         (contexto_cifrado is not null) as tiene_contexto, creado_en, ultimo_uso_en, expira_en
     `;
@@ -268,7 +287,7 @@ export class SitiosConectadosRepository {
         sesion_externa_id = null,
         vista_en_vivo_url = null
       where id = ${id} and owner_id = ${ownerId}
-      returning id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip::text as egress_ip,
+      returning id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, proxy_country, proxy_state, egress_ip::text as egress_ip,
         fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado,
         (contexto_cifrado is not null) as tiene_contexto, creado_en, ultimo_uso_en, expira_en
     `;
@@ -312,7 +331,7 @@ export class SitiosConectadosRepository {
   /** Resuelve UNA conexion del owner por id. null si no existe o es ajena (aislamiento por owner). */
   async obtenerPorId(id: string, ownerId: string): Promise<SitioConectado | null> {
     const rows = await this.sql<SitioRow[]>`
-      select id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip::text as egress_ip,
+      select id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, proxy_country, proxy_state, egress_ip::text as egress_ip,
         fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado,
         (contexto_cifrado is not null) as tiene_contexto, creado_en, ultimo_uso_en, expira_en
       from sitios_conectados
@@ -332,8 +351,8 @@ export class SitiosConectadosRepository {
   async registrarSesionDeLogin(input: RegistrarSesionDeLoginInput): Promise<SitioConectado> {
     const rows = await this.sql<SitioRow[]>`
       insert into sitios_conectados (
-        owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip, fingerprint_ref,
-        sesion_externa_id, vista_en_vivo_url, estado
+        owner_id, dominio, url_login, contexto_externo_id, proxy_ref, proxy_country, proxy_state,
+        egress_ip, fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado
       )
       values (
         ${input.ownerId},
@@ -341,17 +360,37 @@ export class SitiosConectadosRepository {
         ${input.urlLogin},
         ${input.contextoExternoId},
         ${input.proxyRef},
+        ${input.proxyCountry},
+        ${input.proxyState ?? null},
         ${input.egressIp ?? null},
         ${input.fingerprintRef ?? null},
         ${input.sesionExternaId},
         ${input.vistaEnVivoUrl},
         'esperando_login'
       )
-      returning id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip::text as egress_ip,
+      returning id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, proxy_country, proxy_state, egress_ip::text as egress_ip,
         fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado,
         (contexto_cifrado is not null) as tiene_contexto, creado_en, ultimo_uso_en, expira_en
     `;
     return rowToSitio(rows[0] as SitioRow);
+  }
+
+  /**
+   * PINEA el PAIS de salida de una conexion LEGADA (proxy_country null, anterior a V028) en su
+   * primera reconexion posterior. SOLO escribe si proxy_country sigue null: un pais ya pineado es
+   * INMUTABLE de por vida (el where lo garantiza a nivel de base, no solo en el handler). Devuelve
+   * null si la conexion no existe, es ajena o YA tenia pais pineado.
+   */
+  async pinearPais(id: string, ownerId: string, pais: string): Promise<SitioConectado | null> {
+    const rows = await this.sql<SitioRow[]>`
+      update sitios_conectados set proxy_country = ${pais}
+      where id = ${id} and owner_id = ${ownerId} and proxy_country is null
+      returning id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, proxy_country, proxy_state, egress_ip::text as egress_ip,
+        fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado,
+        (contexto_cifrado is not null) as tiene_contexto, creado_en, ultimo_uso_en, expira_en
+    `;
+    const row = rows[0];
+    return row ? rowToSitio(row) : null;
   }
 
   /**
@@ -374,7 +413,7 @@ export class SitiosConectadosRepository {
         vista_en_vivo_url = ${input.vistaEnVivoUrl},
         estado = 'esperando_login'
       where id = ${id} and owner_id = ${ownerId}
-      returning id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip::text as egress_ip,
+      returning id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, proxy_country, proxy_state, egress_ip::text as egress_ip,
         fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado,
         (contexto_cifrado is not null) as tiene_contexto, creado_en, ultimo_uso_en, expira_en
     `;
@@ -398,7 +437,7 @@ export class SitiosConectadosRepository {
         sesion_externa_id = null,
         vista_en_vivo_url = null
       where id = ${id} and owner_id = ${ownerId}
-      returning id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, egress_ip::text as egress_ip,
+      returning id, owner_id, dominio, url_login, contexto_externo_id, proxy_ref, proxy_country, proxy_state, egress_ip::text as egress_ip,
         fingerprint_ref, sesion_externa_id, vista_en_vivo_url, estado,
         (contexto_cifrado is not null) as tiene_contexto, creado_en, ultimo_uso_en, expira_en
     `;
