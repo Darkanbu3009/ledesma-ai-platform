@@ -16,6 +16,8 @@ import { JOB_PAGE_SIZE, JOBS_REFETCH_MS, buildJobsQuery, hasInFlightJobs, isJobI
 import type { SitioConectado } from './sitios';
 import { JOB_SEGUIMIENTO_REFETCH_MS, SITIOS_REFETCH_MS, haySitiosEnTransicion } from './sitios';
 import type { ConsentsState, DataRequest } from './privacy';
+import type { AprobacionWeb } from './aprobaciones';
+import { APROBACIONES_REFETCH_MS, obtenerScreenshotUrl } from './aprobaciones';
 import type { AdminUserDetail, AdminUsersResponse } from './admin';
 import { ADMIN_USERS_PAGE_SIZE, buildAdminUsersQuery } from './admin';
 import type { MyUpgradeRequestsState } from './upgrade-requests';
@@ -152,6 +154,37 @@ export function useJobSeguimiento(jobId: string | null) {
       const job = query.state.data;
       return !job || isJobInFlight(job.status) ? JOB_SEGUIMIENTO_REFETCH_MS : false;
     },
+  });
+}
+
+/**
+ * APROBACIONES PENDIENTES de checkpoints de tareas web (GET /v1/aprobaciones?estado=pendiente).
+ * Polling con refetchInterval (patron V017, sin useEffect) a intervalo FIJO: una aprobacion puede
+ * aparecer en cualquier momento (la crea el worker) y expira en minutos, asi que no hay dato local
+ * con el que "apagar" el polling; la query es un select indexado y barato, y react-query ya no
+ * consulta con la pestana en background (refetchIntervalInBackground=false por defecto).
+ */
+export function useAprobacionesPendientes() {
+  return useQuery({
+    queryKey: ['aprobaciones', 'pendiente'],
+    queryFn: () =>
+      apiFetch<{ aprobaciones: AprobacionWeb[] }>('/v1/aprobaciones?estado=pendiente').then(
+        (r) => r.aprobaciones,
+      ),
+    refetchInterval: APROBACIONES_REFETCH_MS,
+  });
+}
+
+/**
+ * Signed URL del screenshot de una aprobacion (bucket privado, RLS propia, TTL corto). Se firma
+ * con la sesion del usuario via el cliente de Supabase; null = sin screenshot o firma fallida (el
+ * modal decide igual con la descripcion). La queryKey por path evita re-firmar en cada render.
+ */
+export function useScreenshotAprobacion(path: string | null) {
+  return useQuery({
+    queryKey: ['aprobaciones', 'screenshot', path],
+    queryFn: () => obtenerScreenshotUrl(path),
+    enabled: path !== null,
   });
 }
 

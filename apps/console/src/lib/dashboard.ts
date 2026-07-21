@@ -54,6 +54,8 @@ export interface DashboardJobs {
   running: number;
   completed: number;
   failed: number;
+  /** Jobs pausados en un checkpoint de aprobacion humana (V027, 7.1e). */
+  pausado: number;
   total: number;
 }
 

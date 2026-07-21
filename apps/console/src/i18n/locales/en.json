@@ -1678,7 +1678,8 @@
       "pendiente": "Pending",
       "enCurso": "Running",
       "completada": "Completed",
-      "fallida": "Failed"
+      "fallida": "Failed",
+      "pausada": "Awaiting approval"
     },
     "jobTipo": {
       "receta": "Recipe",
@@ -1742,6 +1743,32 @@
       "generico": "Something went wrong. Try again.",
       "cargarLista": "We could not load your connected sites",
       "desconectarFallo": "We could not complete the disconnection. Try again in a few minutes."
+    }
+  },
+  "aprobaciones": {
+    "banner": {
+      "titulo_one": "Your agent needs your approval",
+      "titulo_other": "Your agents need {{count}} approvals",
+      "descripcion": "A web task is paused before an irreversible or financial action. Nothing runs until you decide.",
+      "cta": "Review and decide"
+    },
+    "modal": {
+      "titulo": "Approval required",
+      "subtituloFinanciera": "Your agent wants to perform a financial action. Review the screen and decide.",
+      "subtituloIrreversible": "Your agent wants to perform an irreversible action. Review the screen and decide.",
+      "screenshotAlt": "Screenshot of the page as the agent sees it",
+      "sinScreenshot": "No screenshot available; rely on the description.",
+      "expira": "If you do not decide within a few minutes, the approval expires and the task is cancelled without running the action.",
+      "aprobar": "Approve",
+      "rechazar": "Reject",
+      "rechazarConInstruccion": "Reject with instruction",
+      "instruccionLabel": "Instruction for the agent",
+      "instruccionPlaceholder": "E.g.: book the 9 am flight instead, do not pay yet",
+      "enviarInstruccion": "Reject and send instruction",
+      "volver": "Back",
+      "conflicto": "This approval was already decided or has expired. The list will refresh.",
+      "fallo": "We could not record your decision. Please try again.",
+      "cerrarAria": "Close the approval (it stays pending)"
     }
   }
 }

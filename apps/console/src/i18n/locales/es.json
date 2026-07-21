@@ -1678,7 +1678,8 @@
       "pendiente": "Pendiente",
       "enCurso": "En curso",
       "completada": "Completada",
-      "fallida": "Fallida"
+      "fallida": "Fallida",
+      "pausada": "Esperando aprobación"
     },
     "jobTipo": {
       "receta": "Receta",
@@ -1742,6 +1743,33 @@
       "generico": "Algo salió mal. Intenta de nuevo.",
       "cargarLista": "No pudimos cargar tus sitios conectados",
       "desconectarFallo": "No pudimos completar la desconexión. Intenta de nuevo en unos minutos."
+    }
+  },
+  "aprobaciones": {
+    "banner": {
+      "titulo_one": "Tu agente necesita tu aprobación",
+      "titulo_other": "Tus agentes necesitan {{count}} aprobaciones",
+      "titulo_many": "Tus agentes necesitan {{count}} aprobaciones",
+      "descripcion": "Una tarea web está en pausa ante una acción irreversible o financiera. Nada se ejecuta hasta que decidas.",
+      "cta": "Revisar y decidir"
+    },
+    "modal": {
+      "titulo": "Aprobación requerida",
+      "subtituloFinanciera": "Tu agente quiere ejecutar una acción financiera. Revisa la pantalla y decide.",
+      "subtituloIrreversible": "Tu agente quiere ejecutar una acción irreversible. Revisa la pantalla y decide.",
+      "screenshotAlt": "Captura de la página tal como la ve el agente",
+      "sinScreenshot": "No hay captura disponible; guíate por la descripción.",
+      "expira": "Si no decides en unos minutos, la aprobación expira y la tarea se cancela sin ejecutar la acción.",
+      "aprobar": "Aprobar",
+      "rechazar": "Rechazar",
+      "rechazarConInstruccion": "Rechazar con instrucción",
+      "instruccionLabel": "Instrucción para el agente",
+      "instruccionPlaceholder": "Ej.: mejor reserva el vuelo de las 9 am, no pagues todavía",
+      "enviarInstruccion": "Rechazar y enviar instrucción",
+      "volver": "Volver",
+      "conflicto": "Esta aprobación ya fue decidida o expiró. Se actualizará la lista.",
+      "fallo": "No pudimos registrar tu decisión. Inténtalo de nuevo.",
+      "cerrarAria": "Cerrar la aprobación (queda pendiente)"
     }
   }
 }

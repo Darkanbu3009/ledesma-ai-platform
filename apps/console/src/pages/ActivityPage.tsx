@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Activity, Loader2, RefreshCw } from 'lucide-react';
-import { useAgents, useJobs } from '../lib/queries';
+import { useAgents, useAprobacionesPendientes, useJobs } from '../lib/queries';
+import { AprobacionDialog } from '../components/aprobaciones/AprobacionDialog';
 import { playgroundPath } from '../lib/agents';
 import { JOB_STATUS_FILTERS, type JobStatusFilter } from '../lib/jobs';
 import { ActivityGhostTable } from '../components/activity/ActivityGhostTable';
@@ -77,6 +78,13 @@ function ActivityEmptyState({ filtered, ctaTo }: { filtered: boolean; ctaTo: str
 export function ActivityPage() {
   const { t } = useTranslation();
   const [status, setStatus] = useState<JobStatusFilter>('all');
+  // CHECKPOINT DE APROBACION (7.1e): en la vista de la tarea, la aprobacion pendiente mas reciente
+  // abre el modal (screenshot + descripcion + Aprobar/Rechazar). Cerrar sin decidir la DESCARTA solo
+  // visualmente (por id, estado derivado del click, sin useEffect): la aprobacion sigue pendiente y
+  // una NUEVA (otro id) vuelve a abrir el modal.
+  const { data: pendientes } = useAprobacionesPendientes();
+  const [aprobacionDescartadaId, setAprobacionDescartadaId] = useState<string | null>(null);
+  const aprobacionActiva = (pendientes ?? []).find((a) => a.id !== aprobacionDescartadaId) ?? null;
 
   const {
     data,
@@ -157,6 +165,13 @@ export function ActivityPage() {
             </button>
           )}
         </div>
+      )}
+
+      {aprobacionActiva && (
+        <AprobacionDialog
+          aprobacion={aprobacionActiva}
+          onCerrar={() => setAprobacionDescartadaId(aprobacionActiva.id)}
+        />
       )}
     </div>
   );

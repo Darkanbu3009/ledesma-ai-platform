@@ -31,6 +31,7 @@ import type {
 import type { Consent, CreateConsentInput, CreateDataRequestInput, DataRequest } from './privacy';
 import type { CreateUpgradeRequestInput, CreateUpgradeRequestResult } from './upgrade-requests';
 import type { ConexionAceptada, SitioJobAceptado } from './sitios';
+import type { AprobacionWeb } from './aprobaciones';
 import type { PlanId } from './plans';
 
 /** Registra al usuario actual como individuo: queda activo de inmediato. */
@@ -462,5 +463,51 @@ export function useRequestUpgrade() {
         body: JSON.stringify(input),
       }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['upgrade-requests', 'me'] }),
+  });
+}
+
+/**
+ * APROBAR un checkpoint de tarea web (POST /v1/aprobaciones/:id/aprobar, 7.1e): la accion pendiente
+ * queda AUTORIZADA, el backend registra la intervencion Art.22 y devuelve el job pausado a la cola;
+ * el worker reanuda LA MISMA sesion y ejecuta la accion. Un 409 significa que la aprobacion ya fue
+ * decidida o expiro (doble click / carrera con el barrido): la UI refresca la lista y lo muestra.
+ * Al exito invalida ['aprobaciones'] (el banner/modal desaparecen) y ['jobs'] (el job vuelve a
+ * moverse en /actividad).
+ */
+export function useAprobarAprobacion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ aprobacion: AprobacionWeb; jobReanudado: boolean }>(
+        `/v1/aprobaciones/${id}/aprobar`,
+        { method: 'POST' },
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['aprobaciones'] });
+      void qc.invalidateQueries({ queryKey: ['jobs'] });
+    },
+  });
+}
+
+/**
+ * RECHAZAR un checkpoint (POST /v1/aprobaciones/:id/rechazar). Sin instruccion la tarea aborta
+ * limpia; con instruccion, esta entra como mensaje del usuario y la tarea continua con ese ajuste
+ * SIN ejecutar la accion original. Mismas invalidaciones y semantica de 409 que aprobar.
+ */
+export function useRechazarAprobacion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, instruccion }: { id: string; instruccion?: string }) =>
+      apiFetch<{ aprobacion: AprobacionWeb; jobReanudado: boolean }>(
+        `/v1/aprobaciones/${id}/rechazar`,
+        {
+          method: 'POST',
+          body: JSON.stringify(instruccion !== undefined && instruccion !== '' ? { instruccion } : {}),
+        },
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['aprobaciones'] });
+      void qc.invalidateQueries({ queryKey: ['jobs'] });
+    },
   });
 }
