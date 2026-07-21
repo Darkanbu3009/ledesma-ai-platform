@@ -31,9 +31,13 @@ import type { Logger } from './logger.js';
  * Lineas rojas (espejo de 7.1b, mas las propias de 7.1d/7.1e):
  *  - El login JAMAS se automatiza ni se reintenta: una pantalla de login/verificacion ABORTA la
  *    tarea al instante, marca el sitio 'caducado' y notifica. CERO reintentos.
- *  - La salida de red es la PINEADA o ninguna: la egress_ip observada se verifica ANTES de navegar
- *    y se RE-VERIFICA al reanudar un checkpoint; si difiere del pin, se aborta. PROHIBIDA la
- *    rotacion de proxy.
+ *  - El PAIS de salida es el PINEADO o ninguno: el pais observado se verifica ANTES de navegar y se
+ *    RE-VERIFICA al reanudar un checkpoint; si difiere del pais pineado (proxy_country), se aborta y
+ *    el sitio queda marcado para reconexion. DECISION DE ARQUITECTURA: el criterio es el PAIS, no la
+ *    IP exacta -- los proxies del pool son residenciales rotativos (la IP cambia entre sesiones
+ *    dentro del mismo pais y eso es invisible para el sitio destino); lo que invalida una sesion es
+ *    un salto de pais. JAMAS se degrada a otro pais. Para sitios de maxima seguridad (banca) se
+ *    migrara en el futuro a proxies sticky dedicados (no en esta fase).
  *  - Una accion irreversible o financiera NO se ejecuta sin una aprobacion humana en estado
  *    'aprobada' (7.1e): al detectarla, el worker captura un screenshot, crea el checkpoint, PAUSA
  *    el job y MANTIENE VIVA la sesion (el estado del checkout se pierde si se reabre). El UNICO
@@ -55,8 +59,16 @@ export type ResultadoTareaWeb = 'completada' | 'pausada';
 /** Sesion de navegador abierta para una tarea: referencias minimas (nunca credenciales). */
 export interface SesionDeTareaAbierta {
   sesionExternaId: string;
-  /** IP de salida OBSERVADA a traves del proxy pineado. null = no observable. */
+  /** IP de salida OBSERVADA (informativa/observabilidad; NO es criterio de aborto). null = no observable. */
   egressIp: string | null;
+  /** PAIS de salida OBSERVADO (ISO 3166-1 alpha-2). Se verifica contra proxy_country. null = no observable. */
+  egressCountry: string | null;
+}
+
+/** Salida de red observada en una sesion viva (pestana nueva): pais para verificar, IP para logs. */
+export interface SalidaObservada {
+  egressIp: string | null;
+  egressCountry: string | null;
 }
 
 /**
@@ -65,13 +77,15 @@ export interface SesionDeTareaAbierta {
  */
 export interface NavegadorParaTarea {
   /**
-   * Abre una sesion RECONECTANDO el contexto guardado y FORZANDO la salida pineada. `proxyRef` es
-   * OBLIGATORIO (una tarea jamas sortea salida nueva): si no se puede abrir por esa salida, lanza
-   * SalidaDeRedNoDisponibleError, nunca degrada a otra.
+   * Abre una sesion RECONECTANDO el contexto guardado y FORZANDO la salida pineada. `proxyRef` y
+   * `proxyCountry` son OBLIGATORIOS (una tarea jamas sortea salida nueva ni pais nuevo): si el pin
+   * no es reconstruible, lanza SalidaDeRedNoDisponibleError, nunca degrada. El pais OBSERVADO lo
+   * verifica el handler contra proxy_country antes de navegar.
    */
   abrirSesionParaTarea(params: {
     contextoExternoId: string;
     proxyRef: string;
+    proxyCountry: string;
   }): Promise<SesionDeTareaAbierta>;
   /** Inyecta el contexto de sesion DESCIFRADO (cookies) en la sesion viva, antes de navegar. */
   inyectarContexto(sesionExternaId: string, contexto: string): Promise<void>;
@@ -87,10 +101,10 @@ export interface NavegadorParaTarea {
   /** Screenshot PNG (base64) de la pagina actual, sin tocarla (evidencia del checkpoint 7.1e). */
   capturarPantalla(sesionExternaId: string): Promise<string>;
   /**
-   * OBSERVA la egress_ip actual de la sesion viva en una PESTANA NUEVA (sin tocar la pagina de la
-   * tarea). null = no observable (con IP pineada, null NO verifica -> el handler aborta).
+   * OBSERVA la salida de red actual (pais + IP) de la sesion viva en una PESTANA NUEVA (sin tocar
+   * la pagina de la tarea). Pais null = no observable -> el handler aborta (no se puede verificar).
    */
-  observarEgress(sesionExternaId: string): Promise<string | null>;
+  observarSalida(sesionExternaId: string): Promise<SalidaObservada>;
   /** Cierra (libera) la sesion en el proveedor. */
   cerrarSesion(sesionExternaId: string): Promise<void>;
 }
@@ -367,8 +381,9 @@ export async function procesarTareaWeb(
   if (!sitio || sitio.estado !== 'activo') {
     throw new PermanentExecutionError(MENSAJE_RECONECTAR);
   }
-  if (!sitio.contextoExternoId || !sitio.proxyRef) {
-    // Sin contexto o sin salida pineada no hay sesion que reanudar ni pin que respetar.
+  if (!sitio.contextoExternoId || !sitio.proxyRef || !sitio.proxyCountry) {
+    // Sin contexto, sin salida pineada o sin PAIS pineado (fila legada anterior a V028) no hay
+    // sesion que reanudar ni pin que verificar: reconectar el sitio pinea el pais.
     throw new PermanentExecutionError(MENSAJE_RECONECTAR);
   }
 
@@ -400,26 +415,36 @@ export async function procesarTareaWeb(
     return reanudarTrasDecision(deps, job, sitio, objetivo, credential, contexto, aprobacion);
   }
 
-  // 3. Abrir la sesion RECONECTANDO el contexto guardado y FORZANDO el proxy pineado. El adaptador
-  //    lanza SalidaDeRedNoDisponibleError (permanente) si no puede abrir por esa salida.
+  // 3. Abrir la sesion RECONECTANDO el contexto guardado y FORZANDO el proxy pineado con la
+  //    geolocalizacion del PAIS pineado. El adaptador lanza SalidaDeRedNoDisponibleError
+  //    (permanente) si el pin no es reconstruible.
   const sesion = await deps.navegador.abrirSesionParaTarea({
     contextoExternoId: sitio.contextoExternoId,
     proxyRef: sitio.proxyRef,
+    proxyCountry: sitio.proxyCountry,
+  });
+  deps.logger.info('tarea web: sesion abierta con el pais pineado', {
+    jobId: job.id,
+    connectionId: sitio.id,
+    dominio: sitio.dominio,
+    pais: sesion.egressCountry,
+    egressIp: sesion.egressIp,
   });
 
   // La sesion se cierra SIEMPRE salvo que la tarea quede PAUSADA en un checkpoint: ahi DEBE seguir
   // viva (el estado del checkout se pierde si se reabre) y la cierran la decision o el barrido.
   let mantenerSesionViva = false;
   try {
-    // 4. VERIFICAR la egress_ip ANTES de navegar: si hay IP pineada y la observada no coincide (o no
-    //    se pudo observar), se ABORTA sin ejecutar nada, el sitio queda 'error' y se notifica. Una IP
-    //    distinta puede costarle la sesion al usuario. JAMAS se degrada.
-    if (sitio.egressIp !== null && sesion.egressIp !== sitio.egressIp) {
+    // 4. VERIFICAR el PAIS de salida ANTES de navegar: si el observado difiere del pineado (o no se
+    //    pudo observar), se ABORTA sin ejecutar nada, el sitio queda 'error' (marcado para
+    //    reconectar) y se notifica. Un salto de pais puede costarle la sesion al usuario; un cambio
+    //    de IP dentro del MISMO pais es rotacion normal del pool y NO aborta. JAMAS se degrada.
+    if (sesion.egressCountry !== sitio.proxyCountry) {
       await marcarSitioBestEffort(deps, sitio, job.ownerId, 'error');
       throw new SalidaDeRedNoDisponibleError(
-        `la salida de red observada no coincide con la pineada al dominio ${sitio.dominio} ` +
-          `(observada: ${sesion.egressIp ?? 'ninguna'}); la tarea NO se ejecuto. ` +
-          'Desconecta el sitio y volvelo a conectar para pinear una salida nueva.',
+        `no hay ruta de red disponible para tu region (pais pineado al dominio ${sitio.dominio}: ` +
+          `${sitio.proxyCountry}; pais observado: ${sesion.egressCountry ?? 'ninguno'}); la tarea NO ` +
+          'se ejecuto y no se degrada a otro pais. Reintenta mas tarde o reconecta el sitio.',
       );
     }
 
@@ -596,16 +621,23 @@ async function reanudarTrasDecision(
       return 'completada';
     }
 
-    // RE-VERIFICACION del pin de salida (igual que 7.1d, en pestana nueva): la sesion vivio pausada
-    // un rato y el proxy pudo cambiar por debajo. IP distinta (o no observable) = ABORTAR sin
-    // ejecutar nada. JAMAS se degrada.
-    const egressObservada = await deps.navegador.observarEgress(sesionExternaId);
-    if (sitio.egressIp !== null && egressObservada !== sitio.egressIp) {
+    // RE-VERIFICACION del pin POR PAIS (igual que 7.1d, en pestana nueva): la sesion vivio pausada
+    // un rato y el proxy pudo cambiar por debajo. Pais distinto (o no observable) = ABORTAR sin
+    // ejecutar nada; un cambio de IP dentro del mismo pais NO aborta. JAMAS se degrada.
+    const salida = await deps.navegador.observarSalida(sesionExternaId);
+    deps.logger.info('tarea web: salida de red observada al reanudar el checkpoint', {
+      jobId: job.id,
+      connectionId: sitio.id,
+      pais: salida.egressCountry,
+      egressIp: salida.egressIp,
+    });
+    if (sitio.proxyCountry === null || salida.egressCountry !== sitio.proxyCountry) {
       await marcarSitioBestEffort(deps, sitio, job.ownerId, 'error');
       throw new SalidaDeRedNoDisponibleError(
-        `la salida de red observada al reanudar no coincide con la pineada al dominio ${sitio.dominio} ` +
-          `(observada: ${egressObservada ?? 'ninguna'}); la accion aprobada NO se ejecuto. ` +
-          'Desconecta el sitio y volvelo a conectar para pinear una salida nueva.',
+        `no hay ruta de red disponible para tu region (pais pineado al dominio ${sitio.dominio}: ` +
+          `${sitio.proxyCountry ?? 'ninguno'}; pais observado: ${salida.egressCountry ?? 'ninguno'}); ` +
+          'la accion aprobada NO se ejecuto y no se degrada a otro pais. Reintenta mas tarde o ' +
+          'reconecta el sitio.',
       );
     }
 

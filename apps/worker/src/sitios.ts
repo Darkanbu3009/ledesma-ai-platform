@@ -27,10 +27,14 @@ import type { Logger } from './logger.js';
  *    de este modulo tiene (ni tendra) un campo de contrasena.
  *  - conectar_sitio NO espera al humano: abre la sesion, persiste el registro y TERMINA. Cero
  *    sleeps, cero polling. La sesion vive del lado del proveedor con su propio timeout.
- *  - La salida de red es FIJA por (owner, dominio): pineada al conectar por primera vez, verificada
- *    en cada reapertura. Si el proveedor no puede devolver la MISMA salida, el job FALLA con mensaje
- *    claro; NUNCA se degrada a otra salida (una IP distinta invalida la sesion del usuario y dispara
- *    verificaciones de seguridad en su cuenta real).
+ *  - El PAIS de salida es FIJO por (owner, dominio): pineado al conectar por primera vez (segun la
+ *    ubicacion del usuario) y verificado en cada reapertura. DECISION DE ARQUITECTURA: el criterio
+ *    de continuidad es el PAIS, no la IP exacta -- los proxies del pool son residenciales rotativos
+ *    (la IP cambia entre sesiones dentro del mismo pais) y lo que un sitio destino evalua para
+ *    invalidar una sesion es un salto geografico imposible (cambio de pais), no el cambio de IP.
+ *    Si el proveedor no puede salir por el pais pineado, el job FALLA con mensaje claro; NUNCA se
+ *    degrada a otro pais. Para sitios de maxima seguridad (banca) se migrara en el futuro a proxies
+ *    sticky dedicados (no en esta fase).
  *  - El contexto heredado (cookies) SON credenciales: se cifran con VAULT_SECRET en el repositorio
  *    de 7.1a antes de tocar la base y JAMAS se loguean (ni el contexto, ni las URLs de vista en
  *    vivo, ni los connect URLs: solo ids).
@@ -56,9 +60,9 @@ export function expiracionDeContexto(dominio: string, ahora: Date): string {
 }
 
 /**
- * El proveedor no puede abrir la sesion con la MISMA salida de red pineada a este dominio. Es
- * PERMANENTE a proposito: reintentar seria sortear otra salida del pool, exactamente la degradacion
- * prohibida. El usuario debe reconectar el sitio (nueva terna) o el operador restaurar el proxy.
+ * El proveedor no puede abrir la sesion saliendo por el PAIS pineado a este dominio (o por la
+ * salida externa pineada). Es PERMANENTE a proposito: reintentar seria aceptar otra salida,
+ * exactamente la degradacion prohibida. El usuario debe reintentar mas tarde o reconectar el sitio.
  */
 export class SalidaDeRedNoDisponibleError extends PermanentExecutionError {
   constructor(message: string) {
@@ -77,8 +81,10 @@ export interface SesionDeLoginAbierta {
   vistaEnVivoUrl: string;
   /** Referencia de la salida de red USADA (se pina en la primera conexion). */
   proxyRef: string;
-  /** IP de salida OBSERVADA a traves de esa salida. null = no observable. */
+  /** IP de salida OBSERVADA a traves de esa salida (informativa/observabilidad). null = no observable. */
   egressIp: string | null;
+  /** PAIS de salida OBSERVADO (ISO 3166-1 alpha-2). Es lo que se verifica contra el pais pineado. */
+  egressCountry: string | null;
   /** Referencia del fingerprint del navegador. null = el proveedor no la expone. */
   fingerprintRef: string | null;
   /** Cuando expira sola la sesion del lado del proveedor (ISO). null = desconocido. */
@@ -95,12 +101,14 @@ export interface NavegadorRemoto {
    * Crea una sesion de navegador APUNTANDO a `url` (navegada, lista para que el humano teclee) y
    * devuelve sus referencias. `contextoExternoId` null = crear un contexto NUEVO; con valor = reusar
    * el contexto pineado. `proxyRef` null = asignar una salida nueva; con valor = DEBE abrir por esa
-   * misma salida o lanzar SalidaDeRedNoDisponibleError (jamas degradar a otra).
+   * misma salida o lanzar SalidaDeRedNoDisponibleError (jamas degradar a otra). `proxyCountry` es el
+   * PAIS pedido para la geolocalizacion del proxy; el llamador VERIFICA el pais observado despues.
    */
   abrirSesionParaLogin(params: {
     url: string;
     contextoExternoId: string | null;
     proxyRef: string | null;
+    proxyCountry: string;
   }): Promise<SesionDeLoginAbierta>;
   /** Estado actual de una sesion por su id: 'viva' si sigue corriendo, 'muerta' si ya termino. */
   estadoDeSesion(sesionExternaId: string): Promise<'viva' | 'muerta'>;
@@ -125,11 +133,14 @@ export interface RepositorioSitios {
     urlLogin: string;
     contextoExternoId: string;
     proxyRef: string;
+    proxyCountry: string;
     egressIp?: string | null;
     fingerprintRef?: string | null;
     sesionExternaId: string;
     vistaEnVivoUrl: string;
   }): Promise<SitioConectado>;
+  /** Pinea el pais en una fila LEGADA (proxy_country null). Un pais ya pineado jamas se reescribe. */
+  pinearPais(id: string, ownerId: string, pais: string): Promise<SitioConectado | null>;
   reabrirParaLogin(
     id: string,
     ownerId: string,
@@ -217,7 +228,7 @@ async function cerrarSesionBestEffort(
  * humano, no hace polling: el entregable es la fila en 'esperando_login' con la vista en vivo, que
  * la UI (7.1c) le muestra al usuario. confirmar_conexion, en un job POSTERIOR, hereda el contexto.
  */
-async function conectarSitio(deps: SitiosJobDeps, job: Job, url: string): Promise<void> {
+async function conectarSitio(deps: SitiosJobDeps, job: Job, url: string, pais: string): Promise<void> {
   const dominio = dominioDeUrl(url);
   const existente = await deps.repo.obtenerPorDominio(job.ownerId, dominio);
 
@@ -227,28 +238,32 @@ async function conectarSitio(deps: SitiosJobDeps, job: Job, url: string): Promis
     await cerrarSesionBestEffort(deps, existente.sesionExternaId, 'reconexion: reemplaza login previo');
   }
 
+  // El PAIS que gobierna esta conexion: el YA pineado si existe (es inmutable de por vida), o el del
+  // usuario (payload) en la primera conexion / en una fila legada sin pais (anterior a V028).
+  const paisPineado = existente?.proxyCountry ?? pais;
+
   // Abrir la sesion: contexto NUEVO si es la primera conexion del dominio; el contexto y la salida
-  // PINEADOS si la conexion ya existia. El adaptador lanza SalidaDeRedNoDisponibleError (permanente)
-  // si no puede abrir por la salida pineada: nunca se degrada a otra.
+  // PINEADOS si la conexion ya existia, pidiendo SIEMPRE la geolocalizacion del pais pineado. El
+  // adaptador lanza SalidaDeRedNoDisponibleError (permanente) si el pin no es reconstruible.
   const sesion = await deps.navegador.abrirSesionParaLogin({
     url,
     contextoExternoId: existente?.contextoExternoId ?? null,
     proxyRef: existente?.proxyRef ?? null,
+    proxyCountry: paisPineado,
   });
 
-  // VERIFICACION DEL PIN (solo reaperturas con IP observada en ambos lados): la salida OBSERVADA
-  // debe ser LA MISMA que quedo pineada al conectar. Una salida distinta -- o no poder observarla
-  // para verificar -- cierra la sesion y FALLA el job: seguir con otra IP invalidaria la sesion del
-  // usuario y dispararia verificaciones de seguridad en su cuenta real.
-  if (existente?.egressIp) {
-    if (sesion.egressIp !== existente.egressIp) {
-      await cerrarSesionBestEffort(deps, sesion.sesionExternaId, 'salida de red distinta a la pineada');
-      throw new SalidaDeRedNoDisponibleError(
-        `el proveedor no pudo abrir la sesion por la salida de red pineada al dominio ${dominio} ` +
-          `(observada: ${sesion.egressIp ?? 'ninguna'}); no se degrada a otra salida. ` +
-          'Desconecta el sitio y volvelo a conectar para pinear una salida nueva.',
-      );
-    }
+  // VERIFICACION DEL PIN POR PAIS: el pais de salida OBSERVADO debe ser el pineado. El proveedor
+  // hace best-effort con la geolocalizacion (sin cobertura puede enrutar por el pais mas cercano),
+  // asi que la garantia es NUESTRA: pais distinto -- o no poder observarlo -- cierra la sesion y
+  // FALLA el job. JAMAS se degrada a otro pais (un salto de pais invalida la sesion del usuario en
+  // el sitio destino). Un cambio de IP dentro del mismo pais es normal (pool rotativo) y NO falla.
+  if (sesion.egressCountry !== paisPineado) {
+    await cerrarSesionBestEffort(deps, sesion.sesionExternaId, 'pais de salida distinto al pineado');
+    throw new SalidaDeRedNoDisponibleError(
+      `no hay ruta de red disponible para tu region (pais pineado al dominio ${dominio}: ${paisPineado}; ` +
+        `pais observado: ${sesion.egressCountry ?? 'ninguno'}); no se degrada a otro pais. ` +
+        'Reintenta mas tarde.',
+    );
   }
 
   // Persistir el registro en 'esperando_login'. Si la escritura falla, la sesion recien abierta se
@@ -260,6 +275,11 @@ async function conectarSitio(deps: SitiosJobDeps, job: Job, url: string): Promis
         sesionExternaId: sesion.sesionExternaId,
         vistaEnVivoUrl: sesion.vistaEnVivoUrl,
       });
+      if (existente.proxyCountry === null) {
+        // Fila LEGADA (pineada por IP exacta, anterior a V028): este login queda pineado al pais
+        // recien verificado. pinearPais solo escribe si proxy_country sigue null (inmutable despues).
+        await deps.repo.pinearPais(existente.id, job.ownerId, paisPineado);
+      }
     } else {
       await deps.repo.registrarSesionDeLogin({
         ownerId: job.ownerId,
@@ -267,6 +287,7 @@ async function conectarSitio(deps: SitiosJobDeps, job: Job, url: string): Promis
         urlLogin: url,
         contextoExternoId: sesion.contextoExternoId,
         proxyRef: sesion.proxyRef,
+        proxyCountry: paisPineado,
         egressIp: sesion.egressIp,
         fingerprintRef: sesion.fingerprintRef,
         sesionExternaId: sesion.sesionExternaId,
@@ -278,12 +299,15 @@ async function conectarSitio(deps: SitiosJobDeps, job: Job, url: string): Promis
     throw error;
   }
 
-  // Solo ids en el log: ni la vista en vivo (permite mirar/manejar la sesion) ni URLs del sitio.
+  // Solo ids en el log: ni la vista en vivo (permite mirar/manejar la sesion) ni URLs del sitio. El
+  // pais y la egress_ip observados van SIEMPRE (observabilidad de la identidad de red por sesion).
   deps.logger.info('sesion de login abierta; esperando al usuario (el job NO espera)', {
     jobId: job.id,
     dominio,
     sesionExternaId: sesion.sesionExternaId,
     reconexion: existente !== null,
+    pais: paisPineado,
+    egressIp: sesion.egressIp,
   });
 }
 
@@ -419,7 +443,7 @@ export async function procesarJobDeSitio(deps: SitiosJobDeps | undefined, job: J
   const payload = parsed.data;
   switch (payload.kind) {
     case CONECTAR_SITIO_JOB_KIND:
-      return conectarSitio(deps, job, payload.url);
+      return conectarSitio(deps, job, payload.url, payload.pais);
     case CONFIRMAR_CONEXION_JOB_KIND:
       return confirmarConexion(deps, job, payload.connectionId);
     case DESCONECTAR_SITIO_JOB_KIND:

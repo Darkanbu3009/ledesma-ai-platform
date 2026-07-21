@@ -55,6 +55,8 @@ function makeSitio(overrides: Partial<SitioConectado> = {}): SitioConectado {
     urlLogin: 'https://app.ejemplo.com/login',
     contextoExternoId: 'ctx-1',
     proxyRef: 'browserbase',
+    proxyCountry: 'AR',
+    proxyState: null,
     egressIp: '203.0.113.7',
     fingerprintRef: 'contexto:ctx-1',
     sesionExternaId: null,
@@ -80,13 +82,17 @@ function makeRepo(overrides: Partial<RepositorioSitiosParaTarea> = {}): Reposito
 
 function makeNavegador(overrides: Partial<NavegadorParaTarea> = {}): NavegadorParaTarea {
   return {
-    abrirSesionParaTarea: vi.fn(async () => ({ sesionExternaId: 'ses-1', egressIp: '203.0.113.7' })),
+    abrirSesionParaTarea: vi.fn(async () => ({
+      sesionExternaId: 'ses-1',
+      egressIp: '203.0.113.7',
+      egressCountry: 'AR',
+    })),
     inyectarContexto: vi.fn(async () => {}),
     detectarPantallaDeLogin: vi.fn(async () => false),
     extraerContexto: vi.fn(async () => CONTEXTO_PLANO),
     estadoDeSesion: vi.fn(async () => 'viva' as const),
     capturarPantalla: vi.fn(async () => 'cGxhY2Vob2xkZXI='),
-    observarEgress: vi.fn(async () => '203.0.113.7'),
+    observarSalida: vi.fn(async () => ({ egressIp: '203.0.113.7', egressCountry: 'AR' })),
     cerrarSesion: vi.fn(async () => {}),
     ...overrides,
   };
@@ -212,7 +218,7 @@ describe('pausa en checkpoint (accion financiera detectada)', () => {
 });
 
 describe('reanudacion tras la decision humana', () => {
-  it('APROBADA: reanuda LA MISMA sesion, re-verifica la egress_ip y ejecuta la accion', async () => {
+  it('APROBADA: reanuda LA MISMA sesion, re-verifica el pais de salida y ejecuta la accion', async () => {
     const aprobacion = makeAprobacion({ estado: 'aprobada', sesionExternaId: 'ses-pausada' });
     const navegador = makeNavegador();
     const motor = makeMotor({ exito: true, mensaje: 'pago enviado y tarea completada' });
@@ -226,7 +232,7 @@ describe('reanudacion tras la decision humana', () => {
     expect(resultado).toBe('completada');
     // NO abre sesion nueva: retoma la que quedo viva al pausar.
     expect(navegador.abrirSesionParaTarea).not.toHaveBeenCalled();
-    expect(navegador.observarEgress).toHaveBeenCalledWith('ses-pausada');
+    expect(navegador.observarSalida).toHaveBeenCalledWith('ses-pausada');
     const params = (motor.ejecutar as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
       sesionExternaId: string;
       objetivo: string;
@@ -240,10 +246,25 @@ describe('reanudacion tras la decision humana', () => {
     expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-pausada');
   });
 
-  it('APROBADA con egress_ip DISTINTA al reanudar: aborta SIN ejecutar y marca el sitio en error', async () => {
+  it('APROBADA con IP distinta pero MISMO pais al reanudar: NO aborta (rotacion normal)', async () => {
+    const aprobacion = makeAprobacion({ estado: 'aprobada' });
+    const navegador = makeNavegador({
+      observarSalida: vi.fn(async () => ({ egressIp: '198.51.100.9', egressCountry: 'AR' })),
+    });
+    const deps = makeDeps({
+      navegador,
+      aprobaciones: makeAprobacionesRepo({ obtenerVigentePorJob: vi.fn(async () => aprobacion) }),
+    });
+    await expect(procesarTareaWeb(deps, makeJob())).resolves.toBe('completada');
+    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+  });
+
+  it('APROBADA con PAIS distinto al reanudar: aborta SIN ejecutar y marca el sitio en error', async () => {
     const aprobacion = makeAprobacion({ estado: 'aprobada' });
     const repo = makeRepo();
-    const navegador = makeNavegador({ observarEgress: vi.fn(async () => '198.51.100.9') });
+    const navegador = makeNavegador({
+      observarSalida: vi.fn(async () => ({ egressIp: '198.51.100.9', egressCountry: 'BR' })),
+    });
     const deps = makeDeps({
       repo,
       navegador,

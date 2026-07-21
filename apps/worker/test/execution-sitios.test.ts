@@ -40,6 +40,7 @@ function makeSitiosDeps(): SitiosJobDeps {
       obtenerPorDominio: vi.fn(async () => null),
       obtenerPorId: vi.fn(async () => null),
       registrarSesionDeLogin: vi.fn(async () => ({}) as never),
+      pinearPais: vi.fn(async () => null),
       reabrirParaLogin: vi.fn(async () => null),
       guardarContexto: vi.fn(async () => null),
       cerrarLogin: vi.fn(async () => null),
@@ -53,6 +54,7 @@ function makeSitiosDeps(): SitiosJobDeps {
         vistaEnVivoUrl: 'https://live.browserbase.com/ses-1',
         proxyRef: 'browserbase',
         egressIp: null,
+        egressCountry: 'AR',
         fingerprintRef: null,
         expiraEn: null,
       })),
@@ -95,7 +97,7 @@ describe('processClaimedJob con jobs de sitios conectados', () => {
   it('ramifica por kind ANTES del motor: no carga agente, ni credencial, ni corre el modelo', async () => {
     const sitios = makeSitiosDeps();
     const deps = makeDeps({ sitios });
-    const job = makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login' });
+    const job = makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login', pais: 'AR' });
 
     await processClaimedJob(deps, job);
 
@@ -111,14 +113,14 @@ describe('processClaimedJob con jobs de sitios conectados', () => {
   it('termina en tiempo acotado: conectar_sitio no espera, no poll-ea, no duerme', async () => {
     const deps = makeDeps({ sitios: makeSitiosDeps() });
     const inicio = Date.now();
-    await processClaimedJob(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login' }));
+    await processClaimedJob(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login', pais: 'AR' }));
     expect(Date.now() - inicio).toBeLessThan(500);
     expect(deps.jobs.markCompleted).toHaveBeenCalled();
   });
 
   it('sin deps.sitios cableado (falta env), el job falla DEFINITIVO con mensaje accionable', async () => {
     const deps = makeDeps();
-    await processClaimedJob(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login' }));
+    await processClaimedJob(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login', pais: 'AR' }));
     expect(deps.jobs.markFailed).toHaveBeenCalledWith('job-1', expect.stringContaining('BROWSERBASE_API_KEY'));
     expect(deps.jobs.markPendingRetry).not.toHaveBeenCalled();
   });
@@ -126,7 +128,7 @@ describe('processClaimedJob con jobs de sitios conectados', () => {
   it('el gate por tier aplica tambien a los jobs de sitios (parte de la suite autonoma)', async () => {
     const sitios = makeSitiosDeps();
     const deps = makeDeps({ sitios, getProfileTier: vi.fn(async () => 'free' as never) });
-    await processClaimedJob(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login' }));
+    await processClaimedJob(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login', pais: 'AR' }));
     expect(deps.jobs.markFailed).toHaveBeenCalled();
     expect(sitios.navegador.abrirSesionParaLogin).not.toHaveBeenCalled();
   });

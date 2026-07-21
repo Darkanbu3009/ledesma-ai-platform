@@ -54,6 +54,8 @@ function makeSitio(overrides: Partial<SitioConectado> = {}): SitioConectado {
     urlLogin: 'https://app.ejemplo.com/login',
     contextoExternoId: 'ctx-1',
     proxyRef: 'browserbase',
+    proxyCountry: 'AR',
+    proxyState: null,
     egressIp: '203.0.113.7',
     fingerprintRef: 'contexto:ctx-1',
     sesionExternaId: 'ses-1',
@@ -72,6 +74,7 @@ function makeRepo(overrides: Partial<RepositorioSitios> = {}): RepositorioSitios
     obtenerPorDominio: vi.fn(async () => null),
     obtenerPorId: vi.fn(async () => null),
     registrarSesionDeLogin: vi.fn(async () => makeSitio()),
+    pinearPais: vi.fn(async () => makeSitio()),
     reabrirParaLogin: vi.fn(async () => makeSitio()),
     guardarContexto: vi.fn(async () => makeSitio({ estado: 'activo', tieneContexto: true })),
     cerrarLogin: vi.fn(async () => makeSitio({ estado: 'error' })),
@@ -89,6 +92,7 @@ function makeNavegador(overrides: Partial<NavegadorRemoto> = {}): NavegadorRemot
       vistaEnVivoUrl: 'https://live.browserbase.com/ses-nueva',
       proxyRef: 'browserbase',
       egressIp: '203.0.113.7',
+      egressCountry: 'AR',
       fingerprintRef: 'contexto:ctx-nuevo',
       expiraEn: '2026-07-16T00:15:00.000Z',
     })),
@@ -115,7 +119,7 @@ function makeDeps(
 
 describe('procesarJobDeSitio: guardas', () => {
   it('sin deps de sitios (falta env de Browserbase) falla PERMANENTE con mensaje accionable', async () => {
-    const job = makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login' });
+    const job = makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login', pais: 'AR' });
     await expect(procesarJobDeSitio(undefined, job)).rejects.toThrow(PermanentExecutionError);
     await expect(procesarJobDeSitio(undefined, job)).rejects.toThrow(/BROWSERBASE_API_KEY/);
   });
@@ -132,7 +136,7 @@ describe('conectar_sitio', () => {
   it('abre la sesion con contexto NUEVO, persiste el registro pineado y TERMINA (sin esperar al humano)', async () => {
     const repo = makeRepo();
     const deps = makeDeps(repo);
-    const job = makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login?next=/inicio' });
+    const job = makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login?next=/inicio', pais: 'AR' });
 
     const inicio = Date.now();
     await procesarJobDeSitio(deps, job);
@@ -146,6 +150,7 @@ describe('conectar_sitio', () => {
       url: 'https://app.ejemplo.com/login?next=/inicio',
       contextoExternoId: null,
       proxyRef: null,
+      proxyCountry: 'AR',
     });
     expect(repo.registrarSesionDeLogin).toHaveBeenCalledWith({
       ownerId: 'user-1',
@@ -153,6 +158,7 @@ describe('conectar_sitio', () => {
       urlLogin: 'https://app.ejemplo.com/login?next=/inicio',
       contextoExternoId: 'ctx-nuevo',
       proxyRef: 'browserbase',
+      proxyCountry: 'AR',
       egressIp: '203.0.113.7',
       fingerprintRef: 'contexto:ctx-nuevo',
       sesionExternaId: 'ses-nueva',
@@ -163,16 +169,18 @@ describe('conectar_sitio', () => {
     expect(deps.navegador.cerrarSesion).not.toHaveBeenCalled();
   });
 
-  it('reconexion: reusa el contexto y la salida PINEADOS y reabre la fila existente', async () => {
+  it('reconexion: reusa contexto, salida y PAIS PINEADOS, reabre la fila y NO re-pinea', async () => {
     const existente = makeSitio({ sesionExternaId: null, estado: 'error', proxyRef: 'browserbase' });
     const repo = makeRepo({ obtenerPorDominio: vi.fn(async () => existente) });
     const deps = makeDeps(repo);
-    await procesarJobDeSitio(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login' }));
+    // El payload trae OTRO pais (el usuario viajo o cambio su navegador): el pin manda igual.
+    await procesarJobDeSitio(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login', pais: 'BR' }));
 
     expect(deps.navegador.abrirSesionParaLogin).toHaveBeenCalledWith({
       url: 'https://app.ejemplo.com/login',
       contextoExternoId: 'ctx-1',
       proxyRef: 'browserbase',
+      proxyCountry: 'AR',
     });
     expect(repo.reabrirParaLogin).toHaveBeenCalledWith(CONNECTION_ID, 'user-1', {
       urlLogin: 'https://app.ejemplo.com/login',
@@ -180,10 +188,12 @@ describe('conectar_sitio', () => {
       vistaEnVivoUrl: 'https://live.browserbase.com/ses-nueva',
     });
     expect(repo.registrarSesionDeLogin).not.toHaveBeenCalled();
+    // El pais ya estaba pineado: JAMAS se reescribe.
+    expect(repo.pinearPais).not.toHaveBeenCalled();
   });
 
-  it('salida observada DISTINTA a la pineada: cierra la sesion y FALLA permanente, sin degradar', async () => {
-    const existente = makeSitio({ egressIp: '203.0.113.7', sesionExternaId: null });
+  it('reconexion con IP DISTINTA pero MISMO pais: NO aborta (rotacion normal del pool)', async () => {
+    const existente = makeSitio({ egressIp: '203.0.113.7', proxyCountry: 'AR', sesionExternaId: null });
     const repo = makeRepo({ obtenerPorDominio: vi.fn(async () => existente) });
     const navegador = makeNavegador({
       abrirSesionParaLogin: vi.fn(async () => ({
@@ -192,6 +202,43 @@ describe('conectar_sitio', () => {
         vistaEnVivoUrl: 'https://live.browserbase.com/ses-nueva',
         proxyRef: 'browserbase',
         egressIp: '198.51.100.9',
+        egressCountry: 'AR',
+        fingerprintRef: 'contexto:ctx-1',
+        expiraEn: null,
+      })),
+    });
+    const deps = makeDeps(repo, navegador);
+
+    await procesarJobDeSitio(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login', pais: 'AR' }));
+
+    // La IP cambio (203.0.113.7 -> 198.51.100.9) pero el pais es el pineado: el flujo sigue.
+    expect(repo.reabrirParaLogin).toHaveBeenCalled();
+    expect(navegador.cerrarSesion).not.toHaveBeenCalled();
+  });
+
+  it('fila LEGADA sin pais pineado: pinea el pais del payload en la reconexion', async () => {
+    const existente = makeSitio({ proxyCountry: null, sesionExternaId: null, estado: 'error' });
+    const repo = makeRepo({ obtenerPorDominio: vi.fn(async () => existente) });
+    const deps = makeDeps(repo);
+    await procesarJobDeSitio(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login', pais: 'AR' }));
+
+    expect(deps.navegador.abrirSesionParaLogin).toHaveBeenCalledWith(
+      expect.objectContaining({ proxyCountry: 'AR' }),
+    );
+    expect(repo.pinearPais).toHaveBeenCalledWith(CONNECTION_ID, 'user-1', 'AR');
+  });
+
+  it('PAIS observado DISTINTO al pineado: cierra la sesion y FALLA permanente, sin degradar', async () => {
+    const existente = makeSitio({ proxyCountry: 'AR', sesionExternaId: null });
+    const repo = makeRepo({ obtenerPorDominio: vi.fn(async () => existente) });
+    const navegador = makeNavegador({
+      abrirSesionParaLogin: vi.fn(async () => ({
+        sesionExternaId: 'ses-nueva',
+        contextoExternoId: 'ctx-1',
+        vistaEnVivoUrl: 'https://live.browserbase.com/ses-nueva',
+        proxyRef: 'browserbase',
+        egressIp: '198.51.100.9',
+        egressCountry: 'BR',
         fingerprintRef: 'contexto:ctx-1',
         expiraEn: null,
       })),
@@ -199,18 +246,43 @@ describe('conectar_sitio', () => {
     const deps = makeDeps(repo, navegador);
 
     await expect(
-      procesarJobDeSitio(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login' })),
+      procesarJobDeSitio(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login', pais: 'AR' })),
     ).rejects.toThrow(SalidaDeRedNoDisponibleError);
+    await expect(
+      procesarJobDeSitio(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login', pais: 'AR' })),
+    ).rejects.toThrow(/no hay ruta de red disponible/);
 
-    // UNA sola apertura: jamas se reintenta con otra salida. La sesion desviada se cierra.
-    expect(navegador.abrirSesionParaLogin).toHaveBeenCalledTimes(1);
+    // Jamas se reintenta con otro pais. La sesion desviada se cierra y nada se persiste.
     expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-nueva');
     expect(repo.reabrirParaLogin).not.toHaveBeenCalled();
     expect(repo.registrarSesionDeLogin).not.toHaveBeenCalled();
   });
 
-  it('salida NO OBSERVABLE con IP pineada: tambien falla (no se puede verificar el pin)', async () => {
-    const existente = makeSitio({ egressIp: '203.0.113.7', sesionExternaId: null });
+  it('conexion NUEVA cuyo pais observado no es el pedido (sin cobertura): falla claro, no degrada', async () => {
+    const repo = makeRepo();
+    const navegador = makeNavegador({
+      abrirSesionParaLogin: vi.fn(async () => ({
+        sesionExternaId: 'ses-nueva',
+        contextoExternoId: 'ctx-nuevo',
+        vistaEnVivoUrl: 'https://live.browserbase.com/ses-nueva',
+        proxyRef: 'browserbase',
+        egressIp: '198.51.100.9',
+        // El proveedor enruto por el pais "mas cercano" por falta de cobertura: inaceptable.
+        egressCountry: 'CL',
+        fingerprintRef: 'contexto:ctx-nuevo',
+        expiraEn: null,
+      })),
+    });
+    const deps = makeDeps(repo, navegador);
+    await expect(
+      procesarJobDeSitio(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login', pais: 'AR' })),
+    ).rejects.toThrow(/no hay ruta de red disponible.*[Rr]eintenta mas tarde/s);
+    expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-nueva');
+    expect(repo.registrarSesionDeLogin).not.toHaveBeenCalled();
+  });
+
+  it('pais NO OBSERVABLE: tambien falla (no se puede verificar el pin)', async () => {
+    const existente = makeSitio({ proxyCountry: 'AR', sesionExternaId: null });
     const repo = makeRepo({ obtenerPorDominio: vi.fn(async () => existente) });
     const navegador = makeNavegador({
       abrirSesionParaLogin: vi.fn(async () => ({
@@ -219,13 +291,14 @@ describe('conectar_sitio', () => {
         vistaEnVivoUrl: 'https://live.browserbase.com/ses-nueva',
         proxyRef: 'browserbase',
         egressIp: null,
+        egressCountry: null,
         fingerprintRef: null,
         expiraEn: null,
       })),
     });
     const deps = makeDeps(repo, navegador);
     await expect(
-      procesarJobDeSitio(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login' })),
+      procesarJobDeSitio(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login', pais: 'AR' })),
     ).rejects.toThrow(SalidaDeRedNoDisponibleError);
     expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-nueva');
   });
@@ -240,7 +313,7 @@ describe('conectar_sitio', () => {
     });
     const deps = makeDeps(repo, navegador);
     await expect(
-      procesarJobDeSitio(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login' })),
+      procesarJobDeSitio(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login', pais: 'AR' })),
     ).rejects.toThrow(SalidaDeRedNoDisponibleError);
     expect(repo.reabrirParaLogin).not.toHaveBeenCalled();
     expect(repo.registrarSesionDeLogin).not.toHaveBeenCalled();
@@ -254,7 +327,7 @@ describe('conectar_sitio', () => {
     });
     const deps = makeDeps(repo);
     await expect(
-      procesarJobDeSitio(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login' })),
+      procesarJobDeSitio(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login', pais: 'AR' })),
     ).rejects.toThrow('db caida');
     expect(deps.navegador.cerrarSesion).toHaveBeenCalledWith('ses-nueva');
   });
@@ -263,7 +336,7 @@ describe('conectar_sitio', () => {
     const existente = makeSitio({ sesionExternaId: 'ses-vieja' });
     const repo = makeRepo({ obtenerPorDominio: vi.fn(async () => existente) });
     const deps = makeDeps(repo);
-    await procesarJobDeSitio(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login' }));
+    await procesarJobDeSitio(deps, makeJob({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login', pais: 'AR' }));
     expect(deps.navegador.cerrarSesion).toHaveBeenCalledWith('ses-vieja');
   });
 });
