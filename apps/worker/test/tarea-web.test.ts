@@ -11,6 +11,7 @@ import type {
   RepositorioSitiosParaTarea,
   TareaWebDeps,
 } from '../src/tarea-web.js';
+import { makeAprobacionesRepo } from './aprobaciones-fakes.js';
 import {
   MARCADOR_REQUIERE_APROBACION,
   MARCADOR_SESION_CADUCADA,
@@ -91,6 +92,9 @@ function makeNavegador(overrides: Partial<NavegadorParaTarea> = {}): NavegadorPa
     inyectarContexto: vi.fn(async () => {}),
     detectarPantallaDeLogin: vi.fn(async () => false),
     extraerContexto: vi.fn(async () => CONTEXTO_PLANO),
+    estadoDeSesion: vi.fn(async () => 'viva' as const),
+    capturarPantalla: vi.fn(async () => 'cGxhY2Vob2xkZXI='),
+    observarEgress: vi.fn(async () => '203.0.113.7'),
     cerrarSesion: vi.fn(async () => {}),
     ...overrides,
   };
@@ -115,6 +119,9 @@ function makeDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
       baseUrl: null,
     })),
     guardarResultado: vi.fn(async () => {}),
+    aprobaciones: makeAprobacionesRepo(),
+    aprobacionTtlMs: 15 * 60 * 1000,
+    marcarJobPausado: vi.fn(async () => {}),
     logger: makeLogger(),
     ...overrides,
   };
@@ -196,22 +203,33 @@ describe('procesarTareaWeb', () => {
     expect(deps.guardarResultado).not.toHaveBeenCalled();
   });
 
-  it('accion financiera detectada: se BLOQUEA y se reporta requiere_aprobacion, sin fallar el job', async () => {
+  it('accion financiera detectada: se BLOQUEA, crea el checkpoint, PAUSA el job y NO cierra la sesion', async () => {
     const motor = makeMotor({
       exito: false,
-      mensaje: `${MARCADOR_REQUIERE_APROBACION}: transferir 500 USD a la cuenta X quedo pendiente de aprobacion humana`,
+      mensaje: `${MARCADOR_REQUIERE_APROBACION}: financiera: transferir 500 USD a la cuenta X`,
     });
-    const deps = makeDeps({ motor });
-    await procesarTareaWeb(deps, makeJob());
-    expect(deps.guardarResultado).toHaveBeenCalledTimes(1);
-    const [jobId, resultado] = (deps.guardarResultado as ReturnType<typeof vi.fn>).mock.calls[0] as [
-      string,
-      { estado: string; detalle: string },
-    ];
-    expect(jobId).toBe('job-1');
-    expect(resultado.estado).toBe('requiere_aprobacion');
-    expect(resultado.detalle).toContain('transferir 500 USD');
-    // El motor corrio UNA vez y la tarea se detuvo ahi: no hay segunda ejecucion que "complete" la accion.
+    const navegador = makeNavegador();
+    const deps = makeDeps({ motor, navegador });
+    const resultado = await procesarTareaWeb(deps, makeJob());
+    expect(resultado).toBe('pausada');
+    // El checkpoint quedo creado con la descripcion en una linea y tipo financiera.
+    expect(deps.aprobaciones.crear).toHaveBeenCalledTimes(1);
+    const crearInput = (deps.aprobaciones.crear as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+      accionTipo: string;
+      descripcion: string;
+      sesionExternaId: string;
+    };
+    expect(crearInput.accionTipo).toBe('financiera');
+    expect(crearInput.descripcion).toContain('transferir 500 USD');
+    expect(crearInput.sesionExternaId).toBe('ses-1');
+    // El job quedo pausado con el resultado 'esperando_aprobacion'.
+    expect(deps.marcarJobPausado).toHaveBeenCalledWith('job-1');
+    expect(deps.guardarResultado).toHaveBeenCalledWith(
+      'job-1',
+      expect.objectContaining({ estado: 'esperando_aprobacion' }),
+    );
+    // La sesion sigue VIVA (el estado del checkout se pierde si se reabre) y el motor no volvio a correr.
+    expect(navegador.cerrarSesion).not.toHaveBeenCalled();
     expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
   });
 

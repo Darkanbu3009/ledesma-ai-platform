@@ -32,6 +32,7 @@ import { procesarJobDeSitio } from './sitios.js';
 import type { SitiosJobDeps } from './sitios.js';
 import { procesarTareaWeb } from './tarea-web.js';
 import type { TareaWebDeps } from './tarea-web.js';
+import type { BarridoAprobacionesDeps } from './aprobaciones.js';
 import type { Logger } from './logger.js';
 
 /**
@@ -180,6 +181,13 @@ export interface JobRunnerDeps {
    * mensaje claro (procesarTareaWeb) y el resto del worker no cambia en nada.
    */
   tareaWeb?: TareaWebDeps;
+  /**
+   * Dependencias del BARRIDO de aprobaciones vencidas (7.1e): expira los checkpoints sin decision,
+   * cierra su sesion de navegador (que se mantuvo VIVA mientras estuvo pendiente) y cierra el job
+   * pausado. OPCIONAL con el mismo criterio que `sitios`/`tareaWeb`: se cablea solo con la config
+   * de Browserbase completa; sin cablear, no corre.
+   */
+  barridoAprobaciones?: BarridoAprobacionesDeps;
 }
 
 /** Mensajes del payload de un job: mismo shape que el body de /v1/run/:agentId. */
@@ -483,7 +491,14 @@ export async function processClaimedJob(
     //      posteriores a abrir la sesion son PERMANENTES (no se re-ejecuta una navegacion a medias
     //      sobre la cuenta real del usuario), asi que handleFailure no los reintenta.
     if (isTareaWebJobPayload(job.payload)) {
-      await procesarTareaWeb(deps.tareaWeb, job);
+      const resultado = await procesarTareaWeb(deps.tareaWeb, job);
+      if (resultado === 'pausada') {
+        // Checkpoint de aprobacion humana (7.1e): el handler YA dejo el job 'pausado' (y la sesion
+        // de navegador VIVA). No se marca completado: el job vuelve a 'pending' cuando el humano
+        // decide, o a 'failed' si la aprobacion expira (barrido de aprobaciones vencidas).
+        logger.info('job de tarea web pausado en checkpoint de aprobacion humana', { jobId: job.id });
+        return;
+      }
       await markCompletedWithRetry(deps, job.id);
       logger.info('job de tarea web completado', { jobId: job.id });
       return;

@@ -5,6 +5,7 @@ import type { SitioConectado } from '@ledesma-platform/backend/sitios';
 import { processClaimedJob } from '../src/execution.js';
 import type { JobRunnerDeps } from '../src/execution.js';
 import type { TareaWebDeps } from '../src/tarea-web.js';
+import { makeAprobacionesRepo } from './aprobaciones-fakes.js';
 import { MARCADOR_SESION_CADUCADA } from '../src/prompt-tarea-web.js';
 import type { Logger } from '../src/logger.js';
 
@@ -74,6 +75,9 @@ function makeTareaWebDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
       inyectarContexto: vi.fn(async () => {}),
       detectarPantallaDeLogin: vi.fn(async () => false),
       extraerContexto: vi.fn(async () => JSON.stringify({ formato: 'cookies-cdp-v1', cookies: [] })),
+      estadoDeSesion: vi.fn(async () => 'viva' as const),
+      capturarPantalla: vi.fn(async () => 'cGxhY2Vob2xkZXI='),
+      observarEgress: vi.fn(async () => '203.0.113.7'),
       cerrarSesion: vi.fn(async () => {}),
     },
     motor: { ejecutar: vi.fn(async () => ({ exito: true, mensaje: 'listo' })) },
@@ -87,6 +91,9 @@ function makeTareaWebDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
       baseUrl: null,
     })),
     guardarResultado: vi.fn(async () => {}),
+    aprobaciones: makeAprobacionesRepo(),
+    aprobacionTtlMs: 15 * 60 * 1000,
+    marcarJobPausado: vi.fn(async () => {}),
     logger: makeLogger(),
     ...overrides,
   };
