@@ -121,7 +121,7 @@ beforeEach(async () => {
   totalsForOwner.mockResolvedValue(makeTotals());
   runsByDayForOwner.mockResolvedValue([]);
   tokensByModelForOwner.mockResolvedValue([]);
-  countByStatusForOwner.mockResolvedValue({ pending: 0, running: 0, completed: 0, failed: 0 });
+  countByStatusForOwner.mockResolvedValue({ pending: 0, running: 0, completed: 0, failed: 0, pausado: 0 });
   scheduledCountActive.mockResolvedValue(0);
   triggersCountActive.mockResolvedValue(0);
   recipesCountActive.mockResolvedValue(0);
@@ -288,7 +288,7 @@ describe('GET /v1/admin/users/:id/activity: los tres ejes del usuario objetivo',
     tokensByModelForOwner.mockResolvedValue([
       { model: 'claude-opus-4-8', runs: 10, inputTokens: 1000, outputTokens: 400, cacheReadTokens: 5000, cacheWriteTokens: 250 },
     ]);
-    countByStatusForOwner.mockResolvedValue({ pending: 1, running: 2, completed: 6, failed: 1 });
+    countByStatusForOwner.mockResolvedValue({ pending: 1, running: 2, completed: 6, failed: 1, pausado: 0 });
     scheduledCountActive.mockResolvedValue(3);
     triggersCountActive.mockResolvedValue(2);
     recipesCountActive.mockResolvedValue(4);
@@ -310,7 +310,7 @@ describe('GET /v1/admin/users/:id/activity: los tres ejes del usuario objetivo',
     expect(body.activity.lastRunAt).toBe('2026-07-03T10:00:00.000Z');
 
     // OPERACIONES
-    expect(body.operations.jobs).toEqual({ pending: 1, running: 2, completed: 6, failed: 1, total: 10 });
+    expect(body.operations.jobs).toEqual({ pending: 1, running: 2, completed: 6, failed: 1, pausado: 0, total: 10 });
     expect(body.operations.resources).toEqual({ scheduledTasksActive: 3, triggersActive: 2, recipesActive: 4 });
 
     // GASTO

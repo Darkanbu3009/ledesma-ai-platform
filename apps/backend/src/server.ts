@@ -18,6 +18,7 @@ import { subscriptionRoutes } from './routes/subscription.js';
 import { adminUpgradeRequestsRoutes } from './routes/admin-upgrade-requests.js';
 import { jobsRoutes } from './routes/jobs.js';
 import { sitiosRoutes } from './routes/sitios.js';
+import { aprobacionesRoutes } from './routes/aprobaciones.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { triggerRoutes } from './routes/triggers.js';
 import { incomingTriggerRoutes } from './routes/incoming-triggers.js';
@@ -105,6 +106,9 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
   // Sitios conectados (7.1c): conectar/confirmar/listar/desconectar. Solo encola jobs de 7.1b; el
   // login lo hace el usuario en la vista en vivo del proveedor (jamas pasa por este backend).
   await app.register(sitiosRoutes(config));
+  // Checkpoints de aprobacion humana de tareas web (7.1e): listar/aprobar/rechazar. La decision
+  // registra la intervencion Art.22 y devuelve el job pausado a 'pending'; el worker reanuda.
+  await app.register(aprobacionesRoutes(config));
   // Resumen AGREGADO del dashboard (solo lectura): los tres ejes (actividad, operaciones, gasto) por
   // owner. Aditivo: lee agent_runs, jobs y los repos de recursos; no escribe nada.
   await app.register(dashboardRoutes(config));

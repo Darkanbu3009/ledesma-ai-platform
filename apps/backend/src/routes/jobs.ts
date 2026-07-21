@@ -17,8 +17,8 @@ const DEFAULT_LIMIT = 20;
 // solo lectura, y evita volcar dato potencialmente sensible del proveedor a la UI.
 const MAX_LAST_ERROR_CHARS = 500;
 
-// Los cuatro estados de la cola (mismos que el CHECK de V008). Se listan literales para el schema Zod.
-const JobStatusSchema = z.enum(['pending', 'running', 'completed', 'failed']);
+// Los estados de la cola (mismos que el CHECK de V008 + 'pausado' de V027). Literales para Zod.
+const JobStatusSchema = z.enum(['pending', 'running', 'completed', 'failed', 'pausado']);
 
 // Querystring del listado: filtro opcional por estado + paginacion. limit/offset llegan como strings del
 // querystring, por eso z.coerce; ambos con default y acotados (limit <= 50, offset >= 0).

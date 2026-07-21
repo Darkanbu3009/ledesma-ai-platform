@@ -4,6 +4,7 @@ export type ErrorCode =
   | 'VALIDATION_ERROR'
   | 'RATE_LIMIT_EXCEEDED'
   | 'UNAUTHORIZED'
+  | 'CONFLICT'
   | 'FORBIDDEN'
   | 'AUTHENTICATION';
 
