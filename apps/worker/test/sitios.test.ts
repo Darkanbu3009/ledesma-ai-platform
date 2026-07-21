@@ -4,6 +4,7 @@ import type { SitioConectado } from '@ledesma-platform/backend/sitios';
 import {
   barrerLoginsVencidos,
   CONTEXTO_TTL_DIAS_DEFAULT,
+  esErrorDeRecursoInexistente,
   expiracionDeContexto,
   LOGIN_TIMEOUT_MS,
   procesarJobDeSitio,
@@ -381,12 +382,91 @@ describe('desconectar_sitio (borrado ARCO)', () => {
     expect(repo.borrar).not.toHaveBeenCalled();
   });
 
+  it('contexto ya inexistente en el proveedor (404): EXITO, completa ARCO y borra la fila local', async () => {
+    // El mock imita el NotFoundError del SDK de Browserbase: un error con status 404.
+    const notFound = Object.assign(new Error('404 Context not found'), { status: 404 });
+    const repo = makeRepo({ obtenerPorId: vi.fn(async () => makeSitio()) });
+    const navegador = makeNavegador({
+      borrarContexto: vi.fn(async () => {
+        throw notFound;
+      }),
+    });
+    const deps = makeDeps(repo, navegador);
+
+    await expect(
+      procesarJobDeSitio(deps, makeJob({ kind: 'desconectar_sitio', connectionId: CONNECTION_ID })),
+    ).resolves.toBeUndefined();
+
+    // El ARCO se registra y la fila local se borra AUNQUE el proveedor ya no tuviera nada que borrar.
+    expect(deps.registrarDesconexionArco).toHaveBeenCalledWith('user-1', 'app.ejemplo.com');
+    expect(repo.borrar).toHaveBeenCalledWith(CONNECTION_ID, 'user-1');
+  });
+
+  it('desconecta desde estado error SIN sesion viva: no toca sesiones y borra igual', async () => {
+    const repo = makeRepo({
+      obtenerPorId: vi.fn(async () => makeSitio({ estado: 'error', sesionExternaId: null })),
+    });
+    const navegador = makeNavegador({
+      borrarContexto: vi.fn(async () => {
+        throw Object.assign(new Error('context not found'), { statusCode: 404 });
+      }),
+    });
+    const deps = makeDeps(repo, navegador);
+
+    await expect(
+      procesarJobDeSitio(deps, makeJob({ kind: 'desconectar_sitio', connectionId: CONNECTION_ID })),
+    ).resolves.toBeUndefined();
+
+    expect(navegador.cerrarSesion).not.toHaveBeenCalled();
+    expect(deps.registrarDesconexionArco).toHaveBeenCalledWith('user-1', 'app.ejemplo.com');
+    expect(repo.borrar).toHaveBeenCalledWith(CONNECTION_ID, 'user-1');
+  });
+
+  it('desconecta desde esperando_login con la sesion ya muerta: cerrarSesion falla y se sigue igual', async () => {
+    const repo = makeRepo({
+      obtenerPorId: vi.fn(async () => makeSitio({ estado: 'esperando_login' })),
+    });
+    const navegador = makeNavegador({
+      cerrarSesion: vi.fn(async () => {
+        throw Object.assign(new Error('Session not found'), { status: 404 });
+      }),
+    });
+    const deps = makeDeps(repo, navegador);
+
+    await expect(
+      procesarJobDeSitio(deps, makeJob({ kind: 'desconectar_sitio', connectionId: CONNECTION_ID })),
+    ).resolves.toBeUndefined();
+
+    expect(navegador.borrarContexto).toHaveBeenCalledWith('ctx-1');
+    expect(deps.registrarDesconexionArco).toHaveBeenCalledWith('user-1', 'app.ejemplo.com');
+    expect(repo.borrar).toHaveBeenCalledWith(CONNECTION_ID, 'user-1');
+  });
+
   it('conexion ya inexistente: no-op idempotente (un reintento no falla)', async () => {
     const deps = makeDeps();
     await expect(
       procesarJobDeSitio(deps, makeJob({ kind: 'desconectar_sitio', connectionId: CONNECTION_ID })),
     ).resolves.toBeUndefined();
     expect(deps.registrarDesconexionArco).not.toHaveBeenCalled();
+  });
+});
+
+describe('esErrorDeRecursoInexistente', () => {
+  it('reconoce 404 por status, por statusCode y por mensaje not found', () => {
+    expect(esErrorDeRecursoInexistente(Object.assign(new Error('x'), { status: 404 }))).toBe(true);
+    expect(esErrorDeRecursoInexistente(Object.assign(new Error('x'), { statusCode: 404 }))).toBe(true);
+    expect(esErrorDeRecursoInexistente(new Error('Context not found'))).toBe(true);
+    const conNombre = new Error('no such context');
+    conNombre.name = 'NotFoundError';
+    expect(esErrorDeRecursoInexistente(conNombre)).toBe(true);
+  });
+
+  it('NO trata como inexistente los fallos reales de red o permisos', () => {
+    expect(esErrorDeRecursoInexistente(new Error('api del proveedor caida'))).toBe(false);
+    expect(esErrorDeRecursoInexistente(Object.assign(new Error('forbidden'), { status: 403 }))).toBe(false);
+    expect(esErrorDeRecursoInexistente(Object.assign(new Error('timeout'), { status: 500 }))).toBe(false);
+    expect(esErrorDeRecursoInexistente(null)).toBe(false);
+    expect(esErrorDeRecursoInexistente('not found')).toBe(false);
   });
 });
 

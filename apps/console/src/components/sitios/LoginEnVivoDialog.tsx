@@ -35,14 +35,14 @@ export function LoginEnVivoDialog({
   const dialogRef = useDialog({ onClose: onCerrar, initialFocus: confirmarRef });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6">
       <div className="absolute inset-0 bg-ink/40" onClick={onCerrar} aria-hidden="true" />
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="login-en-vivo-title"
-        className="relative flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-card-hover"
+        className="relative flex max-h-[95vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-card-hover sm:max-h-[92vh]"
       >
         <div className="flex items-start justify-between gap-4 border-b border-line-soft px-6 py-4">
           <div className="min-w-0">
@@ -64,11 +64,13 @@ export function LoginEnVivoDialog({
           </button>
         </div>
 
-        {/* La vista en vivo EMBEBIDA: apunta directo al proveedor. Sin listeners, por diseno. */}
+        {/* La vista en vivo EMBEBIDA: apunta directo al proveedor. Sin listeners, por diseno.
+            El min() del alto minimo evita que en pantallas bajas el iframe empuje el aviso de
+            seguridad o el boton de confirmar fuera del modal (el contenedor recorta overflow). */}
         <iframe
           src={sitio.vistaEnVivoUrl ?? undefined}
           title={t('sitios.modal.iframeTitulo', { dominio: sitio.dominio })}
-          className="h-[55vh] min-h-[320px] w-full flex-1 border-0 bg-ink/5"
+          className="h-[65vh] min-h-[min(320px,55vh)] w-full flex-1 border-0 bg-ink/5 sm:min-h-[min(500px,70vh)]"
           allow="clipboard-read; clipboard-write"
         />
 

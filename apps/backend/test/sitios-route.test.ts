@@ -279,6 +279,28 @@ describe('DELETE /v1/sitios/:id', () => {
     });
   });
 
+  // Desconectar se permite desde CUALQUIER estado: una fila atascada en 'error' o 'esperando_login'
+  // (sesion del proveedor expirada, modal cerrado a medias) se limpia igual; el worker es idempotente
+  // ante el contexto remoto ya inexistente. Regresion del defecto de estados huerfanos.
+  it.each(['error', 'esperando_login', 'caducado'] as const)(
+    'encola desconectar_sitio desde estado %s -> 202',
+    async (estado) => {
+      obtenerPorId.mockResolvedValue(makeSitio({ estado, sesionExternaId: null, vistaEnVivoUrl: null }));
+      const res = await app.inject({
+        method: 'DELETE',
+        url: `/v1/sitios/${SITIO_ID}`,
+        headers: { authorization: 'Bearer valid-user-1' },
+      });
+      expect(res.statusCode).toBe(202);
+      expect(createJob).toHaveBeenCalledWith({
+        agentId: null,
+        ownerId: 'user-1',
+        credentialId: null,
+        payload: { kind: 'desconectar_sitio', connectionId: SITIO_ID },
+      });
+    },
+  );
+
   it('sitio ajeno o inexistente -> 404 sin encolar', async () => {
     obtenerPorId.mockResolvedValue(null);
     const res = await app.inject({
