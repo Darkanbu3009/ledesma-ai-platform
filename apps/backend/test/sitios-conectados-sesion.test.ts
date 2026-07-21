@@ -19,6 +19,8 @@ function makeRow(overrides: Record<string, unknown> = {}) {
     url_login: 'https://app.ejemplo.com/login',
     contexto_externo_id: 'ctx-1',
     proxy_ref: 'browserbase',
+    proxy_country: 'AR',
+    proxy_state: null,
     egress_ip: '203.0.113.7',
     fingerprint_ref: 'contexto:ctx-1',
     sesion_externa_id: 'ses-1',
@@ -56,12 +58,15 @@ describe('registrarSesionDeLogin', () => {
       urlLogin: 'https://app.ejemplo.com/login',
       contextoExternoId: 'ctx-1',
       proxyRef: 'browserbase',
+      proxyCountry: 'AR',
       egressIp: '203.0.113.7',
       fingerprintRef: 'contexto:ctx-1',
       sesionExternaId: 'ses-1',
       vistaEnVivoUrl: 'https://live.browserbase.com/ses-1',
     });
     expect(sqlText(sql)).toContain('insert into sitios_conectados');
+    expect(sqlText(sql)).toContain('proxy_country');
+    expect(sqlValues(sql)).toContain('AR');
     expect(sqlText(sql)).toContain("'esperando_login'");
     expect(sitio).toMatchObject({
       sesionExternaId: 'ses-1',
@@ -86,6 +91,7 @@ describe('reabrirParaLogin', () => {
     // El SET no puede nombrar las columnas pineadas ni el blob (pin de por vida, V024).
     const set = texto.slice(0, texto.indexOf('where'));
     expect(set).not.toContain('proxy_ref =');
+    expect(set).not.toContain('proxy_country =');
     expect(set).not.toContain('egress_ip =');
     expect(set).not.toContain('contexto_externo_id =');
     expect(set).not.toContain('fingerprint_ref =');
@@ -93,6 +99,25 @@ describe('reabrirParaLogin', () => {
     // Acotado por id + owner.
     expect(sqlValues(sql)).toContain('user-1');
     expect(sqlValues(sql)).toContain(SITIO_ID);
+  });
+});
+
+describe('pinearPais', () => {
+  it('escribe proxy_country SOLO si sigue null (fila legada) y acota por id + owner', async () => {
+    const sql = makeSqlReturning([makeRow({ proxy_country: 'AR' })]);
+    const sitio = await new SitiosConectadosRepository(sql).pinearPais(SITIO_ID, 'user-1', 'AR');
+    const texto = sqlText(sql);
+    expect(texto).toContain('update sitios_conectados');
+    expect(texto).toContain('proxy_country is null');
+    expect(sqlValues(sql)).toContain('AR');
+    expect(sqlValues(sql)).toContain('user-1');
+    expect(sitio?.proxyCountry).toBe('AR');
+  });
+
+  it('devuelve null si la fila YA tenia pais pineado (el pin es inmutable de por vida)', async () => {
+    const sql = makeSqlReturning([]);
+    const sitio = await new SitiosConectadosRepository(sql).pinearPais(SITIO_ID, 'user-1', 'BR');
+    expect(sitio).toBeNull();
   });
 });
 

@@ -18,12 +18,16 @@ import type { NavegadorParaTarea, SesionDeTareaAbierta } from './tarea-web.js';
  *    CERRAR la sesion ("The data will be saved when the session closes").
  *  - keepAlive: true SIEMPRE: sin el, la sesion muere al desconectarse nuestro WebSocket CDP y el
  *    usuario no llegaria a loguearse. Requiere plan pago de Browserbase (Hobby+).
- *  - Proxy: 'browserbase' usa el pool gestionado (proxies:true), que es BEST-EFFORT y NO garantiza
- *    IP fija entre sesiones; por eso la IP observada se pina y las reaperturas la VERIFICAN (fallar
- *    antes que degradar). Para salida garantizada fija existe el proxy EXTERNO propio
- *    (BROWSERBASE_PROXY_*): la doc lo senala como la via de IP estatica.
- *  - La API NO expone la IP de salida de una sesion: se OBSERVA navegando a un echo de IP a traves
- *    del proxy, antes de navegar a la URL de login.
+ *  - Proxy: 'browserbase' usa el pool gestionado con GEOLOCALIZACION FIJA POR PAIS (doc "Proxies":
+ *    proxies: [{type:'browserbase', geolocation:{country}}], country en ISO 3166-1 alpha-2). El pool
+ *    es residencial ROTATIVO: la IP cambia entre sesiones aunque el pais pedido sea el mismo, y la
+ *    doc advierte que sin cobertura en la ubicacion pedida usa el proxy MAS CERCANO (puede cruzar
+ *    frontera). Por eso el criterio de pinning es el PAIS observado (los handlers verifican y fallan
+ *    antes que degradar), no la IP exacta. Para salida garantizada fija existe el proxy EXTERNO
+ *    propio (BROWSERBASE_PROXY_*): la doc lo senala como la via de IP estatica.
+ *  - La API NO expone la salida (IP ni pais) de una sesion: se OBSERVA navegando a un echo a traves
+ *    del proxy (cdn-cgi/trace de Cloudflare, que devuelve ip= y loc= en texto plano), antes de
+ *    navegar a la URL de login.
  */
 
 /**
@@ -45,8 +49,12 @@ const SESSION_TIMEOUT_SECONDS = 15 * 60;
  */
 const TAREA_SESSION_TIMEOUT_SECONDS = 45 * 60;
 
-/** Echo de IP para OBSERVAR la salida real del proxy (la API no la expone). Devuelve texto plano. */
-const ECHO_IP_URL = 'https://api.ipify.org';
+/**
+ * Echo para OBSERVAR la salida real del proxy (la API no la expone). El trace de Cloudflare devuelve
+ * lineas clave=valor en texto plano; se usan `ip` (egress IP, informativa) y `loc` (pais ISO 3166-1
+ * alpha-2, EL criterio de verificacion del pinning). loc=XX significa pais desconocido -> null.
+ */
+const ECHO_SALIDA_URL = 'https://www.cloudflare.com/cdn-cgi/trace';
 
 /** Referencia de salida del pool gestionado de Browserbase (best-effort, sin IP garantizada). */
 const PROXY_REF_POOL = 'browserbase';
@@ -55,6 +63,34 @@ const PROXY_REF_POOL = 'browserbase';
 const PROXY_REF_EXTERNO = 'external:';
 
 const IP_REGEX = /^[0-9a-fA-F:.]{3,45}$/;
+const PAIS_REGEX = /^[A-Z]{2}$/;
+
+/** Salida de red observada por el echo: IP (informativa) y pais (criterio de pinning). */
+interface SalidaEcho {
+  egressIp: string | null;
+  egressCountry: string | null;
+}
+
+/**
+ * Parsea el texto del trace de Cloudflare (lineas clave=valor). Tolerante: cualquier cosa que no
+ * matchee el formato esperado queda null (y con pais null el handler NO verifica -> aborta).
+ */
+export function parsearTraceDeSalida(texto: string): SalidaEcho {
+  let egressIp: string | null = null;
+  let egressCountry: string | null = null;
+  for (const linea of texto.split('\n')) {
+    const [clave, valor] = linea.split('=', 2);
+    if (clave === 'ip' && valor !== undefined && IP_REGEX.test(valor.trim())) {
+      egressIp = valor.trim();
+    }
+    if (clave === 'loc' && valor !== undefined) {
+      const pais = valor.trim().toUpperCase();
+      // XX = pais desconocido para Cloudflare: no sirve para verificar el pin.
+      if (PAIS_REGEX.test(pais) && pais !== 'XX') egressCountry = pais;
+    }
+  }
+  return { egressIp, egressCountry };
+}
 
 export interface BrowserbaseConfig {
   apiKey: string;
@@ -82,14 +118,24 @@ export class NavegadorBrowserbase implements NavegadorRemoto, NavegadorParaTarea
 
   /**
    * Resuelve la config de proxies para el `proxyRef` pedido. null = asignar salida nueva (externa si
-   * hay proxy propio configurado; si no, el pool). Un ref pineado que ya no se puede reconstruir
-   * (proxy externo cambiado o retirado del entorno) lanza SalidaDeRedNoDisponibleError: JAMAS se
-   * degrada en silencio a otra salida.
+   * hay proxy propio configurado; si no, el pool). El pool SIEMPRE se pide con la geolocalizacion
+   * del PAIS pineado (`proxyCountry`): es best-effort del proveedor (sin cobertura puede enrutar por
+   * el pais mas cercano), asi que el llamador VERIFICA el pais observado y aborta si difiere. Un ref
+   * pineado que ya no se puede reconstruir (proxy externo cambiado o retirado del entorno) lanza
+   * SalidaDeRedNoDisponibleError: JAMAS se degrada en silencio a otra salida.
    */
-  private resolverProxy(proxyRef: string | null): { proxies: ProxiesParam; proxyRef: string } {
+  private resolverProxy(
+    proxyRef: string | null,
+    proxyCountry: string,
+  ): { proxies: ProxiesParam; proxyRef: string } {
     const externo = this.config.proxyServer
       ? { server: this.config.proxyServer, username: this.config.proxyUsername, password: this.config.proxyPassword }
       : null;
+
+    // Pool gestionado con geolocalizacion fija por pais (doc de Browserbase, seccion Proxies).
+    const pool: ProxiesParam = [
+      { type: 'browserbase', geolocation: { country: proxyCountry } },
+    ];
 
     if (proxyRef === null) {
       if (externo) {
@@ -105,11 +151,11 @@ export class NavegadorBrowserbase implements NavegadorRemoto, NavegadorParaTarea
           proxyRef: `${PROXY_REF_EXTERNO}${externo.server}`,
         };
       }
-      return { proxies: true, proxyRef: PROXY_REF_POOL };
+      return { proxies: pool, proxyRef: PROXY_REF_POOL };
     }
 
     if (proxyRef === PROXY_REF_POOL) {
-      return { proxies: true, proxyRef: PROXY_REF_POOL };
+      return { proxies: pool, proxyRef: PROXY_REF_POOL };
     }
 
     if (proxyRef.startsWith(PROXY_REF_EXTERNO)) {
@@ -140,12 +186,36 @@ export class NavegadorBrowserbase implements NavegadorRemoto, NavegadorParaTarea
     );
   }
 
+  /**
+   * OBSERVA la salida de red real (IP + pais) navegando la pagina dada al echo A TRAVES del proxy.
+   * Best-effort: si el echo falla, ambos campos quedan null y el handler decide (pais null NO
+   * verifica el pin -> aborta; en una conexion nueva el pais observado null tampoco verifica).
+   */
+  private async observarSalidaEnPagina(cdp: ClienteCdp, sessionId: string): Promise<SalidaEcho> {
+    try {
+      const carga = cdp.esperarEvento('Page.loadEventFired', sessionId);
+      await cdp.enviar('Page.navigate', { url: ECHO_SALIDA_URL }, sessionId);
+      await carga;
+      const evaluado = await cdp.enviar<{ result?: { value?: unknown } }>(
+        'Runtime.evaluate',
+        { expression: 'document.body.innerText.trim()', returnByValue: true },
+        sessionId,
+      );
+      const valor = evaluado.result?.value;
+      if (typeof valor !== 'string') return { egressIp: null, egressCountry: null };
+      return parsearTraceDeSalida(valor);
+    } catch {
+      return { egressIp: null, egressCountry: null };
+    }
+  }
+
   async abrirSesionParaLogin(params: {
     url: string;
     contextoExternoId: string | null;
     proxyRef: string | null;
+    proxyCountry: string;
   }): Promise<SesionDeLoginAbierta> {
-    const { proxies, proxyRef } = this.resolverProxy(params.proxyRef);
+    const { proxies, proxyRef } = this.resolverProxy(params.proxyRef, params.proxyCountry);
 
     // Contexto NUEVO para una conexion nueva; el pineado para una reapertura (cookies del proveedor).
     const contextoExternoId =
@@ -162,36 +232,14 @@ export class NavegadorBrowserbase implements NavegadorRemoto, NavegadorParaTarea
       timeout: SESSION_TIMEOUT_SECONDS,
     });
 
-    let egressIp: string | null = null;
+    let salida: SalidaEcho;
     const cdp = await ClienteCdp.conectar(session.connectUrl);
     try {
-      // Attach al tab inicial (flatten): los comandos page-level llevan sessionId top-level.
-      const { targetInfos } = await cdp.enviar<{ targetInfos: TargetInfo[] }>('Target.getTargets');
-      const pagina = targetInfos.find((t) => t.type === 'page');
-      if (!pagina) throw new Error('la sesion de navegador no expone ninguna pagina');
-      const { sessionId } = await cdp.enviar<{ sessionId: string }>('Target.attachToTarget', {
-        targetId: pagina.targetId,
-        flatten: true,
-      });
-      await cdp.enviar('Page.enable', {}, sessionId);
+      const sessionId = await this.attachPaginaInicial(cdp);
 
-      // OBSERVAR la salida real navegando a un echo de IP A TRAVES del proxy (la API no la expone).
-      // Best-effort: si el echo falla, egressIp queda null y el handler decide (una reapertura con
-      // IP pineada FALLA porque no puede verificar; una conexion nueva pina null).
-      try {
-        const carga = cdp.esperarEvento('Page.loadEventFired', sessionId);
-        await cdp.enviar('Page.navigate', { url: ECHO_IP_URL }, sessionId);
-        await carga;
-        const evaluado = await cdp.enviar<{ result?: { value?: unknown } }>(
-          'Runtime.evaluate',
-          { expression: 'document.body.innerText.trim()', returnByValue: true },
-          sessionId,
-        );
-        const valor = evaluado.result?.value;
-        if (typeof valor === 'string' && IP_REGEX.test(valor)) egressIp = valor;
-      } catch {
-        egressIp = null;
-      }
+      // OBSERVAR la salida real (IP + pais) por el echo A TRAVES del proxy (la API no la expone).
+      // Best-effort: si el echo falla queda null y el handler decide (pais no verificable -> aborta).
+      salida = await this.observarSalidaEnPagina(cdp, sessionId);
 
       // Navegar a la URL de login y DESCONECTAR: el humano toma el control en la vista en vivo. No
       // se espera la carga completa (el job no espera nada del humano); si Chrome rechaza la
@@ -219,7 +267,8 @@ export class NavegadorBrowserbase implements NavegadorRemoto, NavegadorParaTarea
       contextoExternoId,
       vistaEnVivoUrl: debug.debuggerFullscreenUrl,
       proxyRef,
-      egressIp,
+      egressIp: salida.egressIp,
+      egressCountry: salida.egressCountry,
       // Browserbase no expone una referencia de fingerprint propia: el fingerprint/perfil viaja CON
       // el contexto del proveedor, asi que la referencia estable es el contexto mismo.
       fingerprintRef: `contexto:${contextoExternoId}`,
@@ -229,17 +278,19 @@ export class NavegadorBrowserbase implements NavegadorRemoto, NavegadorParaTarea
 
   /**
    * Abre la sesion de una TAREA WEB (7.1d): RECONECTA el contexto guardado y FUERZA la salida
-   * pineada (proxyRef OBLIGATORIO: una tarea jamas sortea salida nueva; resolverProxy lanza
-   * SalidaDeRedNoDisponibleError si el pin no es reconstruible). Observa la egress_ip por el echo
-   * (igual que el login) y DEVUELVE sin navegar a ninguna URL del sitio: la verificacion del pin la
-   * hace el handler ANTES de permitir navegar. keepAlive:true porque Stagehand se conecta y
-   * desconecta por CDP durante la tarea y la sesion debe sobrevivir entre medio.
+   * pineada con la geolocalizacion del pais pineado (proxyRef y proxyCountry OBLIGATORIOS: una
+   * tarea jamas sortea salida nueva; resolverProxy lanza SalidaDeRedNoDisponibleError si el pin no
+   * es reconstruible). Observa la salida (IP + pais) por el echo (igual que el login) y DEVUELVE sin
+   * navegar a ninguna URL del sitio: la verificacion del pin POR PAIS la hace el handler ANTES de
+   * permitir navegar. keepAlive:true porque Stagehand se conecta y desconecta por CDP durante la
+   * tarea y la sesion debe sobrevivir entre medio.
    */
   async abrirSesionParaTarea(params: {
     contextoExternoId: string;
     proxyRef: string;
+    proxyCountry: string;
   }): Promise<SesionDeTareaAbierta> {
-    const { proxies } = this.resolverProxy(params.proxyRef);
+    const { proxies } = this.resolverProxy(params.proxyRef, params.proxyCountry);
 
     const session = await this.bb.sessions.create({
       projectId: this.config.projectId,
@@ -249,26 +300,13 @@ export class NavegadorBrowserbase implements NavegadorRemoto, NavegadorParaTarea
       timeout: TAREA_SESSION_TIMEOUT_SECONDS,
     });
 
-    let egressIp: string | null = null;
+    let salida: SalidaEcho;
     const cdp = await ClienteCdp.conectar(session.connectUrl);
     try {
       const sessionId = await this.attachPaginaInicial(cdp);
-      // OBSERVAR la salida real por el echo, ANTES de tocar el sitio. Best-effort: si falla, queda
-      // null y el handler decide (con IP pineada, null NO verifica -> aborta).
-      try {
-        const carga = cdp.esperarEvento('Page.loadEventFired', sessionId);
-        await cdp.enviar('Page.navigate', { url: ECHO_IP_URL }, sessionId);
-        await carga;
-        const evaluado = await cdp.enviar<{ result?: { value?: unknown } }>(
-          'Runtime.evaluate',
-          { expression: 'document.body.innerText.trim()', returnByValue: true },
-          sessionId,
-        );
-        const valor = evaluado.result?.value;
-        if (typeof valor === 'string' && IP_REGEX.test(valor)) egressIp = valor;
-      } catch {
-        egressIp = null;
-      }
+      // OBSERVAR la salida real por el echo, ANTES de tocar el sitio. Best-effort: si falla, el
+      // pais queda null y el handler NO puede verificar el pin -> aborta.
+      salida = await this.observarSalidaEnPagina(cdp, sessionId);
     } catch (error) {
       cdp.cerrar();
       await this.cerrarSesionSilencioso(session.id);
@@ -276,7 +314,11 @@ export class NavegadorBrowserbase implements NavegadorRemoto, NavegadorParaTarea
     }
     cdp.cerrar();
 
-    return { sesionExternaId: session.id, egressIp };
+    return {
+      sesionExternaId: session.id,
+      egressIp: salida.egressIp,
+      egressCountry: salida.egressCountry,
+    };
   }
 
   /**
@@ -376,13 +418,13 @@ export class NavegadorBrowserbase implements NavegadorRemoto, NavegadorParaTarea
   }
 
   /**
-   * OBSERVA la egress_ip actual de la sesion viva SIN tocar la pagina de la tarea: abre una PESTANA
-   * NUEVA (Target.createTarget), navega el echo de IP ahi y la cierra. Es la re-verificacion del pin
-   * al REANUDAR un checkpoint (7.1e): navegar la pestana principal al echo destruiria el estado del
-   * checkout que la pausa preservo. Best-effort: si el echo falla devuelve null (y el handler, con
-   * IP pineada, NO verifica -> aborta, igual que en la apertura de 7.1d).
+   * OBSERVA la salida de red actual (IP + pais) de la sesion viva SIN tocar la pagina de la tarea:
+   * abre una PESTANA NUEVA (Target.createTarget), navega el echo ahi y la cierra. Es la
+   * re-verificacion del pin POR PAIS al REANUDAR un checkpoint (7.1e): navegar la pestana principal
+   * al echo destruiria el estado del checkout que la pausa preservo. Best-effort: si el echo falla
+   * devuelve nulls (y el handler, sin pais observado, NO verifica -> aborta, igual que en 7.1d).
    */
-  async observarEgress(sesionExternaId: string): Promise<string | null> {
+  async observarSalida(sesionExternaId: string): Promise<SalidaEcho> {
     const session = await this.bb.sessions.retrieve(sesionExternaId);
     if (!session.connectUrl) {
       throw new Error('la sesion de navegador no expone un connect URL (ya no esta corriendo)');
@@ -398,22 +440,13 @@ export class NavegadorBrowserbase implements NavegadorRemoto, NavegadorParaTarea
           flatten: true,
         });
         await cdp.enviar('Page.enable', {}, sessionId);
-        const carga = cdp.esperarEvento('Page.loadEventFired', sessionId);
-        await cdp.enviar('Page.navigate', { url: ECHO_IP_URL }, sessionId);
-        await carga;
-        const evaluado = await cdp.enviar<{ result?: { value?: unknown } }>(
-          'Runtime.evaluate',
-          { expression: 'document.body.innerText.trim()', returnByValue: true },
-          sessionId,
-        );
-        const valor = evaluado.result?.value;
-        return typeof valor === 'string' && IP_REGEX.test(valor) ? valor : null;
+        return await this.observarSalidaEnPagina(cdp, sessionId);
       } finally {
         // La pestana del echo se cierra SIEMPRE: la de la tarea queda intacta.
         await cdp.enviar('Target.closeTarget', { targetId }).catch(() => undefined);
       }
     } catch {
-      return null;
+      return { egressIp: null, egressCountry: null };
     } finally {
       cdp.cerrar();
     }

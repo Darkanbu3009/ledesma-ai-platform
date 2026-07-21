@@ -63,6 +63,8 @@ function makeSitio(overrides: Partial<SitioConectado> = {}): SitioConectado {
     urlLogin: 'https://app.ejemplo.com/login',
     contextoExternoId: 'ctx-1',
     proxyRef: 'browserbase',
+    proxyCountry: 'AR',
+    proxyState: null,
     egressIp: '203.0.113.7',
     fingerprintRef: 'contexto:ctx-1',
     sesionExternaId: null,
@@ -88,13 +90,17 @@ function makeRepo(overrides: Partial<RepositorioSitiosParaTarea> = {}): Reposito
 
 function makeNavegador(overrides: Partial<NavegadorParaTarea> = {}): NavegadorParaTarea {
   return {
-    abrirSesionParaTarea: vi.fn(async () => ({ sesionExternaId: 'ses-1', egressIp: '203.0.113.7' })),
+    abrirSesionParaTarea: vi.fn(async () => ({
+      sesionExternaId: 'ses-1',
+      egressIp: '203.0.113.7',
+      egressCountry: 'AR',
+    })),
     inyectarContexto: vi.fn(async () => {}),
     detectarPantallaDeLogin: vi.fn(async () => false),
     extraerContexto: vi.fn(async () => CONTEXTO_PLANO),
     estadoDeSesion: vi.fn(async () => 'viva' as const),
     capturarPantalla: vi.fn(async () => 'cGxhY2Vob2xkZXI='),
-    observarEgress: vi.fn(async () => '203.0.113.7'),
+    observarSalida: vi.fn(async () => ({ egressIp: '203.0.113.7', egressCountry: 'AR' })),
     cerrarSesion: vi.fn(async () => {}),
     ...overrides,
   };
@@ -147,10 +153,47 @@ describe('procesarTareaWeb', () => {
     expect(deps.navegador.abrirSesionParaTarea).not.toHaveBeenCalled();
   });
 
-  it('egress_ip distinta a la pineada: aborta ANTES de navegar, marca error y cierra la sesion', async () => {
+  it('sitio LEGADO sin pais pineado: falla accionable (reconectar) SIN crear sesion', async () => {
+    const deps = makeDeps({
+      repo: makeRepo({ obtenerPorId: vi.fn(async () => makeSitio({ proxyCountry: null })) }),
+    });
+    await expect(procesarTareaWeb(deps, makeJob())).rejects.toThrow(/vuelve a conectarlo/);
+    expect(deps.navegador.abrirSesionParaTarea).not.toHaveBeenCalled();
+  });
+
+  it('pasa el pais pineado al abrir la sesion de la tarea', async () => {
+    const deps = makeDeps();
+    await procesarTareaWeb(deps, makeJob());
+    expect(deps.navegador.abrirSesionParaTarea).toHaveBeenCalledWith({
+      contextoExternoId: 'ctx-1',
+      proxyRef: 'browserbase',
+      proxyCountry: 'AR',
+    });
+  });
+
+  it('IP distinta a la observada al conectar pero MISMO pais: NO aborta (rotacion normal del pool)', async () => {
+    // El sitio quedo con egress_ip 203.0.113.7 al conectar; esta sesion sale por otra IP del mismo
+    // pais pineado. Antes (pinning por IP exacta) esto abortaba; ahora la tarea corre normal.
+    const navegador = makeNavegador({
+      abrirSesionParaTarea: vi.fn(async () => ({
+        sesionExternaId: 'ses-1',
+        egressIp: '198.51.100.9',
+        egressCountry: 'AR',
+      })),
+    });
+    const deps = makeDeps({ navegador });
+    await expect(procesarTareaWeb(deps, makeJob())).resolves.toBe('completada');
+    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+  });
+
+  it('pais de salida distinto al pineado: aborta ANTES de navegar, marca error y cierra la sesion', async () => {
     const repo = makeRepo();
     const navegador = makeNavegador({
-      abrirSesionParaTarea: vi.fn(async () => ({ sesionExternaId: 'ses-1', egressIp: '198.51.100.9' })),
+      abrirSesionParaTarea: vi.fn(async () => ({
+        sesionExternaId: 'ses-1',
+        egressIp: '198.51.100.9',
+        egressCountry: 'BR',
+      })),
     });
     const deps = makeDeps({ repo, navegador });
     await expect(procesarTareaWeb(deps, makeJob())).rejects.toThrow(SalidaDeRedNoDisponibleError);
@@ -162,9 +205,27 @@ describe('procesarTareaWeb', () => {
     expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
   });
 
-  it('egress_ip no observable con pin presente: tambien aborta (no se puede verificar)', async () => {
+  it('pais de salida distinto: el mensaje es claro y accionable (no hay ruta para tu region)', async () => {
     const navegador = makeNavegador({
-      abrirSesionParaTarea: vi.fn(async () => ({ sesionExternaId: 'ses-1', egressIp: null })),
+      abrirSesionParaTarea: vi.fn(async () => ({
+        sesionExternaId: 'ses-1',
+        egressIp: null,
+        egressCountry: 'US',
+      })),
+    });
+    const deps = makeDeps({ navegador });
+    await expect(procesarTareaWeb(deps, makeJob())).rejects.toThrow(
+      /no hay ruta de red disponible.*[Rr]eintenta mas tarde/s,
+    );
+  });
+
+  it('pais no observable con pin presente: tambien aborta (no se puede verificar)', async () => {
+    const navegador = makeNavegador({
+      abrirSesionParaTarea: vi.fn(async () => ({
+        sesionExternaId: 'ses-1',
+        egressIp: null,
+        egressCountry: null,
+      })),
     });
     const deps = makeDeps({ navegador });
     await expect(procesarTareaWeb(deps, makeJob())).rejects.toThrow(SalidaDeRedNoDisponibleError);

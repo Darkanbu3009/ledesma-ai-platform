@@ -24,16 +24,28 @@ describe('isSitioJobPayload (discriminador)', () => {
 });
 
 describe('parseSitioJobPayload', () => {
-  it('conectar_sitio exige una URL http(s) valida', () => {
-    const ok = parseSitioJobPayload({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login' });
+  it('conectar_sitio exige una URL http(s) valida y un pais ISO-2', () => {
+    const ok = parseSitioJobPayload({ kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login', pais: 'AR' });
     expect(ok).toEqual({
       success: true,
-      data: { kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login' },
+      data: { kind: 'conectar_sitio', url: 'https://app.ejemplo.com/login', pais: 'AR' },
     });
-    expect(parseSitioJobPayload({ kind: 'conectar_sitio', url: '' }).success).toBe(false);
-    expect(parseSitioJobPayload({ kind: 'conectar_sitio', url: 'no-una-url' }).success).toBe(false);
-    expect(parseSitioJobPayload({ kind: 'conectar_sitio', url: 'ftp://x.com' }).success).toBe(false);
+    expect(parseSitioJobPayload({ kind: 'conectar_sitio', url: '', pais: 'AR' }).success).toBe(false);
+    expect(parseSitioJobPayload({ kind: 'conectar_sitio', url: 'no-una-url', pais: 'AR' }).success).toBe(false);
+    expect(parseSitioJobPayload({ kind: 'conectar_sitio', url: 'ftp://x.com', pais: 'AR' }).success).toBe(false);
     expect(parseSitioJobPayload({ kind: 'conectar_sitio' }).success).toBe(false);
+  });
+
+  it('conectar_sitio valida el pais y lo NORMALIZA a mayusculas (es lo que se pinea y compara)', () => {
+    const ok = parseSitioJobPayload({ kind: 'conectar_sitio', url: 'https://a.com/l', pais: 'ar' });
+    expect(ok.success).toBe(true);
+    if (ok.success && ok.data.kind === 'conectar_sitio') {
+      expect(ok.data.pais).toBe('AR');
+    }
+    expect(parseSitioJobPayload({ kind: 'conectar_sitio', url: 'https://a.com/l' }).success).toBe(false);
+    expect(parseSitioJobPayload({ kind: 'conectar_sitio', url: 'https://a.com/l', pais: 'ARG' }).success).toBe(false);
+    expect(parseSitioJobPayload({ kind: 'conectar_sitio', url: 'https://a.com/l', pais: 'A1' }).success).toBe(false);
+    expect(parseSitioJobPayload({ kind: 'conectar_sitio', url: 'https://a.com/l', pais: '' }).success).toBe(false);
   });
 
   it('confirmar/desconectar exigen connectionId no vacio', () => {
@@ -55,6 +67,7 @@ describe('parseSitioJobPayload', () => {
     const conBasura = parseSitioJobPayload({
       kind: 'conectar_sitio',
       url: 'https://app.ejemplo.com/login',
+      pais: 'AR',
       password: 'jamas',
     });
     expect(conBasura.success).toBe(true);

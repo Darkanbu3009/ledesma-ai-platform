@@ -19,10 +19,38 @@ import { SitiosConectadosRepository, type SitioConectado } from '../sitios/index
 
 const SitioIdParamSchema = z.object({ id: z.string().uuid() });
 
-// Body de POST /v1/sitios/conectar: la URL de login es LA UNICA entrada humana del flujo. La forma
-// completa (URL http(s) valida) la impone parseSitioJobPayload, el MISMO validador que consumira el
+// Body de POST /v1/sitios/conectar: la URL de login es LA UNICA entrada humana del flujo, mas el
+// pais OPCIONAL que la consola deriva del navegador del usuario (Intl). La forma completa (URL
+// http(s) valida + pais ISO-2) la impone parseSitioJobPayload, el MISMO validador que consumira el
 // worker: lo que se encola es exactamente lo que 7.1b sabe ejecutar.
-const ConectarSitioBodySchema = z.object({ url: z.string().min(1).max(2000) });
+const ConectarSitioBodySchema = z.object({
+  url: z.string().min(1).max(2000),
+  pais: z.string().regex(/^[A-Za-z]{2}$/).optional(),
+});
+
+/**
+ * Deriva el PAIS del usuario (ISO 3166-1 alpha-2) para pinear la salida de red de la conexion:
+ * 1. el `pais` explicito del body (la consola lo deriva del navegador del usuario), o
+ * 2. la region del primer tag de Accept-Language, completada con los likely subtags de CLDR via
+ *    Intl.Locale#maximize (built-in de Node/ICU: 'es-AR' -> AR, 'en' -> US). Cero dependencias
+ *    externas ni servicios de geo-IP.
+ * null = no derivable: el endpoint responde 400 pidiendo el pais explicito, JAMAS pinea un default
+ * silencioso (pinear el pais equivocado condena todas las tareas futuras del dominio).
+ */
+export function derivarPaisDeConexion(
+  bodyPais: string | undefined,
+  acceptLanguage: string | undefined,
+): string | null {
+  if (bodyPais !== undefined) return bodyPais.toUpperCase();
+  const primerTag = acceptLanguage?.split(',')[0]?.split(';')[0]?.trim();
+  if (!primerTag) return null;
+  try {
+    const region = new Intl.Locale(primerTag).maximize().region;
+    return region && /^[A-Z]{2}$/.test(region) ? region : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * DTO de un sitio conectado para la UI (respuesta de GET /v1/sitios). Deriva del SitioConectado del
@@ -107,9 +135,20 @@ export function sitiosRoutes(
       if (!body.success) {
         throw new AppError('VALIDATION_ERROR', 400, 'Invalid site url', body.error.issues);
       }
-      // El payload se valida con el MISMO parser que usara el worker (URL http(s) bien formada): lo
-      // que no pasaria en 7.1b no se encola. El rechazo es un 400 claro, no un job que morira.
-      const parsed = parseSitioJobPayload({ kind: CONECTAR_SITIO_JOB_KIND, url: body.data.url });
+      // El pais que se pineara a la conexion: explicito del body o derivado de Accept-Language. Sin
+      // pais NO se encola nada: pinear un default silencioso condenaria las tareas del dominio.
+      const pais = derivarPaisDeConexion(
+        body.data.pais,
+        request.headers['accept-language'],
+      );
+      if (pais === null) {
+        throw new AppError('VALIDATION_ERROR', 400, 'Could not determine your country; include "pais" (ISO 3166-1 alpha-2) in the request body');
+      }
+
+      // El payload se valida con el MISMO parser que usara el worker (URL http(s) bien formada +
+      // pais ISO-2): lo que no pasaria en 7.1b no se encola. El rechazo es un 400 claro, no un job
+      // que morira.
+      const parsed = parseSitioJobPayload({ kind: CONECTAR_SITIO_JOB_KIND, url: body.data.url, pais });
       if (!parsed.success) {
         throw new AppError('VALIDATION_ERROR', 400, 'Invalid site url', [{ message: parsed.error }]);
       }
