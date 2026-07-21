@@ -179,9 +179,15 @@ export class JobsRepository {
       where owner_id = ${ownerId}
       group by status
     `;
-    const counts: JobStatusCounts = { pending: 0, running: 0, completed: 0, failed: 0 };
+    const counts: JobStatusCounts = { pending: 0, running: 0, completed: 0, failed: 0, pausado: 0 };
     for (const row of rows) {
-      if (row.status === 'pending' || row.status === 'running' || row.status === 'completed' || row.status === 'failed') {
+      if (
+        row.status === 'pending' ||
+        row.status === 'running' ||
+        row.status === 'completed' ||
+        row.status === 'failed' ||
+        row.status === 'pausado'
+      ) {
         counts[row.status] = Number(row.count ?? 0);
       }
     }
@@ -354,6 +360,49 @@ export class JobsRepository {
       resultado: row.resultado ?? null,
       lastError: row.last_error,
     };
+  }
+
+  /**
+   * PAUSA un job de tarea web en un CHECKPOINT DE APROBACION humana (7.1e): 'running' -> 'pausado'.
+   * Compare-and-set sobre 'running' (igual que markCompleted): solo el worker que posee el job puede
+   * pausarlo, y un job ya re-transicionado por el reaper no se pisa. Un job 'pausado' es INVISIBLE
+   * para el claim (que solo mira 'pending') y para el reaper (que solo mira 'running'): queda quieto
+   * hasta que la decision humana lo devuelva a 'pending' (reanudarDePausado) o el barrido de
+   * aprobaciones vencidas lo cierre (marcarPausadoFallido).
+   */
+  async marcarPausado(id: string): Promise<void> {
+    await this.sql`
+      update jobs set status = 'pausado', updated_at = now()
+      where id = ${id} and status = 'running'
+    `;
+  }
+
+  /**
+   * Devuelve un job 'pausado' a 'pending' tras la DECISION humana sobre su aprobacion (7.1e): el
+   * worker lo re-reclama y reanuda la tarea segun la decision. Compare-and-set sobre 'pausado' y
+   * ACOTADO por owner_id (lo invoca el endpoint de decision del backend con el sub del token): un job
+   * ajeno o en otro estado no se toca. started_at se limpia (la corrida anterior quedo suspendida).
+   * Devuelve true si la transicion aplico.
+   */
+  async reanudarDePausado(id: string, ownerId: string): Promise<boolean> {
+    const rows = await this.sql<Array<{ id: string }>>`
+      update jobs set status = 'pending', scheduled_for = null, started_at = null, updated_at = now()
+      where id = ${id} and owner_id = ${ownerId} and status = 'pausado'
+      returning id
+    `;
+    return rows.length > 0;
+  }
+
+  /**
+   * Cierra un job 'pausado' como 'failed' (aprobacion EXPIRADA sin decision, o limpieza del barrido).
+   * Compare-and-set sobre 'pausado': una decision humana que llego en el mismo instante (y ya lo
+   * devolvio a 'pending') gana; este cierre afecta 0 filas y es un no-op.
+   */
+  async marcarPausadoFallido(id: string, error: string): Promise<void> {
+    await this.sql`
+      update jobs set status = 'failed', last_error = ${error}, finished_at = now(), updated_at = now()
+      where id = ${id} and status = 'pausado'
+    `;
   }
 
   /**

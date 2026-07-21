@@ -135,25 +135,28 @@ describe('JobsRepository', () => {
       expect(sqlValues(sql)).toEqual(['user-1']);
     });
 
-    it('mapea los estados presentes y rellena los ausentes con 0 (siempre las 4 claves)', async () => {
+    it('mapea los estados presentes y rellena los ausentes con 0 (siempre las 5 claves)', async () => {
       const sql = makeSqlReturning([
         { status: 'pending', count: 2 },
         { status: 'failed', count: '3' }, // bigint como string: se normaliza a number
+        { status: 'pausado', count: 1 },
       ]);
       expect(await new JobsRepository(sql).countByStatusForOwner('user-1')).toEqual({
         pending: 2,
         running: 0,
         completed: 0,
         failed: 3,
+        pausado: 1,
       });
     });
 
-    it('owner sin jobs (0 filas) -> las 4 claves en 0, sin error', async () => {
+    it('owner sin jobs (0 filas) -> las 5 claves en 0, sin error', async () => {
       expect(await new JobsRepository(makeSqlReturning([])).countByStatusForOwner('user-1')).toEqual({
         pending: 0,
         running: 0,
         completed: 0,
         failed: 0,
+        pausado: 0,
       });
     });
 
@@ -167,6 +170,7 @@ describe('JobsRepository', () => {
         running: 0,
         completed: 5,
         failed: 0,
+        pausado: 0,
       });
     });
   });
@@ -530,6 +534,66 @@ describe('JobsRepository (7.1d: resultado de jobs)', () => {
       ]);
       const job = await new JobsRepository(sql).obtenerJobDeOwner('job-1', 'user-1');
       expect(job?.resultado).toBeNull();
+    });
+  });
+});
+
+describe('JobsRepository (7.1e: checkpoints de aprobacion, estado pausado)', () => {
+  describe('marcarPausado', () => {
+    it("pausa con CAS sobre 'running' (solo el worker que posee el job)", async () => {
+      const sql = makeSqlReturning([]);
+      await new JobsRepository(sql).marcarPausado('job-1');
+      const texto = sqlText(sql);
+      expect(texto).toContain("status = 'pausado'");
+      expect(texto).toContain("status = 'running'");
+      expect(sqlValues(sql)).toEqual(['job-1']);
+    });
+  });
+
+  describe('reanudarDePausado', () => {
+    it("devuelve a 'pending' con CAS sobre 'pausado', ACOTADO por owner, y reporta si aplico", async () => {
+      const sql = makeSqlReturning([{ id: 'job-1' }]);
+      const aplico = await new JobsRepository(sql).reanudarDePausado('job-1', 'user-1');
+      expect(aplico).toBe(true);
+      const texto = sqlText(sql);
+      expect(texto).toContain("status = 'pending'");
+      expect(texto).toContain("status = 'pausado'");
+      expect(texto).toContain('owner_id = ');
+      expect(texto).toContain('started_at = null');
+      expect(sqlValues(sql)).toEqual(['job-1', 'user-1']);
+    });
+
+    it('un job ajeno o no pausado no se toca (0 filas -> false)', async () => {
+      expect(await new JobsRepository(makeSqlReturning([])).reanudarDePausado('job-1', 'user-2')).toBe(false);
+    });
+  });
+
+  describe('marcarPausadoFallido', () => {
+    it("cierra 'pausado' -> 'failed' con CAS (una decision simultanea gana)", async () => {
+      const sql = makeSqlReturning([]);
+      await new JobsRepository(sql).marcarPausadoFallido('job-1', 'aprobacion expirada');
+      const texto = sqlText(sql);
+      expect(texto).toContain("status = 'failed'");
+      expect(texto).toContain("status = 'pausado'");
+      expect(sqlValues(sql)).toEqual(['aprobacion expirada', 'job-1']);
+    });
+  });
+
+  describe('claim y reaper NO tocan un job pausado', () => {
+    it("claimNextJob solo toma 'pending' y reapOrphanedJobs solo recupera 'running'", async () => {
+      const sqlClaim = makeSqlReturning([]);
+      await new JobsRepository(sqlClaim).claimNextJob();
+      expect(sqlText(sqlClaim)).toContain("where status = 'pending'");
+      expect(sqlText(sqlClaim)).not.toContain('pausado');
+
+      const sqlReap = makeSqlReturning([]);
+      await new JobsRepository(sqlReap).reapOrphanedJobs({
+        simpleThresholdMs: 1000,
+        recipeThresholdMs: 2000,
+        maxAttempts: 3,
+      });
+      expect(sqlText(sqlReap)).toContain("where status = 'running'");
+      expect(sqlText(sqlReap)).not.toContain('pausado');
     });
   });
 });
