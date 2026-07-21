@@ -1,5 +1,5 @@
 import type { NormalizedMessage, NormalizedRequest, ProviderCredentials } from '@ledesma-platform/shared';
-import type { AgentConfig } from '../agents/types.js';
+import { agenteTieneToolDeSitios, webhookToolsDe, type AgentConfig } from '../agents/types.js';
 import type { AgentRunInput, ToolExecutor } from '../agent/index.js';
 import { createDemoRegistry } from '../tools/demo-registry.js';
 import { createWebhookExecutor, storedToolsToDefinitions } from '../tools/webhook-tools.js';
@@ -60,7 +60,9 @@ export interface AssembleAgentRunParams {
   /**
    * TOOLS DE SITIOS CONECTADOS (7.1d), OPCIONALES: se inyectan SOLO cuando el llamador puede
    * establecer el contexto de tenancy completo (owner + credencial de la BOVEDA con la que el
-   * worker ejecutara la tarea). El route las pasa unicamente en el camino x-credential-id; los
+   * worker ejecutara la tarea) Y el agente tiene la herramienta de sitios ACTIVADA en su config
+   * (entrada kind:'sitios_conectados' en agent.tools, la que persiste la UI de Herramientas).
+   * El route las pasa unicamente en el camino x-credential-id; los
    * demas caminos (key al momento / token de sesion / worker) quedan INTACTOS sin este parametro.
    * Cuando esta presente, ademas se appendea al system prompt el bloque de separacion
    * instruccion-vs-contenido (unica alteracion permitida de los flujos existentes).
@@ -100,15 +102,19 @@ export function assembleAgentRun(params: AssembleAgentRunParams): AssembledAgent
   const workerUrl = nativeTools.workerUrl;
   const workerSecret = nativeTools.workerSecret;
   const nativasActivas = Boolean(workerUrl && workerSecret);
-  const hasStoredTools = agent.tools.length > 0;
-  // Tools de SITIOS CONECTADOS (7.1d): activas solo si el llamador paso el contexto completo.
-  const sitiosActivos = params.sitios !== undefined;
+  // El agente guarda webhooks del cliente Y (opcionalmente) la activacion de sitios en el MISMO
+  // arreglo; al ejecutor firmado solo le llegan los webhooks.
+  const webhookTools = webhookToolsDe(agent.tools);
+  const hasStoredTools = webhookTools.length > 0;
+  // Tools de SITIOS CONECTADOS (7.1d): activas solo si el llamador paso el contexto completo Y el
+  // agente tiene la herramienta ACTIVADA en su config (la UI de Herramientas la persiste en tools).
+  const sitiosActivos = params.sitios !== undefined && agenteTieneToolDeSitios(agent.tools);
 
   // Defs del modelo: nativas (si activas) + sitios (si activas) + las del cliente. El demo solo
   // cuando no hay ninguna de las tres.
   const nativeDefs = nativasActivas ? nativeToolsToDefinitions() : [];
   const sitioDefs = sitiosActivos ? sitioToolsToDefinitions() : [];
-  const clientDefs = hasStoredTools ? storedToolsToDefinitions(agent.tools) : [];
+  const clientDefs = hasStoredTools ? storedToolsToDefinitions(webhookTools) : [];
   const registry = !nativasActivas && !hasStoredTools && !sitiosActivos ? createDemoRegistry() : null;
 
   // Dedupe defensivo: las de plataforma (nativas + sitios) tienen precedencia; el modelo nunca
@@ -129,7 +135,7 @@ export function assembleAgentRun(params: AssembleAgentRunParams): AssembledAgent
   // Ejecutor con dispatch por nombre: las de plataforma van primero (defensa anti-colision), el
   // resto al ejecutor de cliente (webhook o demo). El flujo de cliente queda intacto.
   const clientExec = hasStoredTools
-    ? createWebhookExecutor(agent.tools, agent.webhookSecret, undefined, { warn })
+    ? createWebhookExecutor(webhookTools, agent.webhookSecret, undefined, { warn })
     : registry
       ? registry.toExecutor()
       : null;
@@ -137,7 +143,7 @@ export function assembleAgentRun(params: AssembleAgentRunParams): AssembledAgent
     workerUrl && workerSecret
       ? createNativeExecutor(workerUrl, workerSecret, undefined, { warn })
       : null;
-  const sitioExec = params.sitios
+  const sitioExec = sitiosActivos && params.sitios
     ? createSitioToolsExecutor(params.sitios.context, params.sitios.deps)
     : null;
   const executeTool: ToolExecutor = (call, abortSignal) => {
