@@ -41,7 +41,7 @@ export type {
 
 // Config del agente (autoritativa) + su repo de acceso a datos.
 export { AgentRepository } from '../agents/agent-repository.js';
-export type { AgentConfig, AgentConfigInput, StoredTool } from '../agents/types.js';
+export type { AgentConfig, AgentConfigInput, AgentTool, StoredTool } from '../agents/types.js';
 
 // Registro de corridas: la MISMA tabla (agent_runs) y el MISMO metodo (record) que usa la ruta sincrona
 // (/v1/run/:agentId), reexpuestos para que el WORKER de ejecucion autonoma persista el usage de sus jobs

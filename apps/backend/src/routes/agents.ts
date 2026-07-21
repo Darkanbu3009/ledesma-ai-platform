@@ -9,6 +9,7 @@ import { createSupabaseJwtVerifier, type JwtVerifier } from '../auth/jwt-verifie
 import { requireUser } from '../auth/require-user.js';
 import { createWebhookExecutor } from '../tools/webhook-tools.js';
 import { NATIVE_TOOL_PREFIX } from '../tools/native-tools.js';
+import { SITIOS_TOOL_KIND, SITIOS_TOOL_NAME, esToolDeSitios, webhookToolsDe } from '../agents/types.js';
 
 // Exportado (sin cambiar sus reglas) para que el validador del agent-spec (agents/agent-spec.ts)
 // REUSE el mismo schema de webhook tools en vez de redefinirlo. La compuerta del Configurador y el
@@ -26,6 +27,19 @@ export const StoredToolSchema = z.object({
   inputSchema: z.record(z.string(), z.unknown()),
   url: z.string().url().startsWith('https://', 'Webhook URL must use https'),
 });
+
+// ACTIVACION de la herramienta de sitios conectados (7.1d) guardada en el MISMO arreglo tools.
+// name y kind son literales fijos: no hay nada configurable ni ejecutable en esta entrada; el
+// runtime (assembleAgentRun) es quien inyecta las tools platform_ reales cuando esta presente.
+export const SitiosToolSchema = z.object({
+  kind: z.literal(SITIOS_TOOL_KIND),
+  name: z.literal(SITIOS_TOOL_NAME),
+  description: z.string().max(1000).default(''),
+});
+
+// Una tool guardada es un webhook del cliente (shape historico, sin kind) o la activacion de
+// sitios. El union intenta webhook primero: las filas existentes no cambian de significado.
+const AgentToolSchema = z.union([StoredToolSchema, SitiosToolSchema]);
 
 // webhookSecret NO es parte del input: lo genera la base al crear y el update nunca lo toca.
 // Las respuestas si lo incluyen (viene en el AgentConfig del repo) para mostrarlo en Conectar.
@@ -51,7 +65,13 @@ export const AgentInputSchema = z.object({
   maxTokens: z.number().int().positive().max(32000).optional(),
   temperature: z.number().min(0).max(2).nullable().optional(),
   baseUrl: z.string().url().nullable().optional(),
-  tools: z.array(StoredToolSchema).max(50).optional(),
+  tools: z
+    .array(AgentToolSchema)
+    .max(50)
+    .refine((tools) => tools.filter((tool) => esToolDeSitios(tool)).length <= 1, {
+      message: 'Solo puede haber una herramienta de sitios conectados',
+    })
+    .optional(),
 });
 
 /** Input EXACTO que acepta POST /v1/agents (lo que el handler pasa a repo.create, sin ownerId). */
@@ -129,7 +149,8 @@ export function agentRoutes(config: Env, deps?: { verifier?: JwtVerifier }) {
       const user = await requireUser(request, verifier);
       const agent = await repo.getByIdForOwner(request.params.id, user.id);
       if (!agent) throw new AppError('NOT_FOUND', 404, 'Agent not found');
-      const tool = agent.tools.find((t) => t.name === request.params.toolName);
+      // Solo los webhooks son probables: la activacion de sitios no tiene URL ni ejecutor propio.
+      const tool = webhookToolsDe(agent.tools).find((t) => t.name === request.params.toolName);
       if (!tool) throw new AppError('NOT_FOUND', 404, 'Tool not found');
       const parsed = TestToolBodySchema.safeParse(request.body ?? {});
       if (!parsed.success) throw new AppError('VALIDATION_ERROR', 400, 'Invalid test input', parsed.error.issues);

@@ -1,10 +1,29 @@
 export type ProviderId = 'anthropic' | 'openai' | 'openai-compatible';
 
-export interface StoredTool {
+/** Webhook externo del cliente, tal como se persiste en agents.tools (shape historico, sin kind). */
+export interface StoredWebhookTool {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
   url: string;
+}
+
+/** Discriminador y name fijo de la activacion de tareas en sitios conectados (espejo del backend). */
+export const SITIOS_TOOL_KIND = 'sitios_conectados';
+export const SITIOS_TOOL_NAME = 'sitios_conectados';
+
+/** Activacion de la herramienta de sitios conectados guardada DENTRO del mismo arreglo tools. */
+export interface StoredSitiosTool {
+  kind: typeof SITIOS_TOOL_KIND;
+  name: typeof SITIOS_TOOL_NAME;
+  description: string;
+}
+
+/** Cualquier tool guardada del agente: webhook del cliente o la activacion de sitios. */
+export type StoredTool = StoredWebhookTool | StoredSitiosTool;
+
+export function esToolDeSitios(tool: StoredTool): tool is StoredSitiosTool {
+  return (tool as StoredSitiosTool).kind === SITIOS_TOOL_KIND;
 }
 
 /** Config de un agente tal como la devuelve el backend (sin llaves, por diseno). */

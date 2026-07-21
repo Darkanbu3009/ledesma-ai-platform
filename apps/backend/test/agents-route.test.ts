@@ -157,3 +157,66 @@ describe('prefijo reservado platform_ en tools de cliente', () => {
     expect(updateForOwnerMock).not.toHaveBeenCalled();
   });
 });
+
+describe('herramienta de sitios conectados en agents.tools', () => {
+  const toolValida = {
+    name: 'cotizar',
+    description: 'Calcula el precio',
+    inputSchema: { type: 'object' },
+    url: 'https://hooks.cliente.com/cotizar',
+  };
+  const sitiosActivacion = { kind: 'sitios_conectados', name: 'sitios_conectados', description: '' };
+
+  it('POST acepta la activacion de sitios junto a webhooks (mismo arreglo tools)', async () => {
+    createMock.mockResolvedValue({ id: 'a1', ...validBody, tools: [toolValida, sitiosActivacion], ownerId: 'user-1' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agents',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { ...validBody, tools: [toolValida, sitiosActivacion] },
+    });
+    expect(res.statusCode).toBe(201);
+    const passed = createMock.mock.calls[0]?.[0];
+    expect(passed.tools).toEqual([toolValida, sitiosActivacion]);
+  });
+
+  it('POST rechaza con 400 dos activaciones de sitios', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agents',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { ...validBody, tools: [sitiosActivacion, sitiosActivacion] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('VALIDATION_ERROR');
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it('POST rechaza con 400 un kind desconocido', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agents',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { ...validBody, tools: [{ kind: 'otro', name: 'x', description: '' }] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it('la activacion de sitios NO es probable via /tools/:toolName/test (404)', async () => {
+    getByIdForOwnerMock.mockResolvedValue({
+      id: 'a1',
+      ...validBody,
+      tools: [sitiosActivacion],
+      webhookSecret: 'whsec_x',
+      ownerId: 'user-1',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agents/a1/tools/sitios_conectados/test',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { input: {} },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});

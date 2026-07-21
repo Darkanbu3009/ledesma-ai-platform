@@ -4,8 +4,9 @@ import type { SitioConectado } from '../sitios/sitios-conectados-repository.js';
 import type { ToolCall, ToolExecutionResult, ToolExecutor } from '../agent/index.js';
 
 /**
- * TOOLS DE SITIOS CONECTADOS (Fase 7.1d): el par con el que un agente ejecuta una tarea en lenguaje
- * natural DENTRO de la sesion que el usuario ya establecio en un sitio conectado (7.1a-7.1c).
+ * TOOLS DE SITIOS CONECTADOS (Fase 7.1d): las tools con las que un agente descubre los sitios
+ * conectados activos del owner y ejecuta una tarea en lenguaje natural DENTRO de la sesion que el
+ * usuario ya establecio en un sitio conectado (7.1a-7.1c).
  * Siguen el patron ASINCRONICO del par iniciar/revisar de las tools nativas, pero sobre la COLA
  * (jobs V008 + resultado V026), NO sobre el webhook del worker viejo: aca no hay timeout de 10s;
  * encolar devuelve un job_id y el resultado se consulta cuando el worker termina.
@@ -17,8 +18,14 @@ import type { ToolCall, ToolExecutionResult, ToolExecutor } from '../agent/index
  */
 
 /** Prefijo reservado platform_ (mismo contrato que native-tools.ts): el cliente no puede colisionar. */
+export const SITIO_TOOL_LISTAR = 'platform_listar_sitios_conectados';
 export const SITIO_TOOL_EJECUTAR = 'platform_ejecutar_tarea_en_sitio';
 export const SITIO_TOOL_REVISAR = 'platform_revisar_tarea_en_sitio';
+
+const listarSchema: JsonSchema = {
+  type: 'object',
+  properties: {},
+};
 
 const ejecutarSchema: JsonSchema = {
   type: 'object',
@@ -47,10 +54,19 @@ const revisarSchema: JsonSchema = {
 /** Catalogo de las tools de sitios que se inyectan cuando el run tiene contexto de sitios (boveda). */
 export const SITIO_TOOLS: readonly ToolDefinition[] = [
   {
+    name: SITIO_TOOL_LISTAR,
+    description:
+      'Lista los sitios conectados ACTIVOS del usuario (id de conexion + dominio). Usala primero para saber ' +
+      'sobre que sitio ejecutar una tarea: el connection_id que devuelve es el que espera ' +
+      'platform_ejecutar_tarea_en_sitio. Solo aparecen sitios cuya sesion sigue activa.',
+    inputSchema: listarSchema,
+  },
+  {
     name: SITIO_TOOL_EJECUTAR,
     description:
       'Ejecuta una tarea en lenguaje natural DENTRO de la sesion ya iniciada del usuario en un sitio conectado ' +
-      '(el usuario conecto el sitio antes y su sesion quedo activa). Encola la tarea en segundo plano y devuelve ' +
+      '(el usuario conecto el sitio antes y su sesion quedo activa). Si no conoces el connection_id, obtenlo ' +
+      'primero con platform_listar_sitios_conectados. Encola la tarea en segundo plano y devuelve ' +
       'un job_id: la tarea NO es inmediata, usa platform_revisar_tarea_en_sitio con ese job_id para obtener el ' +
       'resultado. Solo sirve para sitios que el usuario ya conecto; no inicia sesion ni maneja credenciales. Las ' +
       'acciones irreversibles o financieras (enviar, publicar, borrar, pagar, transferir) NO se ejecutan: se ' +
@@ -107,6 +123,7 @@ export interface SitioToolsDeps {
   };
   sitios: {
     obtenerPorId(id: string, ownerId: string): Promise<SitioConectado | null>;
+    listarPorOwner(ownerId: string): Promise<SitioConectado[]>;
   };
 }
 
@@ -125,6 +142,25 @@ function inputString(input: Record<string, unknown>, key: string): string | null
  * ni devuelve nada sensible: solo ids, estados y el resultado ya saneado que guardo el worker.
  */
 export function createSitioToolsExecutor(ctx: SitioToolsContext, deps: SitioToolsDeps): ToolExecutor {
+  const listar = async (): Promise<ToolExecutionResult> => {
+    // Acotado al owner del run (jamas del modelo) y filtrado a 'activo': un sitio caducado, en
+    // error o esperando login no es ejecutable y no se ofrece. Solo metadata minima: id + dominio.
+    const sitios = await deps.sitios.listarPorOwner(ctx.ownerId);
+    const activos = sitios
+      .filter((sitio) => sitio.estado === 'activo')
+      .map((sitio) => ({ connection_id: sitio.id, dominio: sitio.dominio }));
+    if (activos.length === 0) {
+      return {
+        content: JSON.stringify({
+          sitios: [],
+          nota: 'El usuario no tiene sitios conectados activos; debe conectar uno desde la consola.',
+        }),
+        isError: false,
+      };
+    }
+    return { content: JSON.stringify({ sitios: activos }), isError: false };
+  };
+
   const ejecutar = async (input: Record<string, unknown>): Promise<ToolExecutionResult> => {
     const connectionId = inputString(input, 'connection_id');
     const objetivo = inputString(input, 'objetivo');
@@ -189,6 +225,7 @@ export function createSitioToolsExecutor(ctx: SitioToolsContext, deps: SitioTool
   return async (call: ToolCall): Promise<ToolExecutionResult> => {
     const input = (call.input ?? {}) as Record<string, unknown>;
     try {
+      if (call.name === SITIO_TOOL_LISTAR) return await listar();
       if (call.name === SITIO_TOOL_EJECUTAR) return await ejecutar(input);
       if (call.name === SITIO_TOOL_REVISAR) return await revisar(input);
       return { content: `Tool ${call.name} no es una tool de sitios conectados`, isError: true };

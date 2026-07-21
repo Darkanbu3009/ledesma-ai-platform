@@ -27,6 +27,13 @@ export const AgentFormSchema = z
         message: 'Requerido para proveedores compatibles',
       });
     }
+    if (data.tools.filter((tool) => tool.kind === 'sitios').length > 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['tools'],
+        message: 'Solo puede haber una herramienta de sitios conectados',
+      });
+    }
     const names = new Set<string>();
     for (const tool of data.tools) {
       if (names.has(tool.name)) {

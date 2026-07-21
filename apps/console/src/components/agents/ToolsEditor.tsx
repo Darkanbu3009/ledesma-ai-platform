@@ -1,23 +1,26 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { FlaskConical, Plus, Trash2 } from 'lucide-react';
+import { FlaskConical, Globe, Plus, Trash2 } from 'lucide-react';
 import type { AgentFormValues } from '../../lib/agent-schema';
 import {
   paramsToJsonSchema,
   sampleInputFromParams,
+  sitiosToolForm,
   tryJsonSchemaToParams,
   tryParseJsonObject,
   type ParamType,
   type ToolFormValues,
 } from '../../lib/tool-schema';
+import { useSitios } from '../../lib/queries';
 import { Field, inputClass } from '../ui/Field';
 import { TestToolDialog } from './TestToolDialog';
 
 const PARAM_TYPES: ParamType[] = ['string', 'number', 'boolean'];
 
 function emptyTool(): ToolFormValues {
-  return { name: '', description: '', url: '', mode: 'simple', params: [], rawSchema: '' };
+  return { kind: 'webhook', name: '', description: '', url: '', mode: 'simple', params: [], rawSchema: '' };
 }
 
 /** Editor de la lista de tools del agente; requiere FormProvider del form padre.
@@ -30,6 +33,10 @@ export function ToolsEditor({ agentId }: { agentId?: string }) {
   } = useFormContext<AgentFormValues>();
   const { fields, append, remove } = useFieldArray({ control, name: 'tools' });
   const listError = errors.tools?.root?.message ?? errors.tools?.message;
+  // Los valores vivos (no el snapshot de fields) deciden el tipo de card y si la herramienta de
+  // sitios ya esta activada (a lo sumo una).
+  const toolValues = useWatch({ control, name: 'tools' }) ?? [];
+  const sitiosYaActivada = toolValues.some((tool) => tool?.kind === 'sitios');
 
   return (
     <div>
@@ -40,22 +47,97 @@ export function ToolsEditor({ agentId }: { agentId?: string }) {
             {t('agentes.herramientas.vacio')}
           </div>
         )}
-        {fields.map((field, index) => (
-          <ToolCard key={field.id} index={index} agentId={agentId} onRemove={() => remove(index)} />
-        ))}
+        {fields.map((field, index) =>
+          toolValues[index]?.kind === 'sitios' ? (
+            <SitiosToolCard key={field.id} onRemove={() => remove(index)} />
+          ) : (
+            <ToolCard key={field.id} index={index} agentId={agentId} onRemove={() => remove(index)} />
+          ),
+        )}
         {listError && (
           <p role="alert" className="text-sm text-brasa">
             {listError}
           </p>
         )}
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => append(emptyTool())}
+            className="inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2 text-sm font-medium text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
+          >
+            <Plus className="h-4 w-4" />
+            {t('agentes.herramientas.agregar')}
+          </button>
+          <button
+            type="button"
+            onClick={() => append(sitiosToolForm())}
+            disabled={sitiosYaActivada}
+            title={sitiosYaActivada ? t('agentes.herramientas.sitiosYaActivada') : undefined}
+            className="inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2 text-sm font-medium text-hueso-muted transition hover:border-hueso-muted hover:text-hueso disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-grafito-border disabled:hover:text-hueso-muted"
+          >
+            <Globe className="h-4 w-4" />
+            {t('agentes.herramientas.sitiosActivar')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Card de la herramienta de TAREAS EN SITIOS CONECTADOS: no hay nada que configurar (el runtime
+ * inyecta las tools platform_ de sitios); solo se muestra que hace y sobre que sitios activos del
+ * usuario podra operar el agente.
+ */
+function SitiosToolCard({ onRemove }: { onRemove: () => void }) {
+  const { t } = useTranslation();
+  const { data: sitios, isLoading } = useSitios();
+  const activos = (sitios ?? []).filter((sitio) => sitio.estado === 'activo');
+
+  return (
+    <div className="space-y-4 rounded-xl border border-grafito-border bg-grafito p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="inline-flex items-center gap-2 text-sm font-semibold text-hueso">
+          <Globe className="h-4 w-4" />
+          {t('agentes.herramientas.sitiosTitulo')}
+        </p>
         <button
           type="button"
-          onClick={() => append(emptyTool())}
-          className="inline-flex items-center gap-2 rounded-lg border border-grafito-border px-4 py-2 text-sm font-medium text-hueso-muted transition hover:border-hueso-muted hover:text-hueso"
+          onClick={onRemove}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-grafito-border px-3 py-1.5 text-xs font-medium text-brasa transition hover:border-brasa"
         >
-          <Plus className="h-4 w-4" />
-          {t('agentes.herramientas.agregar')}
+          <Trash2 className="h-3.5 w-3.5" />
+          {t('agentes.herramientas.eliminar')}
         </button>
+      </div>
+      <p className="text-sm text-hueso-muted">{t('agentes.herramientas.sitiosDescripcion')}</p>
+      <p className="text-xs text-hueso-muted">{t('agentes.herramientas.sitiosNota')}</p>
+      <div>
+        <p className="mb-2 text-sm font-medium text-hueso">
+          {t('agentes.herramientas.sitiosActivosLabel')}
+        </p>
+        {isLoading ? (
+          <p className="text-sm text-hueso-muted">{t('agentes.herramientas.sitiosCargando')}</p>
+        ) : activos.length === 0 ? (
+          <p className="text-sm text-hueso-muted">{t('agentes.herramientas.sitiosVacio')}</p>
+        ) : (
+          <ul className="flex flex-wrap gap-2">
+            {activos.map((sitio) => (
+              <li
+                key={sitio.id}
+                className="rounded-lg border border-grafito-border px-3 py-1.5 text-xs font-medium text-hueso"
+              >
+                {sitio.dominio}
+              </li>
+            ))}
+          </ul>
+        )}
+        <Link
+          to="/sitios"
+          className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-hueso-muted underline-offset-2 transition hover:text-hueso hover:underline"
+        >
+          {t('agentes.herramientas.sitiosGestionar')}
+        </Link>
       </div>
     </div>
   );
