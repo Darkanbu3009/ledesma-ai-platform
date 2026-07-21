@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SITIOS_TOOL_KIND, SITIOS_TOOL_NAME, esToolDeSitios, type StoredTool } from './agents';
 
 export type ParamType = 'string' | 'number' | 'boolean';
 
@@ -19,20 +20,42 @@ export const ToolParamSchema = z.object({
   required: z.boolean(),
 });
 
+function esUrlValida(value: string): boolean {
+  try {
+    new URL(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const ToolFormSchema = z
   .object({
+    // 'webhook' es el shape historico; 'sitios' es la activacion de tareas en sitios conectados
+    // (sin URL ni parametros propios: el runtime inyecta las tools platform_ reales).
+    kind: z.enum(['webhook', 'sitios']).default('webhook'),
     name: z
       .string()
       .min(1, 'Nombre obligatorio')
       .max(64)
       .regex(/^[a-zA-Z_][a-zA-Z0-9_-]*$/, 'Solo letras, numeros, guion y guion bajo'),
-    description: z.string().min(1, 'Descripcion obligatoria').max(1000),
-    url: z.string().url('URL invalida').startsWith('https://', 'Debe ser https'),
+    description: z.string().max(1000),
+    url: z.string(),
     mode: z.enum(['simple', 'json']),
     params: z.array(ToolParamSchema),
     rawSchema: z.string(),
   })
   .superRefine((tool, ctx) => {
+    // La entrada de sitios no tiene webhook, descripcion obligatoria ni schema editable.
+    if (tool.kind === 'sitios') return;
+    if (tool.description.trim() === '') {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['description'], message: 'Descripcion obligatoria' });
+    }
+    if (!esUrlValida(tool.url)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['url'], message: 'URL invalida' });
+    } else if (!tool.url.startsWith('https://')) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['url'], message: 'Debe ser https' });
+    }
     if (tool.mode === 'json') {
       const parsed = tryParseJsonObject(tool.rawSchema);
       if (!parsed) {
@@ -105,13 +128,24 @@ export function sampleInputFromParams(params: ToolParam[]): Record<string, unkno
   return input;
 }
 
+/** Valores de formulario de la activacion de sitios conectados (una sola entrada, campos fijos). */
+export function sitiosToolForm(): ToolFormValues {
+  return {
+    kind: 'sitios',
+    name: SITIOS_TOOL_NAME,
+    description: '',
+    url: '',
+    mode: 'simple',
+    params: [],
+    rawSchema: '',
+  };
+}
+
 /** ToolFormValues -> StoredTool (payload del API). */
-export function toolFormToStored(tool: ToolFormValues): {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-  url: string;
-} {
+export function toolFormToStored(tool: ToolFormValues): StoredTool {
+  if (tool.kind === 'sitios') {
+    return { kind: SITIOS_TOOL_KIND, name: SITIOS_TOOL_NAME, description: '' };
+  }
   const inputSchema =
     tool.mode === 'simple'
       ? paramsToJsonSchema(tool.params)
@@ -120,15 +154,14 @@ export function toolFormToStored(tool: ToolFormValues): {
 }
 
 /** StoredTool -> ToolFormValues (decide modo segun representabilidad). */
-export function storedToToolForm(stored: {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-  url: string;
-}): ToolFormValues {
+export function storedToToolForm(stored: StoredTool): ToolFormValues {
+  if (esToolDeSitios(stored)) {
+    return sitiosToolForm();
+  }
   const params = tryJsonSchemaToParams(stored.inputSchema);
   if (params !== null) {
     return {
+      kind: 'webhook',
       name: stored.name,
       description: stored.description,
       url: stored.url,
@@ -138,6 +171,7 @@ export function storedToToolForm(stored: {
     };
   }
   return {
+    kind: 'webhook',
     name: stored.name,
     description: stored.description,
     url: stored.url,
