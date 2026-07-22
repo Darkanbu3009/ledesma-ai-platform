@@ -58,7 +58,7 @@ Notas estructurales:
 - agentes.vacio.conversarConConfigurador | "Conversar con el Configurador" | "Chat with the Configurator" | Mismo caso del nombre "Configurador".
 - agentes.vacio.paso3Titulo | "Lo sueltas" | "You set it loose" | Frase coloquial de marketing; alternativas: "You ship it" / "You let it run".
 - agentes.vacio.paso3Descripcion | "Tareas, triggers, recetas o embebido." | "Tasks, triggers, recipes or embedded." | "embebido" refiere al widget embebido; en ingles quiza "or embed it" suene mas natural.
-- agentes.card.conversar | "Conversar" | "Chat" | Termino de producto (accion principal de la tarjeta); podria ser "Talk" o "Converse" segun el tono de marca.
+- agentes.card.usarAgente | "Usar agente" | "Use agent" | Nombre unificado de la accion que lleva al Playground (antes "Conversar" en la tarjeta y "Probar agente" en el form).
 - agentes.form.modeloDescripcion | "El cerebro que mueve al agente. Es intercambiable." | "The brain that powers the agent. It is swappable." | Metafora de marketing; traduccion libre.
 - agentes.rotarSecreto.descripcion | "Se generara un secreto nuevo..." | "A new secret will be generated..." | Contiene el identificador LEDESMA_WEBHOOK_SECRET (se dejo tal cual en ambos idiomas).
 - playground.titulo | "Playground: {{name}}" | "Playground: {{name}}" | Identico en ambos idiomas ("Playground" es nombre de la seccion); se extrajo igualmente por ser el titulo de la pagina con variable.

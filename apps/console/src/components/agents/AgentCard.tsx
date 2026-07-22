@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Bot, MessageCircle, Pencil, Wrench } from 'lucide-react';
+import { BarChart3, Bot, Pencil, Play, Plug, Wrench } from 'lucide-react';
 import type { AgentConfig, ProviderId } from '../../lib/agents';
 import { playgroundPath, providerLabel } from '../../lib/agents';
 import { focusRing } from '../../lib/utils';
@@ -33,6 +33,9 @@ const ACCENTS: Partial<Record<ProviderId, Accent>> = {
     hoverBorder: 'hover:border-oss-line',
   },
 };
+
+/** Fila discreta de acciones secundarias (mismo patron de links con borde que la pagina de edicion). */
+const secondaryActionClass = `inline-flex min-w-0 items-center justify-center gap-1 rounded-[10px] border border-line bg-surface px-2 py-1.5 text-xs font-semibold text-muted transition hover:border-ink-soft hover:text-ink ${focusRing}`;
 
 /** Proveedor no listado: cae al acento de marca (brasa). */
 const FALLBACK_ACCENT: Accent = {
@@ -91,26 +94,44 @@ export function AgentCard({ agent }: { agent: AgentConfig }) {
           </span>
         </div>
 
-        {/* Acciones de primera clase por agente: "Conversar" (ir a su Playground) junto a "Editar".
-            Antes solo se llegaba al Playground desde el form o la pagina de uso; ahora es un clic
-            directo desde la tarjeta. */}
-        <div className="mt-3.5 grid grid-cols-2 gap-2">
-          <Link
-            to={`/agentes/${agent.id}`}
-            aria-label={t('agentes.card.editarAria', { name: agent.name })}
-            className={`inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-line bg-surface px-3 py-2 text-[13px] font-semibold text-muted transition hover:border-ink-soft hover:text-ink ${focusRing}`}
-          >
-            <Pencil className="h-[15px] w-[15px]" />
-            {t('agentes.card.editar')}
-          </Link>
+        {/* Acciones de primera clase por agente, con jerarquia: "Usar agente" (ir a su Playground)
+            es la primaria y destacada; Editar, Conectar y Uso quedan en una fila discreta debajo,
+            para no tener que entrar a Editar solo para conectarlo o ver su uso. */}
+        <div className="mt-3.5 space-y-2">
           <Link
             to={playgroundPath(agent.id)}
-            aria-label={t('agentes.card.conversarAria', { name: agent.name })}
-            className={`inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-brasa-line bg-brasa-soft px-3 py-2 text-[13px] font-semibold text-brasa transition hover:bg-brasa hover:text-white ${focusRing}`}
+            aria-label={t('agentes.card.usarAgenteAria', { name: agent.name })}
+            className={`inline-flex w-full items-center justify-center gap-1.5 rounded-[10px] bg-brasa px-3 py-2 text-[13px] font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:bg-[#C8460F] ${focusRing}`}
           >
-            <MessageCircle className="h-[15px] w-[15px]" />
-            {t('agentes.card.conversar')}
+            <Play className="h-[15px] w-[15px]" />
+            {t('agentes.card.usarAgente')}
           </Link>
+          <div className="grid grid-cols-3 gap-2">
+            <Link
+              to={`/agentes/${agent.id}`}
+              aria-label={t('agentes.card.editarAria', { name: agent.name })}
+              className={secondaryActionClass}
+            >
+              <Pencil className="h-3.5 w-3.5 flex-none" />
+              <span className="truncate">{t('agentes.card.editar')}</span>
+            </Link>
+            <Link
+              to={`/agentes/${agent.id}/conectar`}
+              aria-label={t('agentes.card.conectarAria', { name: agent.name })}
+              className={secondaryActionClass}
+            >
+              <Plug className="h-3.5 w-3.5 flex-none" />
+              <span className="truncate">{t('agentes.card.conectar')}</span>
+            </Link>
+            <Link
+              to={`/agentes/${agent.id}/uso`}
+              aria-label={t('agentes.card.usoAria', { name: agent.name })}
+              className={secondaryActionClass}
+            >
+              <BarChart3 className="h-3.5 w-3.5 flex-none" />
+              <span className="truncate">{t('agentes.card.uso')}</span>
+            </Link>
+          </div>
         </div>
       </div>
     </div>

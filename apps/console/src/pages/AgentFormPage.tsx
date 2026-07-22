@@ -150,7 +150,7 @@ export function AgentFormPage() {
               <div className="flex flex-wrap gap-2.5">
                 <Link to={`/agentes/${id}/playground`} className={secondaryActionClass}>
                   <Play className="h-4 w-4" />
-                  {t('agentes.form.probarAgente')}
+                  {t('agentes.form.usarAgente')}
                 </Link>
                 <Link to={`/agentes/${id}/conectar`} className={secondaryActionClass}>
                   <Plug className="h-4 w-4" />
