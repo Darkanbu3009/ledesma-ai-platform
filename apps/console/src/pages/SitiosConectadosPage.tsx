@@ -1,13 +1,12 @@
 import { useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Globe, Loader2, Lock, Trash2, Unplug } from 'lucide-react';
+import { Globe, Loader2, Lock, Trash2 } from 'lucide-react';
 import { ApiError } from '../lib/api';
 import i18n from '../i18n';
 import { useJobSeguimiento, useJobsSeguimiento, useMe, useSitios } from '../lib/queries';
 import {
   useConectarSitio,
   useConfirmarSitio,
-  useDesconectarSitio,
   useEliminarSitio,
   useUpdateProfilePais,
 } from '../lib/mutations';
@@ -23,7 +22,6 @@ import { isJobInFlight } from '../lib/jobs';
 import { formatRunAt } from '../lib/schedule';
 import { LoginEnVivoDialog } from '../components/sitios/LoginEnVivoDialog';
 import { SeleccionPaisDialog } from '../components/sitios/SeleccionPaisDialog';
-import { DesconectarSitioDialog } from '../components/sitios/DesconectarSitioDialog';
 import { EliminarSitioDialog } from '../components/sitios/EliminarSitioDialog';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SkeletonList } from '../components/ui/SkeletonList';
@@ -31,7 +29,7 @@ import { ErrorState } from '../components/ui/ErrorState';
 import { ChoosePlanCta } from '../components/upgrade/ChoosePlanCta';
 import { tierAllowsAutonomy } from '../lib/plans';
 
-/** Traduce el error del backend al conectar/confirmar/desconectar a un mensaje legible. */
+/** Traduce el error del backend al conectar/confirmar/eliminar a un mensaje legible. */
 function backendMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 401) return i18n.t('sitios.errores.sesion');
@@ -66,20 +64,15 @@ function EstadoBadge({ estado }: { estado: EstadoSitio }) {
 }
 
 /**
- * Fila de UN sitio conectado: inicial del dominio, dominio, estado, ultimo uso y las dos salidas:
- * "Desconectar" (el flujo limpio) y el icono de ELIMINAR (bote de basura), el borrado FORZADO
- * garantizado para conexiones atascadas que el flujo limpio no puede desconectar.
+ * Fila de UN sitio conectado: inicial del dominio, dominio, estado, ultimo uso y UNA sola salida:
+ * el boton "Eliminar" (bote de basura + etiqueta), que dispara el borrado FORZADO garantizado (el
+ * que funciona desde cualquier estado, aunque la sesion o el contexto del proveedor ya no existan).
  */
 function SitioCard({
   sitio,
-  desconectando,
-  onDesconectar,
   onEliminar,
 }: {
   sitio: SitioConectado;
-  /** true mientras la desconexion de ESTE sitio esta encolada/corriendo (deshabilita los botones). */
-  desconectando: boolean;
-  onDesconectar: () => void;
   onEliminar: () => void;
 }) {
   const { t } = useTranslation();
@@ -111,26 +104,12 @@ function SitioCard({
       <div className="flex flex-none items-center gap-2 self-start sm:self-center">
         <button
           type="button"
-          onClick={onDesconectar}
-          disabled={desconectando}
-          className="inline-flex flex-none items-center justify-center gap-1.5 rounded-[10px] border border-line bg-surface px-3.5 py-2 text-[13px] font-medium text-muted transition hover:border-[rgba(192,73,43,0.4)] hover:text-[#C0492B] disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {desconectando ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Unplug className="h-4 w-4" />
-          )}
-          {desconectando ? t('sitios.lista.desconectando') : t('sitios.lista.desconectar')}
-        </button>
-        <button
-          type="button"
           onClick={onEliminar}
-          disabled={desconectando}
           aria-label={t('sitios.lista.eliminarAria', { dominio: sitio.dominio })}
-          title={t('sitios.lista.eliminar')}
-          className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-[10px] border border-line bg-surface text-muted transition hover:border-[rgba(192,73,43,0.4)] hover:text-[#C0492B] disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex flex-none items-center justify-center gap-1.5 rounded-[10px] border border-line bg-surface px-3.5 py-2 text-[13px] font-medium text-muted transition hover:border-[rgba(192,73,43,0.4)] hover:text-[#C0492B]"
         >
           <Trash2 className="h-4 w-4" />
+          {t('sitios.lista.eliminar')}
         </button>
       </div>
     </div>
@@ -161,7 +140,8 @@ function SitiosLocked() {
  * Pagina SITIOS CONECTADOS (/sitios, Fase 7.1c): el usuario pega la URL de un sitio con login, se
  * abre un navegador remoto seguro, EL MISMO inicia sesion en la vista en vivo embebida y confirma;
  * la conexion queda 'activo' y lista para que un agente opere dentro de su cuenta (eso es 7.1d, no
- * este PR). Tambien lista las conexiones y permite desconectarlas (borrado ARCO, con confirmacion).
+ * este PR). Tambien lista las conexiones y permite eliminarlas (borrado forzado + ARCO, con
+ * confirmacion): una sola accion por fila, la que funciona desde cualquier estado.
  *
  * PRINCIPIO NO NEGOCIABLE: el login lo hace el usuario, no la plataforma. La unica entrada de esta
  * pagina es la URL; la contrasena se teclea dentro del iframe de la vista en vivo (directo contra el
@@ -188,9 +168,6 @@ export function SitiosConectadosPage() {
   const [urlPendienteDePais, setUrlPendienteDePais] = useState<string | null>(null);
   /** Conexion EN CURSO iniciada por esta pagina: el job encolado + el dominio a vigilar en la lista. */
   const [conexion, setConexion] = useState<{ jobId: string; dominio: string } | null>(null);
-  /** Desconexion EN CURSO: el job encolado + el sitio para marcar su fila mientras desaparece. */
-  const [desconexion, setDesconexion] = useState<{ jobId: string; sitioId: string } | null>(null);
-  const [aDesconectar, setADesconectar] = useState<SitioConectado | null>(null);
   /**
    * Borrados FORZADOS EN CURSO: UNA entrada por sitio (job encolado + fila que se oculta de
    * inmediato). Es una LISTA a proposito: el usuario puede encadenar el eliminar de varios sitios
@@ -202,16 +179,12 @@ export function SitiosConectadosPage() {
 
   const conectar = useConectarSitio();
   const confirmar = useConfirmarSitio();
-  const desconectar = useDesconectarSitio();
   const eliminar = useEliminarSitio();
   const guardarPais = useUpdateProfilePais();
 
   const conexionJob = useJobSeguimiento(conexion?.jobId ?? null);
-  const desconexionJob = useJobSeguimiento(desconexion?.jobId ?? null);
   const eliminacionJobs = useJobsSeguimiento(eliminaciones.map((e) => e.jobId));
 
-  // DERIVACION de la desconexion: error si el job fallo (la fila sigue existiendo).
-  const desconexionFallo = desconexion !== null && desconexionJob.data?.status === 'failed';
   // DERIVACION del borrado forzado (apareado por indice con eliminacionJobs): una eliminacion esta
   // FALLIDA si su job termino en failed (solo posible por la propia plataforma, jamas por el
   // proveedor) o si su consulta quedo en error (react-query agoto los reintentos de GET /v1/jobs).
@@ -225,16 +198,10 @@ export function SitiosConectadosPage() {
 
   // La lista se refresca sola mientras hay filas en transicion (dentro de useSitios); ademas se le
   // pide polling extra mientras un job de conectar sigue en vuelo (la fila aun no existe) o una
-  // desconexion/eliminacion espera que su fila desaparezca (job en vuelo, o completado con la fila
-  // aun visible).
+  // eliminacion espera que su fila desaparezca (job en vuelo, o completado con la fila aun visible).
   const sitiosQuery = useSitios(
     (lista) =>
       conexion !== null ||
-      (desconexion !== null &&
-        !desconexionFallo &&
-        (desconexionJob.data === undefined ||
-          isJobInFlight(desconexionJob.data.status) ||
-          lista.some((sitio) => sitio.id === desconexion.sitioId))) ||
       eliminaciones.some((e, i) => {
         const job = eliminacionJobs[i];
         if (job === undefined || job.isError || job.data?.status === 'failed') return false;
@@ -318,17 +285,6 @@ export function SitiosConectadosPage() {
     // Cierra el modal (o el spinner) sin confirmar. La sesion remota expira sola del lado del
     // proveedor y el barrido del worker marca la fila; aqui no hay nada mas que limpiar.
     setConexion(null);
-  }
-
-  function handleDesconectar() {
-    if (!aDesconectar) return;
-    const sitio = aDesconectar;
-    desconectar.mutate(sitio.id, {
-      onSuccess: (aceptada) => {
-        setDesconexion({ jobId: aceptada.jobId, sitioId: sitio.id });
-        setADesconectar(null);
-      },
-    });
   }
 
   function handleEliminar() {
@@ -452,23 +408,6 @@ export function SitiosConectadosPage() {
             </div>
           )}
 
-          {/* La desconexion fallo: la fila sigue existiendo; aviso con cierre explicito. */}
-          {desconexionFallo && (
-            <div
-              role="alert"
-              className="mt-4 flex flex-col gap-2 rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa"
-            >
-              <span>{t('sitios.errores.desconectarFallo')}</span>
-              <button
-                type="button"
-                onClick={() => setDesconexion(null)}
-                className="self-start rounded-lg border border-brasa-line px-3 py-1.5 text-[13px] font-semibold transition hover:bg-brasa/10"
-              >
-                {t('sitios.comunes.entendido')}
-              </button>
-            </div>
-          )}
-
           {/* Lista de sitios. En el estado vacio no se muestra nada mas: el input de arriba ES el CTA. */}
           {sitiosQuery.isLoading ? (
             <SkeletonList cardClassName="h-[92px]" />
@@ -483,11 +422,6 @@ export function SitiosConectadosPage() {
                 <SitioCard
                   key={sitio.id}
                   sitio={sitio}
-                  desconectando={desconexion !== null && desconexion.sitioId === sitio.id && !desconexionFallo}
-                  onDesconectar={() => {
-                    desconectar.reset();
-                    setADesconectar(sitio);
-                  }}
                   onEliminar={() => {
                     eliminar.reset();
                     setAEliminar(sitio);
@@ -520,15 +454,6 @@ export function SitiosConectadosPage() {
           onCerrar={handleCancelarLogin}
         />
       )}
-
-      <DesconectarSitioDialog
-        open={aDesconectar !== null}
-        dominio={aDesconectar?.dominio ?? ''}
-        busy={desconectar.isPending}
-        error={desconectar.isError ? backendMessage(desconectar.error) : undefined}
-        onConfirm={handleDesconectar}
-        onCancel={() => setADesconectar(null)}
-      />
 
       <EliminarSitioDialog
         open={aEliminar !== null}

@@ -15,7 +15,7 @@ import { opcionesDePais, paisDelNavegador } from '../../lib/paises';
  * por el collator del idioma activo): sirve a usuarios de CUALQUIER pais, ninguno privilegiado. La
  * unica preseleccion es la SUGERENCIA derivada del navegador (paisDelNavegador), que el usuario
  * confirma o cambia; si no es derivable, arranca sin seleccion y el boton queda deshabilitado.
- * Mismo patron accesible que DesconectarSitioDialog (useDialog): trampa de foco, Escape, click en
+ * Mismo patron accesible que EliminarSitioDialog (useDialog): trampa de foco, Escape, click en
  * el fondo y foco de vuelta.
  */
 export function SeleccionPaisDialog({

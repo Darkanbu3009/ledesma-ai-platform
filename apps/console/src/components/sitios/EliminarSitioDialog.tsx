@@ -3,11 +3,11 @@ import { useTranslation } from 'react-i18next';
 import { useDialog } from '../ui/useDialog';
 
 /**
- * Confirmacion del BORRADO FORZADO de un sitio (el icono de bote de basura de la lista). Es la
- * salida GARANTIZADA para conexiones atascadas: el worker intenta cerrar la sesion y borrar el
- * contexto en el proveedor best-effort, pero el registro local y la constancia ARCO se completan
- * pase lo que pase con Browserbase. La copy lo dice tal cual: se eliminara de todos modos.
- * Mismo patron accesible que DesconectarSitioDialog (via useDialog): trampa de foco, Escape, click
+ * Confirmacion del BORRADO FORZADO de un sitio (el boton "Eliminar" de la lista, la unica accion
+ * por fila). Es la salida GARANTIZADA desde cualquier estado: el worker intenta cerrar la sesion y
+ * borrar el contexto en el proveedor best-effort, pero el registro local y la constancia ARCO se
+ * completan pase lo que pase con Browserbase. La copy lo dice tal cual: se eliminara de todos modos.
+ * Mismo patron accesible que DeleteTriggerDialog (via useDialog): trampa de foco, Escape, click
  * en el fondo y foco de vuelta al cerrar.
  */
 export function EliminarSitioDialog({

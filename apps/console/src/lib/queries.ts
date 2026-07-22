@@ -142,7 +142,7 @@ export function useTrayectoriasDeJob(jobId: string, enabled: boolean) {
  * SITIOS CONECTADOS del usuario (GET /v1/sitios). AUTO-REFRESH PRUDENTE, mismo criterio que useJobs:
  * reconsulta cada SITIOS_REFETCH_MS SOLO mientras hay una conexion en transicion (esperando_login) o
  * mientras `pollingExtra` (evaluado sobre la lista ya cargada) lo pida: la pagina lo usa cuando un
- * job de conectar/desconectar sigue en vuelo y su efecto aun no se refleja en la lista. Si todo esta
+ * job de conectar/eliminar sigue en vuelo y su efecto aun no se refleja en la lista. Si todo esta
  * estable, no toca el API. Polling via refetchInterval de react-query, sin useEffect.
  */
 export function useSitios(pollingExtra?: (sitios: SitioConectado[]) => boolean) {
