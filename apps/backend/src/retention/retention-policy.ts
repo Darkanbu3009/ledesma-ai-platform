@@ -16,12 +16,19 @@ export interface RetentionPolicy {
   agentRunsDays: number;
   /** Dias que se conservan los jobs en estado TERMINAL (completed/failed) desde que finalizaron. */
   terminalJobsDays: number;
+  /**
+   * Dias que se conservan las trayectorias de tareas web (V030) desde que terminaron. MUCHO mas
+   * corta que la de jobs porque los pasos, aunque censurados, describen la actividad del usuario
+   * dentro de sus sitios (dato mas sensible). Configurable via RETENTION_TRAYECTORIAS_WEB_DAYS.
+   */
+  trayectoriasWebDays: number;
 }
 
 /** Default conservador de la plataforma. Explicito para que sea auditable. */
 export const DEFAULT_RETENTION_POLICY: RetentionPolicy = {
   agentRunsDays: 365,
   terminalJobsDays: 90,
+  trayectoriasWebDays: 30,
 };
 
 /**

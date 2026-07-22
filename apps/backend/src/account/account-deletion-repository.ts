@@ -27,6 +27,8 @@ export interface AccountDataDeletionResult {
   dataSubjectRequests: number;
   upgradeRequests: number;
   sitiosConectados: number;
+  /** Trayectorias de tareas web (V030); sus pasos caen por el on delete cascade de la FK. */
+  trayectoriasWeb: number;
   /**
    * contexto_externo_id de los sitios conectados borrados (los no nulos): referencias de contextos
    * de navegador que viven en un PROVEEDOR EXTERNO y que el borrado local no alcanza. El purgado en
@@ -62,7 +64,8 @@ interface IdRow {
  *   3. agents: el `on delete cascade` de sus 6 hijos limpia cualquier remanente (defensa en profundidad).
  *   4. Tablas sueltas por owner_id sin FK: provider_credentials, consents, data_subject_requests,
  *      upgrade_requests, sitios_conectados (V024; ademas recoge sus contexto_externo_id para el
- *      purgado en el proveedor externo, que ejecuta 7.1b).
+ *      purgado en el proveedor externo, que ejecuta 7.1b) y trayectorias_web (V030; su cascade
+ *      arrastra pasos_trayectoria).
  *   5. admin_actions: se ANONIMIZA (UPDATE actor_id = null), NO se borra, para conservar el audit trail
  *      (guia de la tarea). target_id (NOT NULL) se retiene como id opaco: tras borrar el perfil ya no
  *      resuelve a una persona identificable, y ofuscarlo romperia la correlacion del log.
@@ -115,6 +118,12 @@ export class AccountDeletionRepository {
       const sitiosConectados = await tx<Array<{ id: string; contexto_externo_id: string | null }>>`
         delete from sitios_conectados where owner_id = ${ownerId} returning id, contexto_externo_id
       `;
+      // trayectorias_web (V030): la traza censurada de las tareas web del owner. Sin FK a jobs a
+      // proposito (retencion independiente), por eso se borra EXPLICITO por owner_id; el on delete
+      // cascade de pasos_trayectoria arrastra los pasos de cada trayectoria.
+      const trayectoriasWeb = await tx<IdRow[]>`
+        delete from trayectorias_web where owner_id = ${ownerId} returning id
+      `;
 
       // --- (5) admin_actions: ANONIMIZAR (no borrar). Conserva la fila, quita el vinculo personal actor. ---
       const adminActions = await tx<IdRow[]>`
@@ -161,6 +170,7 @@ export class AccountDeletionRepository {
         dataSubjectRequests: dataSubjectRequests.length,
         upgradeRequests: upgradeRequests.length,
         sitiosConectados: sitiosConectados.length,
+        trayectoriasWeb: trayectoriasWeb.length,
         sitiosConectadosContextosExternos: sitiosConectados
           .map((r) => r.contexto_externo_id)
           .filter((x): x is string => typeof x === 'string' && x.length > 0),

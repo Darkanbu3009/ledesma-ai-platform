@@ -142,6 +142,13 @@ function evaluate(db: Db, text: string, values: unknown[]): unknown[] {
     if (table === 'sitios_conectados') {
       return removed.map((r) => ({ id: r.id, contexto_externo_id: r.contexto_externo_id ?? null }));
     }
+    // FK ON DELETE CASCADE (V030): borrar una trayectoria arrastra sus pasos, como en Postgres.
+    if (table === 'trayectorias_web') {
+      const removedIds = new Set(removed.map((r) => r.id));
+      db.pasos_trayectoria = tbl(db, 'pasos_trayectoria').filter(
+        (r) => !removedIds.has(r.trayectoria_id ?? ''),
+      );
+    }
     return removed.map((r) => ({ id: r.id }));
   }
 
@@ -170,10 +177,10 @@ function mutationTargets(sql: MockSql): string[] {
 const A_COUNTS: Record<string, number> = {
   agent_runs: 2, jobs: 3, scheduled_tasks: 4, triggers: 5, recipes: 6, processing_records: 7,
   agents: 8, provider_credentials: 9, consents: 10, data_subject_requests: 11, upgrade_requests: 12,
-  subscriptions: 13, usage_counters: 14, sitios_conectados: 15,
+  subscriptions: 13, usage_counters: 14, sitios_conectados: 15, trayectorias_web: 16,
 };
 
-const OWNER_TABLES = ['agent_runs', 'jobs', 'scheduled_tasks', 'triggers', 'recipes', 'processing_records', 'agents', 'provider_credentials', 'consents', 'data_subject_requests', 'upgrade_requests', 'sitios_conectados'];
+const OWNER_TABLES = ['agent_runs', 'jobs', 'scheduled_tasks', 'triggers', 'recipes', 'processing_records', 'agents', 'provider_credentials', 'consents', 'data_subject_requests', 'upgrade_requests', 'sitios_conectados', 'trayectorias_web'];
 
 /** DB con dos owners (A y B) en la MISMA org 'org-1', + admin_actions con A como actor y como target. */
 function sharedOrgDb(): Db {
@@ -186,6 +193,12 @@ function sharedOrgDb(): Db {
   db.sitios_conectados = (db.sitios_conectados ?? []).map((r, i) => ({
     ...r,
     contexto_externo_id: r.owner_id === 'owner-A' && i < 2 ? `ctx-${i}` : null,
+  }));
+  // pasos_trayectoria (V030): un paso por trayectoria, ligado por trayectoria_id (sin owner_id
+  // propio: su dueno es el de la cabecera). Deben caer por el cascade al borrar trayectorias_web.
+  db.pasos_trayectoria = tbl(db, 'trayectorias_web').map((r, i) => ({
+    id: `paso-${i}`,
+    trayectoria_id: r.id ?? null,
   }));
   db.subscriptions = [...ownedRows('owner-A', A_COUNTS.subscriptions ?? 1, 'profile_id'), ...ownedRows('owner-B', 1, 'profile_id')];
   db.usage_counters = [...ownedRows('owner-A', A_COUNTS.usage_counters ?? 1, 'profile_id'), ...ownedRows('owner-B', 1, 'profile_id')];
@@ -228,11 +241,25 @@ describe('AccountDeletionRepository.deleteAccountData', () => {
     expect(result).toMatchObject({
       agentRuns: 2, jobs: 3, scheduledTasks: 4, triggers: 5, recipes: 6, processingRecords: 7,
       agents: 8, providerCredentials: 9, consents: 10, dataSubjectRequests: 11, upgradeRequests: 12,
-      subscriptions: 13, usageCounters: 14, sitiosConectados: 15, profiles: 1,
+      subscriptions: 13, usageCounters: 14, sitiosConectados: 15, trayectoriasWeb: 16, profiles: 1,
     });
     // Los contexto_externo_id NO NULOS de los sitios borrados vuelven para el purgado en el
     // proveedor externo (7.1b); los null se filtran.
     expect(result.sitiosConectadosContextosExternos.sort()).toEqual(['ctx-0', 'ctx-1']);
+  });
+
+  it('ARCO en cascada (V030): borrar trayectorias_web del owner arrastra sus pasos y respeta los ajenos', async () => {
+    const sql = makeStatefulSql(sharedOrgDb());
+    await new AccountDeletionRepository(sql as unknown as Sql).deleteAccountData('owner-A');
+
+    // Ninguna trayectoria de A sobrevive y, via el cascade, tampoco ninguno de sus pasos.
+    const trayectoriasB = tbl(sql.db, 'trayectorias_web');
+    expect(trayectoriasB.filter((r) => r.owner_id === 'owner-A')).toHaveLength(0);
+    const idsB = new Set(trayectoriasB.map((r) => r.id));
+    const pasos = tbl(sql.db, 'pasos_trayectoria');
+    // Los pasos que quedan son EXACTAMENTE los de las trayectorias de B.
+    expect(pasos.length).toBeGreaterThan(0);
+    expect(pasos.every((p) => idsB.has(p.trayectoria_id ?? ''))).toBe(true);
   });
 
   it('ANONIMIZA admin_actions: nulifica actor_id del owner, CONSERVA las filas y no toca target ajeno', async () => {

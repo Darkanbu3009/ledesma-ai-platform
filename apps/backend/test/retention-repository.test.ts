@@ -29,12 +29,17 @@ function sqlValues(sql: Sql, index = 0): unknown[] {
 function makeFilteringSql(
   agentRuns: Array<{ id: string; created_at: string }>,
   jobs: Array<{ id: string; status: string; finished_at: string | null }>,
+  trayectorias: Array<{ id: string; terminada_en: string }> = [],
 ): Sql {
   const fn = vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const text = strings.join(' ');
     if (text.includes('delete from agent_runs')) {
       const cutoff = values[0] as string;
       return agentRuns.filter((r) => r.created_at < cutoff).map((r) => ({ id: r.id }));
+    }
+    if (text.includes('delete from trayectorias_web')) {
+      const cutoff = values[0] as string;
+      return trayectorias.filter((r) => r.terminada_en < cutoff).map((r) => ({ id: r.id }));
     }
     if (text.includes('delete from jobs')) {
       const cutoff = values[values.length - 1] as string;
@@ -107,22 +112,35 @@ describe('RetentionRepository', () => {
           { id: 'job-old-running', status: 'running', finished_at: oldRunningJob },
           { id: 'job-recent-failed', status: 'failed', finished_at: recentJob },
         ],
+        [
+          // trayectorias_web (V030): una terminada hace 60 dias (mas vieja que el corte de 30) y una
+          // de hace 3 dias (reciente).
+          { id: 'tray-old', terminada_en: cutoffIso(60, NOW) },
+          { id: 'tray-recent', terminada_en: cutoffIso(3, NOW) },
+        ],
       );
       const result = await new RetentionRepository(sql).purgeExpired(NOW, {
         agentRunsDays: 365,
         terminalJobsDays: 90,
+        trayectoriasWebDays: 30,
       });
-      // Solo el run viejo y el job completed viejo se borran. El run reciente, el job running (no terminal)
-      // y el job failed reciente se CONSERVAN.
-      expect(result).toEqual({ agentRuns: 1, terminalJobs: 1 });
+      // Solo el run viejo, el job completed viejo y la trayectoria vieja se borran. El run reciente, el
+      // job running (no terminal), el job failed reciente y la trayectoria reciente se CONSERVAN.
+      expect(result).toEqual({ agentRuns: 1, terminalJobs: 1, trayectoriasWeb: 1 });
     });
 
-    it('usa los cortes derivados de la politica y now (agent_runs 365, jobs 90)', async () => {
+    it('usa los cortes derivados de la politica y now (agent_runs 365, jobs 90, trayectorias 30)', async () => {
       const sql = makeSqlReturning([]);
-      await new RetentionRepository(sql).purgeExpired(NOW, { agentRunsDays: 365, terminalJobsDays: 90 });
-      // Primera llamada = agent_runs con corte de 365; segunda = jobs con corte de 90.
+      await new RetentionRepository(sql).purgeExpired(NOW, {
+        agentRunsDays: 365,
+        terminalJobsDays: 90,
+        trayectoriasWebDays: 30,
+      });
+      // Primera llamada = agent_runs con corte de 365; segunda = jobs con corte de 90; tercera =
+      // trayectorias_web con corte de 30.
       expect(sqlValues(sql, 0)).toEqual([cutoffIso(365, NOW)]);
       expect(sqlValues(sql, 1)).toEqual([cutoffIso(90, NOW)]);
+      expect(sqlValues(sql, 2)).toEqual([cutoffIso(30, NOW)]);
     });
   });
 

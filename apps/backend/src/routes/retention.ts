@@ -25,10 +25,17 @@ export function retentionRoutes(
     const retentionRepo = deps?.retentionRepo ?? new RetentionRepository(getSql(config));
     const now = deps?.now ?? (() => new Date());
 
+    // La ventana de trayectorias es la unica configurable por env (dato mas sensible, ver env.ts);
+    // el resto de la politica sigue el default auditable de retention-policy.ts.
+    const policy = {
+      ...DEFAULT_RETENTION_POLICY,
+      trayectoriasWebDays: config.RETENTION_TRAYECTORIAS_WEB_DAYS,
+    };
+
     app.post('/v1/admin/retention/purge', async (request: FastifyRequest, reply: FastifyReply) => {
       requireAdmin(request, config);
-      const result: PurgeResult = await retentionRepo.purgeExpired(now(), DEFAULT_RETENTION_POLICY);
-      return reply.send({ purged: result, policy: DEFAULT_RETENTION_POLICY });
+      const result: PurgeResult = await retentionRepo.purgeExpired(now(), policy);
+      return reply.send({ purged: result, policy });
     });
   };
 }

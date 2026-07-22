@@ -15,6 +15,10 @@
     "./aprobaciones": {
       "types": "./dist/aprobaciones/index.d.ts",
       "import": "./dist/aprobaciones/index.js"
+    },
+    "./trayectorias": {
+      "types": "./dist/trayectorias/index.d.ts",
+      "import": "./dist/trayectorias/index.js"
     }
   },
   "scripts": {

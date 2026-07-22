@@ -50,6 +50,12 @@ const EnvSchema = z.object({
   // run. Ambos numeros positivos (coercion de string como PORT).
   RUN_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(DEFAULT_RUN_TIMEOUT_SECONDS),
   RUN_MAX_TOKENS: z.coerce.number().int().positive().default(DEFAULT_RUN_MAX_TOKENS),
+  // RETENCION de trayectorias de tareas web (V030), en dias, OPCIONAL con default 30 (mismo patron
+  // numerico que RUN_TIMEOUT_SECONDS). Es la UNICA ventana de retencion configurable por env porque
+  // los pasos describen la actividad del usuario dentro de sus sitios (dato mas sensible que
+  // agent_runs/jobs, cuyas ventanas siguen fijas en retention-policy.ts). Subirla retiene mas;
+  // bajarla, menos. La purga la aplican el endpoint admin de retencion y la gemela SQL de V030.
+  RETENTION_TRAYECTORIAS_WEB_DAYS: z.coerce.number().int().positive().default(30),
   // CORREO DE BIENVENIDA por Resend (onboarding, aditivo, best-effort). Las TRES son OPCIONALES: si
   // falta cualquiera, el registro funciona IGUAL y solo se loguea que no se envio la bienvenida (el
   // correo es una mejora de retencion, no una dependencia dura). Reusan el MISMO patron de fetch a
