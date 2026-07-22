@@ -99,7 +99,9 @@ function makeNavegador(overrides: Partial<NavegadorParaTarea> = {}): NavegadorPa
 }
 
 function makeMotor(resultado: { exito: boolean; mensaje: string }): MotorDeTareaWeb {
-  return { ejecutar: vi.fn(async () => resultado) };
+  // El motor real (Stagehand) ademas devuelve la traza (acciones/tokens); los tests que no la
+  // ejercitan usan una traza vacia.
+  return { ejecutar: vi.fn(async () => ({ ...resultado, acciones: [], tokensIn: null, tokensOut: null })) };
 }
 
 function makeDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {

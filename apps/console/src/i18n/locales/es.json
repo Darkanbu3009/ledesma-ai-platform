@@ -1690,10 +1690,31 @@
       "intentos_one": "{{count}} intento",
       "intentos_other": "{{count}} intentos",
       "intentos_many": "{{count}} intentos",
-      "sitios": "Sitios conectados"
+      "sitios": "Sitios conectados",
+      "tareaWeb": "Tarea en sitio conectado"
     },
     "filtros": {
       "todas": "Todas"
+    },
+    "trayectoria": {
+      "verPasos": "Ver pasos",
+      "ocultarPasos": "Ocultar pasos",
+      "cargando": "Cargando pasos",
+      "error": "No pudimos cargar los pasos de esta tarea",
+      "vacia": "Esta tarea no tiene pasos registrados (corrio antes de activar el registro o el registro fallo).",
+      "ejecucion": "Ejecucion {{num}}",
+      "duracion": "Duracion: {{valor}}",
+      "tokens": "Tokens: {{entrada}} entrada / {{salida}} salida",
+      "pasos_one": "{{count}} paso",
+      "pasos_other": "{{count}} pasos",
+      "pasos_many": "{{count}} pasos",
+      "selector": "Selector",
+      "valor": "Valor",
+      "estado": {
+        "exitosa": "Exitosa",
+        "fallida": "Fallida",
+        "pausada": "Pausada"
+      }
     },
     "jobEstado": {
       "pendiente": "Pendiente",
@@ -1705,7 +1726,8 @@
     "jobTipo": {
       "receta": "Receta",
       "mensaje": "Mensaje",
-      "sitio": "Sitio"
+      "sitio": "Sitio",
+      "tareaWeb": "Tarea web"
     }
   },
   "sitios": {

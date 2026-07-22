@@ -49,11 +49,13 @@ export interface CreateJobInput {
 /**
  * Tipo de un job INFERIDO del payload (para OBSERVABILIDAD): 'recipe' si el payload lleva el
  * discriminador kind === 'recipe' (ver recipe-payload.ts), 'sitio' si lleva uno de los tres kinds de
- * sitios conectados (ver sitio-payload.ts), y 'simple' en cualquier otro caso (el job de un mensaje
- * suelto). Es lo unico que se puede saber del payload SIN exponerlo: el origen (scheduler/trigger/
- * manual) NO es inferible sin cambios de esquema, asi que no se modela aqui.
+ * sitios conectados (ver sitio-payload.ts), 'tarea_web' si lleva el kind de tarea web (ver
+ * tarea-web-payload.ts; la UI lo usa para ofrecer la vista de trayectoria, V030) y 'simple' en
+ * cualquier otro caso (el job de un mensaje suelto). Es lo unico que se puede saber del payload SIN
+ * exponerlo: el origen (scheduler/trigger/manual) NO es inferible sin cambios de esquema, asi que no
+ * se modela aqui.
  */
-export type JobType = 'recipe' | 'simple' | 'sitio';
+export type JobType = 'recipe' | 'simple' | 'sitio' | 'tarea_web';
 
 /**
  * RESUMEN de un job para el historial de ejecuciones (listado de OBSERVABILIDAD). Deliberadamente NO

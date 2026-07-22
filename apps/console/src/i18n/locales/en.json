@@ -1690,10 +1690,31 @@
       "intentos_one": "{{count}} attempt",
       "intentos_other": "{{count}} attempts",
       "intentos_many": "{{count}} attempts",
-      "sitios": "Connected sites"
+      "sitios": "Connected sites",
+      "tareaWeb": "Task on connected site"
     },
     "filtros": {
       "todas": "All"
+    },
+    "trayectoria": {
+      "verPasos": "View steps",
+      "ocultarPasos": "Hide steps",
+      "cargando": "Loading steps",
+      "error": "We couldn't load the steps of this task",
+      "vacia": "This task has no recorded steps (it ran before recording was enabled or recording failed).",
+      "ejecucion": "Run {{num}}",
+      "duracion": "Duration: {{valor}}",
+      "tokens": "Tokens: {{entrada}} in / {{salida}} out",
+      "pasos_one": "{{count}} step",
+      "pasos_other": "{{count}} steps",
+      "pasos_many": "{{count}} steps",
+      "selector": "Selector",
+      "valor": "Value",
+      "estado": {
+        "exitosa": "Successful",
+        "fallida": "Failed",
+        "pausada": "Paused"
+      }
     },
     "jobEstado": {
       "pendiente": "Pending",
@@ -1705,7 +1726,8 @@
     "jobTipo": {
       "receta": "Recipe",
       "mensaje": "Message",
-      "sitio": "Site"
+      "sitio": "Site",
+      "tareaWeb": "Web task"
     }
   },
   "sitios": {

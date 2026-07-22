@@ -14,6 +14,7 @@ import type { Recipe, RecipeSummary } from './recipes';
 import type { JobActivity, JobsPage, JobStatusFilter } from './jobs';
 import { JOB_PAGE_SIZE, JOBS_REFETCH_MS, buildJobsQuery, hasInFlightJobs, isJobInFlight } from './jobs';
 import type { SitioConectado } from './sitios';
+import type { Trayectoria } from './trayectorias';
 import { JOB_SEGUIMIENTO_REFETCH_MS, SITIOS_REFETCH_MS, haySitiosEnTransicion } from './sitios';
 import type { ConsentsState, DataRequest } from './privacy';
 import type { AprobacionWeb } from './aprobaciones';
@@ -117,6 +118,23 @@ export function useJobs(status: JobStatusFilter = 'all') {
       const jobs = query.state.data?.pages.flatMap((page) => page.jobs) ?? [];
       return hasInFlightJobs(jobs) ? JOBS_REFETCH_MS : false;
     },
+  });
+}
+
+/**
+ * TRAYECTORIA de una tarea web (GET /v1/trayectorias?jobId=..., Fase F V030): las ejecuciones del
+ * motor de navegacion registradas para un job, con sus pasos censurados. Solo corre con `enabled`
+ * (la tarjeta de actividad la pide recien al expandir la tarea: no se descargan pasos que nadie
+ * abrio). Sin auto-refresh: la trayectoria se escribe UNA vez al cerrar la ejecucion.
+ */
+export function useTrayectoriasDeJob(jobId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['trayectorias', jobId],
+    queryFn: () =>
+      apiFetch<{ trayectorias: Trayectoria[] }>(`/v1/trayectorias?jobId=${jobId}`).then(
+        (r) => r.trayectorias,
+      ),
+    enabled,
   });
 }
 

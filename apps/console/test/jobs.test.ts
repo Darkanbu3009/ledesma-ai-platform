@@ -41,10 +41,11 @@ describe('jobStatusLabel', () => {
 });
 
 describe('jobTypeLabel', () => {
-  it('recipe -> Receta, simple -> Mensaje, sitio -> Sitio', () => {
+  it('recipe -> Receta, simple -> Mensaje, sitio -> Sitio, tarea_web -> Tarea web', () => {
     expect(jobTypeLabel('recipe')).toBe('Receta');
     expect(jobTypeLabel('simple')).toBe('Mensaje');
     expect(jobTypeLabel('sitio')).toBe('Sitio');
+    expect(jobTypeLabel('tarea_web')).toBe('Tarea web');
   });
 });
 

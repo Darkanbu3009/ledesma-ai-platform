@@ -2,8 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { cutoffIso, DEFAULT_RETENTION_POLICY } from '../src/retention/retention-policy.js';
 
 describe('retention-policy', () => {
-  it('el default es conservador (agent_runs 365 dias, jobs terminales 90 dias)', () => {
-    expect(DEFAULT_RETENTION_POLICY).toEqual({ agentRunsDays: 365, terminalJobsDays: 90 });
+  it('el default es conservador (agent_runs 365, jobs terminales 90, trayectorias web 30 dias)', () => {
+    expect(DEFAULT_RETENTION_POLICY).toEqual({
+      agentRunsDays: 365,
+      terminalJobsDays: 90,
+      trayectoriasWebDays: 30,
+    });
   });
 
   describe('cutoffIso', () => {

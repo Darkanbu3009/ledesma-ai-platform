@@ -10,8 +10,9 @@
 
 import i18n from '../i18n';
 
-/** Tipo inferido del job (del payload, sin exponerlo): receta multi-paso, mensaje suelto o sitio conectado. */
-export type JobType = 'recipe' | 'simple' | 'sitio';
+/** Tipo inferido del job (del payload, sin exponerlo): receta multi-paso, mensaje suelto, sitio
+ *  conectado o tarea web (la unica con trayectoria V030 que abrir). */
+export type JobType = 'recipe' | 'simple' | 'sitio' | 'tarea_web';
 
 /** Estados de la cola (mismos que el backend: CHECK de V008 + 'pausado' de V027). */
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'pausado';
@@ -75,10 +76,11 @@ export function jobStatusLabel(status: JobStatus): string {
   }
 }
 
-/** Etiqueta legible del tipo de job: receta (multi-paso), mensaje (suelto) o sitio conectado. */
+/** Etiqueta legible del tipo de job: receta (multi-paso), mensaje (suelto), sitio o tarea web. */
 export function jobTypeLabel(type: JobType): string {
   if (type === 'recipe') return i18n.t('actividad.jobTipo.receta');
   if (type === 'sitio') return i18n.t('actividad.jobTipo.sitio');
+  if (type === 'tarea_web') return i18n.t('actividad.jobTipo.tareaWeb');
   return i18n.t('actividad.jobTipo.mensaje');
 }
 

@@ -20,6 +20,7 @@ import { cutoffIso, DEFAULT_RETENTION_POLICY, type RetentionPolicy } from './ret
 export interface PurgeResult {
   agentRuns: number;
   terminalJobs: number;
+  trayectoriasWeb: number;
 }
 
 export class RetentionRepository {
@@ -55,13 +56,31 @@ export class RetentionRepository {
   }
 
   /**
-   * Purga periodica: aplica la politica (cortes calculados desde `now`) a agent_runs y jobs terminales.
-   * Recibe `now` (no lo lee) para ser determinista y testeable. Conservadora: solo lo mas viejo que la
-   * ventana; nada reciente.
+   * Borra trayectorias de tareas web (V030) TERMINADAS antes del corte. El on delete cascade de
+   * pasos_trayectoria arrastra los pasos de cada trayectoria borrada. Toda trayectoria persistida ya
+   * esta terminada (el worker la escribe al cerrar la ejecucion): no hay estado "en vuelo" que
+   * proteger; la salvaguarda es el corte en el pasado.
+   */
+  async purgeTrayectoriasWebOlderThan(cutoff: string): Promise<number> {
+    const rows = await this.sql<Array<{ id: string }>>`
+      delete from trayectorias_web
+      where terminada_en < ${cutoff}
+      returning id
+    `;
+    return rows.length;
+  }
+
+  /**
+   * Purga periodica: aplica la politica (cortes calculados desde `now`) a agent_runs, jobs terminales
+   * y trayectorias de tareas web. Recibe `now` (no lo lee) para ser determinista y testeable.
+   * Conservadora: solo lo mas viejo que la ventana; nada reciente.
    */
   async purgeExpired(now: Date, policy: RetentionPolicy = DEFAULT_RETENTION_POLICY): Promise<PurgeResult> {
     const agentRuns = await this.purgeAgentRunsOlderThan(cutoffIso(policy.agentRunsDays, now));
     const terminalJobs = await this.purgeTerminalJobsOlderThan(cutoffIso(policy.terminalJobsDays, now));
-    return { agentRuns, terminalJobs };
+    const trayectoriasWeb = await this.purgeTrayectoriasWebOlderThan(
+      cutoffIso(policy.trayectoriasWebDays, now),
+    );
+    return { agentRuns, terminalJobs, trayectoriasWeb };
   }
 }

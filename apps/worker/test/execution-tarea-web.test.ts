@@ -86,7 +86,15 @@ function makeTareaWebDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
       observarSalida: vi.fn(async () => ({ egressIp: '203.0.113.7', egressCountry: 'AR' })),
       cerrarSesion: vi.fn(async () => {}),
     },
-    motor: { ejecutar: vi.fn(async () => ({ exito: true, mensaje: 'listo' })) },
+    motor: {
+      ejecutar: vi.fn(async () => ({
+        exito: true,
+        mensaje: 'listo',
+        acciones: [],
+        tokensIn: null,
+        tokensOut: null,
+      })),
+    },
     vaultSecret: '0123456789abcdef0123456789abcdef',
     model: 'anthropic/claude-sonnet-4-6',
     runTimeoutMs: 600_000,
@@ -147,7 +155,13 @@ describe('processClaimedJob con jobs de tarea web', () => {
   it('pantalla de login a mitad de tarea: markFailed DIRECTO (cero reintentos) y UNA alerta', async () => {
     const tareaWeb = makeTareaWebDeps({
       motor: {
-        ejecutar: vi.fn(async () => ({ exito: false, mensaje: `${MARCADOR_SESION_CADUCADA}: login` })),
+        ejecutar: vi.fn(async () => ({
+          exito: false,
+          mensaje: `${MARCADOR_SESION_CADUCADA}: login`,
+          acciones: [],
+          tokensIn: null,
+          tokensOut: null,
+        })),
       },
     });
     // attempts=1: a un fallo transitorio le quedarian reintentos; el permanente NO los usa.

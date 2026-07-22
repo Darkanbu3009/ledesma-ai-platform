@@ -11,6 +11,7 @@ import type {
 } from './types.js';
 import { RECIPE_JOB_KIND } from './recipe-payload.js';
 import { SITIO_JOB_KINDS } from './sitio-payload.js';
+import { TAREA_WEB_JOB_KIND } from './tarea-web-payload.js';
 
 /**
  * Cliente postgres (tagged template) que el repositorio recibe por inyeccion, IGUAL que los
@@ -94,9 +95,11 @@ function rowToSummary(row: JobSummaryRow): JobSummary {
     type:
       row.payload_kind === RECIPE_JOB_KIND
         ? 'recipe'
-        : (SITIO_JOB_KINDS as readonly string[]).includes(row.payload_kind ?? '')
-          ? 'sitio'
-          : 'simple',
+        : row.payload_kind === TAREA_WEB_JOB_KIND
+          ? 'tarea_web'
+          : (SITIO_JOB_KINDS as readonly string[]).includes(row.payload_kind ?? '')
+            ? 'sitio'
+            : 'simple',
     attempts: Number(row.attempts ?? 0),
     lastError: row.last_error,
     scheduledFor: toIso(row.scheduled_for),

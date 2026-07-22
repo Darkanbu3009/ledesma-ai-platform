@@ -1,6 +1,6 @@
 import { Stagehand } from '@browserbasehq/stagehand';
 import type { V3Options } from '@browserbasehq/stagehand';
-import type { MotorDeTareaWeb } from './tarea-web.js';
+import type { MotorDeTareaWeb, ResultadoMotor } from './tarea-web.js';
 
 /**
  * ADAPTADOR real del puerto MotorDeTareaWeb (tarea-web.ts) sobre Stagehand v3
@@ -71,7 +71,7 @@ export class MotorStagehand implements MotorDeTareaWeb {
     model: string;
     maxPasos: number;
     signal?: AbortSignal;
-  }): Promise<{ exito: boolean; mensaje: string }> {
+  }): Promise<ResultadoMotor> {
     const stagehand = new Stagehand(
       construirOpcionesStagehand({
         apiKey: this.config.apiKey,
@@ -89,7 +89,17 @@ export class MotorStagehand implements MotorDeTareaWeb {
         maxSteps: params.maxPasos,
         ...(params.signal !== undefined ? { signal: params.signal } : {}),
       });
-      return { exito: resultado.success && resultado.completed, mensaje: resultado.message };
+      // AgentResult (v3, types/public/agent.d.ts:64-89) ya trae la TRAZA estructurada: `actions`
+      // (una por tool ejecutada, con playwrightArguments.selector en 'act'/'fillForm') y `usage`
+      // (tokens). Se devuelven CRUDAS: la censura y la persistencia son del handler (trayectoria.ts),
+      // este adaptador no decide que se guarda.
+      return {
+        exito: resultado.success && resultado.completed,
+        mensaje: resultado.message,
+        acciones: resultado.actions ?? [],
+        tokensIn: resultado.usage?.input_tokens ?? null,
+        tokensOut: resultado.usage?.output_tokens ?? null,
+      };
     } finally {
       // Cierre del CLIENTE Stagehand (no de la sesion: keepAlive la mantiene viva para que el
       // handler extraiga el contexto; la sesion la cierra el handler en su finally).
