@@ -69,15 +69,16 @@ export function LoginEnVivoDialog({
         </div>
 
         {/* La vista en vivo EMBEBIDA: apunta directo al proveedor. Sin listeners, por diseno.
-            flex-1 + min-h-0: llena TODO el alto que el modal (de altura fija) deja entre la
-            cabecera y el pie, y puede ceder si hiciera falta -- el aviso de seguridad (cabecera) y
-            el boton de confirmar (pie) son flex-none y quedan SIEMPRE visibles. El min() del piso
-            evita que en pantallas bajas el iframe los empuje fuera (el contenedor recorta overflow);
-            en un desktop tipico (ventana >= ~840px de alto) el flex-1 ya supera los 600px. */}
+            flex-1: llena TODO el alto que el modal (de altura fija) deja entre la cabecera y el
+            pie; en un desktop tipico (ventana >= ~840px de alto) eso ya supera los 600px pedidos.
+            El aviso de seguridad (cabecera) y el boton de confirmar (pie) son flex-none y mandan:
+            el piso del iframe es DELIBERADAMENTE bajo (solo evita el colapso total si cabecera o
+            pie crecieran, p.ej. con el alert de error) para que en pantallas bajas -- telefono
+            apaisado incluido -- el iframe ceda y JAMAS los empuje fuera del overflow-hidden. */}
         <iframe
           src={sitio.vistaEnVivoUrl ?? undefined}
           title={t('sitios.modal.iframeTitulo', { dominio: sitio.dominio })}
-          className="min-h-[min(320px,55vh)] w-full flex-1 border-0 bg-ink/5 sm:min-h-[min(600px,62vh)]"
+          className="min-h-[120px] w-full flex-1 border-0 bg-ink/5"
           allow="clipboard-read; clipboard-write"
         />
 

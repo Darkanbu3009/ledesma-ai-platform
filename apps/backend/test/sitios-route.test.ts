@@ -349,6 +349,21 @@ describe('DELETE /v1/sitios/:id', () => {
     },
   );
 
+  it('la clave repetida (?force=true&force=true) sigue siendo borrado forzado, jamas se degrada', async () => {
+    obtenerPorId.mockResolvedValue(makeSitio({ estado: 'activo' }));
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/v1/sitios/${SITIO_ID}?force=true&force=true`,
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: { kind: 'desconectar_sitio', connectionId: SITIO_ID, force: true },
+      }),
+    );
+  });
+
   it('un force distinto del literal true (false, basura) es el flujo limpio, sin force', async () => {
     obtenerPorId.mockResolvedValue(makeSitio({ estado: 'activo' }));
     const res = await app.inject({

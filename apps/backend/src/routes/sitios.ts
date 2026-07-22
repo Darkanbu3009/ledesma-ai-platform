@@ -20,8 +20,22 @@ import { SitiosConectadosRepository, type SitioConectado } from '../sitios/index
 const SitioIdParamSchema = z.object({ id: z.string().uuid() });
 
 // Querystring de DELETE /v1/sitios/:id: force=true pide el BORRADO FORZADO (garantizado). Solo el
-// literal 'true' activa el modo; cualquier otro valor (ausente, 'false', basura) es el flujo limpio.
-const SitioDeleteQuerySchema = z.object({ force: z.string().optional() });
+// literal 'true' activa el modo; cualquier otro valor (ausente, 'false', basura) es el flujo
+// limpio. Se acepta tambien la clave repetida (?force=true&force=true llega como array): una
+// peticion que pidio force en cualquiera de sus valores JAMAS se degrada en silencio al flujo
+// limpio.
+const SitioDeleteQuerySchema = z.object({
+  force: z.union([z.string(), z.array(z.string())]).optional(),
+});
+
+/** ¿La querystring pide el borrado forzado? true si CUALQUIER valor de force es el literal 'true'. */
+function pideBorradoForzado(query: unknown): boolean {
+  const parsed = SitioDeleteQuerySchema.safeParse(query);
+  if (!parsed.success) return false;
+  const force = parsed.data.force;
+  if (force === undefined) return false;
+  return Array.isArray(force) ? force.includes('true') : force === 'true';
+}
 
 // Body de POST /v1/sitios/conectar: la URL de login es LA UNICA entrada humana del flujo, mas el
 // pais OPCIONAL que la consola deriva del navegador del usuario (Intl). La forma completa (URL
@@ -216,14 +230,13 @@ export function sitiosRoutes(
     app.delete(
       '/v1/sitios/:id',
       async (
-        request: FastifyRequest<{ Params: { id: string }; Querystring: { force?: string } }>,
+        request: FastifyRequest<{ Params: { id: string }; Querystring: { force?: string | string[] } }>,
         reply: FastifyReply,
       ) => {
         const user = await requireUser(request, verifier);
         await requireAutonomy(user.id);
         const sitio = await resolveSitioParam(request, user.id);
-        const query = SitioDeleteQuerySchema.safeParse(request.query);
-        const force = query.success && query.data.force === 'true';
+        const force = pideBorradoForzado(request.query);
 
         const job = await jobsRepo.createJob({
           agentId: null,

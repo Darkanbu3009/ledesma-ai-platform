@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useQueries, useQuery } from '@tanstack/react-query';
 import { apiFetch } from './api';
 import type { AgentConfig } from './agents';
 import type { ProviderCredential } from './credentials';
@@ -145,16 +145,30 @@ export function useSitios(pollingExtra?: (sitios: SitioConectado[]) => boolean) 
  * job sigue en vuelo (pending/running, mismo isJobInFlight del historial) y se detiene sola al llegar
  * a un estado terminal. Solo corre con un jobId presente. Polling con react-query, sin useEffect.
  */
-export function useJobSeguimiento(jobId: string | null) {
-  return useQuery({
-    queryKey: ['jobs', 'detalle', jobId],
+function jobSeguimientoQueryOptions(jobId: string | null) {
+  return {
+    queryKey: ['jobs', 'detalle', jobId] as const,
     queryFn: () => apiFetch<{ job: JobActivity }>(`/v1/jobs/${jobId}`).then((r) => r.job),
     enabled: Boolean(jobId),
-    refetchInterval: (query) => {
+    refetchInterval: (query: { state: { data?: JobActivity } }) => {
       const job = query.state.data;
       return !job || isJobInFlight(job.status) ? JOB_SEGUIMIENTO_REFETCH_MS : false;
     },
-  });
+  };
+}
+
+export function useJobSeguimiento(jobId: string | null) {
+  return useQuery(jobSeguimientoQueryOptions(jobId));
+}
+
+/**
+ * SEGUIMIENTO de VARIOS jobs a la vez (useQueries sobre las mismas opciones que useJobSeguimiento):
+ * lo usa la pagina de sitios para vigilar N borrados forzados en paralelo sin perder ninguno (cada
+ * uno con su propio polling, que se apaga solo al llegar el job a un estado terminal). El resultado
+ * llega EN EL MISMO ORDEN que `jobIds` (garantia de useQueries), asi el llamador aparea por indice.
+ */
+export function useJobsSeguimiento(jobIds: string[]) {
+  return useQueries({ queries: jobIds.map((jobId) => jobSeguimientoQueryOptions(jobId)) });
 }
 
 /**

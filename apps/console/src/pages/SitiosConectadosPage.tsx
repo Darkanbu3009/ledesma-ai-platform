@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Globe, Loader2, Lock, Trash2, Unplug } from 'lucide-react';
 import { ApiError } from '../lib/api';
 import i18n from '../i18n';
-import { useJobSeguimiento, useMe, useSitios } from '../lib/queries';
+import { useJobSeguimiento, useJobsSeguimiento, useMe, useSitios } from '../lib/queries';
 import {
   useConectarSitio,
   useConfirmarSitio,
@@ -180,8 +180,13 @@ export function SitiosConectadosPage() {
   /** Desconexion EN CURSO: el job encolado + el sitio para marcar su fila mientras desaparece. */
   const [desconexion, setDesconexion] = useState<{ jobId: string; sitioId: string } | null>(null);
   const [aDesconectar, setADesconectar] = useState<SitioConectado | null>(null);
-  /** Borrado FORZADO EN CURSO: el job encolado + el sitio cuya fila se oculta de inmediato. */
-  const [eliminacion, setEliminacion] = useState<{ jobId: string; sitioId: string } | null>(null);
+  /**
+   * Borrados FORZADOS EN CURSO: UNA entrada por sitio (job encolado + fila que se oculta de
+   * inmediato). Es una LISTA a proposito: el usuario puede encadenar el eliminar de varios sitios
+   * y ninguno pierde su seguimiento (un slot unico sobreescribiria el anterior y su fallo seria
+   * invisible).
+   */
+  const [eliminaciones, setEliminaciones] = useState<Array<{ jobId: string; sitioId: string }>>([]);
   const [aEliminar, setAEliminar] = useState<SitioConectado | null>(null);
 
   const conectar = useConectarSitio();
@@ -191,13 +196,20 @@ export function SitiosConectadosPage() {
 
   const conexionJob = useJobSeguimiento(conexion?.jobId ?? null);
   const desconexionJob = useJobSeguimiento(desconexion?.jobId ?? null);
-  const eliminacionJob = useJobSeguimiento(eliminacion?.jobId ?? null);
+  const eliminacionJobs = useJobsSeguimiento(eliminaciones.map((e) => e.jobId));
 
   // DERIVACION de la desconexion: error si el job fallo (la fila sigue existiendo).
   const desconexionFallo = desconexion !== null && desconexionJob.data?.status === 'failed';
-  // DERIVACION del borrado forzado: por diseno NO puede fallar por Browserbase, pero el job puede
-  // fallar por la propia plataforma (base caida). En ese caso la fila oculta REAPARECE con un aviso.
-  const eliminacionFallo = eliminacion !== null && eliminacionJob.data?.status === 'failed';
+  // DERIVACION del borrado forzado (apareado por indice con eliminacionJobs): una eliminacion esta
+  // FALLIDA si su job termino en failed (solo posible por la propia plataforma, jamas por el
+  // proveedor) o si su consulta quedo en error (react-query agoto los reintentos de GET /v1/jobs).
+  // En ambos casos la fila oculta REAPARECE junto al aviso, y el polling de esa entrada se apaga.
+  const idsFallidos = new Set(
+    eliminaciones
+      .filter((_e, i) => eliminacionJobs[i]?.data?.status === 'failed' || eliminacionJobs[i]?.isError === true)
+      .map((e) => e.sitioId),
+  );
+  const hayEliminacionFallida = idsFallidos.size > 0;
 
   // La lista se refresca sola mientras hay filas en transicion (dentro de useSitios); ademas se le
   // pide polling extra mientras un job de conectar sigue en vuelo (la fila aun no existe) o una
@@ -211,19 +223,22 @@ export function SitiosConectadosPage() {
         (desconexionJob.data === undefined ||
           isJobInFlight(desconexionJob.data.status) ||
           lista.some((sitio) => sitio.id === desconexion.sitioId))) ||
-      (eliminacion !== null &&
-        !eliminacionFallo &&
-        (eliminacionJob.data === undefined ||
-          isJobInFlight(eliminacionJob.data.status) ||
-          lista.some((sitio) => sitio.id === eliminacion.sitioId))),
+      eliminaciones.some((e, i) => {
+        const job = eliminacionJobs[i];
+        if (job === undefined || job.isError || job.data?.status === 'failed') return false;
+        return (
+          job.data === undefined ||
+          isJobInFlight(job.data.status) ||
+          lista.some((sitio) => sitio.id === e.sitioId)
+        );
+      }),
   );
   const sitios = sitiosQuery.data ?? [];
   // La fila de un borrado forzado en curso desaparece DE INMEDIATO (derivado, sin efectos): si el
   // job llegara a fallar por la plataforma, el filtro se apaga y la fila reaparece junto al aviso.
-  const sitiosVisibles =
-    eliminacion !== null && !eliminacionFallo
-      ? sitios.filter((sitio) => sitio.id !== eliminacion.sitioId)
-      : sitios;
+  const sitiosVisibles = sitios.filter(
+    (sitio) => !eliminaciones.some((e) => e.sitioId === sitio.id && !idsFallidos.has(e.sitioId)),
+  );
 
   // DERIVACIONES del flujo de conexion (sin efectos): el modal abre cuando la fila del login existe.
   const sitioEnLogin = conexion ? sitioEnLoginParaDominio(sitios, conexion.dominio) : null;
@@ -277,7 +292,11 @@ export function SitiosConectadosPage() {
     const sitio = aEliminar;
     eliminar.mutate(sitio.id, {
       onSuccess: (aceptada) => {
-        setEliminacion({ jobId: aceptada.jobId, sitioId: sitio.id });
+        // Un reintento sobre el mismo sitio reemplaza su entrada previa (fallida); las demas siguen.
+        setEliminaciones((prev) => [
+          ...prev.filter((e) => e.sitioId !== sitio.id),
+          { jobId: aceptada.jobId, sitioId: sitio.id },
+        ]);
         setAEliminar(null);
       },
     });
@@ -368,9 +387,10 @@ export function SitiosConectadosPage() {
             </div>
           )}
 
-          {/* El borrado forzado fallo (solo posible por la propia plataforma, jamas por el
-              proveedor): la fila reaparece; aviso con cierre explicito. */}
-          {eliminacionFallo && (
+          {/* Algun borrado forzado fallo (solo posible por la propia plataforma, jamas por el
+              proveedor): sus filas reaparecen; aviso con cierre explicito que descarta SOLO las
+              entradas fallidas (las eliminaciones aun en vuelo siguen su curso). */}
+          {hayEliminacionFallida && (
             <div
               role="alert"
               className="mt-4 flex flex-col gap-2 rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa"
@@ -378,7 +398,9 @@ export function SitiosConectadosPage() {
               <span>{t('sitios.errores.eliminarFallo')}</span>
               <button
                 type="button"
-                onClick={() => setEliminacion(null)}
+                onClick={() =>
+                  setEliminaciones((prev) => prev.filter((e) => !idsFallidos.has(e.sitioId)))
+                }
                 className="self-start rounded-lg border border-brasa-line px-3 py-1.5 text-[13px] font-semibold transition hover:bg-brasa/10"
               >
                 {t('sitios.comunes.entendido')}
