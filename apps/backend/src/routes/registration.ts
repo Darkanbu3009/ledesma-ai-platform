@@ -27,13 +27,24 @@ const OrganizationBodySchema = z.object({
   full_name: FullNameSchema,
 });
 
-// Body de la edicion del PROPIO perfil (PATCH /v1/me/profile): SOLO el nombre. Schema ESTRECHO de un
-// unico campo whitelisted -> cualquier otra clave del body (tier/role/is_admin/account_type/...) se
-// DESCARTA en el parseo (zod no la incluye en data) y por tanto JAMAS puede llegar al UPDATE. Reusa la
-// MISMA validacion de nombre del registro (FullNameSchema): una sola fuente de verdad.
-const ProfileUpdateBodySchema = z.object({
-  fullName: FullNameSchema,
-});
+// Body de la edicion del PROPIO perfil (PATCH /v1/me/profile): SOLO nombre y/o pais, ambos opcionales
+// pero al menos uno presente. Schema ESTRECHO de campos whitelisted -> cualquier otra clave del body
+// (tier/role/is_admin/account_type/...) se DESCARTA en el parseo (zod no la incluye en data) y por
+// tanto JAMAS puede llegar a ningun UPDATE. El nombre reusa la MISMA validacion del registro
+// (FullNameSchema); el pais es ISO 3166-1 alpha-2 (dos letras, se normaliza a mayusculas en la ruta;
+// sirve a CUALQUIER pais, sin lista blanca ni default). Cada campo presente va a su UPDATE dedicado
+// de un solo SET (updateOwnProfileName / updateOwnProfilePais): la whitelist es por construccion.
+const ProfileUpdateBodySchema = z
+  .object({
+    fullName: FullNameSchema.optional(),
+    pais: z
+      .string()
+      .regex(/^[A-Za-z]{2}$/)
+      .optional(),
+  })
+  .refine((body) => body.fullName !== undefined || body.pais !== undefined, {
+    message: 'fullName or pais required',
+  });
 
 // Body del cambio de tier (super-admin): el plan al que se mueve el perfil. Mismo set de valores que
 // el CHECK de profiles.tier (V007). Es la palanca manual hasta que exista facturacion. Se EXPORTA para
@@ -126,24 +137,34 @@ export function registrationRoutes(config: Env, deps?: { verifier?: JwtVerifier 
       return reply.send(state);
     });
 
-    // Edicion del PROPIO perfil por el usuario: SOLO full_name. requireUser -> el OWNER es SIEMPRE el sub
-    // del token (user.id), NUNCA un id del body/params (no hay :id aca: es "mi" perfil, no el de otro; el
-    // camino para editar el perfil de terceros es el admin). El body se valida con un schema ESTRECHO de
-    // un solo campo (misma validacion de nombre que el registro): cualquier campo extra del body
-    // (tier/role/is_admin/...) se descarta en el parseo y JAMAS llega al UPDATE -> este endpoint no puede
-    // tocar campos sensibles aunque el cliente los mande (no reabre la escalada que cerro V018). Escribe
-    // con el rol de servicio (como todo el repo), NO relajando la RLS de V018 (profiles sigue default-deny
-    // para authenticated). Devuelve el estado consolidado (misma forma que GET /v1/me) para que la consola
-    // refresque su cache ['me']. 404 si el usuario aun no tiene perfil (needsRegistration).
+    // Edicion del PROPIO perfil por el usuario: SOLO full_name y/o pais. requireUser -> el OWNER es
+    // SIEMPRE el sub del token (user.id), NUNCA un id del body/params (no hay :id aca: es "mi" perfil,
+    // no el de otro; el camino para editar el perfil de terceros es el admin). El body se valida con un
+    // schema ESTRECHO de campos whitelisted: cualquier campo extra del body (tier/role/is_admin/...) se
+    // descarta en el parseo y JAMAS llega a ningun UPDATE -> este endpoint no puede tocar campos
+    // sensibles aunque el cliente los mande (no reabre la escalada que cerro V018). Cada campo presente
+    // va a su UPDATE dedicado de un solo SET; el pais se normaliza a MAYUSCULAS (lo que pinea el proxy
+    // y exige el CHECK de V029). Escribe con el rol de servicio (como todo el repo), NO relajando la
+    // RLS de V018 (profiles sigue default-deny para authenticated). Devuelve el estado consolidado
+    // (misma forma que GET /v1/me) para que la consola refresque su cache ['me']. 404 si el usuario
+    // aun no tiene perfil (needsRegistration).
     app.patch('/v1/me/profile', async (request: FastifyRequest, reply: FastifyReply) => {
       const user = await requireUser(request, verifier);
       const parsed = ProfileUpdateBodySchema.safeParse(request.body);
       if (!parsed.success) {
         throw new AppError('VALIDATION_ERROR', 400, 'Invalid profile body', parsed.error.issues);
       }
-      const updated = await repo.updateOwnProfileName(user.id, parsed.data.fullName);
-      if (!updated) {
-        throw new AppError('NOT_FOUND', 404, 'Profile not found');
+      if (parsed.data.fullName !== undefined) {
+        const updated = await repo.updateOwnProfileName(user.id, parsed.data.fullName);
+        if (!updated) {
+          throw new AppError('NOT_FOUND', 404, 'Profile not found');
+        }
+      }
+      if (parsed.data.pais !== undefined) {
+        const updated = await repo.updateOwnProfilePais(user.id, parsed.data.pais.toUpperCase());
+        if (!updated) {
+          throw new AppError('NOT_FOUND', 404, 'Profile not found');
+        }
       }
       const state = await repo.getState(user.id);
       return reply.send(state);

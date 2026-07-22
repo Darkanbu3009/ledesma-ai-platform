@@ -32,6 +32,8 @@ interface ProfileRow {
   // NO se mapea al modelo Profile de dominio (que sigue sin llevarlo), sino al campo hermano isAdmin
   // del RegistrationState.
   is_admin: boolean;
+  // Pais declarado por el usuario (V029, ISO 3166-1 alpha-2 en mayusculas). null = aun no declarado.
+  pais: string | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -145,6 +147,7 @@ function rowToProfile(row: ProfileRow): Profile {
     fullName: row.full_name,
     identityVerified: row.identity_verified,
     tier: row.tier as ProfileTier,
+    pais: row.pais,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };
@@ -201,7 +204,7 @@ export class RegistrationRepository {
    */
   private async loadState(sql: Sql, sub: string): Promise<RegistrationState> {
     const profileRows = await sql<ProfileRow[]>`
-      select id, org_id, account_type, role, full_name, identity_verified, tier, is_admin, created_at, updated_at
+      select id, org_id, account_type, role, full_name, identity_verified, tier, is_admin, pais, created_at, updated_at
       from profiles where id = ${sub}
     `;
     const profileRow = profileRows[0];
@@ -500,7 +503,7 @@ export class RegistrationRepository {
       update profiles
       set tier = ${tier}, updated_at = now()
       where id = ${profileId}
-      returning id, org_id, account_type, role, full_name, identity_verified, tier, created_at, updated_at
+      returning id, org_id, account_type, role, full_name, identity_verified, tier, pais, created_at, updated_at
     `;
     const row = rows[0];
     return row ? rowToProfile(row) : null;
@@ -583,10 +586,44 @@ export class RegistrationRepository {
       update profiles
       set full_name = ${fullName}, updated_at = now()
       where id = ${ownerId}
-      returning id, org_id, account_type, role, full_name, identity_verified, tier, created_at, updated_at
+      returning id, org_id, account_type, role, full_name, identity_verified, tier, pais, created_at, updated_at
     `;
     const row = rows[0];
     return row ? rowToProfile(row) : null;
+  }
+
+  /**
+   * Declara o cambia el PAIS del PROPIO perfil (self-service, via PATCH /v1/me/profile con requireUser).
+   * Hermano de updateOwnProfileName y con exactamente las mismas garantias: el OWNER es SIEMPRE el sub
+   * del token (where id = ownerId), el SET toca EXCLUSIVAMENTE pais (+ updated_at) -- whitelist por
+   * construccion, ningun campo sensible puede entrar --, y corre con el rol de servicio sin relajar la
+   * RLS default-deny de V018. El llamador entrega el pais YA validado y normalizado (ISO 3166-1
+   * alpha-2 en mayusculas); el CHECK de V029 es la defensa en profundidad.
+   *
+   * Devuelve el perfil actualizado, o null si no existe perfil para ese owner (404 en el route).
+   */
+  async updateOwnProfilePais(ownerId: string, pais: string): Promise<Profile | null> {
+    const rows = await this.sql<ProfileRow[]>`
+      update profiles
+      set pais = ${pais}, updated_at = now()
+      where id = ${ownerId}
+      returning id, org_id, account_type, role, full_name, identity_verified, tier, pais, created_at, updated_at
+    `;
+    const row = rows[0];
+    return row ? rowToProfile(row) : null;
+  }
+
+  /**
+   * Lee SOLO el pais declarado de un sub (profiles.pais, V029). Lectura liviana para el fallback de
+   * POST /v1/sitios/conectar (body sin pais -> se usa el del perfil), analoga a getProfileTier.
+   * Devuelve null si el perfil no existe o si el usuario aun no declaro pais: el llamador decide
+   * (el endpoint de conectar responde 400 accionable, jamas pinea un default).
+   */
+  async getProfilePais(sub: string): Promise<string | null> {
+    const rows = await this.sql<{ pais: string | null }[]>`
+      select pais from profiles where id = ${sub}
+    `;
+    return rows[0]?.pais ?? null;
   }
 
   /**

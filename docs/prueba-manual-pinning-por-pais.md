@@ -29,8 +29,10 @@ resultados reales al ejecutarlo.
    ```
 
    - `estado = 'activo'`, `tiene_contexto = true`.
-   - `proxy_country` poblado con el pais del usuario (ISO-2, p.ej. `AR` o `ES`), derivado del
-     navegador (la consola manda `pais`; el backend cae a `Accept-Language`).
+   - `proxy_country` poblado con el pais del usuario (ISO-2, p.ej. `AR` o `ES`): el DECLARADO en su
+     perfil (la consola manda `pais`, capturado una vez y editable en Configuracion > Cuenta; el
+     backend cae al del perfil y, en ultimo recurso, a `Accept-Language`). Ver
+     `prueba-manual-captura-pais-usuario.md`.
    - `egress_ip` poblada (informativa: ya NO es criterio de aborto).
    - En los logs del worker, la linea `sesion de login abierta` incluye `pais` y `egressIp`.
 

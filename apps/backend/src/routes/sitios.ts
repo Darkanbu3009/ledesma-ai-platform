@@ -48,18 +48,22 @@ const ConectarSitioBodySchema = z.object({
 
 /**
  * Deriva el PAIS del usuario (ISO 3166-1 alpha-2) para pinear la salida de red de la conexion:
- * 1. el `pais` explicito del body (la consola lo deriva del navegador del usuario), o
- * 2. la region del primer tag de Accept-Language, completada con los likely subtags de CLDR via
- *    Intl.Locale#maximize (built-in de Node/ICU: 'es-AR' -> AR, 'en' -> US). Cero dependencias
- *    externas ni servicios de geo-IP.
- * null = no derivable: el endpoint responde 400 pidiendo el pais explicito, JAMAS pinea un default
+ * 1. el `pais` explicito del body (la consola manda el declarado en el perfil), o
+ * 2. el pais DECLARADO en el perfil del usuario (profiles.pais, V029; la consola lo captura una vez
+ *    antes de la primera conexion y es editable en la configuracion del perfil), o
+ * 3. la region del primer tag de Accept-Language, completada con los likely subtags de CLDR via
+ *    Intl.Locale#maximize (built-in de Node/ICU: 'es-AR' -> AR, 'en' -> US). Ultimo recurso
+ *    best-effort para clientes sin perfil actualizado. Cero dependencias externas ni geo-IP.
+ * null = no derivable: el endpoint responde 400 pidiendo declarar el pais, JAMAS pinea un default
  * silencioso (pinear el pais equivocado condena todas las tareas futuras del dominio).
  */
 export function derivarPaisDeConexion(
   bodyPais: string | undefined,
+  paisPerfil: string | null,
   acceptLanguage: string | undefined,
 ): string | null {
   if (bodyPais !== undefined) return bodyPais.toUpperCase();
+  if (paisPerfil !== null && /^[A-Za-z]{2}$/.test(paisPerfil)) return paisPerfil.toUpperCase();
   const primerTag = acceptLanguage?.split(',')[0]?.split(';')[0]?.trim();
   if (!primerTag) return null;
   try {
@@ -112,7 +116,7 @@ export function sitiosRoutes(
     verifier?: JwtVerifier;
     sitiosRepo?: Pick<SitiosConectadosRepository, 'listarPorOwner' | 'obtenerPorId'>;
     jobsRepo?: Pick<JobsRepository, 'createJob'>;
-    registrationRepo?: Pick<RegistrationRepository, 'getProfileTier'>;
+    registrationRepo?: Pick<RegistrationRepository, 'getProfileTier' | 'getProfilePais'>;
   },
 ) {
   return async function (app: FastifyInstance): Promise<void> {
@@ -153,14 +157,24 @@ export function sitiosRoutes(
       if (!body.success) {
         throw new AppError('VALIDATION_ERROR', 400, 'Invalid site url', body.error.issues);
       }
-      // El pais que se pineara a la conexion: explicito del body o derivado de Accept-Language. Sin
-      // pais NO se encola nada: pinear un default silencioso condenaria las tareas del dominio.
+      // El pais que se pineara a la conexion: explicito del body, o el DECLARADO en el perfil (V029),
+      // o derivado de Accept-Language como ultimo recurso. La lectura del perfil solo ocurre cuando el
+      // body no lo trae. Sin pais NO se encola nada: pinear un default silencioso condenaria las
+      // tareas del dominio. El rechazo lleva codigo propio (PAIS_REQUERIDO) y un mensaje accionable
+      // para el usuario final en ES y EN (la consola ademas lo traduce por codigo): la solucion es
+      // declarar el pais en el perfil, no un detalle tecnico del body.
+      const paisPerfil = body.data.pais === undefined ? await registrationRepo.getProfilePais(user.id) : null;
       const pais = derivarPaisDeConexion(
         body.data.pais,
+        paisPerfil,
         request.headers['accept-language'],
       );
       if (pais === null) {
-        throw new AppError('VALIDATION_ERROR', 400, 'Could not determine your country; include "pais" (ISO 3166-1 alpha-2) in the request body');
+        throw new AppError(
+          'PAIS_REQUERIDO',
+          400,
+          'Indica tu pais en la configuracion de tu perfil para poder conectar sitios. / Set your country in your profile settings to connect sites.',
+        );
       }
 
       // El payload se valida con el MISMO parser que usara el worker (URL http(s) bien formada +

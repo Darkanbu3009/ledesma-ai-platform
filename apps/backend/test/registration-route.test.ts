@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { registerIndividualMock, registerOrganizationMock, getStateMock, approveOrganizationMock, updateProfileTierMock, updateOwnProfileNameMock, getProfileTierMock, recordAdminActionMock, enviarBienvenidaMock } = vi.hoisted(() => ({
+const { registerIndividualMock, registerOrganizationMock, getStateMock, approveOrganizationMock, updateProfileTierMock, updateOwnProfileNameMock, updateOwnProfilePaisMock, getProfileTierMock, recordAdminActionMock, enviarBienvenidaMock } = vi.hoisted(() => ({
   registerIndividualMock: vi.fn(),
   registerOrganizationMock: vi.fn(),
   getStateMock: vi.fn(),
   approveOrganizationMock: vi.fn(),
   updateProfileTierMock: vi.fn(),
   updateOwnProfileNameMock: vi.fn(),
+  updateOwnProfilePaisMock: vi.fn(),
   getProfileTierMock: vi.fn(),
   recordAdminActionMock: vi.fn(),
   enviarBienvenidaMock: vi.fn(),
@@ -20,6 +21,7 @@ vi.mock('../src/registration/registration-repository.js', () => ({
     approveOrganization = approveOrganizationMock;
     updateProfileTier = updateProfileTierMock;
     updateOwnProfileName = updateOwnProfileNameMock;
+    updateOwnProfilePais = updateOwnProfilePaisMock;
     getProfileTier = getProfileTierMock;
     recordAdminAction = recordAdminActionMock;
   },
@@ -58,7 +60,7 @@ const ENV = {
 const individualState = {
   created: true,
   needsRegistration: false,
-  profile: { id: 'user-1', orgId: null, accountType: 'individual', role: 'individual', fullName: 'Ada', identityVerified: false, tier: 'free', createdAt: 'x', updatedAt: 'x' },
+  profile: { id: 'user-1', orgId: null, accountType: 'individual', role: 'individual', fullName: 'Ada', identityVerified: false, tier: 'free', pais: null, createdAt: 'x', updatedAt: 'x' },
   organization: null,
   subscription: { id: 's1', profileId: 'user-1', plan: 'free', status: 'active', createdAt: 'x' },
   usageCounter: { id: 'u1', profileId: 'user-1', runsUsed: 0, runsLimit: 10, periodKind: 'lifetime', createdAt: 'x' },
@@ -73,6 +75,7 @@ beforeEach(async () => {
   approveOrganizationMock.mockReset();
   updateProfileTierMock.mockReset();
   updateOwnProfileNameMock.mockReset();
+  updateOwnProfilePaisMock.mockReset();
   getProfileTierMock.mockReset();
   recordAdminActionMock.mockReset();
   enviarBienvenidaMock.mockReset();
@@ -125,7 +128,7 @@ describe('POST /v1/register/organization', () => {
   const orgState = {
     created: true,
     needsRegistration: false,
-    profile: { id: 'user-1', orgId: 'org-1', accountType: 'empresa_member', role: 'org_admin', fullName: 'Ada', identityVerified: false, tier: 'free', createdAt: 'x', updatedAt: 'x' },
+    profile: { id: 'user-1', orgId: 'org-1', accountType: 'empresa_member', role: 'org_admin', fullName: 'Ada', identityVerified: false, tier: 'free', pais: null, createdAt: 'x', updatedAt: 'x' },
     organization: { id: 'org-1', name: 'Acme', status: 'active', approvedAt: null, createdAt: 'x', updatedAt: 'x' },
     subscription: { id: 's1', profileId: 'user-1', plan: 'free', status: 'active', createdAt: 'x' },
     usageCounter: { id: 'u1', profileId: 'user-1', runsUsed: 0, runsLimit: 10, periodKind: 'lifetime', createdAt: 'x' },
@@ -195,7 +198,7 @@ describe('correo de bienvenida tras el registro (best-effort, una sola vez)', ()
     registerOrganizationMock.mockResolvedValue({
       created: true,
       needsRegistration: false,
-      profile: { id: 'user-1', orgId: 'org-1', accountType: 'empresa_member', role: 'org_admin', fullName: 'Ada', identityVerified: false, tier: 'free', createdAt: 'x', updatedAt: 'x' },
+      profile: { id: 'user-1', orgId: 'org-1', accountType: 'empresa_member', role: 'org_admin', fullName: 'Ada', identityVerified: false, tier: 'free', pais: null, createdAt: 'x', updatedAt: 'x' },
       organization: { id: 'org-1', name: 'Acme', status: 'active', approvedAt: null, createdAt: 'x', updatedAt: 'x' },
       subscription: { id: 's1', profileId: 'user-1', plan: 'free', status: 'active', createdAt: 'x' },
       usageCounter: { id: 'u1', profileId: 'user-1', runsUsed: 0, runsLimit: 10, periodKind: 'lifetime', createdAt: 'x' },
@@ -228,7 +231,7 @@ describe('correo de bienvenida tras el registro (best-effort, una sola vez)', ()
     registerOrganizationMock.mockResolvedValue({
       created: false,
       needsRegistration: false,
-      profile: { id: 'user-1', orgId: 'org-1', accountType: 'empresa_member', role: 'org_admin', fullName: 'Ada', identityVerified: false, tier: 'free', createdAt: 'x', updatedAt: 'x' },
+      profile: { id: 'user-1', orgId: 'org-1', accountType: 'empresa_member', role: 'org_admin', fullName: 'Ada', identityVerified: false, tier: 'free', pais: null, createdAt: 'x', updatedAt: 'x' },
       organization: { id: 'org-1', name: 'Acme', status: 'active', approvedAt: null, createdAt: 'x', updatedAt: 'x' },
       subscription: { id: 's1', profileId: 'user-1', plan: 'free', status: 'active', createdAt: 'x' },
       usageCounter: { id: 'u1', profileId: 'user-1', runsUsed: 0, runsLimit: 10, periodKind: 'lifetime', createdAt: 'x' },
@@ -348,7 +351,7 @@ describe('PATCH /v1/me/profile', () => {
     expect(updateOwnProfileNameMock).not.toHaveBeenCalled();
   });
 
-  it('400 si falta fullName', async () => {
+  it('400 con body vacio (hace falta fullName o pais)', async () => {
     const res = await app.inject({
       method: 'PATCH',
       url: '/v1/me/profile',
@@ -357,6 +360,52 @@ describe('PATCH /v1/me/profile', () => {
     });
     expect(res.statusCode).toBe(400);
     expect(updateOwnProfileNameMock).not.toHaveBeenCalled();
+    expect(updateOwnProfilePaisMock).not.toHaveBeenCalled();
+  });
+
+  it('200 declara el pais del PROPIO owner NORMALIZADO a mayusculas (sin tocar el nombre)', async () => {
+    updateOwnProfilePaisMock.mockResolvedValue({ ...individualState.profile, pais: 'AR' });
+    getStateMock.mockResolvedValue({ ...individualState, created: undefined, profile: { ...individualState.profile, pais: 'AR' } });
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/me/profile',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { pais: 'ar' },
+    });
+    expect(res.statusCode).toBe(200);
+    // El owner es el sub del token y el pais viaja YA normalizado (lo que pinea el proxy es ISO-2 en
+    // mayusculas). El nombre no se toca: cada campo presente va a su UPDATE dedicado.
+    expect(updateOwnProfilePaisMock).toHaveBeenCalledWith('user-1', 'AR');
+    expect(updateOwnProfileNameMock).not.toHaveBeenCalled();
+    expect(res.json().profile.pais).toBe('AR');
+  });
+
+  it('200 edita nombre y pais JUNTOS cuando el body trae ambos', async () => {
+    updateOwnProfileNameMock.mockResolvedValue({ ...individualState.profile, fullName: 'Ada Lovelace' });
+    updateOwnProfilePaisMock.mockResolvedValue({ ...individualState.profile, fullName: 'Ada Lovelace', pais: 'CL' });
+    getStateMock.mockResolvedValue({ ...individualState, created: undefined, profile: { ...individualState.profile, fullName: 'Ada Lovelace', pais: 'CL' } });
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/v1/me/profile',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { fullName: 'Ada Lovelace', pais: 'cl' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(updateOwnProfileNameMock).toHaveBeenCalledWith('user-1', 'Ada Lovelace');
+    expect(updateOwnProfilePaisMock).toHaveBeenCalledWith('user-1', 'CL');
+  });
+
+  it('400 si el pais no es ISO 3166-1 alpha-2 (tres letras, numeros, vacio)', async () => {
+    for (const pais of ['ARG', 'A1', '', 'M']) {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/v1/me/profile',
+        headers: { authorization: 'Bearer valid-user-1' },
+        payload: { pais },
+      });
+      expect(res.statusCode).toBe(400);
+    }
+    expect(updateOwnProfilePaisMock).not.toHaveBeenCalled();
   });
 
   it('400 si fullName excede 200 caracteres (mismo limite que el registro)', async () => {
@@ -401,6 +450,8 @@ describe('PATCH /v1/me/profile', () => {
     expect(recordAdminActionMock).not.toHaveBeenCalled();
     expect(registerIndividualMock).not.toHaveBeenCalled();
     expect(registerOrganizationMock).not.toHaveBeenCalled();
+    // Sin pais en el body tampoco se toca el pais (el otro unico mutador permitido del endpoint).
+    expect(updateOwnProfilePaisMock).not.toHaveBeenCalled();
   });
 
   it('el owner es SIEMPRE el del token: no hay parametro de id para editar el perfil de otro', async () => {

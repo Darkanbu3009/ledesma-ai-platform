@@ -26,6 +26,7 @@ function state(tier: ProfileTier): RegistrationState {
       accountType: 'individual',
       role: 'individual',
       fullName: 'Ada Lovelace',
+      pais: null,
       identityVerified: true,
       tier,
       createdAt: '2026-06-10T12:00:00.000Z',

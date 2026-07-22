@@ -30,6 +30,7 @@ const listarPorOwner = vi.fn();
 const obtenerPorId = vi.fn();
 const createJob = vi.fn();
 const getProfileTier = vi.fn();
+const getProfilePais = vi.fn();
 
 /** Un sitio conectado tal como lo devuelve el repositorio de 7.1a (camelCase, sin blobs). */
 function makeSitio(overrides: Record<string, unknown> = {}) {
@@ -62,7 +63,7 @@ async function makeApp(): Promise<FastifyInstance> {
       verifier,
       sitiosRepo: { listarPorOwner, obtenerPorId },
       jobsRepo: { createJob },
-      registrationRepo: { getProfileTier },
+      registrationRepo: { getProfileTier, getProfilePais },
     }),
   );
   return app;
@@ -75,6 +76,8 @@ beforeEach(async () => {
   obtenerPorId.mockResolvedValue(null);
   createJob.mockResolvedValue({ id: JOB_ID });
   getProfileTier.mockResolvedValue('autonomous');
+  // Por defecto el perfil NO tiene pais declarado: cada test que lo necesite lo setea explicito.
+  getProfilePais.mockResolvedValue(null);
   app = await makeApp();
 });
 
@@ -110,7 +113,36 @@ describe('POST /v1/sitios/conectar', () => {
     });
   });
 
-  it('sin pais en el body: lo deriva de Accept-Language (region del primer tag)', async () => {
+  it('sin pais en el body: usa el DECLARADO en el perfil (profiles.pais, V029)', async () => {
+    getProfilePais.mockResolvedValue('CL');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/sitios/conectar',
+      // Accept-Language presente A PROPOSITO: el perfil tiene prioridad sobre la heuristica.
+      headers: { authorization: 'Bearer valid-user-1', 'accept-language': 'es-AR,es;q=0.9' },
+      payload: { url: 'https://app.ejemplo.com/login' },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(getProfilePais).toHaveBeenCalledWith('user-1');
+    const payload = createJob.mock.calls[0]?.[0]?.payload as Record<string, unknown>;
+    expect(payload.pais).toBe('CL');
+  });
+
+  it('con pais en el body NO se lee el perfil: el body (lo que manda la consola) tiene prioridad', async () => {
+    getProfilePais.mockResolvedValue('CL');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/sitios/conectar',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload: { url: 'https://app.ejemplo.com/login', pais: 'uy' },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(getProfilePais).not.toHaveBeenCalled();
+    const payload = createJob.mock.calls[0]?.[0]?.payload as Record<string, unknown>;
+    expect(payload.pais).toBe('UY');
+  });
+
+  it('sin pais en body ni perfil: lo deriva de Accept-Language (region del primer tag)', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/sitios/conectar',
@@ -122,7 +154,7 @@ describe('POST /v1/sitios/conectar', () => {
     expect(payload.pais).toBe('AR');
   });
 
-  it('sin pais derivable (ni body ni Accept-Language): 400 accionable, JAMAS un default silencioso', async () => {
+  it('sin pais derivable (ni body, ni perfil, ni Accept-Language): 400 accionable, JAMAS un default silencioso', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/sitios/conectar',
@@ -130,7 +162,11 @@ describe('POST /v1/sitios/conectar', () => {
       payload: { url: 'https://app.ejemplo.com/login' },
     });
     expect(res.statusCode).toBe(400);
+    // Codigo propio para que la consola lo traduzca, y mensaje accionable para el usuario final en
+    // ES y EN (declarar el pais en el perfil), no un detalle tecnico del body.
+    expect(res.json().error.code).toBe('PAIS_REQUERIDO');
     expect(res.json().error.message).toContain('pais');
+    expect(res.json().error.message).toContain('country');
     expect(createJob).not.toHaveBeenCalled();
   });
 

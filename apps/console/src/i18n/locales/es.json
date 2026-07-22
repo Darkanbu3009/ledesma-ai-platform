@@ -119,6 +119,13 @@
       "descripcion": "Entras con tu correo y contraseña. Aquí puedes cerrar la sesión activa.",
       "cerrarSesion": "Cerrar sesión"
     },
+    "pais": {
+      "titulo": "País",
+      "descripcion": "Tus agentes navegan desde tu país para que tus sesiones en sitios conectados se mantengan estables.",
+      "sinPais": "Elige tu país",
+      "actualizado": "País actualizado.",
+      "errorActualizar": "No pudimos actualizar tu país. Inténtalo de nuevo."
+    },
     "eliminar": {
       "zonaTitulo": "Eliminar mi cuenta",
       "zonaDescripcion": "Borra de forma permanente agentes, credenciales, recetas, tareas, triggers e historial. No se puede deshacer.",
@@ -1753,10 +1760,21 @@
       "cancelar": "Cancelar",
       "entendido": "Entendido"
     },
+    "paisDialog": {
+      "titulo": "¿Desde qué país trabajas?",
+      "porQue": "Tus agentes navegarán desde tu país para que tus sesiones se mantengan estables.",
+      "label": "País",
+      "placeholder": "Elige tu país",
+      "editableDespues": "Se guarda en tu perfil y solo se pide una vez. Puedes cambiarlo cuando quieras en la configuración de tu cuenta.",
+      "guardar": "Guardar y conectar",
+      "guardando": "Guardando",
+      "errorGuardar": "No pudimos guardar tu país. Inténtalo de nuevo."
+    },
     "errores": {
       "sesion": "Tu sesión expiró. Vuelve a iniciar sesión en la consola.",
       "plan": "Tu plan no incluye sitios conectados. Elige un plan con autonomía.",
       "noExiste": "Ese sitio ya no existe.",
+      "paisRequerido": "Indica tu país en la configuración de tu cuenta para poder conectar sitios.",
       "rechazo": "La solicitud fue rechazada. Revisa los datos e intenta de nuevo.",
       "generico": "Algo salió mal. Intenta de nuevo.",
       "cargarLista": "No pudimos cargar tus sitios conectados",

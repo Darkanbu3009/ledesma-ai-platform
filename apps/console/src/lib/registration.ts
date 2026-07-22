@@ -24,6 +24,12 @@ export interface Profile {
   identityVerified: boolean;
   /** Plan del usuario. 'autonomous' habilita el modo autonomo del Configurador. */
   tier: ProfileTier;
+  /**
+   * Pais DECLARADO por el usuario (ISO 3166-1 alpha-2 en mayusculas, profiles.pais). Pinea la
+   * geolocalizacion del proxy al conectar sitios. null = aun no declarado: la pagina de Sitios lo
+   * pide UNA vez antes de la primera conexion, y despues es editable en la configuracion del perfil.
+   */
+  pais: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -95,6 +101,15 @@ export interface OrganizationInput {
  */
 export interface UpdateProfileNameInput {
   fullName: string;
+}
+
+/**
+ * Body de PATCH /v1/me/profile para declarar/cambiar el PROPIO pais: SOLO el codigo ISO 3166-1
+ * alpha-2. Mismo endpoint whitelisted que el nombre: cualquier otra clave se descarta en el parseo
+ * del servidor, y el backend lo normaliza a mayusculas antes de escribir profiles.pais.
+ */
+export interface UpdateProfilePaisInput {
+  pais: string;
 }
 
 /**

@@ -18,6 +18,7 @@ const individualProfile: Profile = {
   fullName: 'Ada',
   identityVerified: false,
   tier: 'free',
+  pais: null,
   createdAt: 'x',
   updatedAt: 'x',
 };
@@ -30,6 +31,7 @@ const empresaProfile: Profile = {
   fullName: 'Ada',
   identityVerified: false,
   tier: 'free',
+  pais: null,
   createdAt: 'x',
   updatedAt: 'x',
 };

@@ -28,6 +28,12 @@ export interface Profile {
   identityVerified: boolean;
   /** Plan del usuario. 'autonomous' habilita el modo autonomo del Configurador. Default 'free'. */
   tier: ProfileTier;
+  /**
+   * Pais DECLARADO por el usuario (ISO 3166-1 alpha-2 en mayusculas, columna profiles.pais de V029),
+   * usado para pinear la geolocalizacion del proxy al conectar sitios. null = aun no declarado (la
+   * consola lo pide antes de la primera conexion). Lo declara el usuario: jamas se infiere por IP.
+   */
+  pais: string | null;
   createdAt: string;
   updatedAt: string;
 }
