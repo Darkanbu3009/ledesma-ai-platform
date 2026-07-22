@@ -1,4 +1,5 @@
 import { Stagehand } from '@browserbasehq/stagehand';
+import type { V3Options } from '@browserbasehq/stagehand';
 import type { MotorDeTareaWeb } from './tarea-web.js';
 
 /**
@@ -14,14 +15,51 @@ import type { MotorDeTareaWeb } from './tarea-web.js';
  *    extrae el contexto actualizado despues, y el cierre real lo hace SIEMPRE el handler en finally.
  *  - `model: { modelName, apiKey }`: la inferencia corre con la key del OWNER (boveda), formato
  *    proveedor/modelo (TAREA_WEB_MODEL; Haiku prohibido, validado en env.ts).
- *  - `disableAPI: true`: la inferencia es LOCAL (nuestro proceso llama al proveedor con la key del
- *    owner); nada viaja al plano de API de Stagehand/Browserbase.
+ *  - `disableAPI: true` + `experimental: true`: van JUNTOS y son deliberados (ver
+ *    construirOpcionesStagehand); no quitar ninguno de los dos.
  *  - `agent({ systemPrompt })` + `execute({ instruction, maxSteps, signal })`: el system prompt
  *    anti-injection va por el canal de sistema y el OBJETIVO del usuario por el canal de
  *    instruccion; el contenido de las paginas jamas entra a ninguno de los dos.
  *  - `disablePino: true` y `verbose: 0`: cero logging propio de Stagehand (los logs del worker no
  *    deben arrastrar URLs ni contenido del sitio).
  */
+/**
+ * Opciones del constructor de Stagehand. Exportada SOLO para que los tests validen esta
+ * configuracion contra la validacion real de Stagehand (validateExperimentalFeatures) sin abrir un
+ * navegador.
+ *
+ * `disableAPI: true` y `experimental: true` van JUNTOS y son deliberados; NO quitar ninguno:
+ *  - `disableAPI: true`: la inferencia es LOCAL (nuestro proceso llama al proveedor con la key del
+ *    owner); nada viaja al plano de API de Stagehand/Browserbase.
+ *  - `experimental: true`: desbloquea el abort signal de execute(), que es como el deadline de
+ *    pared del worker (runTimeoutMs, tarea-web.ts) corta una tarea colgada antes de que consuma
+ *    minutos de Browserbase indefinidamente. Sin este flag, pasar `signal` lanza
+ *    ExperimentalNotConfiguredError y la navegacion falla de inmediato.
+ *  - Auditado en 3.6.0: con disableAPI ya en true, `experimental: true` NO habilita ningun otro
+ *    cambio de comportamiento (el cliente de API nunca se crea, el cache de servidor depende de ese
+ *    cliente, y el resto de los sitios que reciben el flag no lo leen).
+ */
+export function construirOpcionesStagehand(params: {
+  apiKey: string;
+  projectId: string;
+  sesionExternaId: string;
+  model: string;
+  modelApiKey: string;
+}): V3Options {
+  return {
+    env: 'BROWSERBASE',
+    apiKey: params.apiKey,
+    projectId: params.projectId,
+    browserbaseSessionID: params.sesionExternaId,
+    keepAlive: true,
+    model: { modelName: params.model, apiKey: params.modelApiKey },
+    disableAPI: true,
+    experimental: true,
+    disablePino: true,
+    verbose: 0,
+  };
+}
+
 export class MotorStagehand implements MotorDeTareaWeb {
   constructor(private readonly config: { apiKey: string; projectId: string }) {}
 
@@ -34,17 +72,15 @@ export class MotorStagehand implements MotorDeTareaWeb {
     maxPasos: number;
     signal?: AbortSignal;
   }): Promise<{ exito: boolean; mensaje: string }> {
-    const stagehand = new Stagehand({
-      env: 'BROWSERBASE',
-      apiKey: this.config.apiKey,
-      projectId: this.config.projectId,
-      browserbaseSessionID: params.sesionExternaId,
-      keepAlive: true,
-      model: { modelName: params.model, apiKey: params.apiKey },
-      disableAPI: true,
-      disablePino: true,
-      verbose: 0,
-    });
+    const stagehand = new Stagehand(
+      construirOpcionesStagehand({
+        apiKey: this.config.apiKey,
+        projectId: this.config.projectId,
+        sesionExternaId: params.sesionExternaId,
+        model: params.model,
+        modelApiKey: params.apiKey,
+      }),
+    );
     await stagehand.init();
     try {
       const agente = stagehand.agent({ systemPrompt: params.systemPrompt });

@@ -323,6 +323,30 @@ describe('procesarTareaWeb', () => {
     expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
   });
 
+  it('motor que excede runTimeoutMs: el signal aborta la ejecucion y la sesion se cierra', async () => {
+    // El fake imita el comportamiento real de Stagehand con abort signal (AgentAbortError al
+    // abortar): cuelga hasta que el deadline de pared del worker dispara el signal.
+    const navegador = makeNavegador();
+    const motor: MotorDeTareaWeb = {
+      ejecutar: vi.fn(
+        async (params: { signal?: AbortSignal }) =>
+          new Promise<{ exito: boolean; mensaje: string }>((_resolve, reject) => {
+            params.signal?.addEventListener('abort', () =>
+              reject(new Error('AgentAbortError: aborted')),
+            );
+          }),
+      ),
+    };
+    const deps = makeDeps({ navegador, motor, runTimeoutMs: 20 });
+    await expect(procesarTareaWeb(deps, makeJob())).rejects.toThrow(PermanentExecutionError);
+    const paso = (motor.ejecutar as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+      signal?: AbortSignal;
+    };
+    expect(paso.signal).toBeInstanceOf(AbortSignal);
+    expect(paso.signal?.aborted).toBe(true);
+    expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
+  });
+
   it('el objetivo del usuario viaja INTACTO por el canal de instruccion, con el cap duro de pasos', async () => {
     const motor = makeMotor({ exito: true, mensaje: 'ok' });
     const deps = makeDeps({ motor });
