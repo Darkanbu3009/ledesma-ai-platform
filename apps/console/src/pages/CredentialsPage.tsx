@@ -13,9 +13,6 @@ import { ErrorState } from '../components/ui/ErrorState';
 import { Notice } from '../components/ui/Notice';
 import { focusRing } from '../lib/utils';
 
-const addButtonClass =
-  'inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:-translate-y-px hover:bg-brasa-hover hover:shadow-[0_2px_6px_rgba(31,30,28,0.14)]';
-
 /** Las tres garantias de la franja inferior de la tarjeta de ejemplo (claves de traduccion). */
 const GARANTIAS = [
   {
@@ -46,8 +43,10 @@ function CredentialsEmptyState({ onAdd }: { onAdd: () => void }) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
-        <div className="max-w-[520px]">
+      {/* En movil el CTA baja a su propia fila a ancho completo (sin partir su texto); desde md
+          vuelve a la derecha del titulo, como el PageHeader compartido. */}
+      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between md:gap-6">
+        <div className="min-w-0 max-w-[520px]">
           <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">
             {t('credenciales.titulo')}
           </h1>
@@ -58,7 +57,7 @@ function CredentialsEmptyState({ onAdd }: { onAdd: () => void }) {
         <button
           type="button"
           onClick={onAdd}
-          className={`inline-flex flex-none items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white transition hover:bg-brasa-hover ${focusRing}`}
+          className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white transition hover:bg-brasa-hover md:flex-none ${focusRing}`}
         >
           <Plus className="h-[17px] w-[17px]" />
           {t('credenciales.agregar')}
@@ -161,19 +160,11 @@ export function CredentialsPage() {
 
   return (
     <div className="mx-auto flex min-h-full max-w-4xl flex-col">
+      {/* Con credenciales, la UNICA entrada a "Agregar credencial" es el area punteada al final de
+          la lista (mismo patron que la tarjeta punteada de Agentes): el boton que duplicaba la
+          accion en el encabezado se quito, asi el titulo respira en anchos chicos. */}
       {!showEmpty && (
-        <PageHeader
-          title={t('credenciales.titulo')}
-          subtitle={t('credenciales.subtitulo')}
-          action={
-            hasCredentials && (
-              <button type="button" onClick={() => setFormOpen(true)} className={addButtonClass}>
-                <Plus className="h-[17px] w-[17px]" />
-                {t('credenciales.agregar')}
-              </button>
-            )
-          }
-        />
+        <PageHeader title={t('credenciales.titulo')} subtitle={t('credenciales.subtitulo')} />
       )}
 
       <Notice notice={notice ? { kind: 'ok', text: notice } : null} />

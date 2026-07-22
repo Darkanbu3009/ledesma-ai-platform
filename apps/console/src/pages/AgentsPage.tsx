@@ -17,7 +17,7 @@ function CreateAgentButton() {
   return (
     <Link
       to="/agentes/nuevo"
-      className="inline-flex items-center gap-2 rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:-translate-y-px hover:bg-[#C8460F] hover:shadow-[0_2px_6px_rgba(31,30,28,0.14)]"
+      className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[10px] bg-brasa px-[22px] py-[11px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:-translate-y-px hover:bg-[#C8460F] hover:shadow-[0_2px_6px_rgba(31,30,28,0.14)]"
     >
       <Plus className="h-[17px] w-[17px]" />
       {t('agentes.lista.crearAgente')}
@@ -32,7 +32,7 @@ function ConfiguratorButton() {
   return (
     <Link
       to="/configurador"
-      className="inline-flex items-center gap-2 rounded-[10px] border border-line bg-surface px-[20px] py-[11px] text-sm font-semibold text-ink transition hover:border-brasa-line hover:text-brasa"
+      className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[10px] border border-line bg-surface px-[20px] py-[11px] text-sm font-semibold text-ink transition hover:border-brasa-line hover:text-brasa"
     >
       <Sparkles className="h-[17px] w-[17px]" />
       {t('agentes.lista.crearConConfigurador')}
@@ -182,7 +182,9 @@ export function AgentsPage() {
         subtitle={t('agentes.lista.subtitulo')}
         action={
           hasAgents && (
-            <div className="flex flex-wrap items-center gap-2.5">
+            // En movil las dos acciones se apilan a ancho completo (sin partir su texto);
+            // desde sm caben en fila y desde md vuelven junto al titulo (PageHeader).
+            <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center">
               <ConfiguratorButton />
               <CreateAgentButton />
             </div>

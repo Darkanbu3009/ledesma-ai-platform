@@ -34,8 +34,12 @@ const ACCENTS: Partial<Record<ProviderId, Accent>> = {
   },
 };
 
-/** Fila discreta de acciones secundarias (mismo patron de links con borde que la pagina de edicion). */
-const secondaryActionClass = `inline-flex min-w-0 items-center justify-center gap-1 rounded-[10px] border border-line bg-surface px-2 py-1.5 text-xs font-semibold text-muted transition hover:border-ink-soft hover:text-ink ${focusRing}`;
+/**
+ * Fila discreta de acciones secundarias (mismo patron de links con borde que la pagina de edicion).
+ * Con `whitespace-nowrap` + contenedor `flex-wrap` la etiqueta jamas se corta: si no cabe en la
+ * fila (tarjeta angosta en movil), esa accion baja a su propia fila y crece a ancho completo.
+ */
+const secondaryActionClass = `inline-flex flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-[10px] border border-line bg-surface px-2 py-1.5 text-xs font-semibold text-muted transition hover:border-ink-soft hover:text-ink ${focusRing}`;
 
 /** Proveedor no listado: cae al acento de marca (brasa). */
 const FALLBACK_ACCENT: Accent = {
@@ -106,14 +110,14 @@ export function AgentCard({ agent }: { agent: AgentConfig }) {
             <Play className="h-[15px] w-[15px]" />
             {t('agentes.card.usarAgente')}
           </Link>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="flex flex-wrap gap-2">
             <Link
               to={`/agentes/${agent.id}`}
               aria-label={t('agentes.card.editarAria', { name: agent.name })}
               className={secondaryActionClass}
             >
               <Pencil className="h-3.5 w-3.5 flex-none" />
-              <span className="truncate">{t('agentes.card.editar')}</span>
+              {t('agentes.card.editar')}
             </Link>
             <Link
               to={`/agentes/${agent.id}/conectar`}
@@ -121,7 +125,7 @@ export function AgentCard({ agent }: { agent: AgentConfig }) {
               className={secondaryActionClass}
             >
               <Plug className="h-3.5 w-3.5 flex-none" />
-              <span className="truncate">{t('agentes.card.conectar')}</span>
+              {t('agentes.card.conectar')}
             </Link>
             <Link
               to={`/agentes/${agent.id}/uso`}
@@ -129,7 +133,7 @@ export function AgentCard({ agent }: { agent: AgentConfig }) {
               className={secondaryActionClass}
             >
               <BarChart3 className="h-3.5 w-3.5 flex-none" />
-              <span className="truncate">{t('agentes.card.uso')}</span>
+              {t('agentes.card.uso')}
             </Link>
           </div>
         </div>
