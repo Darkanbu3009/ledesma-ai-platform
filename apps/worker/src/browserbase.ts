@@ -62,6 +62,18 @@ const PROXY_REF_POOL = 'browserbase';
 /** Prefijo de referencia de salida por proxy EXTERNO propio (IP estatica garantizada por el operador). */
 const PROXY_REF_EXTERNO = 'external:';
 
+/**
+ * VIEWPORT de la sesion de LOGIN. La vista en vivo de Browserbase renderiza el navegador remoto al
+ * tamano del viewport de la SESION, no al del iframe que la embebe: la doc de "Session Live View"
+ * (https://docs.browserbase.com/features/session-live-view) no ofrece ningun parametro de escala en
+ * la URL, y su propia receta para cambiar el tamano de la vista (el ejemplo "mobile live view") es
+ * fijar browserSettings.viewport {width, height} AL CREAR la sesion. Sin viewport explicito, el
+ * default del proveedor gobierna lo que el usuario ve y agrandar el iframe con CSS no cambia nada
+ * (la leccion del intento previo, que solo agrando el modal). 1280x720 es un viewport desktop
+ * estandar con el aspecto (16:9) del iframe del modal: la vista escala ~1:1 y se lee bien.
+ */
+export const LOGIN_VIEWPORT = { width: 1280, height: 720 } as const;
+
 const IP_REGEX = /^[0-9a-fA-F:.]{3,45}$/;
 const PAIS_REGEX = /^[A-Z]{2}$/;
 
@@ -224,9 +236,13 @@ export class NavegadorBrowserbase implements NavegadorRemoto, NavegadorParaTarea
 
     // keepAlive: la sesion debe SOBREVIVIR a nuestra desconexion CDP para que el humano se loguee.
     // timeout: techo de costo propio (el barrido de 10 min llega antes en operacion normal).
+    // viewport: EXPLICITO porque es lo que dimensiona la vista en vivo (ver LOGIN_VIEWPORT).
     const session = await this.bb.sessions.create({
       projectId: this.config.projectId,
-      browserSettings: { context: { id: contextoExternoId, persist: true } },
+      browserSettings: {
+        context: { id: contextoExternoId, persist: true },
+        viewport: { width: LOGIN_VIEWPORT.width, height: LOGIN_VIEWPORT.height },
+      },
       proxies,
       keepAlive: true,
       timeout: SESSION_TIMEOUT_SECONDS,
