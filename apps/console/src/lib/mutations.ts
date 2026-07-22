@@ -396,23 +396,11 @@ export function useConfirmarSitio() {
 }
 
 /**
- * DESCONECTAR un sitio (DELETE /v1/sitios/:id): encola kind:'desconectar_sitio' (el borrado ARCO:
- * proveedor + constancia + fila local; PERMANENTE). La UI SIEMPRE lo dispara tras una confirmacion
- * explicita (DesconectarSitioDialog). Refresca la lista; la fila desaparece cuando el worker borra.
- */
-export function useDesconectarSitio() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => apiFetch<SitioJobAceptado>(`/v1/sitios/${id}`, { method: 'DELETE' }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['sitios'] }),
-  });
-}
-
-/**
- * ELIMINAR un sitio con BORRADO FORZADO (DELETE /v1/sitios/:id?force=true): la salida GARANTIZADA
- * para conexiones atascadas. El worker intenta cerrar/borrar en el proveedor best-effort, pero el
- * registro local y la constancia ARCO se completan pase lo que pase con Browserbase. La UI SIEMPRE
- * lo dispara tras una confirmacion explicita (EliminarSitioDialog).
+ * ELIMINAR un sitio con BORRADO FORZADO (DELETE /v1/sitios/:id?force=true): LA UNICA salida de la
+ * UI y la garantizada desde cualquier estado. El worker intenta cerrar/borrar en el proveedor
+ * best-effort, pero el registro local y la constancia ARCO se completan pase lo que pase con
+ * Browserbase. La UI SIEMPRE lo dispara tras una confirmacion explicita (EliminarSitioDialog).
+ * El DELETE sin force (flujo limpio) sigue existiendo en el backend pero la consola ya no lo usa.
  */
 export function useEliminarSitio() {
   const qc = useQueryClient();

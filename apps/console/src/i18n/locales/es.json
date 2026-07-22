@@ -1764,17 +1764,8 @@
     "lista": {
       "ultimoUso": "Último uso: {{fecha}}",
       "sinUso": "Sin uso todavía",
-      "desconectar": "Desconectar",
-      "desconectando": "Desconectando",
       "eliminar": "Eliminar",
       "eliminarAria": "Eliminar la conexión con {{dominio}}"
-    },
-    "desconectarDialog": {
-      "titulo": "¿Desconectar este sitio?",
-      "cuerpoAntes": "Se cerrará la sesión guardada y se borrará de forma permanente la conexión con",
-      "cuerpoDespues": "Es un borrado definitivo: para volver a usar el sitio tendrás que conectarlo e iniciar sesión de nuevo.",
-      "desconectar": "Desconectar",
-      "desconectando": "Desconectando"
     },
     "eliminarDialog": {
       "titulo": "¿Eliminar esta conexión?",
@@ -1805,7 +1796,6 @@
       "rechazo": "La solicitud fue rechazada. Revisa los datos e intenta de nuevo.",
       "generico": "Algo salió mal. Intenta de nuevo.",
       "cargarLista": "No pudimos cargar tus sitios conectados",
-      "desconectarFallo": "No pudimos completar la desconexión. Intenta de nuevo en unos minutos.",
       "eliminarFallo": "No pudimos eliminar la conexión por un problema de la plataforma. Intenta de nuevo en unos minutos."
     }
   },

@@ -101,7 +101,7 @@ export function App() {
               <Route path="/triggers" element={<TriggersPage />} />
               <Route path="/recetas" element={<RecipesPage />} />
               {/* Sitios conectados (7.1c): conectar un sitio con login (el usuario se autentica EL
-                  MISMO en la vista en vivo), listar y desconectar. Ejecutar tareas alli es 7.1d. */}
+                  MISMO en la vista en vivo), listar y eliminar. Ejecutar tareas alli es 7.1d. */}
               <Route path="/sitios" element={<SitiosConectadosPage />} />
               {/* Observabilidad: historial de ejecuciones (jobs). Solo lectura, sin gate por tier. */}
               <Route path="/actividad" element={<ActivityPage />} />

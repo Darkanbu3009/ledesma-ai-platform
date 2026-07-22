@@ -36,7 +36,7 @@ export interface ConexionAceptada {
   dominio: string;
 }
 
-/** Respuesta 202 de confirmar/desconectar: solo el job encolado. */
+/** Respuesta 202 de confirmar/eliminar: solo el job encolado. */
 export interface SitioJobAceptado {
   status: string;
   jobId: string;

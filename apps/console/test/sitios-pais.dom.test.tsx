@@ -6,7 +6,7 @@ import type { RegistrationState } from '../src/lib/registration';
 
 // Se mockean los hooks de datos y de mutaciones: asi se ejerce el FLUJO DE CAPTURA DE PAIS de la
 // pagina de Sitios (la parte nueva de este PR) sin red ni react-query. El resto de la pagina
-// (login en vivo, desconectar, eliminar) se cubre en sus propios tests.
+// (login en vivo, eliminar) se cubre en sus propios tests.
 const {
   useMeMock,
   useSitiosMock,
@@ -39,7 +39,6 @@ vi.mock('../src/lib/mutations', () => {
   return {
     useConectarSitio: () => ({ mutate: conectarMock, reset: vi.fn(), isPending: false, isError: false, error: null }),
     useConfirmarSitio: mutacionInerte,
-    useDesconectarSitio: mutacionInerte,
     useEliminarSitio: mutacionInerte,
     useUpdateProfilePais: () => ({ mutate: guardarPaisMock, reset: vi.fn(), isPending: false, isError: false, error: null }),
   };

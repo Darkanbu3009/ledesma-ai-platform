@@ -1764,17 +1764,8 @@
     "lista": {
       "ultimoUso": "Last used: {{fecha}}",
       "sinUso": "Not used yet",
-      "desconectar": "Disconnect",
-      "desconectando": "Disconnecting",
       "eliminar": "Delete",
       "eliminarAria": "Delete the connection with {{dominio}}"
-    },
-    "desconectarDialog": {
-      "titulo": "Disconnect this site?",
-      "cuerpoAntes": "The saved session will be closed and the connection will be permanently deleted for",
-      "cuerpoDespues": "This deletion is final: to use the site again you will have to connect it and sign in again.",
-      "desconectar": "Disconnect",
-      "desconectando": "Disconnecting"
     },
     "eliminarDialog": {
       "titulo": "Delete this connection?",
@@ -1805,7 +1796,6 @@
       "rechazo": "The request was rejected. Check the data and try again.",
       "generico": "Something went wrong. Try again.",
       "cargarLista": "We could not load your connected sites",
-      "desconectarFallo": "We could not complete the disconnection. Try again in a few minutes.",
       "eliminarFallo": "We could not delete the connection because of a platform issue. Try again in a few minutes."
     }
   },

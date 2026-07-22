@@ -56,8 +56,9 @@ hay que iniciar una conexion NUEVA despues de desplegar worker y consola.
      Browserbase haya expirado o el proveedor no responda.
    - En la base, la fila de `sitios_conectados` ya no existe y hay una constancia nueva en
      `data_subject_requests` (tipo `cancellation`, estado `completed`) para el owner.
-6. Contraste con el flujo limpio: "Desconectar" sigue existiendo y se comporta como antes
-   (si el proveedor falla de verdad, ese flujo si reporta el error).
+6. NOTA (posterior a este PR): el boton "Desconectar" (flujo limpio) fue retirado de la UI;
+   la unica accion por fila es "Eliminar" (borrado forzado). Ver
+   docs/prueba-manual-un-solo-boton-eliminar.md.
 7. Repetir el Eliminar sobre una conexion en estado `activo`: tambien funciona (el borrado
    forzado vale desde cualquier estado).
 8. Verificar ES y EN, movil y desktop.
