@@ -53,11 +53,11 @@ function makeSql(results: Array<unknown[] | Error>): MockSql {
 const TS = '2026-06-28T00:00:00.000Z';
 const individualProfileRow = {
   id: 'user-1', org_id: null, account_type: 'individual', role: 'individual',
-  full_name: 'Ada', identity_verified: false, tier: 'free', is_admin: false, created_at: TS, updated_at: TS,
+  full_name: 'Ada', identity_verified: false, tier: 'free', is_admin: false, pais: null, created_at: TS, updated_at: TS,
 };
 const orgProfileRow = {
   id: 'user-1', org_id: 'org-1', account_type: 'empresa_member', role: 'org_admin',
-  full_name: 'Ada', identity_verified: false, tier: 'free', is_admin: false, created_at: TS, updated_at: TS,
+  full_name: 'Ada', identity_verified: false, tier: 'free', is_admin: false, pais: null, created_at: TS, updated_at: TS,
 };
 const subRow = { id: 's1', profile_id: 'user-1', plan: 'free', status: 'active', created_at: TS };
 const usageRow = { id: 'u1', profile_id: 'user-1', runs_used: 0, runs_limit: 10, period_kind: 'lifetime', created_at: TS };
@@ -407,6 +407,67 @@ describe('RegistrationRepository.updateOwnProfileName', () => {
     const sql = makeSql([[]]);
     const repo = new RegistrationRepository(sql as unknown as Sql);
     expect(await repo.updateOwnProfileName('no-existe', 'X')).toBeNull();
+  });
+});
+
+describe('RegistrationRepository.updateOwnProfilePais', () => {
+  it('actualiza SOLO pais del owner, toca updated_at y mapea el perfil del returning', async () => {
+    const sql = makeSql([[{ ...individualProfileRow, pais: 'AR' }]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    const profile = await repo.updateOwnProfilePais('user-1', 'AR');
+    expect(profile).toMatchObject({ id: 'user-1', pais: 'AR' });
+
+    const update = findCall(sql, 'update profiles');
+    expect(update?.text).toContain('set pais =');
+    expect(update?.text).toContain('updated_at = now()');
+    // El owner se liga por id = ${ownerId}: el pais y el owner viajan PARAMETRIZADOS, en ese orden.
+    expect(update?.values).toEqual(['AR', 'user-1']);
+  });
+
+  it('BLINDAJE: el SET toca EXCLUSIVAMENTE pais (+ updated_at), nunca tier/role/is_admin/etc.', async () => {
+    // Misma barrera de whitelist por construccion que updateOwnProfileName: el UPDATE de este metodo
+    // solo puede escribir pais; ninguna columna sensible puede aparecer en el SET.
+    const sql = makeSql([[{ ...individualProfileRow, pais: 'MX' }]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    await repo.updateOwnProfilePais('user-1', 'MX');
+
+    const update = findCall(sql, 'update profiles');
+    const text = update?.text ?? '';
+    const setClause = text.slice(text.indexOf('set '), text.indexOf('where'));
+    expect(setClause).toContain('pais');
+    expect(setClause).toContain('updated_at');
+    expect(setClause).not.toContain('tier');
+    expect(setClause).not.toContain('role');
+    expect(setClause).not.toContain('is_admin');
+    expect(setClause).not.toContain('account_type');
+    expect(setClause).not.toContain('identity_verified');
+    expect(setClause).not.toContain('org_id');
+    expect(setClause).not.toContain('full_name');
+    // Solo se ligan dos valores: el pais y el owner. Un tercer valor delataria otra columna en el SET.
+    expect(update?.values).toEqual(['MX', 'user-1']);
+  });
+
+  it('devuelve null si no existe perfil para el owner (usuario sin registro completo)', async () => {
+    const sql = makeSql([[]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    expect(await repo.updateOwnProfilePais('no-existe', 'AR')).toBeNull();
+  });
+});
+
+describe('RegistrationRepository.getProfilePais', () => {
+  it('devuelve el pais declarado del perfil (lectura liviana por sub)', async () => {
+    const sql = makeSql([[{ pais: 'UY' }]]);
+    const repo = new RegistrationRepository(sql as unknown as Sql);
+    expect(await repo.getProfilePais('user-1')).toBe('UY');
+    const select = findCall(sql, 'select pais from profiles');
+    expect(select?.values).toEqual(['user-1']);
+  });
+
+  it('devuelve null si el usuario aun no declaro pais o si el perfil no existe', async () => {
+    const sinPais = makeSql([[{ pais: null }]]);
+    expect(await new RegistrationRepository(sinPais as unknown as Sql).getProfilePais('user-1')).toBeNull();
+    const sinPerfil = makeSql([[]]);
+    expect(await new RegistrationRepository(sinPerfil as unknown as Sql).getProfilePais('no-existe')).toBeNull();
   });
 });
 

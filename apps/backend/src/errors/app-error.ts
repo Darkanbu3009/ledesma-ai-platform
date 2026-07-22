@@ -6,7 +6,10 @@ export type ErrorCode =
   | 'UNAUTHORIZED'
   | 'CONFLICT'
   | 'FORBIDDEN'
-  | 'AUTHENTICATION';
+  | 'AUTHENTICATION'
+  // POST /v1/sitios/conectar sin pais en el body ni declarado en el perfil: la consola mapea este
+  // codigo a un mensaje traducido (ES/EN) que manda al usuario a declarar su pais.
+  | 'PAIS_REQUERIDO';
 
 export class AppError extends Error {
   public readonly code: ErrorCode;
