@@ -119,6 +119,13 @@
       "descripcion": "You sign in with your email and password. Here you can sign out of the active session.",
       "cerrarSesion": "Sign out"
     },
+    "pais": {
+      "titulo": "Country",
+      "descripcion": "Your agents browse from your country so your sessions on connected sites stay stable.",
+      "sinPais": "Choose your country",
+      "actualizado": "Country updated.",
+      "errorActualizar": "We could not update your country. Try again."
+    },
     "eliminar": {
       "zonaTitulo": "Delete my account",
       "zonaDescripcion": "Permanently deletes agents, credentials, recipes, tasks, triggers and history. It cannot be undone.",
@@ -1753,10 +1760,21 @@
       "cancelar": "Cancel",
       "entendido": "Got it"
     },
+    "paisDialog": {
+      "titulo": "Which country do you work from?",
+      "porQue": "Your agents will browse from your country so your sessions stay stable.",
+      "label": "Country",
+      "placeholder": "Choose your country",
+      "editableDespues": "It is saved to your profile and only asked once. You can change it anytime in your account settings.",
+      "guardar": "Save and connect",
+      "guardando": "Saving",
+      "errorGuardar": "We could not save your country. Try again."
+    },
     "errores": {
       "sesion": "Your session expired. Sign in to the console again.",
       "plan": "Your plan does not include connected sites. Choose a plan with autonomy.",
       "noExiste": "That site no longer exists.",
+      "paisRequerido": "Set your country in your account settings to connect sites.",
       "rechazo": "The request was rejected. Check the data and try again.",
       "generico": "Something went wrong. Try again.",
       "cargarLista": "We could not load your connected sites",

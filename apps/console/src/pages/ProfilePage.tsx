@@ -1,12 +1,13 @@
 import { type FormEvent, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowRight, KeyRound, Languages, LogOut, Pencil } from 'lucide-react';
+import { ArrowRight, Globe, KeyRound, Languages, LogOut, Pencil } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { LANGUAGE_LABELS, SUPPORTED_LANGUAGES, currentLanguage } from '../i18n';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../auth/useAuth';
 import { useMe } from '../lib/queries';
-import { useUpdateProfileName } from '../lib/mutations';
+import { useUpdateProfileName, useUpdateProfilePais } from '../lib/mutations';
+import { opcionesDePais } from '../lib/paises';
 import { updateProfileNameErrorMessage, validateName } from '../lib/registration';
 import type { Profile, Subscription, UsageCounter } from '../lib/registration';
 import { accountTypeLabel, formatUserDate } from '../lib/admin';
@@ -366,6 +367,70 @@ function LanguageSection() {
 }
 
 /**
+ * PAIS: fila con selector (lista completa ISO 3166-1, nombres localizados via Intl.DisplayNames en
+ * el idioma activo). Es el pais DECLARADO que pinea la geolocalizacion del proxy al conectar sitios
+ * (profiles.pais): la pagina de Sitios lo pide una vez si falta, y AQUI se edita despues. Guarda al
+ * cambiar la seleccion (PATCH /v1/me/profile via useUpdateProfilePais, mismo refresco de ['me'] que
+ * el nombre) y muestra el resultado como Notice. Sin efectos: todo se deriva de props y del estado
+ * de la mutacion.
+ */
+function PaisSection({ pais }: { pais: string | null }) {
+  const { t, i18n } = useTranslation();
+  const [notice, setNotice] = useState<NoticeData | null>(null);
+  const mutation = useUpdateProfilePais();
+  const opciones = opcionesDePais(i18n.language);
+
+  function handleChange(codigo: string) {
+    if (codigo === '' || codigo === pais) return;
+    setNotice(null);
+    mutation.mutate(
+      { pais: codigo },
+      {
+        onSuccess: () => setNotice({ kind: 'ok', text: t('cuenta.pais.actualizado') }),
+        onError: () => setNotice({ kind: 'error', text: t('cuenta.pais.errorActualizar') }),
+      },
+    );
+  }
+
+  return (
+    <section className={`${cardClass} flex flex-wrap items-center gap-3.5 px-[22px] py-4`}>
+      <span
+        aria-hidden="true"
+        className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] bg-[#F1EFE8] text-[#5F5E5A]"
+      >
+        <Globe className="h-4 w-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <h2 className="text-[13.5px] font-medium text-ink">{t('cuenta.pais.titulo')}</h2>
+        <p className="text-xs text-[#8A8880]">{t('cuenta.pais.descripcion')}</p>
+        <Notice notice={notice} className="mt-2" />
+      </div>
+      <div className="w-full sm:w-auto">
+        <label htmlFor="cuenta-pais" className="sr-only">
+          {t('cuenta.pais.titulo')}
+        </label>
+        <select
+          id="cuenta-pais"
+          value={pais ?? ''}
+          onChange={(e) => handleChange(e.target.value)}
+          disabled={mutation.isPending}
+          className="h-10 w-full rounded-[10px] border-[0.5px] border-[#E9E7DF] bg-surface px-3 text-[13px] text-ink focus:border-brasa-line focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 sm:w-56"
+        >
+          <option value="" disabled>
+            {t('cuenta.pais.sinPais')}
+          </option>
+          {opciones.map((opcion) => (
+            <option key={opcion.codigo} value={opcion.codigo}>
+              {opcion.nombre}
+            </option>
+          ))}
+        </select>
+      </div>
+    </section>
+  );
+}
+
+/**
  * PANTALLA DE PERFIL (/configuracion/cuenta, antes /perfil): el usuario ve sus datos de cuenta (email
  * de Supabase + campos de /v1/me), edita SOLO su nombre (PATCH /v1/me/profile via useUpdateProfileName),
  * ve su cuota con enlace al Panel y puede cerrar sesion. Vive como sub-vista del shell de Configuracion
@@ -395,6 +460,7 @@ export function ProfilePage() {
           <UsageSection usageCounter={data.usageCounter} tier={data.profile.tier} />
           <SessionSection />
           <LanguageSection />
+          <PaisSection pais={data.profile.pais} />
           {/* Zona de peligro: fila punteada al final del perfil. Abre el modal de confirmacion fuerte
               (escribir el email) y, tras el borrado, cierra sesion y redirige. El email esperado sale
               de useAuth().user?.email (mismo origen que el encabezado). */}

@@ -7,15 +7,19 @@ import type { RegistrationState } from '../src/lib/registration';
 
 // Los hooks de datos, la mutation, el email (Supabase) y el cliente Supabase se mockean: asi se ejerce la
 // pantalla y el flujo del form sin red, sin react-query y sin leer las env (supabase.ts lanza sin ellas).
-const { useMeMock, useAuthMock, useUpdateProfileNameMock, useDeleteAccountMock } = vi.hoisted(() => ({
+const { useMeMock, useAuthMock, useUpdateProfileNameMock, useUpdateProfilePaisMock, useDeleteAccountMock } = vi.hoisted(() => ({
   useMeMock: vi.fn(),
   useAuthMock: vi.fn(),
   useUpdateProfileNameMock: vi.fn(),
+  useUpdateProfilePaisMock: vi.fn(),
   useDeleteAccountMock: vi.fn(),
 }));
 vi.mock('../src/lib/queries', () => ({ useMe: useMeMock }));
 vi.mock('../src/auth/useAuth', () => ({ useAuth: useAuthMock }));
-vi.mock('../src/lib/mutations', () => ({ useUpdateProfileName: useUpdateProfileNameMock }));
+vi.mock('../src/lib/mutations', () => ({
+  useUpdateProfileName: useUpdateProfileNameMock,
+  useUpdateProfilePais: useUpdateProfilePaisMock,
+}));
 // La Zona de peligro usa useDeleteAccount (arrastra supabase + react-router): se mockea para ejercer la
 // pantalla sin QueryClient ni Router real; su comportamiento propio se testea en danger-zone.dom.test.tsx.
 vi.mock('../src/lib/account-mutations', () => ({ useDeleteAccount: useDeleteAccountMock }));
@@ -34,6 +38,7 @@ function state(overrides?: Partial<RegistrationState['profile']>): RegistrationS
       fullName: 'Ada Lovelace',
       identityVerified: true,
       tier: 'free',
+      pais: null,
       createdAt: '2026-06-10T12:00:00.000Z',
       updatedAt: '2026-06-10T12:00:00.000Z',
       ...overrides,
@@ -56,6 +61,14 @@ function mockMutation() {
   const mutate = vi.fn();
   useUpdateProfileNameMock.mockReturnValue({
     mutate,
+    reset: vi.fn(),
+    isPending: false,
+    isError: false,
+    error: null,
+  });
+  // La seccion de Pais consume su propia mutacion: stub inerte (su flujo se testea aparte).
+  useUpdateProfilePaisMock.mockReturnValue({
+    mutate: vi.fn(),
     reset: vi.fn(),
     isPending: false,
     isError: false,
@@ -90,6 +103,7 @@ afterEach(() => {
   useMeMock.mockReset();
   useAuthMock.mockReset();
   useUpdateProfileNameMock.mockReset();
+  useUpdateProfilePaisMock.mockReset();
   useDeleteAccountMock.mockReset();
 });
 
@@ -141,6 +155,27 @@ describe('ProfilePage', () => {
 
     expect(mutate).toHaveBeenCalledTimes(1);
     expect(mutate.mock.calls[0]?.[0]).toEqual({ fullName: 'Ada Nueva' });
+  });
+
+  it('la seccion Pais precarga el pais del perfil y guarda el nuevo con PATCH { pais }', () => {
+    mockData(state({ pais: 'MX' }));
+    mockMutation();
+    const mutatePais = vi.fn();
+    useUpdateProfilePaisMock.mockReturnValue({
+      mutate: mutatePais,
+      reset: vi.fn(),
+      isPending: false,
+      isError: false,
+      error: null,
+    });
+    renderPage();
+
+    const select = screen.getByLabelText('País');
+    expect(select).toHaveValue('MX');
+    // El pais es EDITABLE despues de declararlo: cambiarlo dispara el PATCH con el codigo nuevo.
+    fireEvent.change(select, { target: { value: 'AR' } });
+    expect(mutatePais).toHaveBeenCalledTimes(1);
+    expect(mutatePais.mock.calls[0]?.[0]).toEqual({ pais: 'AR' });
   });
 
   it('no envia el PATCH y muestra el error de validacion cuando el nombre queda vacio', () => {

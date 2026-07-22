@@ -9,6 +9,7 @@ import {
   useConfirmarSitio,
   useDesconectarSitio,
   useEliminarSitio,
+  useUpdateProfilePais,
 } from '../lib/mutations';
 import {
   estadoSitioLabel,
@@ -21,6 +22,7 @@ import {
 import { isJobInFlight } from '../lib/jobs';
 import { formatRunAt } from '../lib/schedule';
 import { LoginEnVivoDialog } from '../components/sitios/LoginEnVivoDialog';
+import { SeleccionPaisDialog } from '../components/sitios/SeleccionPaisDialog';
 import { DesconectarSitioDialog } from '../components/sitios/DesconectarSitioDialog';
 import { EliminarSitioDialog } from '../components/sitios/EliminarSitioDialog';
 import { PageHeader } from '../components/ui/PageHeader';
@@ -35,6 +37,8 @@ function backendMessage(error: unknown): string {
     if (error.status === 401) return i18n.t('sitios.errores.sesion');
     if (error.status === 403) return i18n.t('sitios.errores.plan');
     if (error.status === 404) return i18n.t('sitios.errores.noExiste');
+    // Falta declarar el pais (codigo propio del backend): mensaje accionable, no el rechazo generico.
+    if (error.code === 'PAIS_REQUERIDO') return i18n.t('sitios.errores.paisRequerido');
     if (error.status === 400) return i18n.t('sitios.errores.rechazo');
   }
   return i18n.t('sitios.errores.generico');
@@ -175,6 +179,13 @@ export function SitiosConectadosPage() {
 
   const [url, setUrl] = useState('');
   const [urlError, setUrlError] = useState<string | null>(null);
+  /**
+   * URL YA validada esperando a que el usuario declare su pais (solo cuando el perfil aun no lo
+   * tiene): abre el dialogo de seleccion de pais y, al guardarse el pais, la conexion continua con
+   * esta URL. null = sin captura pendiente. Se pide UNA sola vez: con pais en el perfil, conectar
+   * va directo.
+   */
+  const [urlPendienteDePais, setUrlPendienteDePais] = useState<string | null>(null);
   /** Conexion EN CURSO iniciada por esta pagina: el job encolado + el dominio a vigilar en la lista. */
   const [conexion, setConexion] = useState<{ jobId: string; dominio: string } | null>(null);
   /** Desconexion EN CURSO: el job encolado + el sitio para marcar su fila mientras desaparece. */
@@ -193,6 +204,7 @@ export function SitiosConectadosPage() {
   const confirmar = useConfirmarSitio();
   const desconectar = useDesconectarSitio();
   const eliminar = useEliminarSitio();
+  const guardarPais = useUpdateProfilePais();
 
   const conexionJob = useJobSeguimiento(conexion?.jobId ?? null);
   const desconexionJob = useJobSeguimiento(desconexion?.jobId ?? null);
@@ -245,6 +257,19 @@ export function SitiosConectadosPage() {
   const conexionFallo = conexion !== null && conexionJob.data?.status === 'failed';
   const abriendoNavegador = conexion !== null && !sitioEnLogin && !conexionFallo;
 
+  /** Encola la conexion con la URL validada y el pais (el declarado en el perfil o el recien guardado). */
+  function encolarConexion(urlNormalizada: string, pais: string) {
+    conectar.mutate(
+      { url: urlNormalizada, pais },
+      {
+        onSuccess: (aceptada) => {
+          setConexion({ jobId: aceptada.jobId, dominio: aceptada.dominio });
+          setUrl('');
+        },
+      },
+    );
+  }
+
   function handleConectar(e: FormEvent) {
     e.preventDefault();
     const normalizada = normalizarUrlDeSitio(url);
@@ -253,12 +278,31 @@ export function SitiosConectadosPage() {
       return;
     }
     setUrlError(null);
-    conectar.mutate(normalizada, {
-      onSuccess: (aceptada) => {
-        setConexion({ jobId: aceptada.jobId, dominio: aceptada.dominio });
-        setUrl('');
+    const paisPerfil = me.data?.profile?.pais ?? null;
+    if (paisPerfil === null) {
+      // Primera conexion sin pais declarado: capturarlo UNA vez antes de conectar (el dialogo
+      // explica por que se pide). La URL queda pendiente y la conexion continua al guardar.
+      guardarPais.reset();
+      setUrlPendienteDePais(normalizada);
+      return;
+    }
+    encolarConexion(normalizada, paisPerfil);
+  }
+
+  /** El usuario eligio su pais: se guarda en el perfil y, al confirmarse, la conexion continua. */
+  function handleGuardarPais(codigo: string) {
+    const pendiente = urlPendienteDePais;
+    if (pendiente === null) return;
+    guardarPais.mutate(
+      { pais: codigo },
+      {
+        onSuccess: (state) => {
+          setUrlPendienteDePais(null);
+          // El pais efectivo es el que quedo en el perfil (el backend normaliza a mayusculas).
+          encolarConexion(pendiente, state.profile?.pais ?? codigo.toUpperCase());
+        },
       },
-    });
+    );
   }
 
   function handleConfirmar() {
@@ -454,6 +498,17 @@ export function SitiosConectadosPage() {
           ) : null}
         </>
       )}
+
+      {/* Captura del pais (UNA sola vez, solo si el perfil no lo tiene): la conexion pendiente
+          continua al guardarse. Cancelar descarta la conexion; el pais seguira editable en la
+          configuracion del perfil. */}
+      <SeleccionPaisDialog
+        open={urlPendienteDePais !== null}
+        busy={guardarPais.isPending}
+        error={guardarPais.isError ? t('sitios.paisDialog.errorGuardar') : null}
+        onGuardar={handleGuardarPais}
+        onCancelar={() => setUrlPendienteDePais(null)}
+      />
 
       {/* Modal de la vista en vivo: abre cuando la fila del login (con su URL) ya existe. */}
       {sitioEnLogin && (

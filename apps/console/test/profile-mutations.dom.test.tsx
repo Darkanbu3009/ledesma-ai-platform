@@ -21,6 +21,7 @@ const UPDATED_STATE: RegistrationState = {
     fullName: 'Ada Nueva',
     identityVerified: false,
     tier: 'free',
+    pais: null,
     createdAt: 'x',
     updatedAt: 'y',
   },

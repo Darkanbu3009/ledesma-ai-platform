@@ -27,6 +27,7 @@ import type {
   RegistrationResult,
   RegistrationState,
   UpdateProfileNameInput,
+  UpdateProfilePaisInput,
 } from './registration';
 import type { Consent, CreateConsentInput, CreateDataRequestInput, DataRequest } from './privacy';
 import type { CreateUpgradeRequestInput, CreateUpgradeRequestResult } from './upgrade-requests';
@@ -77,6 +78,26 @@ export function useUpdateProfileName() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: UpdateProfileNameInput) =>
+      apiFetch<RegistrationState>('/v1/me/profile', {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
+    onSuccess: (state) => {
+      qc.setQueryData<RegistrationState>(['me'], state);
+    },
+  });
+}
+
+/**
+ * Declara o cambia el PROPIO pais del usuario (PATCH /v1/me/profile con { pais }, ISO 3166-1
+ * alpha-2). Mismo patron que useUpdateProfileName: el endpoint devuelve el estado consolidado y se
+ * refresca la cache ['me'] con setQueryData, asi la pagina de Sitios ve el pais recien declarado de
+ * inmediato (y no lo vuelve a pedir). El backend normaliza a mayusculas y whitelistea el campo.
+ */
+export function useUpdateProfilePais() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateProfilePaisInput) =>
       apiFetch<RegistrationState>('/v1/me/profile', {
         method: 'PATCH',
         body: JSON.stringify(input),
@@ -344,27 +365,17 @@ export function useRunRecipe() {
  * aparecera en 'esperando_login' con su vista en vivo. Refresca la lista al aceptarse.
  */
 /**
- * PAIS del usuario (ISO 3166-1 alpha-2) derivado del navegador con los likely subtags de CLDR
- * (Intl.Locale#maximize, built-in: 'es-AR' -> AR, 'es' -> ES). Se manda al conectar para que el
- * worker PINEE la salida de red del dominio a ese pais (la continuidad se verifica por pais, no por
- * IP exacta). undefined = no derivable: el backend cae a Accept-Language.
+ * CONECTAR: el body lleva la URL que pego el usuario Y el pais DECLARADO en su perfil (la pagina lo
+ * garantiza pidiendolo antes de la primera conexion). El backend ademas cae al pais del perfil si el
+ * body no lo trajera (defensa en profundidad); jamas se pinea un default silencioso.
  */
-export function paisDelNavegador(): string | undefined {
-  try {
-    const region = new Intl.Locale(navigator.language).maximize().region;
-    return region && /^[A-Z]{2}$/.test(region) ? region : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export function useConectarSitio() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (url: string) =>
+    mutationFn: (input: { url: string; pais: string }) =>
       apiFetch<ConexionAceptada>('/v1/sitios/conectar', {
         method: 'POST',
-        body: JSON.stringify({ url, pais: paisDelNavegador() }),
+        body: JSON.stringify({ url: input.url, pais: input.pais }),
       }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['sitios'] }),
   });
