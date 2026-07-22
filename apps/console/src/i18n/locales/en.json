@@ -314,6 +314,11 @@
     "eligeCredencial": "Choose a credential or paste your API key to test the agent.",
     "escribeParaEmpezar": "Type a message to get started.",
     "usoTokens": "{{input}} in / {{output}} out tokens",
+    "corte": {
+      "maxIterations": "The run was cut off by the iteration limit before the final answer.",
+      "tokenCap": "The run was cut off by the accumulated token cap.",
+      "timeout": "The run was cut off after reaching the maximum execution time."
+    },
     "errorFallback": "Check your key or the model identifier.",
     "mensajeAria": "Message for the agent",
     "mensajePlaceholder": "Type a message...",

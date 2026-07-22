@@ -314,6 +314,11 @@
     "eligeCredencial": "Elegi una credencial o pega tu API key para probar el agente.",
     "escribeParaEmpezar": "Escribe un mensaje para empezar.",
     "usoTokens": "{{input}} in / {{output}} out tokens",
+    "corte": {
+      "maxIterations": "La corrida se corto por el limite de iteraciones antes de la respuesta final.",
+      "tokenCap": "La corrida se corto por el tope de tokens acumulados del run.",
+      "timeout": "La corrida se corto por alcanzar el tiempo maximo de ejecucion."
+    },
     "errorFallback": "Revisa tu key o el identificador del modelo.",
     "mensajeAria": "Mensaje para el agente",
     "mensajePlaceholder": "Escribe un mensaje...",

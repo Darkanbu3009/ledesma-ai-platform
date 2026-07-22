@@ -129,8 +129,20 @@ type ViewItem =
   | { kind: 'user'; text: string; attachments?: AttachmentRef[] }
   | { kind: 'assistant'; text: string }
   | { kind: 'tool'; id: string; name: string; isError: boolean }
-  | { kind: 'usage'; inputTokens: number; outputTokens: number }
+  | { kind: 'usage'; inputTokens: number; outputTokens: number; stopReason: string }
   | { kind: 'error'; code: string; message?: string; retryText: string };
+
+/**
+ * Cortes del motor de ejecucion que terminan el run SIN respuesta final del modelo. Se muestran
+ * junto al conteo de tokens para que el silencio tenga explicacion (antes el turno moria mudo).
+ * 'end_turn' / 'tool_use' / 'max_tokens' no van aca: o son el final normal o el propio texto ya
+ * evidencia el corte.
+ */
+const CORTE_LABEL: Record<string, string> = {
+  max_iterations: 'playground.corte.maxIterations',
+  token_cap: 'playground.corte.tokenCap',
+  timeout: 'playground.corte.timeout',
+};
 
 export function PlaygroundPage() {
   const { t } = useTranslation();
@@ -247,7 +259,12 @@ export function PlaygroundPage() {
       case 'stop':
         setVista((items) => [
           ...items,
-          { kind: 'usage', inputTokens: event.usage.inputTokens, outputTokens: event.usage.outputTokens },
+          {
+            kind: 'usage',
+            inputTokens: event.usage.inputTokens,
+            outputTokens: event.usage.outputTokens,
+            stopReason: event.reason,
+          },
         ]);
         break;
     }
@@ -476,15 +493,22 @@ export function PlaygroundPage() {
                           </span>
                         </div>
                       );
-                    case 'usage':
+                    case 'usage': {
+                      const corteLabel = CORTE_LABEL[item.stopReason];
                       return (
-                        <p key={i} className="text-center text-xs text-hueso-muted">
-                          {t('playground.usoTokens', {
-                            input: item.inputTokens,
-                            output: item.outputTokens,
-                          })}
-                        </p>
+                        <div key={i} className="space-y-1 text-center text-xs">
+                          {corteLabel !== undefined && (
+                            <p className="text-brasa">{t(corteLabel)}</p>
+                          )}
+                          <p className="text-hueso-muted">
+                            {t('playground.usoTokens', {
+                              input: item.inputTokens,
+                              output: item.outputTokens,
+                            })}
+                          </p>
+                        </div>
                       );
+                    }
                     case 'error':
                       return (
                         <div key={i} className="flex justify-start">
