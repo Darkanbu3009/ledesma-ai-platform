@@ -77,7 +77,8 @@ export const SITIO_TOOLS: readonly ToolDefinition[] = [
     name: SITIO_TOOL_REVISAR,
     description:
       'Consulta el resultado de una tarea encolada con platform_ejecutar_tarea_en_sitio, usando su job_id. ' +
-      'Si sigue en proceso, vuelve a llamarla en unos segundos.',
+      'Esta tool ESPERA internamente mientras la tarea sigue corriendo (hasta ~25 segundos por llamada), ' +
+      'asi que una sola llamada suele bastar; si aun asi devuelve en_proceso, vuelve a llamarla.',
     inputSchema: revisarSchema,
   },
 ];
@@ -131,6 +132,46 @@ export interface SitioToolsDeps {
 const MENSAJE_RECONECTAR =
   'El sitio no esta conectado o la sesion caduco; el usuario debe volver a conectarlo desde la consola.';
 
+/**
+ * LONG-POLL de la tool revisar: en vez de devolver 'en_proceso' al instante (lo que empuja al
+ * modelo a rellamarla de inmediato y quemar las iteraciones del loop), el ejecutor espera
+ * internamente re-consultando el job cada INTERVALO hasta agotar la VENTANA.
+ *
+ * La ventana es 25s A PROPOSITO: el SSE del run no emite ningun byte mientras una tool ejecuta
+ * (sse-runner solo escribe AgentEvents), y los proxies intermedios cortan conexiones inactivas
+ * (umbrales tipicos de 30-60s). 25s queda por debajo del umbral mas agresivo comun; una tarea mas
+ * larga simplemente consume otra llamada de la tool (otra iteracion), no rompe el stream. El
+ * timeout de pared del run (600s) sigue mandando: su abort llega por el AbortSignal y corta la
+ * espera de inmediato.
+ */
+export const REVISAR_ESPERA_MAX_MS = 25_000;
+export const REVISAR_ESPERA_INTERVALO_MS = 3_000;
+
+/** Espera dormida que se corta al instante si el signal aborta (nunca rechaza). */
+function esperar(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/** Overrides de la espera del long-poll (solo para tests; produccion usa los defaults). */
+export interface EsperaRevisarOpciones {
+  esperaMaxMs?: number;
+  esperaIntervaloMs?: number;
+}
+
 function inputString(input: Record<string, unknown>, key: string): string | null {
   const value = input[key];
   return typeof value === 'string' && value.trim() !== '' ? value : null;
@@ -141,7 +182,13 @@ function inputString(input: Record<string, unknown>, key: string): string | null
  * { content, isError } (mismo contrato que createWebhookExecutor/createNativeExecutor). No loguea
  * ni devuelve nada sensible: solo ids, estados y el resultado ya saneado que guardo el worker.
  */
-export function createSitioToolsExecutor(ctx: SitioToolsContext, deps: SitioToolsDeps): ToolExecutor {
+export function createSitioToolsExecutor(
+  ctx: SitioToolsContext,
+  deps: SitioToolsDeps,
+  opciones: EsperaRevisarOpciones = {},
+): ToolExecutor {
+  const esperaMaxMs = opciones.esperaMaxMs ?? REVISAR_ESPERA_MAX_MS;
+  const esperaIntervaloMs = opciones.esperaIntervaloMs ?? REVISAR_ESPERA_INTERVALO_MS;
   const listar = async (): Promise<ToolExecutionResult> => {
     // Acotado al owner del run (jamas del modelo) y filtrado a 'activo': un sitio caducado, en
     // error o esperando login no es ejecutable y no se ofrece. Solo metadata minima: id + dominio.
@@ -195,12 +242,31 @@ export function createSitioToolsExecutor(ctx: SitioToolsContext, deps: SitioTool
     };
   };
 
-  const revisar = async (input: Record<string, unknown>): Promise<ToolExecutionResult> => {
+  const revisar = async (
+    input: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<ToolExecutionResult> => {
     const jobId = inputString(input, 'job_id');
     if (!jobId) {
       return { content: 'Falta job_id (string no vacio).', isError: true };
     }
-    const job = await deps.jobs.obtenerJobDeOwner(jobId, ctx.ownerId);
+    // LONG-POLL: mientras el job siga pending/running, re-consultar cada intervalo hasta agotar la
+    // ventana. El AbortSignal del run (desconexion del cliente o timeout de pared de 600s) corta la
+    // espera al instante; en ese caso se devuelve 'en_proceso' limpio y el loop decide (el resultado
+    // igual se descarta si el run ya aborto).
+    const deadline = Date.now() + esperaMaxMs;
+    let job = await deps.jobs.obtenerJobDeOwner(jobId, ctx.ownerId);
+    while (
+      job !== null &&
+      (job.status === 'pending' || job.status === 'running') &&
+      !signal?.aborted
+    ) {
+      const restante = deadline - Date.now();
+      if (restante <= 0) break;
+      await esperar(Math.min(esperaIntervaloMs, restante), signal);
+      if (signal?.aborted) break;
+      job = await deps.jobs.obtenerJobDeOwner(jobId, ctx.ownerId);
+    }
     if (!job) {
       return { content: 'No existe una tarea con ese job_id para este usuario.', isError: true };
     }
@@ -222,12 +288,12 @@ export function createSitioToolsExecutor(ctx: SitioToolsContext, deps: SitioTool
     };
   };
 
-  return async (call: ToolCall): Promise<ToolExecutionResult> => {
+  return async (call: ToolCall, signal?: AbortSignal): Promise<ToolExecutionResult> => {
     const input = (call.input ?? {}) as Record<string, unknown>;
     try {
       if (call.name === SITIO_TOOL_LISTAR) return await listar();
       if (call.name === SITIO_TOOL_EJECUTAR) return await ejecutar(input);
-      if (call.name === SITIO_TOOL_REVISAR) return await revisar(input);
+      if (call.name === SITIO_TOOL_REVISAR) return await revisar(input, signal);
       return { content: `Tool ${call.name} no es una tool de sitios conectados`, isError: true };
     } catch (error) {
       // Fallo de infraestructura (DB): mensaje generico, sin detalle interno hacia el modelo.

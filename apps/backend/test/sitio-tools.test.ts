@@ -170,13 +170,50 @@ describe('platform_ejecutar_tarea_en_sitio', () => {
   });
 });
 
+// Ventana corta para los tests del long-poll: mismas rutas de codigo, sin esperas reales largas.
+const ESPERA_TEST = { esperaMaxMs: 60, esperaIntervaloMs: 10 };
+
 describe('platform_revisar_tarea_en_sitio', () => {
-  it('en proceso mientras el job esta pending/running', async () => {
+  it('agotada la ventana con el job aun corriendo, devuelve en_proceso limpio', async () => {
     const deps = makeDeps({ consulta: { id: 'job-1', status: 'running', resultado: null, lastError: null } });
-    const exec = createSitioToolsExecutor(CTX, deps);
+    const exec = createSitioToolsExecutor(CTX, deps, ESPERA_TEST);
     const res = await exec(call(SITIO_TOOL_REVISAR, { job_id: 'job-1' }));
     expect(res.isError).toBe(false);
     expect(JSON.parse(res.content).estado).toBe('en_proceso');
+    // El long-poll re-consulto varias veces dentro de la ventana antes de rendirse.
+    expect((deps.jobs.obtenerJobDeOwner as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('ESPERA dentro de la ventana y devuelve el resultado cuando el job completa (sin gastar otra llamada)', async () => {
+    const deps = makeDeps();
+    const consulta = deps.jobs.obtenerJobDeOwner as ReturnType<typeof vi.fn>;
+    consulta
+      .mockResolvedValueOnce({ id: 'job-1', status: 'pending', resultado: null, lastError: null })
+      .mockResolvedValueOnce({ id: 'job-1', status: 'running', resultado: null, lastError: null })
+      .mockResolvedValue({
+        id: 'job-1',
+        status: 'completed',
+        resultado: { estado: 'ok', resumen: 'listo' },
+        lastError: null,
+      });
+    const exec = createSitioToolsExecutor(CTX, deps, { esperaMaxMs: 5_000, esperaIntervaloMs: 10 });
+    const res = await exec(call(SITIO_TOOL_REVISAR, { job_id: 'job-1' }));
+    expect(res.isError).toBe(false);
+    expect(JSON.parse(res.content)).toEqual({ estado: 'completada', resultado: { estado: 'ok', resumen: 'listo' } });
+    expect(consulta).toHaveBeenCalledTimes(3);
+  });
+
+  it('el AbortSignal del run corta la espera al instante y devuelve en_proceso', async () => {
+    const deps = makeDeps({ consulta: { id: 'job-1', status: 'running', resultado: null, lastError: null } });
+    // Ventana ENORME a proposito: si el abort no cortara la espera, este test se colgaria.
+    const exec = createSitioToolsExecutor(CTX, deps, { esperaMaxMs: 600_000, esperaIntervaloMs: 600_000 });
+    const controller = new AbortController();
+    const pendiente = exec(call(SITIO_TOOL_REVISAR, { job_id: 'job-1' }), controller.signal);
+    controller.abort();
+    const res = await pendiente;
+    expect(res.isError).toBe(false);
+    expect(JSON.parse(res.content).estado).toBe('en_proceso');
+    expect(deps.jobs.obtenerJobDeOwner).toHaveBeenCalledTimes(1);
   });
 
   it('devuelve el resultado guardado cuando el job completo', async () => {
