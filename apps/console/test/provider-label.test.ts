@@ -11,8 +11,8 @@ describe('providerLabel', () => {
 
 describe('playgroundPath', () => {
   it('apunta al Playground del agente recien creado usando su id real', () => {
-    // Destino del puente "crear -> conversar": los flujos asistente, autonomo y manual redirigen
-    // aqui tras crear, y la lista lo usa para el boton "Conversar".
+    // Destino de la accion "Usar agente": los flujos asistente, autonomo y manual redirigen
+    // aqui tras crear, y la tarjeta de la lista lo usa para su boton primario.
     expect(playgroundPath('agent-123')).toBe('/agentes/agent-123/playground');
   });
 
