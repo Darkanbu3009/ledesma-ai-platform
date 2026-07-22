@@ -314,6 +314,71 @@ describe('DELETE /v1/sitios/:id', () => {
     });
   });
 
+  it('con ?force=true encola el payload con force: true (borrado garantizado) -> 202', async () => {
+    obtenerPorId.mockResolvedValue(makeSitio({ estado: 'activo' }));
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/v1/sitios/${SITIO_ID}?force=true`,
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(createJob).toHaveBeenCalledWith({
+      agentId: null,
+      ownerId: 'user-1',
+      credentialId: null,
+      payload: { kind: 'desconectar_sitio', connectionId: SITIO_ID, force: true },
+    });
+  });
+
+  // El borrado FORZADO es la salida para filas atascadas: se acepta desde CUALQUIER estado.
+  it.each(['activo', 'esperando_login', 'error', 'caducado'] as const)(
+    'con ?force=true desde estado %s -> 202 con force en el payload',
+    async (estado) => {
+      obtenerPorId.mockResolvedValue(makeSitio({ estado, sesionExternaId: null, vistaEnVivoUrl: null }));
+      const res = await app.inject({
+        method: 'DELETE',
+        url: `/v1/sitios/${SITIO_ID}?force=true`,
+        headers: { authorization: 'Bearer valid-user-1' },
+      });
+      expect(res.statusCode).toBe(202);
+      expect(createJob).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: { kind: 'desconectar_sitio', connectionId: SITIO_ID, force: true },
+        }),
+      );
+    },
+  );
+
+  it('la clave repetida (?force=true&force=true) sigue siendo borrado forzado, jamas se degrada', async () => {
+    obtenerPorId.mockResolvedValue(makeSitio({ estado: 'activo' }));
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/v1/sitios/${SITIO_ID}?force=true&force=true`,
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: { kind: 'desconectar_sitio', connectionId: SITIO_ID, force: true },
+      }),
+    );
+  });
+
+  it('un force distinto del literal true (false, basura) es el flujo limpio, sin force', async () => {
+    obtenerPorId.mockResolvedValue(makeSitio({ estado: 'activo' }));
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/v1/sitios/${SITIO_ID}?force=si`,
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: { kind: 'desconectar_sitio', connectionId: SITIO_ID },
+      }),
+    );
+  });
+
   // Desconectar se permite desde CUALQUIER estado: una fila atascada en 'error' o 'esperando_login'
   // (sesion del proveedor expirada, modal cerrado a medias) se limpia igual; el worker es idempotente
   // ante el contexto remoto ya inexistente. Regresion del defecto de estados huerfanos.

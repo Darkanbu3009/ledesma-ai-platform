@@ -524,6 +524,104 @@ describe('desconectar_sitio (borrado ARCO)', () => {
   });
 });
 
+describe('desconectar_sitio FORZADO (force: true, el borrado garantizado)', () => {
+  const jobForzado = () =>
+    makeJob({ kind: 'desconectar_sitio', connectionId: CONNECTION_ID, force: true });
+
+  // LA GARANTIA CENTRAL: ningun fallo del proveedor detiene el borrado local ni el ARCO. Se cubren
+  // las tres formas tipicas: 404 (recurso ya inexistente), 5xx (proveedor roto) y timeout de red.
+  it.each([
+    ['contexto ya inexistente (404)', Object.assign(new Error('404 Context not found'), { status: 404 })],
+    ['proveedor caido (500)', Object.assign(new Error('internal server error'), { status: 500 })],
+    ['timeout de red', Object.assign(new Error('Request timed out'), { name: 'APIConnectionTimeoutError' })],
+  ])('con el proveedor fallando (%s): completa ARCO y borra la fila local', async (_caso, fallo) => {
+    const repo = makeRepo({ obtenerPorId: vi.fn(async () => makeSitio()) });
+    const navegador = makeNavegador({
+      cerrarSesion: vi.fn(async () => {
+        throw fallo;
+      }),
+      borrarContexto: vi.fn(async () => {
+        throw fallo;
+      }),
+    });
+    const deps = makeDeps(repo, navegador);
+
+    await expect(procesarJobDeSitio(deps, jobForzado())).resolves.toBeUndefined();
+
+    expect(deps.registrarDesconexionArco).toHaveBeenCalledWith('user-1', 'app.ejemplo.com');
+    expect(repo.borrar).toHaveBeenCalledWith(CONNECTION_ID, 'user-1');
+  });
+
+  it('el intento sobre el proveedor SI se hace (best-effort) y el fallo queda logueado', async () => {
+    const repo = makeRepo({ obtenerPorId: vi.fn(async () => makeSitio()) });
+    const navegador = makeNavegador({
+      borrarContexto: vi.fn(async () => {
+        throw new Error('api del proveedor caida');
+      }),
+    });
+    const deps = makeDeps(repo, navegador);
+
+    await procesarJobDeSitio(deps, jobForzado());
+
+    expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
+    expect(navegador.borrarContexto).toHaveBeenCalledWith('ctx-1');
+    expect(deps.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('desconectar forzado'),
+      expect.objectContaining({ connectionId: CONNECTION_ID }),
+    );
+  });
+
+  // El borrado forzado funciona DESDE CUALQUIER estado de la conexion, con o sin sesion viva.
+  it.each(['activo', 'esperando_login', 'error', 'caducado'] as const)(
+    'desde estado %s con el proveedor caido: la fila local se borra igual',
+    async (estado) => {
+      const sitio = makeSitio({
+        estado,
+        sesionExternaId: estado === 'esperando_login' ? 'ses-1' : null,
+      });
+      const repo = makeRepo({ obtenerPorId: vi.fn(async () => sitio) });
+      const navegador = makeNavegador({
+        cerrarSesion: vi.fn(async () => {
+          throw new Error('provider unreachable');
+        }),
+        borrarContexto: vi.fn(async () => {
+          throw new Error('provider unreachable');
+        }),
+      });
+      const deps = makeDeps(repo, navegador);
+
+      await expect(procesarJobDeSitio(deps, jobForzado())).resolves.toBeUndefined();
+      expect(deps.registrarDesconexionArco).toHaveBeenCalledWith('user-1', 'app.ejemplo.com');
+      expect(repo.borrar).toHaveBeenCalledWith(CONNECTION_ID, 'user-1');
+    },
+  );
+
+  it('los fallos de la PROPIA plataforma (ARCO) siguen fallando el job: force solo cubre al proveedor', async () => {
+    const repo = makeRepo({ obtenerPorId: vi.fn(async () => makeSitio()) });
+    const deps = makeDeps(repo);
+    (deps.registrarDesconexionArco as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      throw new Error('db caida');
+    });
+
+    await expect(procesarJobDeSitio(deps, jobForzado())).rejects.toThrow('db caida');
+    expect(repo.borrar).not.toHaveBeenCalled();
+  });
+
+  it('sin force, el fallo real del proveedor sigue frenando el borrado (el flujo limpio no cambia)', async () => {
+    const repo = makeRepo({ obtenerPorId: vi.fn(async () => makeSitio()) });
+    const navegador = makeNavegador({
+      borrarContexto: vi.fn(async () => {
+        throw new Error('api del proveedor caida');
+      }),
+    });
+    const deps = makeDeps(repo, navegador);
+    await expect(
+      procesarJobDeSitio(deps, makeJob({ kind: 'desconectar_sitio', connectionId: CONNECTION_ID })),
+    ).rejects.toThrow('api del proveedor caida');
+    expect(repo.borrar).not.toHaveBeenCalled();
+  });
+});
+
 describe('esErrorDeRecursoInexistente', () => {
   it('reconoce 404 por status, por statusCode y por mensaje not found', () => {
     expect(esErrorDeRecursoInexistente(Object.assign(new Error('x'), { status: 404 }))).toBe(true);

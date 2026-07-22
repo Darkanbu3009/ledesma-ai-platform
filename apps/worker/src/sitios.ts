@@ -377,8 +377,20 @@ async function confirmarConexion(deps: SitiosJobDeps, job: Job, connectionId: st
  * (3) la fila local (contexto cifrado incluido).
  * El ARCO se registra ANTES de borrar la fila: si el borrado local fallara, el reintento puede
  * duplicar la solicitud (aceptable y visible) pero jamas queda un borrado sin su constancia.
+ *
+ * MODO FORZADO (`force`): el borrado GARANTIZADO que la UI dispara con el icono de eliminar. La
+ * unica diferencia con el flujo limpio es el paso (1): TODO fallo del proveedor al borrar el
+ * contexto (timeout, 5xx, caida total, permisos) se LOGUEA y se sigue igual, en vez de fallar el
+ * job. El ARCO y el borrado local se completan pase lo que pase con Browserbase; los fallos de la
+ * PROPIA base (ARCO o borrar la fila) si siguen fallando el job, porque ahi reintentar es correcto
+ * y no hay proveedor de por medio.
  */
-async function desconectarSitio(deps: SitiosJobDeps, job: Job, connectionId: string): Promise<void> {
+async function desconectarSitio(
+  deps: SitiosJobDeps,
+  job: Job,
+  connectionId: string,
+  force: boolean,
+): Promise<void> {
   const sitio = await deps.repo.obtenerPorId(connectionId, job.ownerId);
   if (!sitio) {
     // Idempotente: un reintento tras un borrado parcial (o un doble encolado) no debe fallar.
@@ -403,12 +415,23 @@ async function desconectarSitio(deps: SitiosJobDeps, job: Job, connectionId: str
     try {
       await deps.navegador.borrarContexto(sitio.contextoExternoId);
     } catch (error) {
-      if (!esErrorDeRecursoInexistente(error)) throw error;
-      deps.logger.info('desconectar: el contexto ya no existia en el proveedor (se continua igual)', {
-        jobId: job.id,
-        connectionId: sitio.id,
-        err: describir(error),
-      });
+      if (esErrorDeRecursoInexistente(error)) {
+        deps.logger.info('desconectar: el contexto ya no existia en el proveedor (se continua igual)', {
+          jobId: job.id,
+          connectionId: sitio.id,
+          err: describir(error),
+        });
+      } else if (force) {
+        // BORRADO FORZADO: el fallo real del proveedor (timeout, 5xx, caida) NO detiene el borrado.
+        // Queda constancia en el log; el contexto remoto, si sobrevivio, muere solo con su timeout.
+        deps.logger.warn('desconectar forzado: el proveedor fallo al borrar el contexto (se continua igual)', {
+          jobId: job.id,
+          connectionId: sitio.id,
+          err: describir(error),
+        });
+      } else {
+        throw error;
+      }
     }
   }
 
@@ -422,6 +445,7 @@ async function desconectarSitio(deps: SitiosJobDeps, job: Job, connectionId: str
     jobId: job.id,
     connectionId: sitio.id,
     dominio: sitio.dominio,
+    force,
   });
 }
 
@@ -447,7 +471,7 @@ export async function procesarJobDeSitio(deps: SitiosJobDeps | undefined, job: J
     case CONFIRMAR_CONEXION_JOB_KIND:
       return confirmarConexion(deps, job, payload.connectionId);
     case DESCONECTAR_SITIO_JOB_KIND:
-      return desconectarSitio(deps, job, payload.connectionId);
+      return desconectarSitio(deps, job, payload.connectionId, payload.force === true);
   }
 }
 

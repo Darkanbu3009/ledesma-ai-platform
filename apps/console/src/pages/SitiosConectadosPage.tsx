@@ -1,10 +1,15 @@
 import { useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Globe, Loader2, Lock, Unplug } from 'lucide-react';
+import { Globe, Loader2, Lock, Trash2, Unplug } from 'lucide-react';
 import { ApiError } from '../lib/api';
 import i18n from '../i18n';
-import { useJobSeguimiento, useMe, useSitios } from '../lib/queries';
-import { useConectarSitio, useConfirmarSitio, useDesconectarSitio } from '../lib/mutations';
+import { useJobSeguimiento, useJobsSeguimiento, useMe, useSitios } from '../lib/queries';
+import {
+  useConectarSitio,
+  useConfirmarSitio,
+  useDesconectarSitio,
+  useEliminarSitio,
+} from '../lib/mutations';
 import {
   estadoSitioLabel,
   inicialDeDominio,
@@ -17,6 +22,7 @@ import { isJobInFlight } from '../lib/jobs';
 import { formatRunAt } from '../lib/schedule';
 import { LoginEnVivoDialog } from '../components/sitios/LoginEnVivoDialog';
 import { DesconectarSitioDialog } from '../components/sitios/DesconectarSitioDialog';
+import { EliminarSitioDialog } from '../components/sitios/EliminarSitioDialog';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SkeletonList } from '../components/ui/SkeletonList';
 import { ErrorState } from '../components/ui/ErrorState';
@@ -55,16 +61,22 @@ function EstadoBadge({ estado }: { estado: EstadoSitio }) {
   );
 }
 
-/** Fila de UN sitio conectado: inicial del dominio, dominio, estado, ultimo uso y Desconectar. */
+/**
+ * Fila de UN sitio conectado: inicial del dominio, dominio, estado, ultimo uso y las dos salidas:
+ * "Desconectar" (el flujo limpio) y el icono de ELIMINAR (bote de basura), el borrado FORZADO
+ * garantizado para conexiones atascadas que el flujo limpio no puede desconectar.
+ */
 function SitioCard({
   sitio,
   desconectando,
   onDesconectar,
+  onEliminar,
 }: {
   sitio: SitioConectado;
-  /** true mientras la desconexion de ESTE sitio esta encolada/corriendo (deshabilita el boton). */
+  /** true mientras la desconexion de ESTE sitio esta encolada/corriendo (deshabilita los botones). */
   desconectando: boolean;
   onDesconectar: () => void;
+  onEliminar: () => void;
 }) {
   const { t } = useTranslation();
   const ultimoUso = formatRunAt(sitio.ultimoUsoEn);
@@ -92,19 +104,31 @@ function SitioCard({
           </p>
         </div>
       </div>
-      <button
-        type="button"
-        onClick={onDesconectar}
-        disabled={desconectando}
-        className="inline-flex flex-none items-center justify-center gap-1.5 self-start rounded-[10px] border border-line bg-surface px-3.5 py-2 text-[13px] font-medium text-muted transition hover:border-[rgba(192,73,43,0.4)] hover:text-[#C0492B] disabled:cursor-not-allowed disabled:opacity-60 sm:self-center"
-      >
-        {desconectando ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <Unplug className="h-4 w-4" />
-        )}
-        {desconectando ? t('sitios.lista.desconectando') : t('sitios.lista.desconectar')}
-      </button>
+      <div className="flex flex-none items-center gap-2 self-start sm:self-center">
+        <button
+          type="button"
+          onClick={onDesconectar}
+          disabled={desconectando}
+          className="inline-flex flex-none items-center justify-center gap-1.5 rounded-[10px] border border-line bg-surface px-3.5 py-2 text-[13px] font-medium text-muted transition hover:border-[rgba(192,73,43,0.4)] hover:text-[#C0492B] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {desconectando ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Unplug className="h-4 w-4" />
+          )}
+          {desconectando ? t('sitios.lista.desconectando') : t('sitios.lista.desconectar')}
+        </button>
+        <button
+          type="button"
+          onClick={onEliminar}
+          disabled={desconectando}
+          aria-label={t('sitios.lista.eliminarAria', { dominio: sitio.dominio })}
+          title={t('sitios.lista.eliminar')}
+          className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-[10px] border border-line bg-surface text-muted transition hover:border-[rgba(192,73,43,0.4)] hover:text-[#C0492B] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -156,20 +180,41 @@ export function SitiosConectadosPage() {
   /** Desconexion EN CURSO: el job encolado + el sitio para marcar su fila mientras desaparece. */
   const [desconexion, setDesconexion] = useState<{ jobId: string; sitioId: string } | null>(null);
   const [aDesconectar, setADesconectar] = useState<SitioConectado | null>(null);
+  /**
+   * Borrados FORZADOS EN CURSO: UNA entrada por sitio (job encolado + fila que se oculta de
+   * inmediato). Es una LISTA a proposito: el usuario puede encadenar el eliminar de varios sitios
+   * y ninguno pierde su seguimiento (un slot unico sobreescribiria el anterior y su fallo seria
+   * invisible).
+   */
+  const [eliminaciones, setEliminaciones] = useState<Array<{ jobId: string; sitioId: string }>>([]);
+  const [aEliminar, setAEliminar] = useState<SitioConectado | null>(null);
 
   const conectar = useConectarSitio();
   const confirmar = useConfirmarSitio();
   const desconectar = useDesconectarSitio();
+  const eliminar = useEliminarSitio();
 
   const conexionJob = useJobSeguimiento(conexion?.jobId ?? null);
   const desconexionJob = useJobSeguimiento(desconexion?.jobId ?? null);
+  const eliminacionJobs = useJobsSeguimiento(eliminaciones.map((e) => e.jobId));
 
   // DERIVACION de la desconexion: error si el job fallo (la fila sigue existiendo).
   const desconexionFallo = desconexion !== null && desconexionJob.data?.status === 'failed';
+  // DERIVACION del borrado forzado (apareado por indice con eliminacionJobs): una eliminacion esta
+  // FALLIDA si su job termino en failed (solo posible por la propia plataforma, jamas por el
+  // proveedor) o si su consulta quedo en error (react-query agoto los reintentos de GET /v1/jobs).
+  // En ambos casos la fila oculta REAPARECE junto al aviso, y el polling de esa entrada se apaga.
+  const idsFallidos = new Set(
+    eliminaciones
+      .filter((_e, i) => eliminacionJobs[i]?.data?.status === 'failed' || eliminacionJobs[i]?.isError === true)
+      .map((e) => e.sitioId),
+  );
+  const hayEliminacionFallida = idsFallidos.size > 0;
 
   // La lista se refresca sola mientras hay filas en transicion (dentro de useSitios); ademas se le
   // pide polling extra mientras un job de conectar sigue en vuelo (la fila aun no existe) o una
-  // desconexion espera que su fila desaparezca (job en vuelo, o completado con la fila aun visible).
+  // desconexion/eliminacion espera que su fila desaparezca (job en vuelo, o completado con la fila
+  // aun visible).
   const sitiosQuery = useSitios(
     (lista) =>
       conexion !== null ||
@@ -177,9 +222,23 @@ export function SitiosConectadosPage() {
         !desconexionFallo &&
         (desconexionJob.data === undefined ||
           isJobInFlight(desconexionJob.data.status) ||
-          lista.some((sitio) => sitio.id === desconexion.sitioId))),
+          lista.some((sitio) => sitio.id === desconexion.sitioId))) ||
+      eliminaciones.some((e, i) => {
+        const job = eliminacionJobs[i];
+        if (job === undefined || job.isError || job.data?.status === 'failed') return false;
+        return (
+          job.data === undefined ||
+          isJobInFlight(job.data.status) ||
+          lista.some((sitio) => sitio.id === e.sitioId)
+        );
+      }),
   );
   const sitios = sitiosQuery.data ?? [];
+  // La fila de un borrado forzado en curso desaparece DE INMEDIATO (derivado, sin efectos): si el
+  // job llegara a fallar por la plataforma, el filtro se apaga y la fila reaparece junto al aviso.
+  const sitiosVisibles = sitios.filter(
+    (sitio) => !eliminaciones.some((e) => e.sitioId === sitio.id && !idsFallidos.has(e.sitioId)),
+  );
 
   // DERIVACIONES del flujo de conexion (sin efectos): el modal abre cuando la fila del login existe.
   const sitioEnLogin = conexion ? sitioEnLoginParaDominio(sitios, conexion.dominio) : null;
@@ -228,7 +287,22 @@ export function SitiosConectadosPage() {
     });
   }
 
-  const hasSitios = sitios.length > 0;
+  function handleEliminar() {
+    if (!aEliminar) return;
+    const sitio = aEliminar;
+    eliminar.mutate(sitio.id, {
+      onSuccess: (aceptada) => {
+        // Un reintento sobre el mismo sitio reemplaza su entrada previa (fallida); las demas siguen.
+        setEliminaciones((prev) => [
+          ...prev.filter((e) => e.sitioId !== sitio.id),
+          { jobId: aceptada.jobId, sitioId: sitio.id },
+        ]);
+        setAEliminar(null);
+      },
+    });
+  }
+
+  const hasSitios = sitiosVisibles.length > 0;
 
   return (
     <div className="mx-auto flex min-h-full max-w-4xl flex-col">
@@ -313,6 +387,27 @@ export function SitiosConectadosPage() {
             </div>
           )}
 
+          {/* Algun borrado forzado fallo (solo posible por la propia plataforma, jamas por el
+              proveedor): sus filas reaparecen; aviso con cierre explicito que descarta SOLO las
+              entradas fallidas (las eliminaciones aun en vuelo siguen su curso). */}
+          {hayEliminacionFallida && (
+            <div
+              role="alert"
+              className="mt-4 flex flex-col gap-2 rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa"
+            >
+              <span>{t('sitios.errores.eliminarFallo')}</span>
+              <button
+                type="button"
+                onClick={() =>
+                  setEliminaciones((prev) => prev.filter((e) => !idsFallidos.has(e.sitioId)))
+                }
+                className="self-start rounded-lg border border-brasa-line px-3 py-1.5 text-[13px] font-semibold transition hover:bg-brasa/10"
+              >
+                {t('sitios.comunes.entendido')}
+              </button>
+            </div>
+          )}
+
           {/* La desconexion fallo: la fila sigue existiendo; aviso con cierre explicito. */}
           {desconexionFallo && (
             <div
@@ -340,7 +435,7 @@ export function SitiosConectadosPage() {
             />
           ) : hasSitios ? (
             <div className="mt-6 space-y-3">
-              {sitios.map((sitio) => (
+              {sitiosVisibles.map((sitio) => (
                 <SitioCard
                   key={sitio.id}
                   sitio={sitio}
@@ -348,6 +443,10 @@ export function SitiosConectadosPage() {
                   onDesconectar={() => {
                     desconectar.reset();
                     setADesconectar(sitio);
+                  }}
+                  onEliminar={() => {
+                    eliminar.reset();
+                    setAEliminar(sitio);
                   }}
                 />
               ))}
@@ -374,6 +473,15 @@ export function SitiosConectadosPage() {
         error={desconectar.isError ? backendMessage(desconectar.error) : undefined}
         onConfirm={handleDesconectar}
         onCancel={() => setADesconectar(null)}
+      />
+
+      <EliminarSitioDialog
+        open={aEliminar !== null}
+        dominio={aEliminar?.dominio ?? ''}
+        busy={eliminar.isPending}
+        error={eliminar.isError ? backendMessage(eliminar.error) : undefined}
+        onConfirm={handleEliminar}
+        onCancel={() => setAEliminar(null)}
       />
     </div>
   );

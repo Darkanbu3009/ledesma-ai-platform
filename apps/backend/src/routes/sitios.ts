@@ -19,6 +19,24 @@ import { SitiosConectadosRepository, type SitioConectado } from '../sitios/index
 
 const SitioIdParamSchema = z.object({ id: z.string().uuid() });
 
+// Querystring de DELETE /v1/sitios/:id: force=true pide el BORRADO FORZADO (garantizado). Solo el
+// literal 'true' activa el modo; cualquier otro valor (ausente, 'false', basura) es el flujo
+// limpio. Se acepta tambien la clave repetida (?force=true&force=true llega como array): una
+// peticion que pidio force en cualquiera de sus valores JAMAS se degrada en silencio al flujo
+// limpio.
+const SitioDeleteQuerySchema = z.object({
+  force: z.union([z.string(), z.array(z.string())]).optional(),
+});
+
+/** ¿La querystring pide el borrado forzado? true si CUALQUIER valor de force es el literal 'true'. */
+function pideBorradoForzado(query: unknown): boolean {
+  const parsed = SitioDeleteQuerySchema.safeParse(query);
+  if (!parsed.success) return false;
+  const force = parsed.data.force;
+  if (force === undefined) return false;
+  return Array.isArray(force) ? force.includes('true') : force === 'true';
+}
+
 // Body de POST /v1/sitios/conectar: la URL de login es LA UNICA entrada humana del flujo, mas el
 // pais OPCIONAL que la consola deriva del navegador del usuario (Intl). La forma completa (URL
 // http(s) valida + pais ISO-2) la impone parseSitioJobPayload, el MISMO validador que consumira el
@@ -206,18 +224,27 @@ export function sitiosRoutes(
 
     // DESCONECTAR: encola kind:'desconectar_sitio' (el borrado ARCO: proveedor + constancia en
     // data_subject_requests + fila local). Es PERMANENTE; la UI pide confirmacion antes de llamar.
+    // Con ?force=true es el BORRADO FORZADO: el worker degrada TODO fallo del proveedor a
+    // best-effort y completa igual el ARCO y el borrado local (la salida garantizada para filas
+    // atascadas cuya sesion/contexto remoto ya no responde).
     app.delete(
       '/v1/sitios/:id',
-      async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+      async (
+        request: FastifyRequest<{ Params: { id: string }; Querystring: { force?: string | string[] } }>,
+        reply: FastifyReply,
+      ) => {
         const user = await requireUser(request, verifier);
         await requireAutonomy(user.id);
         const sitio = await resolveSitioParam(request, user.id);
+        const force = pideBorradoForzado(request.query);
 
         const job = await jobsRepo.createJob({
           agentId: null,
           ownerId: user.id,
           credentialId: null,
-          payload: { kind: DESCONECTAR_SITIO_JOB_KIND, connectionId: sitio.id },
+          payload: force
+            ? { kind: DESCONECTAR_SITIO_JOB_KIND, connectionId: sitio.id, force: true }
+            : { kind: DESCONECTAR_SITIO_JOB_KIND, connectionId: sitio.id },
         });
         return reply.status(202).send({ status: 'accepted', jobId: job.id });
       },

@@ -67,6 +67,12 @@ export interface DesconectarSitioJobPayload {
   kind: typeof DESCONECTAR_SITIO_JOB_KIND;
   /** Id de la fila de sitios_conectados (V024) a borrar. */
   connectionId: string;
+  /**
+   * BORRADO FORZADO (garantizado): con true, los fallos del proveedor de navegador (timeout, 5xx,
+   * caida total) se degradan a best-effort y el job COMPLETA igual el ARCO y el borrado local. Es la
+   * salida para conexiones atascadas que el flujo limpio (force ausente/false) no puede desconectar.
+   */
+  force?: boolean;
 }
 
 export type SitioJobPayload =
@@ -121,11 +127,25 @@ export function parseSitioJobPayload(value: unknown): SitioJobPayloadParseResult
     // El pais viaja SIEMPRE normalizado a mayusculas: es lo que se pinea y se compara.
     return { success: true, data: { kind, url: value.url, pais: value.pais.toUpperCase() } };
   }
-  if (kind === CONFIRMAR_CONEXION_JOB_KIND || kind === DESCONECTAR_SITIO_JOB_KIND) {
+  if (kind === CONFIRMAR_CONEXION_JOB_KIND) {
     if (typeof value.connectionId !== 'string' || value.connectionId.length === 0) {
       return { success: false, error: 'connectionId debe ser un string no vacio' };
     }
     return { success: true, data: { kind, connectionId: value.connectionId } };
+  }
+  if (kind === DESCONECTAR_SITIO_JOB_KIND) {
+    if (typeof value.connectionId !== 'string' || value.connectionId.length === 0) {
+      return { success: false, error: 'connectionId debe ser un string no vacio' };
+    }
+    if (value.force !== undefined && typeof value.force !== 'boolean') {
+      return { success: false, error: 'force debe ser boolean' };
+    }
+    // force viaja SOLO cuando es true: un payload legado (sin force) y uno explicito en false son el
+    // mismo flujo limpio, y asi el shape guardado en jobs.payload no cambia para el caso comun.
+    return {
+      success: true,
+      data: value.force === true ? { kind, connectionId: value.connectionId, force: true } : { kind, connectionId: value.connectionId },
+    };
   }
   return { success: false, error: 'kind no corresponde a un job de sitios conectados' };
 }
