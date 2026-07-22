@@ -37,14 +37,18 @@ export function LoginEnVivoDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6">
       <div className="absolute inset-0 bg-ink/40" onClick={onCerrar} aria-hidden="true" />
+      {/* El modal ocupa la pantalla casi completa (hasta 90vw/1400px en desktop) con ALTURA FIJA:
+          asi el iframe (flex-1) recibe todo el alto restante y la vista en vivo se ve grande. El
+          tamano del CONTENIDO remoto lo gobierna el viewport de la sesion (LOGIN_VIEWPORT del
+          worker), no este CSS: agrandar solo el iframe fue el intento previo que no surtio efecto. */}
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="login-en-vivo-title"
-        className="relative flex max-h-[95vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-card-hover sm:max-h-[92vh]"
+        className="relative flex h-[96vh] w-full max-w-[1400px] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-card-hover sm:h-[92vh] sm:w-[90vw]"
       >
-        <div className="flex items-start justify-between gap-4 border-b border-line-soft px-6 py-4">
+        <div className="flex flex-none items-start justify-between gap-4 border-b border-line-soft px-6 py-4">
           <div className="min-w-0">
             <h2 id="login-en-vivo-title" className="truncate font-display text-lg font-bold text-ink">
               {t('sitios.modal.titulo', { dominio: sitio.dominio })}
@@ -65,16 +69,19 @@ export function LoginEnVivoDialog({
         </div>
 
         {/* La vista en vivo EMBEBIDA: apunta directo al proveedor. Sin listeners, por diseno.
-            El min() del alto minimo evita que en pantallas bajas el iframe empuje el aviso de
-            seguridad o el boton de confirmar fuera del modal (el contenedor recorta overflow). */}
+            flex-1 + min-h-0: llena TODO el alto que el modal (de altura fija) deja entre la
+            cabecera y el pie, y puede ceder si hiciera falta -- el aviso de seguridad (cabecera) y
+            el boton de confirmar (pie) son flex-none y quedan SIEMPRE visibles. El min() del piso
+            evita que en pantallas bajas el iframe los empuje fuera (el contenedor recorta overflow);
+            en un desktop tipico (ventana >= ~840px de alto) el flex-1 ya supera los 600px. */}
         <iframe
           src={sitio.vistaEnVivoUrl ?? undefined}
           title={t('sitios.modal.iframeTitulo', { dominio: sitio.dominio })}
-          className="h-[65vh] min-h-[min(320px,55vh)] w-full flex-1 border-0 bg-ink/5 sm:min-h-[min(500px,70vh)]"
+          className="min-h-[min(320px,55vh)] w-full flex-1 border-0 bg-ink/5 sm:min-h-[min(600px,62vh)]"
           allow="clipboard-read; clipboard-write"
         />
 
-        <div className="border-t border-line-soft px-6 py-4">
+        <div className="flex-none border-t border-line-soft px-6 py-4">
           {error && (
             <div
               role="alert"
