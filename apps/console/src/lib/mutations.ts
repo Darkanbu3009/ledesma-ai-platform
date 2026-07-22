@@ -397,6 +397,21 @@ export function useDesconectarSitio() {
   });
 }
 
+/**
+ * ELIMINAR un sitio con BORRADO FORZADO (DELETE /v1/sitios/:id?force=true): la salida GARANTIZADA
+ * para conexiones atascadas. El worker intenta cerrar/borrar en el proveedor best-effort, pero el
+ * registro local y la constancia ARCO se completan pase lo que pase con Browserbase. La UI SIEMPRE
+ * lo dispara tras una confirmacion explicita (EliminarSitioDialog).
+ */
+export function useEliminarSitio() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<SitioJobAceptado>(`/v1/sitios/${id}?force=true`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['sitios'] }),
+  });
+}
+
 /** Guarda una credencial nueva. El backend responde solo con metadata (nunca la key). */
 export function useCreateCredential() {
   const qc = useQueryClient();
