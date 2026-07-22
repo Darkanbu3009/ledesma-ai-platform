@@ -10,6 +10,7 @@ import {
 } from '@ledesma-platform/backend/execution';
 import { DataSubjectRequestRepository, SitiosConectadosRepository } from '@ledesma-platform/backend/sitios';
 import { AprobacionesWebRepository } from '@ledesma-platform/backend/aprobaciones';
+import { TrayectoriasWebRepository } from '@ledesma-platform/backend/trayectorias';
 import { crearNotificadorAprobaciones, type BarridoAprobacionesDeps } from './aprobaciones.js';
 import { crearSubidorDeScreenshots } from './storage.js';
 import { parseEnv, type WorkerEnv } from './env.js';
@@ -104,6 +105,9 @@ function main(): void {
             logger,
           )
         : undefined;
+    // TRAYECTORIAS (Fase F, V030): el registro censurado de cada ejecucion del motor, escrito con el
+    // MISMO repositorio que leen los endpoints del backend. El handler lo usa best-effort.
+    const trayectoriasRepo = new TrayectoriasWebRepository(sql);
     // TAREA WEB (7.1d): navegacion por IA dentro de la sesion activa de un sitio conectado. Misma
     // compuerta de config que los jobs de sitios; el motor (Stagehand) corre con la credencial del
     // OWNER (boveda) y el modelo de TAREA_WEB_MODEL (Haiku prohibido, validado en env.ts).
@@ -118,6 +122,7 @@ function main(): void {
       aprobacionTtlMs: config.APROBACION_TTL_MINUTOS * 60 * 1000,
       marcarJobPausado: (jobId) => jobs.marcarPausado(jobId),
       subidorScreenshots,
+      trayectorias: { guardar: async (trayectoria) => void (await trayectoriasRepo.crear(trayectoria)) },
       notificadorAprobaciones,
       vaultSecret: config.VAULT_SECRET,
       model: config.TAREA_WEB_MODEL,

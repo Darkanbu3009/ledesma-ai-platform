@@ -11,6 +11,7 @@ import { SalidaDeRedNoDisponibleError, expiracionDeContexto } from './sitios.js'
 import {
   clasificarDesenlace,
   construirSystemPromptTareaWeb,
+  type DesenlaceTareaWeb,
 } from './prompt-tarea-web.js';
 import {
   clasificarTipoAccion,
@@ -21,6 +22,13 @@ import {
   type RepositorioAprobacionesParaWorker,
 } from './aprobaciones.js';
 import type { SubidorDeScreenshots } from './storage.js';
+import { censurarTexto } from './censura.js';
+import {
+  extraerPasosCensurados,
+  type AccionCrudaDeMotor,
+  type EstadoTrayectoria,
+  type RegistradorDeTrayectorias,
+} from './trayectoria.js';
 import type { Logger } from './logger.js';
 
 /**
@@ -128,7 +136,23 @@ export interface MotorDeTareaWeb {
     model: string;
     maxPasos: number;
     signal?: AbortSignal;
-  }): Promise<{ exito: boolean; mensaje: string }>;
+  }): Promise<ResultadoMotor>;
+}
+
+/**
+ * Resultado de una ejecucion del motor. Ademas del desenlace, expone la TRAZA de acciones que el
+ * motor ejecuto (AgentResult.actions de Stagehand v3) y los tokens consumidos: es el insumo del
+ * registro de trayectorias (Fase F). Las acciones vienen CRUDAS del motor; el handler las CENSURA
+ * (trayectoria.ts) antes de persistir cualquier cosa.
+ */
+export interface ResultadoMotor {
+  exito: boolean;
+  mensaje: string;
+  /** Acciones ejecutadas, en orden. Vacia si el motor no llego a ejecutar ninguna. */
+  acciones: AccionCrudaDeMotor[];
+  /** Tokens reportados por el motor (usage). null = no reportados. */
+  tokensIn: number | null;
+  tokensOut: number | null;
 }
 
 /** Subconjunto del SitiosConectadosRepository (7.1a) que la tarea web usa (facil de mockear). */
@@ -166,6 +190,12 @@ export interface TareaWebDeps {
   marcarJobPausado(jobId: string): Promise<void>;
   /** Sube el screenshot del checkpoint a Storage (best-effort). OPCIONAL: sin config, sin screenshot. */
   subidorScreenshots?: SubidorDeScreenshots | undefined;
+  /**
+   * Registro de TRAYECTORIAS (Fase F, V030): persiste la traza censurada de cada ejecucion del motor
+   * (exitosa, fallida o pausada). Best-effort SIEMPRE: un fallo del registro jamas cambia el
+   * desenlace de la tarea. OPCIONAL para no romper el cableado en despliegues sin la migracion.
+   */
+  trayectorias?: RegistradorDeTrayectorias | undefined;
   /** Notifica por correo la aprobacion pendiente/expirada (best-effort). OPCIONAL. */
   notificadorAprobaciones?: NotificadorAprobaciones | undefined;
   /** Secreto de la boveda: descifra el contexto (7.1a) y re-cifra el actualizado. */
@@ -462,14 +492,17 @@ export async function procesarTareaWeb(
     }
 
     // 6. Ejecutar el objetivo con el motor de navegacion, bajo el deadline de pared del worker y el
-    //    cap DURO de pasos.
-    const resultado = await ejecutarMotor(deps, sesion.sesionExternaId, credential.apiKey, {
+    //    cap DURO de pasos. La ejecucion queda REGISTRADA como trayectoria (V030) sea cual sea el
+    //    desenlace, ya clasificado por los marcadores del prompt.
+    const { resultado, desenlace } = await ejecutarMotorConRegistro(
+      deps,
+      job,
+      sitio,
       objetivo,
-      systemPrompt: construirSystemPromptTareaWeb(),
-    });
-
-    // 7. Clasificar el desenlace segun los marcadores del prompt.
-    const desenlace = clasificarDesenlace(resultado.mensaje);
+      sesion.sesionExternaId,
+      credential.apiKey,
+      { objetivo, systemPrompt: construirSystemPromptTareaWeb() },
+    );
 
     if (desenlace.tipo === 'sesion_caducada') {
       await marcarSitioBestEffort(deps, sitio, job.ownerId, 'caducado');
@@ -536,13 +569,92 @@ async function cerrarSesionBestEffort(deps: TareaWebDeps, sesionExternaId: strin
   }
 }
 
+/**
+ * Persiste la TRAYECTORIA de una ejecucion del motor (V030), SIEMPRE best-effort: la traza es
+ * observabilidad; su fallo jamas cambia el desenlace de la tarea (misma politica que el screenshot
+ * del checkpoint). El objetivo y las acciones pasan por la CENSURA (censura.ts / trayectoria.ts)
+ * ANTES de salir de este proceso: valores de campos sensibles nunca llegan a la base.
+ */
+async function guardarTrayectoriaBestEffort(
+  deps: TareaWebDeps,
+  job: Job,
+  sitio: SitioConectado,
+  objetivo: string,
+  estado: EstadoTrayectoria,
+  iniciadaEn: Date,
+  resultado: Pick<ResultadoMotor, 'acciones' | 'tokensIn' | 'tokensOut'>,
+): Promise<void> {
+  if (!deps.trayectorias) return;
+  const terminadaEn = new Date();
+  try {
+    await deps.trayectorias.guardar({
+      ownerId: job.ownerId,
+      jobId: job.id,
+      connectionId: sitio.id,
+      dominio: sitio.dominio,
+      objetivo: censurarTexto(objetivo),
+      estado,
+      iniciadaEn,
+      terminadaEn,
+      duracionMs: Math.max(0, terminadaEn.getTime() - iniciadaEn.getTime()),
+      tokensIn: resultado.tokensIn,
+      tokensOut: resultado.tokensOut,
+      pasos: extraerPasosCensurados(resultado.acciones),
+    });
+  } catch (error) {
+    deps.logger.warn('tarea web: no se pudo registrar la trayectoria (se ignora, best-effort)', {
+      jobId: job.id,
+      connectionId: sitio.id,
+      err: describir(error),
+    });
+  }
+}
+
+/**
+ * Corre el motor y REGISTRA la trayectoria de la ejecucion (exitosa, fallida o pausada) antes de
+ * devolver el desenlace. Si el motor LANZA (p.ej. el deadline de pared aborto la navegacion), la
+ * trayectoria fallida queda igual, sin pasos (el motor no devolvio la traza), como constancia para
+ * depurar; el error se re-propaga intacto.
+ */
+async function ejecutarMotorConRegistro(
+  deps: TareaWebDeps,
+  job: Job,
+  sitio: SitioConectado,
+  objetivo: string,
+  sesionExternaId: string,
+  apiKey: string,
+  prompt: { objetivo: string; systemPrompt: string },
+): Promise<{ resultado: ResultadoMotor; desenlace: DesenlaceTareaWeb }> {
+  const iniciadaEn = new Date();
+  let resultado: ResultadoMotor;
+  try {
+    resultado = await ejecutarMotor(deps, sesionExternaId, apiKey, prompt);
+  } catch (error) {
+    await guardarTrayectoriaBestEffort(deps, job, sitio, objetivo, 'fallida', iniciadaEn, {
+      acciones: [],
+      tokensIn: null,
+      tokensOut: null,
+    });
+    throw error;
+  }
+  const desenlace = clasificarDesenlace(resultado.mensaje);
+  const estado: EstadoTrayectoria =
+    desenlace.tipo === 'requiere_aprobacion'
+      ? 'pausada'
+      : desenlace.tipo === 'ok' && resultado.exito
+        ? 'exitosa'
+        : 'fallida';
+  await guardarTrayectoriaBestEffort(deps, job, sitio, objetivo, estado, iniciadaEn, resultado);
+  return { resultado, desenlace };
+}
+
 /** Corre el motor con el deadline de pared del worker (mismo patron AbortController de 7.1d). */
 async function ejecutarMotor(
   deps: TareaWebDeps,
   sesionExternaId: string,
   apiKey: string,
   prompt: { objetivo: string; systemPrompt: string },
-): Promise<{ exito: boolean; mensaje: string }> {
+): Promise<ResultadoMotor> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), deps.runTimeoutMs);
   try {
@@ -648,8 +760,17 @@ async function reanudarTrasDecision(
         ? construirReanudacionAprobada(aprobacion, objetivo)
         : construirReanudacionRechazada(aprobacion, objetivo, aprobacion.instruccionRechazo ?? '');
 
-    const resultado = await ejecutarMotor(deps, sesionExternaId, credential.apiKey, prompt);
-    const desenlace = clasificarDesenlace(resultado.mensaje);
+    // La reanudacion tambien queda registrada como SU PROPIA trayectoria (la corrida inicial quedo
+    // 'pausada' en el checkpoint).
+    const { resultado, desenlace } = await ejecutarMotorConRegistro(
+      deps,
+      job,
+      sitio,
+      objetivo,
+      sesionExternaId,
+      credential.apiKey,
+      prompt,
+    );
 
     if (desenlace.tipo === 'sesion_caducada') {
       await marcarSitioBestEffort(deps, sitio, job.ownerId, 'caducado');

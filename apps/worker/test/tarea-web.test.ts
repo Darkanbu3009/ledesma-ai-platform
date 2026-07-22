@@ -9,6 +9,7 @@ import type {
   MotorDeTareaWeb,
   NavegadorParaTarea,
   RepositorioSitiosParaTarea,
+  ResultadoMotor,
   TareaWebDeps,
 } from '../src/tarea-web.js';
 import { makeAprobacionesRepo } from './aprobaciones-fakes.js';
@@ -18,6 +19,7 @@ import {
   clasificarDesenlace,
   construirSystemPromptTareaWeb,
 } from '../src/prompt-tarea-web.js';
+import type { TrayectoriaNueva } from '../src/trayectoria.js';
 import { SalidaDeRedNoDisponibleError } from '../src/sitios.js';
 import { PermanentExecutionError } from '../src/errores.js';
 import type { Logger } from '../src/logger.js';
@@ -107,7 +109,9 @@ function makeNavegador(overrides: Partial<NavegadorParaTarea> = {}): NavegadorPa
 }
 
 function makeMotor(resultado: { exito: boolean; mensaje: string }): MotorDeTareaWeb {
-  return { ejecutar: vi.fn(async () => resultado) };
+  // El motor real (Stagehand) ademas devuelve la traza (acciones/tokens); los tests que no la
+  // ejercitan usan una traza vacia.
+  return { ejecutar: vi.fn(async () => ({ ...resultado, acciones: [], tokensIn: null, tokensOut: null })) };
 }
 
 function makeDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
@@ -330,7 +334,7 @@ describe('procesarTareaWeb', () => {
     const motor: MotorDeTareaWeb = {
       ejecutar: vi.fn(
         async (params: { signal?: AbortSignal }) =>
-          new Promise<{ exito: boolean; mensaje: string }>((_resolve, reject) => {
+          new Promise<ResultadoMotor>((_resolve, reject) => {
             params.signal?.addEventListener('abort', () =>
               reject(new Error('AgentAbortError: aborted')),
             );
@@ -389,6 +393,169 @@ describe('procesarTareaWeb', () => {
       expect(llamada).not.toContain('sk-ant-secreta');
       expect(llamada).not.toContain(OBJETIVO);
     }
+  });
+});
+
+describe('registro de trayectorias (Fase F, V030)', () => {
+  /** Motor con traza: dos acciones reales (goto + act con fill censurable) y usage. */
+  function makeMotorConTraza(resultado: { exito: boolean; mensaje: string }): MotorDeTareaWeb {
+    return {
+      ejecutar: vi.fn(async () => ({
+        ...resultado,
+        acciones: [
+          { type: 'goto', instruction: 'https://app.ejemplo.com/', pageUrl: 'https://app.ejemplo.com/' },
+          {
+            type: 'act',
+            action: 'type hunter2 into the password field',
+            pageUrl: 'https://app.ejemplo.com/panel',
+            playwrightArguments: {
+              selector: 'xpath=//input[@type="password"]',
+              method: 'fill',
+              arguments: ['hunter2'],
+            },
+          },
+        ],
+        tokensIn: 1200,
+        tokensOut: 340,
+      })),
+    };
+  }
+
+  function makeTrayectorias() {
+    return { guardar: vi.fn<(trayectoria: TrayectoriaNueva) => Promise<void>>(async () => {}) };
+  }
+
+  /** Primera trayectoria guardada por el fake (los tests siempre esperan exactamente una). */
+  function guardadaEn(trayectorias: ReturnType<typeof makeTrayectorias>): TrayectoriaNueva {
+    return trayectorias.guardar.mock.calls[0]?.[0] as TrayectoriaNueva;
+  }
+
+  it('tarea EXITOSA: guarda la trayectoria con sus pasos censurados, tokens y duracion', async () => {
+    const trayectorias = makeTrayectorias();
+    const deps = makeDeps({
+      motor: makeMotorConTraza({ exito: true, mensaje: 'listo' }),
+      trayectorias,
+    });
+    await expect(procesarTareaWeb(deps, makeJob())).resolves.toBe('completada');
+
+    expect(trayectorias.guardar).toHaveBeenCalledTimes(1);
+    const guardada = guardadaEn(trayectorias);
+    expect(guardada).toMatchObject({
+      ownerId: 'user-1',
+      jobId: 'job-1',
+      connectionId: CONNECTION_ID,
+      dominio: 'app.ejemplo.com',
+      objetivo: OBJETIVO,
+      estado: 'exitosa',
+      tokensIn: 1200,
+      tokensOut: 340,
+    });
+    expect(guardada.duracionMs).toBeGreaterThanOrEqual(0);
+    expect(guardada.pasos).toHaveLength(2);
+    expect(guardada.pasos[0]).toMatchObject({ idx: 0, accion: { tipo: 'goto' } });
+    expect(guardada.pasos[1]).toMatchObject({
+      idx: 1,
+      selector: 'xpath=//input[@type="password"]',
+      url: 'https://app.ejemplo.com/panel',
+      exito: true,
+    });
+    // La censura ya se aplico: el valor tecleado en el campo password JAMAS viaja al registro.
+    expect(JSON.stringify(guardada)).not.toContain('hunter2');
+  });
+
+  it('tarea FALLIDA (limite de pasos): guarda la trayectoria PARCIAL hasta donde llego y el job igual falla', async () => {
+    const trayectorias = makeTrayectorias();
+    const deps = makeDeps({
+      motor: makeMotorConTraza({ exito: false, mensaje: 'me quede sin pasos' }),
+      trayectorias,
+    });
+    await expect(procesarTareaWeb(deps, makeJob())).rejects.toThrow(PermanentExecutionError);
+
+    expect(trayectorias.guardar).toHaveBeenCalledTimes(1);
+    const guardada = guardadaEn(trayectorias);
+    expect(guardada).toMatchObject({ estado: 'fallida' });
+    // La traza parcial (lo que el motor alcanzo a ejecutar) se conserva: sirve para depurar.
+    expect(guardada.pasos).toHaveLength(2);
+  });
+
+  it('motor que LANZA (deadline de pared): guarda la trayectoria fallida sin pasos y re-propaga', async () => {
+    const trayectorias = makeTrayectorias();
+    const motor: MotorDeTareaWeb = {
+      ejecutar: vi.fn(async () => {
+        throw new Error('AgentAbortError: aborted');
+      }),
+    };
+    const deps = makeDeps({ motor, trayectorias });
+    await expect(procesarTareaWeb(deps, makeJob())).rejects.toThrow(PermanentExecutionError);
+
+    expect(trayectorias.guardar).toHaveBeenCalledTimes(1);
+    expect(guardadaEn(trayectorias)).toMatchObject({
+      estado: 'fallida',
+      pasos: [],
+      tokensIn: null,
+      tokensOut: null,
+    });
+  });
+
+  it('checkpoint de aprobacion: la corrida queda registrada como PAUSADA', async () => {
+    const trayectorias = makeTrayectorias();
+    const deps = makeDeps({
+      motor: makeMotorConTraza({
+        exito: true,
+        mensaje: `${MARCADOR_REQUIERE_APROBACION}: financiera: pagar 100 MXN`,
+      }),
+      trayectorias,
+    });
+    await expect(procesarTareaWeb(deps, makeJob())).resolves.toBe('pausada');
+    expect(trayectorias.guardar).toHaveBeenCalledTimes(1);
+    expect(guardadaEn(trayectorias)).toMatchObject({ estado: 'pausada' });
+  });
+
+  it('sesion caducada a mitad de tarea: la trayectoria fallida queda igual registrada', async () => {
+    const trayectorias = makeTrayectorias();
+    const deps = makeDeps({
+      motor: makeMotorConTraza({ exito: false, mensaje: `${MARCADOR_SESION_CADUCADA}: login` }),
+      trayectorias,
+    });
+    await expect(procesarTareaWeb(deps, makeJob())).rejects.toThrow(PermanentExecutionError);
+    expect(guardadaEn(trayectorias)).toMatchObject({ estado: 'fallida' });
+  });
+
+  it('el registro es BEST-EFFORT: si guardar lanza, la tarea completa igual y solo se loguea un warn', async () => {
+    const trayectorias = {
+      guardar: vi.fn<(trayectoria: TrayectoriaNueva) => Promise<void>>(async () =>
+        Promise.reject(new Error('db caida')),
+      ),
+    };
+    const logger = makeLogger();
+    const deps = makeDeps({
+      motor: makeMotorConTraza({ exito: true, mensaje: 'listo' }),
+      trayectorias,
+      logger,
+    });
+    await expect(procesarTareaWeb(deps, makeJob())).resolves.toBe('completada');
+    expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it('sin registrador cableado (deploy sin V030): la tarea corre igual, sin trayectoria', async () => {
+    const deps = makeDeps({ motor: makeMotorConTraza({ exito: true, mensaje: 'listo' }) });
+    await expect(procesarTareaWeb(deps, makeJob())).resolves.toBe('completada');
+  });
+
+  it('el objetivo guardado pasa por la censura de texto (una tarjeta dictada no se persiste)', async () => {
+    const trayectorias = makeTrayectorias();
+    const deps = makeDeps({
+      motor: makeMotorConTraza({ exito: true, mensaje: 'listo' }),
+      trayectorias,
+    });
+    const objetivoConTarjeta = 'paga con la tarjeta 4111 1111 1111 1111 el plan basico';
+    await procesarTareaWeb(
+      deps,
+      makeJob({ payload: { kind: 'tarea_web', connectionId: CONNECTION_ID, objetivo: objetivoConTarjeta } }),
+    );
+    const guardada = guardadaEn(trayectorias);
+    expect(guardada.objetivo).not.toContain('4111');
+    expect(guardada.objetivo).toContain('el plan basico');
   });
 });
 
