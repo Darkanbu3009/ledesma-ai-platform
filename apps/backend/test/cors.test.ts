@@ -34,4 +34,25 @@ describe('cors preflight', () => {
     expect(allowHeaders).toContain('authorization');
     await app.close();
   });
+
+  it('acepta el preflight de PATCH a /v1/me/profile con los headers de la consola', async () => {
+    const app = await buildServer(parseEnv(ENV));
+    const res = await app.inject({
+      method: 'OPTIONS',
+      url: '/v1/me/profile',
+      headers: {
+        origin: 'https://app.ledesma-ai-labs.com',
+        'access-control-request-method': 'PATCH',
+        'access-control-request-headers': 'authorization,content-type',
+      },
+    });
+    expect(res.statusCode).toBeGreaterThanOrEqual(200);
+    expect(res.statusCode).toBeLessThan(300);
+    const allowMethods = String(res.headers['access-control-allow-methods']);
+    expect(allowMethods).toContain('PATCH');
+    const allowHeaders = String(res.headers['access-control-allow-headers']).toLowerCase();
+    expect(allowHeaders).toContain('authorization');
+    expect(allowHeaders).toContain('content-type');
+    await app.close();
+  });
 });

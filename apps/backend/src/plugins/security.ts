@@ -30,7 +30,9 @@ export const securityPlugin = fp<SecurityPluginOptions>(async (app, opts) => {
 
   await app.register(cors, {
     origin: parseOrigins(config.CORS_ORIGINS),
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    // PATCH: lo usan /v1/me/profile (nombre/pais), tareas programadas, triggers y recetas desde la
+    // consola (cross-origin). Sin el, el preflight del navegador rechaza el metodo.
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
       'Content-Type',
       'Authorization',
