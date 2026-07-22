@@ -58,6 +58,29 @@ describe('parseSitioJobPayload', () => {
     expect(parseSitioJobPayload({ kind: 'desconectar_sitio' }).success).toBe(false);
   });
 
+  it('desconectar acepta force booleano: true viaja, false/ausente no, otro tipo se rechaza', () => {
+    expect(parseSitioJobPayload({ kind: 'desconectar_sitio', connectionId: 'c1', force: true })).toEqual({
+      success: true,
+      data: { kind: 'desconectar_sitio', connectionId: 'c1', force: true },
+    });
+    // El flujo limpio (force ausente o false) conserva el shape legado, sin la clave force.
+    expect(parseSitioJobPayload({ kind: 'desconectar_sitio', connectionId: 'c1', force: false })).toEqual({
+      success: true,
+      data: { kind: 'desconectar_sitio', connectionId: 'c1' },
+    });
+    expect(parseSitioJobPayload({ kind: 'desconectar_sitio', connectionId: 'c1' })).toEqual({
+      success: true,
+      data: { kind: 'desconectar_sitio', connectionId: 'c1' },
+    });
+    expect(parseSitioJobPayload({ kind: 'desconectar_sitio', connectionId: 'c1', force: 'true' }).success).toBe(false);
+    // confirmar_conexion NO conoce force: si viniera, se ignora (no viaja en el payload validado).
+    const confirmar = parseSitioJobPayload({ kind: 'confirmar_conexion', connectionId: 'c1', force: true });
+    expect(confirmar.success).toBe(true);
+    if (confirmar.success) {
+      expect('force' in confirmar.data).toBe(false);
+    }
+  });
+
   it('rechaza kinds ajenos y no-objetos sin lanzar', () => {
     expect(parseSitioJobPayload({ kind: 'recipe' }).success).toBe(false);
     expect(parseSitioJobPayload(42).success).toBe(false);
