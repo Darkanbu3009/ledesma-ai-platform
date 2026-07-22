@@ -118,6 +118,10 @@ create policy "pasos_trayectoria_select_own"
 --    (RetentionRepository.purgeTrayectoriasWebOlderThan), mismo patron que retention_purge_expired
 --    (V015): SQL puro que NO se programa solo (pg_cron es opt-in, V016). Borra las trayectorias
 --    TERMINADAS antes del corte; el cascade arrastra los pasos.
+--    COHERENCIA CON EL ENV: si RETENTION_TRAYECTORIAS_WEB_DAYS del backend difiere del default 30,
+--    toda invocacion manual o programada de esta funcion DEBE pasar ese mismo valor
+--    (select trayectorias_purge_expired(<dias>)); con el default se borraria mas de lo que la
+--    politica vigente promete retener.
 create or replace function trayectorias_purge_expired(
   p_trayectorias_days integer default 30
 ) returns jsonb

@@ -1,4 +1,4 @@
-import { censurarTexto, censurarValor } from './censura.js';
+import { censurarTexto, censurarUrl, censurarValor, VALOR_CENSURADO } from './censura.js';
 
 /**
  * TRAYECTORIAS de tareas web (Fase F, paso 1): mapeo de las acciones CRUDAS que devuelve el motor de
@@ -103,21 +103,30 @@ export function extraerPasosCensurados(acciones: AccionCrudaDeMotor[]): PasoCens
     // El contexto de censura junta TODO lo que delata un campo sensible: el selector del DOM, la
     // descripcion del elemento y la instruccion del modelo.
     const contexto = [selector ?? '', descripcionPw ?? '', instruccionCruda ?? ''].join(' ');
-    const argumentos = argumentosCrudos.map((arg) => censurarValor(arg, contexto));
-
-    // Valor tecleado: solo en metodos de tecleo con argumentos. Ya viene censurado por contexto.
     const esTecleo = metodo !== null && METODOS_DE_TECLEO.has(metodo);
+    // Tecleo SIN ninguna senal textual (los pasos sinteticos de fillForm no traen instruccion y su
+    // descripcion puede faltar; el selector xpath de Stagehand es estructural, sin semantica): no se
+    // puede juzgar si el campo es sensible -> se censura entero (criterio asimetrico, revision
+    // adversarial). Con senal textual, decide censurarValor por contexto o por forma.
+    const sinSenalTextual = esTecleo && descripcionPw === null && instruccionCruda === null;
+    const argumentos = argumentosCrudos.map((arg) =>
+      sinSenalTextual ? VALOR_CENSURADO : censurarValor(arg, contexto),
+    );
+
+    // Valor tecleado: solo en metodos de tecleo con argumentos. Ya viene censurado.
     const valorCensurado = esTecleo && argumentos.length > 0 ? argumentos.join(' ') : null;
 
     // La instruccion del modelo puede EMBEBER el valor tecleado ("type hunter2 into the password
-    // field"): todo argumento que quedo censurado se borra tambien de la instruccion, y despues se
-    // pasa la censura de texto (tarjetas embebidas que no vinieran como argumento).
+    // field"): todo argumento que quedo censurado se borra tambien de la instruccion SIN distinguir
+    // mayusculas (el modelo puede parafrasear la capitalizacion), y despues se pasa la censura de
+    // texto (tarjetas o credenciales dictadas que no vinieran como argumento).
     let instruccion = instruccionCruda;
     if (instruccion !== null) {
       for (let i = 0; i < argumentosCrudos.length; i++) {
         const crudo = argumentosCrudos[i];
         if (argumentos[i] !== crudo && crudo !== undefined && crudo.length > 0) {
-          instruccion = instruccion.split(crudo).join(argumentos[i] ?? '');
+          const escapado = crudo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          instruccion = instruccion.replace(new RegExp(escapado, 'gi'), argumentos[i] ?? '');
         }
       }
       instruccion = censurarTexto(instruccion);
@@ -133,7 +142,12 @@ export function extraerPasosCensurados(acciones: AccionCrudaDeMotor[]): PasoCens
       },
       selector,
       valorCensurado,
-      url: comoTexto(accion.pageUrl),
+      // La URL se persiste SIN query string ni fragment (tokens de reset, codigos OAuth y session
+      // ids viajan ahi); una URL no parseable se descarta (censurarUrl).
+      url: (() => {
+        const cruda = comoTexto(accion.pageUrl);
+        return cruda !== null ? censurarUrl(cruda) : null;
+      })(),
       // Solo un false explicito del motor marca el paso como fallido; la ausencia del campo es exito
       // (la mayoria de las tools no reportan success cuando salieron bien).
       exito: accion.success !== false,

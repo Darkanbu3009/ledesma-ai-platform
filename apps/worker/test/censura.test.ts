@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { censurarTexto, censurarValor, esContextoSensible, VALOR_CENSURADO } from '../src/censura.js';
+import {
+  censurarObjetivo,
+  censurarTexto,
+  censurarUrl,
+  censurarValor,
+  esContextoSensible,
+  VALOR_CENSURADO,
+} from '../src/censura.js';
 
 /**
  * La censura es la garantia DURA de este PR: valores tecleados en campos sensibles (passwords,
@@ -25,6 +32,16 @@ describe('censurarValor', () => {
       }
     });
 
+    it('censura "contraseña" CON enie (la descripcion de un sitio en espanol la trae asi)', () => {
+      expect(censurarValor('hunter2', 'el campo de contraseña')).toBe(VALOR_CENSURADO);
+      expect(censurarValor('hunter2', 'Contraseña actual')).toBe(VALOR_CENSURADO);
+    });
+
+    it('censura variantes cortas comunes: pwd y passcode', () => {
+      expect(censurarValor('hunter2', 'xpath=//input[@id="pwd"]')).toBe(VALOR_CENSURADO);
+      expect(censurarValor('123456', 'enter your passcode')).toBe(VALOR_CENSURADO);
+    });
+
     it('censura tokens y api keys por contexto', () => {
       expect(censurarValor('sk-abc123', 'campo api_key de la integracion')).toBe(VALOR_CENSURADO);
       expect(censurarValor('ghp_xyz', 'personal access token input')).toBe(VALOR_CENSURADO);
@@ -36,9 +53,11 @@ describe('censurarValor', () => {
       expect(censurarValor('4111111111111111', 'campo buscar')).toBe(VALOR_CENSURADO);
     });
 
-    it('censura tarjetas con espacios y con guiones', () => {
+    it('censura tarjetas con espacios, guiones, puntos y punto medio', () => {
       expect(censurarValor('4111 1111 1111 1111', 'input generico')).toBe(VALOR_CENSURADO);
       expect(censurarValor('5500-0000-0000-0004', 'input generico')).toBe(VALOR_CENSURADO);
+      expect(censurarValor('4111.1111.1111.1111', 'input generico')).toBe(VALOR_CENSURADO);
+      expect(censurarValor('4111·1111·1111·1111', 'input generico')).toBe(VALOR_CENSURADO);
     });
 
     it('censura una amex de 15 digitos y una tarjeta de 19', () => {
@@ -85,6 +104,45 @@ describe('censurarTexto', () => {
   it('no toca un texto sin secuencias con pinta de tarjeta', () => {
     const texto = 'buscar el articulo sobre historia de Mexico y resumirlo en 3 puntos';
     expect(censurarTexto(texto)).toBe(texto);
+  });
+});
+
+describe('censurarObjetivo', () => {
+  it('censura una credencial dictada: "con contraseña hunter2"', () => {
+    const objetivo = 'entra a mi cuenta con usuario omar y contraseña hunter2 y revisa mis pedidos';
+    const censurado = censurarObjetivo(objetivo);
+    expect(censurado).not.toContain('hunter2');
+    expect(censurado).toContain(`contraseña ${VALOR_CENSURADO}`);
+    expect(censurado).toContain('revisa mis pedidos');
+  });
+
+  it('censura variantes con separador: "password: x", "pin es 1234"', () => {
+    expect(censurarObjetivo('usa password: s3creto para entrar')).not.toContain('s3creto');
+    expect(censurarObjetivo('el pin es 1234, luego paga')).not.toContain('1234');
+  });
+
+  it('tambien censura tarjetas embebidas (hereda censurarTexto)', () => {
+    expect(censurarObjetivo('paga con la 4111 1111 1111 1111')).not.toContain('4111');
+  });
+
+  it('un objetivo sin credenciales pasa intacto', () => {
+    const objetivo = 'lee el articulo destacado de hoy y resumelo en tres puntos';
+    expect(censurarObjetivo(objetivo)).toBe(objetivo);
+  });
+});
+
+describe('censurarUrl', () => {
+  it('conserva origen y path, y DESCARTA query string y fragment (tokens de reset, codigos OAuth)', () => {
+    expect(censurarUrl('https://example.com/reset?token=abc123&user=omar#paso2')).toBe(
+      'https://example.com/reset',
+    );
+    expect(censurarUrl('https://en.wikipedia.org/wiki/Mexico')).toBe(
+      'https://en.wikipedia.org/wiki/Mexico',
+    );
+  });
+
+  it('una URL no parseable se descarta entera', () => {
+    expect(censurarUrl('esto no es una url')).toBeNull();
   });
 });
 

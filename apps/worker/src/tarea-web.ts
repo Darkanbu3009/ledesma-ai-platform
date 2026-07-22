@@ -22,7 +22,7 @@ import {
   type RepositorioAprobacionesParaWorker,
 } from './aprobaciones.js';
 import type { SubidorDeScreenshots } from './storage.js';
-import { censurarTexto } from './censura.js';
+import { censurarObjetivo } from './censura.js';
 import {
   extraerPasosCensurados,
   type AccionCrudaDeMotor,
@@ -592,7 +592,7 @@ async function guardarTrayectoriaBestEffort(
       jobId: job.id,
       connectionId: sitio.id,
       dominio: sitio.dominio,
-      objetivo: censurarTexto(objetivo),
+      objetivo: censurarObjetivo(objetivo),
       estado,
       iniciadaEn,
       terminadaEn,

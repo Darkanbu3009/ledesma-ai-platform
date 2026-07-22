@@ -105,6 +105,50 @@ describe('extraerPasosCensurados', () => {
     expect(pasos[1]).toMatchObject({ idx: 1, accion: { tipo: 'extract', instruccion: null } });
   });
 
+  it('paso sintetico de fillForm SIN descripcion ni instruccion: el valor se censura entero (no se puede juzgar el campo)', () => {
+    // mapFillFormToolResult de Stagehand emite acts sinteticos SOLO con playwrightArguments; el
+    // selector xpath es estructural (cero semantica). Sin senal textual, criterio asimetrico.
+    const acciones: AccionCrudaDeMotor[] = [
+      {
+        type: 'act',
+        playwrightArguments: {
+          selector: 'xpath=/html/body/div[2]/form/input[2]',
+          method: 'fill',
+          arguments: ['hunter2'],
+        },
+      },
+    ];
+    const [paso] = extraerPasosCensurados(acciones);
+    expect(paso?.valorCensurado).toBe(VALOR_CENSURADO);
+    expect(JSON.stringify(paso)).not.toContain('hunter2');
+  });
+
+  it('el scrub de la instruccion no distingue mayusculas (el modelo puede parafrasear la capitalizacion)', () => {
+    const acciones: AccionCrudaDeMotor[] = [
+      {
+        type: 'act',
+        action: 'type Hunter2 into the password field',
+        playwrightArguments: {
+          selector: 'xpath=//input[@type="password"]',
+          description: 'the password input',
+          method: 'fill',
+          arguments: ['hunter2'],
+        },
+      },
+    ];
+    const [paso] = extraerPasosCensurados(acciones);
+    expect(JSON.stringify(paso).toLowerCase()).not.toContain('hunter2');
+  });
+
+  it('la url del paso pierde query string y fragment (tokens y codigos viajan ahi)', () => {
+    const acciones: AccionCrudaDeMotor[] = [
+      { type: 'act', action: 'click continue', pageUrl: 'https://example.com/reset?token=abc123#done' },
+    ];
+    const [paso] = extraerPasosCensurados(acciones);
+    expect(paso?.url).toBe('https://example.com/reset');
+    expect(JSON.stringify(paso)).not.toContain('abc123');
+  });
+
   it('success false explicito marca el paso fallido; ausencia de success es exito', () => {
     const pasos = extraerPasosCensurados([
       { type: 'act', success: false },
