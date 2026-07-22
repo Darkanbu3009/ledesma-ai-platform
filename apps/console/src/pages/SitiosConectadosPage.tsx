@@ -318,7 +318,9 @@ export function SitiosConectadosPage() {
         <>
           {/* Conectar: la unica entrada humana es la URL. Sin formulario de configuracion por sitio. */}
           <form onSubmit={handleConectar} className="mt-6" noValidate>
-            <div className="flex flex-col gap-3 sm:flex-row">
+            {/* En movil: input a ancho completo con alto comodo y el boton debajo, tambien a ancho
+                completo, con un respiro claro entre ambos; desde sm quedan en una sola fila. */}
+            <div className="flex flex-col gap-4 sm:flex-row sm:gap-3">
               <label htmlFor="sitio-url" className="sr-only">
                 {t('sitios.conectar.label')}
               </label>
@@ -332,12 +334,12 @@ export function SitiosConectadosPage() {
                   setUrlError(null);
                 }}
                 placeholder={t('sitios.conectar.placeholder')}
-                className="h-11 w-full flex-1 rounded-xl border border-line bg-field px-4 text-sm text-ink placeholder:text-muted-soft focus:border-brasa-line focus:outline-none"
+                className="h-12 w-full flex-1 rounded-xl border border-line bg-field px-4 text-sm text-ink placeholder:text-muted-soft focus:border-brasa-line focus:outline-none sm:h-11"
               />
               <button
                 type="submit"
                 disabled={conectar.isPending || abriendoNavegador}
-                className="inline-flex h-11 flex-none items-center justify-center gap-2 rounded-[10px] bg-brasa px-[22px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex h-11 flex-none items-center justify-center gap-2 whitespace-nowrap rounded-[10px] bg-brasa px-[22px] text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {conectar.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
