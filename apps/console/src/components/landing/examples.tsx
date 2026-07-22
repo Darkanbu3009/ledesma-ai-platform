@@ -159,6 +159,10 @@ export function Examples(): JSX.Element {
             </Button>
           </div>
         </div>
+
+        {/* Nota discreta del SDK embebido: deja de ser seccion protagonista y queda como
+            un renglon para equipos tecnicos dentro de la seccion de empresas. */}
+        <p className="mt-6 text-sm text-foreground-secondary">{t('landing.ejemplos.sdkNota')}</p>
       </div>
     </section>
   );

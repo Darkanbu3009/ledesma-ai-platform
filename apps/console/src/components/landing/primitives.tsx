@@ -7,15 +7,17 @@ import {
   KeyRound,
   BarChart3,
   Puzzle,
+  UserCheck,
   type LucideIcon
 } from 'lucide-react';
 import { Eyebrow } from './eyebrow';
 import { REVEAL_KEYFRAMES, revealAnimationClass, useRevealOnScroll } from './use-reveal-on-scroll';
 
 /**
- * Las 6 primitivas que forman "el cuerpo" alrededor del cerebro. Los iconos siguen
- * el mapeo del mockup (Tabler -> lucide): refresh, shield/lock, users, key,
- * chart-bar, puzzle.
+ * Las primitivas que forman "el cuerpo" alrededor del cerebro: las 6 del mockup
+ * (refresh, shield/lock, users, key, chart-bar, puzzle) mas la de aprobacion humana
+ * ("Tu apruebas lo que importa", checkpoints ya en produccion), que cierra la grilla
+ * ocupando el ancho completo de su fila.
  */
 const PRIMITIVES: { icon: LucideIcon; tituloKey: string; descripcionKey: string }[] = [
   {
@@ -47,6 +49,11 @@ const PRIMITIVES: { icon: LucideIcon; tituloKey: string; descripcionKey: string 
     icon: Puzzle,
     tituloKey: 'landing.primitivas.items.integracionNativa.titulo',
     descripcionKey: 'landing.primitivas.items.integracionNativa.descripcion'
+  },
+  {
+    icon: UserCheck,
+    tituloKey: 'landing.primitivas.items.apruebasLoQueImporta.titulo',
+    descripcionKey: 'landing.primitivas.items.apruebasLoQueImporta.descripcion'
   }
 ];
 
@@ -79,10 +86,15 @@ export function Primitives(): JSX.Element {
         >
           {PRIMITIVES.map((primitive, index) => {
             const Icon = primitive.icon;
+            // La ultima tarjeta (aprobacion humana) es la 7a: ocupa el ancho completo de
+            // su fila en 2 y 3 columnas para que la grilla no deje celdas vacias.
+            const esUltima = index === PRIMITIVES.length - 1;
             return (
               <div
                 key={primitive.tituloKey}
-                className={`bg-background-secondary p-6 ${revealAnimationClass(revealed)}`}
+                className={`bg-background-secondary p-6 ${
+                  esUltima ? 'min-[640px]:col-span-2 min-[900px]:col-span-3' : ''
+                } ${revealAnimationClass(revealed)}`}
                 style={{ animationDelay: `${index * 80}ms` }}
               >
                 <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent/10">

@@ -3,13 +3,11 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ArrowRight } from 'lucide-react';
 import { Button } from '../ui/button';
+import { Eyebrow } from './eyebrow';
 import { HeroShowcase } from './hero-showcase';
 import { PixelCloud } from './pixel-cloud';
 
-/** WhatsApp de contacto del showroom (mismo numero que el resto del sitio). */
-const WHATSAPP_URL = 'https://wa.me/528116261651';
-
-/** Ritmo de escritura del titular en ms por caracter (~54 caracteres en unos 2.2s). */
+/** Ritmo de escritura del titular en ms por caracter (~30 caracteres en poco mas de 1s). */
 const MS_POR_CARACTER = 40;
 
 /** Parpadeo a saltos del cursor del titular (mismo patron step-end que el Configurador). */
@@ -130,16 +128,15 @@ function TituloTypewriter(): JSX.Element {
  */
 export function Hero(): JSX.Element {
   const { t } = useTranslation();
-  // Enlace de WhatsApp con mensaje pre-llenado para solicitar una demo guiada.
-  const demoWhatsappUrl = `${WHATSAPP_URL}?text=${encodeURIComponent(
-    t('landing.hero.whatsappMensajeDemo'),
-  )}`;
 
   return (
     <section className="relative isolate overflow-hidden">
       <PixelCloud />
       <div className="relative z-10 mx-auto grid max-w-6xl items-center gap-10 px-4 py-14 sm:gap-12 sm:px-6 sm:py-20 min-[900px]:grid-cols-2 min-[900px]:py-28">
         <div>
+          <div className="mb-5">
+            <Eyebrow className="text-accent">{t('landing.hero.eyebrow')}</Eyebrow>
+          </div>
           <TituloTypewriter />
           <p className="mt-5 max-w-xl text-base leading-relaxed text-foreground-secondary sm:mt-6 sm:text-lg sm:leading-relaxed">
             {t('landing.hero.descripcion')}
@@ -152,9 +149,7 @@ export function Hero(): JSX.Element {
               </Link>
             </Button>
             <Button asChild variant="secondary" size="lg" className="w-full sm:w-auto">
-              <a href={demoWhatsappUrl} target="_blank" rel="noopener noreferrer">
-                {t('landing.hero.solicitarDemo')}
-              </a>
+              <a href="#integracion">{t('landing.comun.verComoFunciona')}</a>
             </Button>
           </div>
         </div>

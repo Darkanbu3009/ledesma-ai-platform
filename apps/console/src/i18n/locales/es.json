@@ -792,22 +792,23 @@
       "crear": "Crear",
       "crearCuenta": "Crear cuenta",
       "entrar": "Entrar",
-      "iniciarSesion": "Iniciar sesión"
+      "iniciarSesion": "Iniciar sesión",
+      "verComoFunciona": "Ver cómo funciona",
+      "beta": "Beta"
     },
     "navegacion": {
-      "integracion": "Integración",
-      "plataforma": "Plataforma",
-      "ejemplos": "Ejemplos",
       "comoFunciona": "Cómo funciona",
+      "paraTi": "Para ti",
+      "empresas": "Empresas",
+      "plataforma": "Plataforma",
       "seccionesAria": "Secciones",
       "abrirMenu": "Abrir menú de navegación",
       "cerrarMenu": "Cerrar menú de navegación"
     },
     "hero": {
-      "titulo": "Agentes verticales de IA, con el modelo que tú elijas",
-      "descripcion": "Automatizan trabajo real dentro de los sistemas que tu empresa ya usa. El modelo es intercambiable: Claude, ChatGPT u open source. Cambias de proveedor por configuración, sin reescribir el agente ni tus integraciones.",
-      "solicitarDemo": "Solicitar demo guiada",
-      "whatsappMensajeDemo": "Hola, me interesa una demo guiada de Ledesma AI Labs."
+      "eyebrow": "El futuro es hoy",
+      "titulo": "Pídelo. Tu agente lo hace.",
+      "descripcion": "Un asistente de IA que trabaja dentro de tus cuentas y tus sistemas. Le hablas en tu idioma, y entra a hacer el trabajo por ti. Sin abrir pestañas, sin llenar formularios. Para personas y para empresas."
     },
     "heroShowcase": {
       "tusSistemas": "Tus sistemas",
@@ -821,24 +822,27 @@
       "cambiarModeloAria": "Cambiar modelo a {{label}}"
     },
     "integracion": {
-      "eyebrow": "Integración",
-      "titulo": "Lo montas en tres líneas",
-      "descripcion": "Sin migraciones ni proyectos de meses. Pegas el snippet, el agente queda renderizado y corre en las superficies donde tu equipo ya trabaja.",
-      "copiar": "Copiar",
-      "copiado": "Copiado",
-      "canalesTitulo": "Corre donde ya trabajas",
-      "canalesSubtitulo": "El mismo agente, sin reescribir nada.",
-      "superficies": {
-        "web": "Web",
-        "whatsapp": "WhatsApp",
-        "slack": "Slack",
-        "correo": "Correo",
-        "api": "API",
-        "movil": "Móvil"
+      "eyebrow": "Así de simple",
+      "titulo": "Conecta una vez. Habla siempre.",
+      "descripcion": "Sin migraciones ni proyectos de meses. Conectas tu cuenta o tu sistema una sola vez, y de ahí en adelante solo le hablas al agente.",
+      "pasos": {
+        "paso1": {
+          "titulo": "Conecta tu cuenta",
+          "descripcion": "Tú inicias sesión, en tu navegador, como siempre. Tu contraseña nunca pasa por nosotros."
+        },
+        "paso2": {
+          "titulo": "Dile qué necesitas",
+          "descripcion": "En español, como se lo dirías a una persona."
+        },
+        "paso3": {
+          "titulo": "El agente lo hace",
+          "descripcion": "Entra a tu cuenta y ejecuta el trabajo. Tú apruebas cualquier acción importante."
+        }
       }
     },
     "chatWidget": {
       "agentes": {
+        "personal": "Tu asistente",
         "ventas": "Sales Analysis",
         "facturacion": "Facturación",
         "operaciones": "Operaciones",
@@ -848,12 +852,20 @@
       "escribeTuMensaje": "Escribe tu mensaje",
       "enviarMensajeAria": "Enviar mensaje",
       "guiones": {
+        "personal": {
+          "usuario1": "¿Cuánto llevo gastado este mes en mi tarjeta?",
+          "agente1": "Revisé tu cuenta del banco: llevas $12,480 este mes. Tu gasto más grande fue el súper, con $3,120.",
+          "usuario2": "Resérvame una mesa para dos el viernes a las 8.",
+          "agenteBeta1": "Reservar mesas está en beta: todavía la estoy aprendiendo. Muy pronto podré hacer esta reservación por ti.",
+          "usuario3": "Y cómprame unos audífonos al mejor precio.",
+          "agenteBeta2": "Comprar al mejor precio está en beta. Cuando esté lista, compararé opciones y te pediré confirmación antes de cualquier pago."
+        },
         "ventas": {
           "usuario1": "Dame el análisis de ventas del último trimestre.",
           "usuario2": "¿Qué explica la caída de octubre?",
           "agente1": "El quiebre de stock en la categoría estrella (12 días sin inventario) y menor tráfico tras la promoción. Sin ese quiebre, octubre habría cerrado en ~$2.1M.",
           "usuario3": "¿Y la proyección del próximo trimestre?",
-          "agente2": "Proyecto $7.4M (intervalo 95%: $6.9M–$7.9M). El mayor riesgo sigue siendo el inventario de la categoría estrella."
+          "agente2": "Proyecto $7.4M (intervalo 95%: de $6.9M a $7.9M). El mayor riesgo sigue siendo el inventario de la categoría estrella."
         },
         "facturacion": {
           "usuario1": "Procesa esta factura y valídala.",
@@ -914,7 +926,8 @@
       "alerta": {
         "titulo": "Cargo duplicado detectado",
         "detalle": "Aceros del Norte facturó dos veces la OC-4471 (folios A-1182 y A-1207). Riesgo de doble pago: $48,200."
-      }
+      },
+      "beta": "Beta"
     },
     "primitivas": {
       "eyebrow": "Independiente del modelo",
@@ -944,14 +957,18 @@
         "integracionNativa": {
           "titulo": "Integración nativa",
           "descripcion": "El agente opera dentro de tus sistemas (ERP, CRM, correo, datos) a través de herramientas conectadas. Trabaja donde ya está tu equipo, no en una interfaz separada."
+        },
+        "apruebasLoQueImporta": {
+          "titulo": "Tú apruebas lo que importa",
+          "descripcion": "Nada que gaste tu dinero o sea irreversible se ejecuta sin tu confirmación. Ves exactamente qué va a hacer el agente, y decides."
         }
       }
     },
     "ejemplos": {
-      "eyebrow": "Ejemplos en vivo",
+      "eyebrow": "Para tu empresa",
       "titulo": "Una plataforma, muchos agentes",
-      "introDestacado": "Agentes que no solo responden: ejecutan trabajo real.",
-      "introResto": "Todos corren sobre la misma plataforma, con las integraciones, la seguridad y la trazabilidad ya resueltas. Cuentas por pagar, cotizaciones, soporte… o el proceso que tu operación necesite.",
+      "introDestacado": "Para tu empresa, el mismo agente trabaja dentro de tus sistemas: ERP, CRM, correo.",
+      "introResto": "Cuentas por pagar, cotizaciones, soporte, o el proceso que tu operación necesite.",
       "badgeEjemploEnVivo": "Ejemplo en vivo",
       "agentes": {
         "ap": {
@@ -974,7 +991,8 @@
       "otroProcesoIntro": "Estos tres son solo ejemplos.",
       "otroProcesoDestacado": "La misma plataforma se adapta a cualquier proceso de tu operación:",
       "otroProcesoResto": "conciliaciones, onboarding, reportes, generación de documentos, lo que necesites. Tú describes el proceso; nosotros lo construimos y lo desplegamos.",
-      "cuentanosTuCaso": "Cuéntanos tu caso"
+      "cuentanosTuCaso": "Cuéntanos tu caso",
+      "sdkNota": "¿Tienes equipo técnico? El mismo agente también se puede incrustar en tu sitio o tu app con nuestro SDK."
     },
     "comoFunciona": {
       "eyebrow": "Cómo funciona",
@@ -996,17 +1014,28 @@
       }
     },
     "ctaFinal": {
-      "titulo": "Pon un agente a trabajar en tu operación",
-      "descripcion": "Tú describes el proceso; nosotros lo configuramos, lo integramos a tus sistemas y lo ponemos en producción. A la medida de tu negocio y en una fracción del tiempo.",
+      "titulo": "Pídeselo a tu agente",
+      "descripcion": "Crea tu cuenta, conecta tus cuentas y tus sistemas, y empieza a pedir. Para tu día a día y para tu empresa.",
       "escribenosWhatsapp": "Escríbenos por WhatsApp"
     },
     "footer": {
-      "descripcion": "Agentes verticales de IA para tu empresa, integrados en los sistemas que tu equipo ya usa.",
+      "descripcion": "Un asistente de IA que trabaja dentro de tus cuentas y tus sistemas. Le hablas en tu idioma, y hace el trabajo. Para personas y para empresas.",
       "contacto": "Contacto",
       "contactanos": "Contáctanos",
       "facebookAria": "Facebook de Ledesma AI Labs",
       "copyright": "© 2026 Ledesma AI Labs. Todos los derechos reservados",
       "politicaPrivacidad": "Política de privacidad"
+    },
+    "capacidades": {
+      "eyebrow": "Para tu día a día",
+      "titulo": "Todo con un mensaje",
+      "descripcion": "Esto es lo que viene para tu agente. Las funciones marcadas como Beta están en desarrollo: aún no ejecutan estas acciones, y las verás llegar a tu cuenta.",
+      "chips": {
+        "reservarMesa": "Reservar tu mesa",
+        "comprarMejorPrecio": "Comprar al mejor precio",
+        "planearViaje": "Planear tu viaje",
+        "conTuVoz": "Con tu voz"
+      }
     }
   },
   "panel": {
