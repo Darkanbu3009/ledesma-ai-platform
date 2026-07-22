@@ -7,10 +7,10 @@ import { Logo } from '../brand/logo';
 import { LanguageSwitcher } from './language-switcher';
 
 const NAV_LINKS = [
-  { href: '#integracion', labelKey: 'landing.navegacion.integracion' },
-  { href: '#plataforma', labelKey: 'landing.navegacion.plataforma' },
-  { href: '#ejemplos', labelKey: 'landing.navegacion.ejemplos' },
-  { href: '#como-funciona', labelKey: 'landing.navegacion.comoFunciona' }
+  { href: '#integracion', labelKey: 'landing.navegacion.comoFunciona' },
+  { href: '#capacidades', labelKey: 'landing.navegacion.paraTi' },
+  { href: '#ejemplos', labelKey: 'landing.navegacion.empresas' },
+  { href: '#plataforma', labelKey: 'landing.navegacion.plataforma' }
 ];
 
 /** Id del panel del menu movil, para enlazar aria-controls del boton hamburguesa. */

@@ -8,18 +8,23 @@ import {
   Headphones,
   LineChart,
   Send,
+  Sparkles,
   type LucideIcon
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { BetaBadge } from './beta-badge';
 
 /**
  * Widget de chat ANIMADO de la seccion de integracion. Reemplaza al widget estatico de la
  * derecha: corre una conversacion que avanza sola y, al terminar, CAMBIA de agente en ciclo,
  * tinendo todo el widget con el acento del agente activo. El orden del ciclo es:
- * Sales Analysis (azul) -> Facturacion (verde) -> Operaciones (morado) -> Customer Success
- * (brasa) y vuelve a empezar. Arranca mostrando Sales Analysis.
+ * Tu asistente (brasa) -> Sales Analysis (azul) -> Facturacion (verde) -> Operaciones
+ * (morado) -> Customer Success (brasa) y vuelve a empezar. Arranca mostrando Tu asistente.
  *
  * Cada agente trae su guion y, algunos, un artefacto visual propio:
+ *  - Tu asistente (universal): una consulta de lectura real en una cuenta conectada y dos
+ *    peticiones (reservar / comprar) cuyas respuestas llevan etiqueta Beta: capacidades en
+ *    desarrollo que NUNCA se muestran como acciones ya ejecutadas.
  *  - Sales Analysis: tarjeta de analisis con 3 KPIs y una mini-grafica de barras que crecen.
  *  - Facturacion: tarjeta de validacion de factura (datos extraidos + checklist con un aviso).
  *  - Operaciones: arranca PROACTIVO (sin pregunta previa) y emite una tarjeta de ALERTA.
@@ -41,7 +46,7 @@ import { cn } from '../../lib/utils';
  *    la pagina, y limpia sus timers al desmontar para no dejar estados huerfanos.
  *
  * Movimiento reducido: no anima ni cicla. Muestra estatica y completa la conversacion de
- * Sales Analysis (con su tarjeta de analisis visible).
+ * Tu asistente (con sus respuestas beta etiquetadas visibles).
  *
  * Altura fija + scroll interno: la conversacion crece y cambia, asi que el widget tiene alto
  * fijo y el cuerpo hace scroll al ultimo mensaje. Asi la seccion no salta de tamano mientras
@@ -49,7 +54,7 @@ import { cn } from '../../lib/utils';
  * afectado mas alla de igualar la altura de la fila, como ya hacia.
  */
 
-type AgentKey = 'sales' | 'ap' | 'ops' | 'support';
+type AgentKey = 'personal' | 'sales' | 'ap' | 'ops' | 'support';
 
 interface Agent {
   /** Clave i18n del nombre visible del agente. */
@@ -68,11 +73,19 @@ interface Agent {
 type ScriptMessage =
   | { kind: 'user'; textKey: string }
   | { kind: 'agent'; textKey: string }
+  | { kind: 'agentBeta'; textKey: string }
   | { kind: 'report' }
   | { kind: 'validation' }
   | { kind: 'alert' };
 
 const AGENTS: Record<AgentKey, Agent> = {
+  // Tu asistente (universal): reusa el acento de marca del tema claro (brasa), porque es
+  // la cara principal del producto y abre el ciclo.
+  personal: {
+    nameKey: 'landing.chatWidget.agentes.personal',
+    icon: Sparkles,
+    accent: 'rgb(var(--ll-accent))'
+  },
   // Sales Analysis: azul LOCAL del widget (no es token de marca; vive solo aqui).
   sales: { nameKey: 'landing.chatWidget.agentes.ventas', icon: LineChart, accent: '#2D6FB3' },
   // Facturacion: verde LOCAL del widget.
@@ -87,10 +100,21 @@ const AGENTS: Record<AgentKey, Agent> = {
   }
 };
 
-/** Orden del ciclo: arranca en Sales Analysis y termina en Customer Success, luego repite. */
-const AGENT_ORDER: readonly AgentKey[] = ['sales', 'ap', 'ops', 'support'];
+/** Orden del ciclo: abre el asistente universal y siguen los agentes de empresa; repite. */
+const AGENT_ORDER: readonly AgentKey[] = ['personal', 'sales', 'ap', 'ops', 'support'];
 
 const SCRIPTS: Record<AgentKey, readonly ScriptMessage[]> = {
+  // Tu asistente: una consulta de lectura REAL dentro de una cuenta conectada (disponible
+  // hoy) y dos peticiones de acciones en desarrollo (reservar / comprar), cuyas respuestas
+  // entran como `agentBeta`: llevan etiqueta Beta y NUNCA muestran la accion como hecha.
+  personal: [
+    { kind: 'user', textKey: 'landing.chatWidget.guiones.personal.usuario1' },
+    { kind: 'agent', textKey: 'landing.chatWidget.guiones.personal.agente1' },
+    { kind: 'user', textKey: 'landing.chatWidget.guiones.personal.usuario2' },
+    { kind: 'agentBeta', textKey: 'landing.chatWidget.guiones.personal.agenteBeta1' },
+    { kind: 'user', textKey: 'landing.chatWidget.guiones.personal.usuario3' },
+    { kind: 'agentBeta', textKey: 'landing.chatWidget.guiones.personal.agenteBeta2' }
+  ],
   sales: [
     { kind: 'user', textKey: 'landing.chatWidget.guiones.ventas.usuario1' },
     { kind: 'report' },
@@ -415,6 +439,19 @@ function ChatItem({ item }: { item: ScriptMessage }): JSX.Element {
       </div>
     );
   }
+  // Respuesta de una capacidad EN DESARROLLO: misma burbuja de agente pero encabezada por
+  // la etiqueta Beta, inequivoca y visualmente distinta. El texto describe un estado en
+  // beta; nunca un resultado consumado ("reservado" / "comprado").
+  if (item.kind === 'agentBeta') {
+    return (
+      <div className="mr-auto max-w-[84%] rounded-2xl rounded-bl-sm border border-accent/25 bg-background-tertiary px-3.5 py-2.5 text-sm text-foreground-secondary motion-safe:[animation:cw-pop_0.35s_ease_both]">
+        <div className="mb-1.5">
+          <BetaBadge />
+        </div>
+        {t(item.textKey)}
+      </div>
+    );
+  }
   if (item.kind === 'report') return <ReportCard />;
   if (item.kind === 'validation') return <ValidationCard />;
   return <AlertCard />;
@@ -429,9 +466,9 @@ export function IntegrationChatWidget(): JSX.Element {
   // Se calcula una vez al montar: define si animamos o mostramos el estado final estatico.
   const [reduceMotion] = useState(prefersReducedMotion);
 
-  const [agentKey, setAgentKey] = useState<AgentKey>('sales');
+  const [agentKey, setAgentKey] = useState<AgentKey>('personal');
   const [items, setItems] = useState<ScriptMessage[]>(() =>
-    reduceMotion ? [...SCRIPTS.sales] : []
+    reduceMotion ? [...SCRIPTS.personal] : []
   );
   const [typing, setTyping] = useState(false);
   const [headerHidden, setHeaderHidden] = useState(false);
@@ -505,17 +542,16 @@ export function IntegrationChatWidget(): JSX.Element {
           continue;
         }
 
-        // Respuesta con "escribiendo": texto del agente o tarjeta (ventas / factura).
+        // Respuesta con "escribiendo": texto del agente (normal o beta) o tarjeta.
+        const esTexto = message.kind === 'agent' || message.kind === 'agentBeta';
         setTyping(true);
         await sleep(
-          message.kind === 'agent'
-            ? typingDuration(t(message.textKey))
-            : CARD_TIMING[message.kind].typing
+          esTexto ? typingDuration(t(message.textKey)) : CARD_TIMING[message.kind].typing
         );
         if (cancelled) return;
         setTyping(false);
         setItems((prev) => [...prev, message]);
-        await sleep(message.kind === 'agent' ? TIMING.afterAgent : CARD_TIMING[message.kind].after);
+        await sleep(esTexto ? TIMING.afterAgent : CARD_TIMING[message.kind].after);
       }
     };
 

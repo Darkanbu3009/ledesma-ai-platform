@@ -792,22 +792,23 @@
       "crear": "Sign up",
       "crearCuenta": "Create account",
       "entrar": "Sign in",
-      "iniciarSesion": "Sign in"
+      "iniciarSesion": "Sign in",
+      "verComoFunciona": "See how it works",
+      "beta": "Beta"
     },
     "navegacion": {
-      "integracion": "Integration",
-      "plataforma": "Platform",
-      "ejemplos": "Examples",
       "comoFunciona": "How it works",
+      "paraTi": "For you",
+      "empresas": "For business",
+      "plataforma": "Platform",
       "seccionesAria": "Sections",
       "abrirMenu": "Open navigation menu",
       "cerrarMenu": "Close navigation menu"
     },
     "hero": {
-      "titulo": "Vertical AI agents, with the model you choose",
-      "descripcion": "They automate real work inside the systems your company already uses. The model is interchangeable: Claude, ChatGPT, or open source. You switch providers through configuration, without rewriting the agent or your integrations.",
-      "solicitarDemo": "Request a guided demo",
-      "whatsappMensajeDemo": "Hi, I'm interested in a guided demo of Ledesma AI Labs."
+      "eyebrow": "The future is now",
+      "titulo": "Just ask. Your agent does it.",
+      "descripcion": "An AI assistant that works inside your accounts and your systems. You talk to it in your own words, and it goes in and does the work for you. No tabs to open, no forms to fill. For people and for companies."
     },
     "heroShowcase": {
       "tusSistemas": "Your systems",
@@ -821,24 +822,27 @@
       "cambiarModeloAria": "Switch model to {{label}}"
     },
     "integracion": {
-      "eyebrow": "Integration",
-      "titulo": "Set it up in three lines",
-      "descripcion": "No migrations or months-long projects. You paste the snippet, the agent is rendered, and it runs on the surfaces where your team already works.",
-      "copiar": "Copy",
-      "copiado": "Copied",
-      "canalesTitulo": "Runs where you already work",
-      "canalesSubtitulo": "The same agent, without rewriting anything.",
-      "superficies": {
-        "web": "Web",
-        "whatsapp": "WhatsApp",
-        "slack": "Slack",
-        "correo": "Email",
-        "api": "API",
-        "movil": "Mobile"
+      "eyebrow": "It's this simple",
+      "titulo": "Connect once. Just talk.",
+      "descripcion": "No migrations or months-long projects. You connect your account or your system once, and from then on you just talk to the agent.",
+      "pasos": {
+        "paso1": {
+          "titulo": "Connect your account",
+          "descripcion": "You sign in, in your own browser, like you always do. Your password never goes through us."
+        },
+        "paso2": {
+          "titulo": "Tell it what you need",
+          "descripcion": "In plain language, the way you would tell a person."
+        },
+        "paso3": {
+          "titulo": "The agent does it",
+          "descripcion": "It goes into your account and gets the work done. You approve any important action."
+        }
       }
     },
     "chatWidget": {
       "agentes": {
+        "personal": "Your assistant",
         "ventas": "Sales Analysis",
         "facturacion": "Invoicing",
         "operaciones": "Operations",
@@ -848,12 +852,20 @@
       "escribeTuMensaje": "Type your message",
       "enviarMensajeAria": "Send message",
       "guiones": {
+        "personal": {
+          "usuario1": "How much have I spent on my card this month?",
+          "agente1": "I checked your bank account: you are at $12,480 this month. Your biggest expense was groceries, at $3,120.",
+          "usuario2": "Book me a table for two on Friday at 8.",
+          "agenteBeta1": "Booking tables is in beta: I'm still learning it. Very soon I'll be able to make this reservation for you.",
+          "usuario3": "And buy me headphones at the best price.",
+          "agenteBeta2": "Buying at the best price is in beta. Once it's ready, I'll compare options and ask for your confirmation before any payment."
+        },
         "ventas": {
           "usuario1": "Give me the sales analysis for the last quarter.",
           "usuario2": "What explains the October drop?",
           "agente1": "The stockout in the star category (12 days without inventory) and lower traffic after the promotion. Without that stockout, October would have closed at ~$2.1M.",
           "usuario3": "And the projection for next quarter?",
-          "agente2": "I project $7.4M (95% interval: $6.9M–$7.9M). The biggest risk is still inventory in the star category."
+          "agente2": "I project $7.4M (95% interval: $6.9M to $7.9M). The biggest risk is still inventory in the star category."
         },
         "facturacion": {
           "usuario1": "Process this invoice and validate it.",
@@ -914,7 +926,8 @@
       "alerta": {
         "titulo": "Duplicate charge detected",
         "detalle": "Aceros del Norte invoiced PO OC-4471 twice (invoices A-1182 and A-1207). Double payment risk: $48,200."
-      }
+      },
+      "beta": "Beta"
     },
     "primitivas": {
       "eyebrow": "Model-independent",
@@ -944,14 +957,18 @@
         "integracionNativa": {
           "titulo": "Native integration",
           "descripcion": "The agent operates inside your systems (ERP, CRM, email, data) through connected tools. It works where your team already is, not in a separate interface."
+        },
+        "apruebasLoQueImporta": {
+          "titulo": "You approve what matters",
+          "descripcion": "Nothing that spends your money or is irreversible runs without your confirmation. You see exactly what the agent is about to do, and you decide."
         }
       }
     },
     "ejemplos": {
-      "eyebrow": "Live examples",
+      "eyebrow": "For your business",
       "titulo": "One platform, many agents",
-      "introDestacado": "Agents that don't just respond: they execute real work.",
-      "introResto": "They all run on the same platform, with integrations, security, and traceability already solved. Accounts payable, quotations, support… or whatever process your operation needs.",
+      "introDestacado": "For your business, the same agent works inside your systems: ERP, CRM, email.",
+      "introResto": "Accounts payable, quotations, support, or whatever process your operation needs.",
       "badgeEjemploEnVivo": "Live example",
       "agentes": {
         "ap": {
@@ -974,7 +991,8 @@
       "otroProcesoIntro": "These three are just examples.",
       "otroProcesoDestacado": "The same platform adapts to any process in your operation:",
       "otroProcesoResto": "reconciliations, onboarding, reports, document generation, whatever you need. You describe the process; we build it and deploy it.",
-      "cuentanosTuCaso": "Tell us about your case"
+      "cuentanosTuCaso": "Tell us about your case",
+      "sdkNota": "Have a technical team? The same agent can also be embedded in your site or your app with our SDK."
     },
     "comoFunciona": {
       "eyebrow": "How it works",
@@ -996,17 +1014,28 @@
       }
     },
     "ctaFinal": {
-      "titulo": "Put an agent to work in your operation",
-      "descripcion": "You describe the process; we configure it, integrate it with your systems, and put it into production. Tailored to your business and in a fraction of the time.",
+      "titulo": "Ask your agent",
+      "descripcion": "Create your account, connect your accounts and your systems, and start asking. For your everyday life and for your business.",
       "escribenosWhatsapp": "Message us on WhatsApp"
     },
     "footer": {
-      "descripcion": "Vertical AI agents for your company, integrated into the systems your team already uses.",
+      "descripcion": "An AI assistant that works inside your accounts and your systems. You talk to it in your own words, and it does the work. For people and for companies.",
       "contacto": "Contact",
       "contactanos": "Contact us",
       "facebookAria": "Ledesma AI Labs on Facebook",
       "copyright": "© 2026 Ledesma AI Labs. All rights reserved",
       "politicaPrivacidad": "Privacy Policy"
+    },
+    "capacidades": {
+      "eyebrow": "For everyday life",
+      "titulo": "Everything in one message",
+      "descripcion": "This is what's coming to your agent. Features marked Beta are in development: they don't run these actions yet, and you'll see them arrive in your account.",
+      "chips": {
+        "reservarMesa": "Book your table",
+        "comprarMejorPrecio": "Buy at the best price",
+        "planearViaje": "Plan your trip",
+        "conTuVoz": "With your voice"
+      }
     }
   },
   "panel": {
