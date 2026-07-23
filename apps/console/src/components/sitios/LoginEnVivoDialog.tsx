@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, ShieldCheck, X } from 'lucide-react';
+import { Loader2, ShieldCheck, TriangleAlert, X } from 'lucide-react';
 import type { SitioConectado } from '../../lib/sitios';
 import { useDialog } from '../ui/useDialog';
 
@@ -14,6 +14,15 @@ import { useDialog } from '../ui/useDialog';
  * teclea dentro del iframe, contra el proveedor. Por eso aqui NO hay ningun input (menos aun de
  * contrasena) y NO se adjunta NINGUN listener sobre el iframe (ni load, ni message, ni nada): esta
  * consola no puede leer, interceptar ni reenviar lo que ocurre alli dentro, por construccion.
+ *
+ * LIMITACION EN TELEFONOS: la vista en vivo de Browserbase no soporta el teclado movil ("Mobile
+ * keyboards aren't officially supported", doc de Session Live View). El tap si llega como click a la
+ * sesion remota, pero como no existe ningun campo editable LOCAL que enfocar, el sistema operativo
+ * jamas despliega su teclado: no es un problema de este iframe ni de sus estilos, y abrir la vista
+ * en pestana propia tampoco lo resuelve. El unico workaround documentado (teclado virtual propio que
+ * reenvia las teclas a la sesion) capturaria lo que el usuario teclea y viola la restriccion de
+ * arriba, asi que queda descartado. Mientras el proveedor no lo soporte, en dispositivos tactiles
+ * sin puntero fino se muestra un aviso pidiendo completar la conexion desde una computadora.
  */
 export function LoginEnVivoDialog({
   sitio,
@@ -33,6 +42,14 @@ export function LoginEnVivoDialog({
   const { t } = useTranslation();
   const confirmarRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useDialog({ onClose: onCerrar, initialFocus: confirmarRef });
+
+  // Dispositivo tactil sin puntero fino ni hover (telefono/tablet): ahi el teclado movil no
+  // funciona dentro de la vista en vivo (limitacion del proveedor, ver arriba). Se evalua en el
+  // render (sin estado ni efectos): el medio no cambia durante la vida del modal, y el guard de
+  // matchMedia cubre los entornos de test sin esa API (mismo criterio que use-reveal-on-scroll).
+  const esDispositivoTactil =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(hover: none) and (pointer: coarse)').matches;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6">
@@ -67,6 +84,18 @@ export function LoginEnVivoDialog({
             <X className="h-[18px] w-[18px]" />
           </button>
         </div>
+
+        {/* Aviso SOLO en dispositivos tactiles: la vista sigue visible (el usuario ve la pagina de
+            login y puede tocarla), pero sin teclado movil no puede escribir; se le pide terminar
+            desde una computadora. No es un error de esta sesion, por eso role="note" y no alert. */}
+        {esDispositivoTactil && (
+          <div role="note" className="flex-none border-b border-brasa-line bg-brasa-soft px-6 py-3">
+            <p className="flex items-start gap-1.5 text-sm font-medium text-brasa">
+              <TriangleAlert className="mt-0.5 h-4 w-4 flex-none" aria-hidden="true" />
+              <span>{t('sitios.modal.avisoMovil')}</span>
+            </p>
+          </div>
+        )}
 
         {/* La vista en vivo EMBEBIDA: apunta directo al proveedor. Sin listeners, por diseno.
             flex-1: llena TODO el alto que el modal (de altura fija) deja entre la cabecera y el

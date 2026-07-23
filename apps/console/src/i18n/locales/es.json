@@ -1782,6 +1782,7 @@
     "modal": {
       "titulo": "Inicia sesión en {{dominio}}",
       "instruccion": "Inicia sesión aquí como lo harías normalmente. Nadie más ve tus datos. Tu contraseña no pasa por Ledesma.",
+      "avisoMovil": "En teléfonos y tablets todavía no se puede escribir dentro de esta vista: el navegador seguro aún no soporta el teclado móvil. Abre esta página en una computadora para conectar el sitio.",
       "iframeTitulo": "Navegador seguro para iniciar sesión en {{dominio}}",
       "pie": "La sesión se abre en un navegador remoto seguro y expira sola si no confirmas.",
       "confirmar": "Ya inicié sesión",
