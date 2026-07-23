@@ -808,7 +808,7 @@
     "hero": {
       "eyebrow": "El futuro es hoy",
       "titulo": "Pídelo. Tu agente lo hace.",
-      "descripcion": "Un asistente de IA que trabaja dentro de tus cuentas y tus sistemas. Le hablas en tu idioma, y entra a hacer el trabajo por ti. Sin abrir pestañas, sin llenar formularios. Para personas y para empresas."
+      "descripcion": "Un asistente de IA que trabaja dentro de tus cuentas y tus sistemas. Le hablas en tu idioma, y entra a hacer el trabajo por ti. Sin abrir pestañas, aplicaciones, plataformas, sin llenar formularios. Para personas y para empresas."
     },
     "heroShowcase": {
       "tusSistemas": "Tus sistemas",
@@ -1029,7 +1029,7 @@
     "capacidades": {
       "eyebrow": "Para tu día a día",
       "titulo": "Todo con un mensaje",
-      "descripcion": "Esto es lo que viene para tu agente. Las funciones marcadas como Beta están en desarrollo: aún no ejecutan estas acciones, y las verás llegar a tu cuenta.",
+      "descripcion": "Lo tenemos en versión beta para tu agente y estarán disponibles en tu cuenta.",
       "chips": {
         "reservarMesa": "Reservar tu mesa",
         "comprarMejorPrecio": "Comprar al mejor precio",

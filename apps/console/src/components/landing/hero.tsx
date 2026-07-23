@@ -1,9 +1,8 @@
-import { type JSX, useEffect, useState } from 'react';
+import { type JSX, type ReactNode, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ArrowRight } from 'lucide-react';
 import { Button } from '../ui/button';
-import { Eyebrow } from './eyebrow';
 import { HeroShowcase } from './hero-showcase';
 import { PixelCloud } from './pixel-cloud';
 
@@ -16,6 +15,24 @@ const KEYFRAMES_CURSOR = '@keyframes hero-blink { 0%, 100% { opacity: 1; } 50% {
 /** Clases del h1 del titular, compartidas por la variante animada y la estatica. */
 const CLASES_TITULO =
   'font-display text-3xl font-bold leading-[1.1] tracking-tight text-foreground min-[420px]:text-4xl sm:text-5xl min-[900px]:text-6xl';
+
+/**
+ * Eyebrow propio del hero, con mas calidez que el eyebrow generico de las secciones:
+ * frase en Archivo semibold cursiva, en sentence case y color brasa, precedida por el
+ * cuadrito brasa del isotipo (pulsa suave solo si el usuario acepta movimiento). Es un
+ * acento superior: no compite con el h1 y en 360px cabe en una linea sin cortarse.
+ */
+function EyebrowHero({ children }: { children: ReactNode }): JSX.Element {
+  return (
+    <p className="inline-flex items-center gap-2.5 font-display text-base font-semibold italic tracking-tight text-accent sm:text-lg">
+      <span
+        className="h-2 w-2 shrink-0 rounded-[2px] bg-accent motion-safe:animate-splash-pulso"
+        aria-hidden="true"
+      />
+      {children}
+    </p>
+  );
+}
 
 function prefersReducedMotion(): boolean {
   return (
@@ -135,7 +152,7 @@ export function Hero(): JSX.Element {
       <div className="relative z-10 mx-auto grid max-w-6xl items-center gap-10 px-4 py-14 sm:gap-12 sm:px-6 sm:py-20 min-[900px]:grid-cols-2 min-[900px]:py-28">
         <div>
           <div className="mb-5">
-            <Eyebrow className="text-accent">{t('landing.hero.eyebrow')}</Eyebrow>
+            <EyebrowHero>{t('landing.hero.eyebrow')}</EyebrowHero>
           </div>
           <TituloTypewriter />
           <p className="mt-5 max-w-xl text-base leading-relaxed text-foreground-secondary sm:mt-6 sm:text-lg sm:leading-relaxed">
