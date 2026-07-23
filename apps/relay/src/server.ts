@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket, type RawData } from 'ws';
 import { SesionRelay, type CdpInyector, type SocketRelay } from './session.js';
-import type { RegistroUsoUnico } from './single-use.js';
+import type { AutoridadRelay } from './autoridad.js';
 import type { LimitadorRelay } from './rate-limit.js';
 import type { Logger } from './logger.js';
 
@@ -17,7 +17,7 @@ import type { Logger } from './logger.js';
 export interface DepsServidor {
   relayTokenSecret: string;
   allowedOrigins: '*' | string[];
-  usoUnico: RegistroUsoUnico;
+  autoridad: AutoridadRelay;
   limitador: LimitadorRelay;
   logger: Logger;
   resolverConnectUrl(sesionExternaId: string): Promise<string>;
@@ -81,7 +81,7 @@ function conectar(
     socket,
     origen,
     relayTokenSecret: deps.relayTokenSecret,
-    usoUnico: deps.usoUnico,
+    autoridad: deps.autoridad,
     limitador: deps.limitador,
     logger: deps.logger,
     resolverConnectUrl: deps.resolverConnectUrl,

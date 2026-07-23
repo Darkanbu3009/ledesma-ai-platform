@@ -1,10 +1,12 @@
 import { parseEnv, type RelayEnv } from './env.js';
 import { createLogger } from './logger.js';
 import { crearServidorRelay } from './server.js';
-import { RegistroUsoUnico } from './single-use.js';
+import { AutoridadEnMemoria, type AutoridadRelay } from './autoridad.js';
+import { AutoridadRemota } from './autoridad-remota.js';
 import { LimitadorRelay } from './rate-limit.js';
 import { ClienteCdp } from './cdp.js';
 import { obtenerConnectUrl } from './browserbase.js';
+import type { Logger } from './logger.js';
 
 /**
  * Punto de entrada del SERVICIO RELAY de teclado movil (conocimiento minimo). Hace UNA cosa: aceptar el
@@ -24,17 +26,33 @@ function loadConfig(): RelayEnv {
   }
 }
 
+/**
+ * Elige la AUTORIDAD de coordinacion (B-1): remota (backend, compartida) si hay URL; en memoria si no.
+ * La opcion en memoria SOLO es admisible fuera de produccion: en produccion parseEnv ya obliga la URL
+ * (refuse-to-start), asi que aca nunca se cae a memoria en prod.
+ */
+function elegirAutoridad(env: RelayEnv, logger: Logger): AutoridadRelay {
+  if (env.consumoUrl !== undefined) {
+    logger.info('relay_autoridad_remota', { url: env.consumoUrl });
+    return new AutoridadRemota(env.consumoUrl, env.relayTokenSecret);
+  }
+  logger.warn('relay_autoridad_en_memoria', {
+    aviso: 'uso unico del jti y lock por conexion son por proceso: valido SOLO con una unica instancia',
+  });
+  return new AutoridadEnMemoria();
+}
+
 function main(): void {
   const env = loadConfig();
   const logger = createLogger(env.logLevel);
-  const usoUnico = new RegistroUsoUnico();
+  const autoridad = elegirAutoridad(env, logger);
   const limitador = new LimitadorRelay();
   const ref = { apiKey: env.browserbaseApiKey, projectId: env.browserbaseProjectId };
 
   const { server, sesiones } = crearServidorRelay({
     relayTokenSecret: env.relayTokenSecret,
     allowedOrigins: env.allowedOrigins,
-    usoUnico,
+    autoridad,
     limitador,
     logger,
     resolverConnectUrl: (sesionExternaId) => obtenerConnectUrl(ref, sesionExternaId),

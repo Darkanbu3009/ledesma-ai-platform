@@ -13,11 +13,82 @@
 /** Version del protocolo. Un cliente y un relay con versiones distintas no negocian. */
 export const RELAY_PROTOCOL_VERSION = 1;
 
-/** `info` de HKDF-SHA256 (contexto de derivacion). Fijo en ambos lados. */
+/** `info` de HKDF-SHA256 (contexto de derivacion de la CLAVE AES). Fijo en ambos lados. */
 export const HKDF_INFO: Uint8Array = new TextEncoder().encode('ledesma-relay-teclado-v1');
 
 /** `salt` de HKDF: vacio (la aleatoriedad viene del ECDH efimero por sesion). */
 export const HKDF_SALT: Uint8Array = new Uint8Array(0);
+
+/**
+ * AUTENTICACION DEL HANDSHAKE (channel binding contra un MITM en el proxy que termina TLS).
+ *
+ * El ECDH X25519 por si solo NO esta autenticado: un adversario activo puede sustituir la publica en
+ * cada pata, compartir una clave con cada extremo y leer cada pulsacion. Para detectarlo, ambos lados
+ * confirman la clave con un HMAC sobre el TRANSCRIPT del handshake (las DOS publicas + el token),
+ * usando como raiz de confianza un secreto de enlace `bk` que el backend mete DENTRO del token cifrado
+ * (que el cliente no puede descifrar) y ademas entrega al cliente por su canal confiable con el backend.
+ * Como el MITM ve el token cifrado pero no `bk`, no puede forjar el HMAC: sustituir cualquier publica
+ * cambia el transcript y la MAC deja de validar. Nada de esto es cripto propia: solo HKDF/HMAC-SHA256.
+ *
+ * `info` de HKDF-SHA256 para DERIVAR LA CLAVE DE MAC desde `bk`. Distinta de HKDF_INFO (la clave AES no
+ * comparte material con la clave de MAC).
+ */
+export const HKDF_MAC_INFO: Uint8Array = new TextEncoder().encode('ledesma-relay-handshake-mac-v1');
+
+/** Etiqueta de dominio del transcript del handshake (fija en ambos lados). */
+export const HANDSHAKE_LABEL: Uint8Array = new TextEncoder().encode('ledesma-relay-handshake-v1');
+
+/** Rol del extremo en la MAC de confirmacion (separa la MAC del cliente de la del relay). */
+export const MAC_ROLE_CLIENTE = 1;
+export const MAC_ROLE_RELAY = 2;
+
+/** Agrega a `out` el prefijo de longitud (uint32 big-endian) seguido de los bytes UTF-8 de `s`. */
+function agregarConLongitud(out: number[], s: string): void {
+  const bytes = new TextEncoder().encode(s);
+  const n = bytes.length;
+  out.push((n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff);
+  for (const b of bytes) out.push(b);
+}
+
+/**
+ * TRANSCRIPT del handshake: `LABEL || version || lp(relayPub) || lp(clientPub) || lp(token)`, donde
+ * `lp(x)` es la longitud en uint32 big-endian seguida de los bytes de `x`. El prefijo de longitud lo
+ * hace inequivoco (ningun corrimiento entre campos produce el mismo transcript). Cada lado lo arma con
+ * SU vista local: el cliente usa el relayPub que RECIBIO y el clientPub que ENVIO; el relay usa el
+ * relayPub que ENVIO y el clientPub que RECIBIO. Si el MITM sustituye cualquier publica, los dos
+ * transcripts difieren en ese campo y la MAC no coincide. Puro (solo Uint8Array/TextEncoder) para que
+ * cliente (WebCrypto) y relay (node:crypto) produzcan bytes IDENTICOS.
+ */
+export function transcriptoHandshake(
+  relayPubB64: string,
+  clientPubB64: string,
+  token: string,
+): Uint8Array {
+  const out: number[] = [];
+  for (const b of HANDSHAKE_LABEL) out.push(b);
+  out.push(RELAY_PROTOCOL_VERSION & 0xff);
+  agregarConLongitud(out, relayPubB64);
+  agregarConLongitud(out, clientPubB64);
+  agregarConLongitud(out, token);
+  return Uint8Array.from(out);
+}
+
+/**
+ * Mensaje sobre el que se calcula el HMAC de confirmacion: `role || transcript`. El byte de rol separa
+ * la MAC del cliente de la del relay bajo la MISMA clave (un lado no puede reusar la MAC del otro).
+ */
+export function mensajeMacHandshake(
+  role: number,
+  relayPubB64: string,
+  clientPubB64: string,
+  token: string,
+): Uint8Array {
+  const transcripto = transcriptoHandshake(relayPubB64, clientPubB64, token);
+  const mensaje = new Uint8Array(transcripto.length + 1);
+  mensaje[0] = role & 0xff;
+  mensaje.set(transcripto, 1);
+  return mensaje;
+}
 
 /** Longitud del nonce AES-GCM (96 bits). */
 export const NONCE_LENGTH = 12;

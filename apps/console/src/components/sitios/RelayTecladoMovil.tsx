@@ -62,6 +62,7 @@ function useRelayTeclado(sitioId: string): {
       const conexion = new ConexionRelayTeclado({
         relayUrl: tk.relayUrl,
         token: tk.token,
+        hs: tk.hs,
         onEstado: (e) => {
           if (!cancelado) setEstado(mapear(e));
         },

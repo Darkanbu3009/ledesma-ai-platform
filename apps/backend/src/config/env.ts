@@ -96,6 +96,12 @@ const EnvSchema = z.object({
       message: 'RELAY_PUBLIC_URL debe ser una URL WebSocket (wss:// en produccion)',
     })
     .optional(),
+  // PUERTO del LISTENER INTERNO del backend para la AUTORIDAD DE COORDINACION del relay (B-1): uso unico
+  // del jti y lock por conexion. Es un segundo listener, SEPARADO del publico (PORT), que Railway NO
+  // mapea al dominio publico: solo es alcanzable por la RED PRIVADA (`backend.railway.internal:<puerto>`)
+  // desde el servicio relay. Aditivo y opcional: si el relay no esta configurado (sin RELAY_TOKEN_SECRET)
+  // este listener no arranca. Default 3001; se puede cambiar por env.
+  RELAY_INTERNAL_PORT: z.coerce.number().int().positive().max(65535).default(3001),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

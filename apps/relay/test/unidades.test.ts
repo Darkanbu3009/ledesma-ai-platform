@@ -1,53 +1,71 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { RegistroUsoUnico } from '../src/single-use.js';
+import { AutoridadEnMemoria } from '../src/autoridad.js';
 import { LimitadorRelay } from '../src/rate-limit.js';
 import { origenPermitido } from '../src/server.js';
 
-describe('RegistroUsoUnico', () => {
-  it('consume una vez y rechaza el reuso', () => {
-    const r = new RegistroUsoUnico();
-    expect(r.consumir('jti-1', 2000, 1000)).toBe(true);
-    expect(r.consumir('jti-1', 2000, 1000)).toBe(false);
+describe('AutoridadEnMemoria: uso unico del jti', () => {
+  it('consume una vez y rechaza el reuso', async () => {
+    const a = new AutoridadEnMemoria(() => 1000);
+    expect(await a.consumirJti('jti-1', 2000)).toBe(true);
+    expect(await a.consumirJti('jti-1', 2000)).toBe(false);
   });
 
-  it('purga los jti vencidos (acota la memoria)', () => {
-    const r = new RegistroUsoUnico();
-    r.consumir('jti-1', 1500, 1000);
-    expect(r.tamano).toBe(1);
-    // un consumo posterior con reloj mas alla del exp purga el vencido
-    r.consumir('jti-2', 3000, 2000);
-    expect(r.tamano).toBe(1);
+  it('purga los jti vencidos (acota la memoria)', async () => {
+    let ahora = 1000;
+    const a = new AutoridadEnMemoria(() => ahora);
+    await a.consumirJti('jti-1', 1500);
+    expect(a.jtiRetenidos).toBe(1);
+    ahora = 2000; // mas alla del exp de jti-1
+    await a.consumirJti('jti-2', 3000); // purga el vencido en el intento
+    expect(a.jtiRetenidos).toBe(1);
     // jti-1 ya no esta: se puede volver a consumir (aunque el token ya no verificaria)
-    expect(r.consumir('jti-1', 4000, 2000)).toBe(true);
+    expect(await a.consumirJti('jti-1', 4000)).toBe(true);
   });
 });
 
-describe('LimitadorRelay', () => {
-  it('una sola sesion por conexion a la vez', () => {
-    const l = new LimitadorRelay();
-    expect(l.intentar('o', 'c1', 0)).toEqual({ ok: true });
-    expect(l.intentar('o', 'c1', 0)).toEqual({ ok: false, motivo: 'conexion_ocupada' });
-    l.liberar('o', 'c1');
-    expect(l.intentar('o', 'c1', 0)).toEqual({ ok: true });
+describe('AutoridadEnMemoria: lock por conexion', () => {
+  it('un solo canal por conexion a la vez; libera solo con el nonce correcto', async () => {
+    const a = new AutoridadEnMemoria(() => 1000);
+    expect(await a.tomarConexion('con-1', 'nonce-A', 5000)).toBe(true);
+    // Vigente y tomado: otra sesion no lo toma.
+    expect(await a.tomarConexion('con-1', 'nonce-B', 5000)).toBe(false);
+    // Liberar con un nonce ajeno no hace nada.
+    await a.liberarConexion('con-1', 'nonce-ajeno');
+    expect(await a.tomarConexion('con-1', 'nonce-B', 5000)).toBe(false);
+    // Liberar con el nonce correcto libera el lock.
+    await a.liberarConexion('con-1', 'nonce-A');
+    expect(await a.tomarConexion('con-1', 'nonce-B', 5000)).toBe(true);
   });
 
+  it('un lock VENCIDO se puede retomar (auto-liberacion ante crash del relay)', async () => {
+    let ahora = 1000;
+    const a = new AutoridadEnMemoria(() => ahora);
+    expect(await a.tomarConexion('con-1', 'nonce-A', 2000)).toBe(true);
+    ahora = 2500; // el lock de nonce-A vencio (exp 2000)
+    expect(await a.tomarConexion('con-1', 'nonce-B', 5000)).toBe(true);
+  });
+});
+
+describe('LimitadorRelay (best-effort por instancia)', () => {
   it('techo de concurrencia por owner', () => {
     const l = new LimitadorRelay({ maxPorOwner: 2, maxNuevasPorVentana: 100 });
-    expect(l.intentar('o', 'c1', 0).ok).toBe(true);
-    expect(l.intentar('o', 'c2', 0).ok).toBe(true);
-    expect(l.intentar('o', 'c3', 0)).toEqual({ ok: false, motivo: 'concurrencia_owner' });
+    expect(l.intentar('o', 0).ok).toBe(true);
+    expect(l.intentar('o', 0).ok).toBe(true);
+    expect(l.intentar('o', 0)).toEqual({ ok: false, motivo: 'concurrencia_owner' });
+    l.liberar('o');
+    expect(l.intentar('o', 0).ok).toBe(true);
   });
 
   it('anti flood: techo de sesiones nuevas por ventana', () => {
     const l = new LimitadorRelay({ maxPorOwner: 100, maxNuevasPorVentana: 2, ventanaMs: 1000 });
-    expect(l.intentar('o', 'c1', 0).ok).toBe(true);
-    l.liberar('o', 'c1');
-    expect(l.intentar('o', 'c2', 100).ok).toBe(true);
-    l.liberar('o', 'c2');
-    expect(l.intentar('o', 'c3', 200)).toEqual({ ok: false, motivo: 'flood' });
+    expect(l.intentar('o', 0).ok).toBe(true);
+    l.liberar('o');
+    expect(l.intentar('o', 100).ok).toBe(true);
+    l.liberar('o');
+    expect(l.intentar('o', 200)).toEqual({ ok: false, motivo: 'flood' });
     // pasada la ventana, vuelve a admitir
-    expect(l.intentar('o', 'c4', 1300).ok).toBe(true);
+    expect(l.intentar('o', 1300).ok).toBe(true);
   });
 });
 

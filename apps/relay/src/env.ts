@@ -8,17 +8,27 @@ import type { LogLevel } from './logger.js';
  * SECRETOS QUE TIENE (y solo estos):
  *  - BROWSERBASE_API_KEY / BROWSERBASE_PROJECT_ID: para pedir el connectUrl de la sesion viva. El
  *    connectUrl embebe el signing key de la sesion; por eso este proceso es pequeno y auditable.
- *  - RELAY_TOKEN_SECRET: secreto COMPARTIDO con el backend para validar el token efimero.
+ *  - RELAY_TOKEN_SECRET: secreto COMPARTIDO con el backend para validar el token efimero Y para firmar
+ *    (HMAC) las llamadas a la autoridad de coordinacion (mismo secreto, no se crea uno nuevo).
  * SECRETOS QUE NO TIENE (por diseno): VAULT_SECRET, DATABASE_URL, llaves de Supabase ni ninguna otra.
- * El relay NO toca la base de datos: el token stateless trae todo lo necesario para validarlo.
+ * El relay NO toca la base de datos: el token stateless trae todo lo necesario para validarlo, y el
+ * estado compartido (uso unico del jti + lock por conexion) lo media el backend por su endpoint interno.
  */
 export interface RelayEnv {
   port: number;
   host: string;
+  nodeEnv: string;
   logLevel: LogLevel;
   browserbaseApiKey: string;
   browserbaseProjectId: string;
   relayTokenSecret: string;
+  /**
+   * URL base de la AUTORIDAD DE COORDINACION (endpoint interno del backend) para el uso unico del jti y
+   * el lock por conexion (B-1). Debe apuntar a la RED PRIVADA de Railway (p.ej.
+   * `http://backend.railway.internal:3001`), no a internet. OBLIGATORIA en produccion: sin ella el relay
+   * SE NIEGA A ARRANCAR (invariante multi-instancia). En dev/tests puede faltar (autoridad en memoria).
+   */
+  consumoUrl: string | undefined;
   /** Origenes permitidos del upgrade WebSocket. '*' refleja cualquiera (solo para desarrollo). */
   allowedOrigins: '*' | string[];
 }
@@ -59,14 +69,34 @@ function parsePort(value: string | undefined): number {
 }
 
 export function parseEnv(source: NodeJS.ProcessEnv = process.env): RelayEnv {
+  const nodeEnv = source.NODE_ENV ?? 'production';
+  const consumoUrl = normalizarUrlConsumo(source.RELAY_CONSUMO_URL);
+  // REFUSE-TO-START: en produccion la autoridad de coordinacion es OBLIGATORIA. Sin ella el uso unico y
+  // el lock por conexion volverian a ser por proceso y un rolling deploy abriria la ventana multi
+  // instancia SIN AVISO. Preferimos no arrancar antes que operar con estado dividido en silencio.
+  if (nodeEnv === 'production' && consumoUrl === undefined) {
+    throw new Error(
+      'Environment validation failed: RELAY_CONSUMO_URL es obligatorio en produccion ' +
+        '(autoridad de coordinacion para uso unico del jti y lock por conexion). Ver docs/despliegue-relay.md.',
+    );
+  }
   return {
     port: parsePort(source.PORT),
     host: source.HOST ?? '0.0.0.0',
+    nodeEnv,
     logLevel: parseLogLevel(source.LOG_LEVEL),
     browserbaseApiKey: requireVar(source, 'BROWSERBASE_API_KEY'),
     browserbaseProjectId: requireVar(source, 'BROWSERBASE_PROJECT_ID'),
     // Mismo piso de 32 caracteres que en el backend: los dos lados comparten este secreto exacto.
     relayTokenSecret: requireVar(source, 'RELAY_TOKEN_SECRET', 32),
+    consumoUrl,
     allowedOrigins: parseOrigins(source.RELAY_ALLOWED_ORIGINS),
   };
+}
+
+/** Normaliza la URL de la autoridad: recorta espacios y devuelve undefined si viene vacia/ausente. */
+function normalizarUrlConsumo(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
