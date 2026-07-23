@@ -61,7 +61,7 @@ Solo estas. **Nunca** `VAULT_SECRET`, `DATABASE_URL` ni ninguna otra llave de la
 | `BROWSERBASE_PROJECT_ID` | obligatoria | Proyecto de Browserbase. El MISMO del worker. |
 | `RELAY_TOKEN_SECRET` | obligatoria, >= 32 chars | Validar el token efimero Y firmar (HMAC) las llamadas a la autoridad de coordinacion. **Mismo valor exacto** que en el backend. Secreto **separado** de `VAULT_SECRET` y `SESSION_TOKEN_SECRET`. |
 | `RELAY_CONSUMO_URL` | **obligatoria en produccion** | URL base de la autoridad de coordinacion (el listener interno del backend) por la **red privada**, p.ej. `http://backend.railway.internal:3001`. Sin ella en produccion el relay **se niega a arrancar** (ver *Coordinacion multi-instancia*). |
-| `RELAY_ALLOWED_ORIGINS` | recomendada | Lista separada por comas de los origenes permitidos del upgrade (p.ej. `https://app.ledesma-ai-labs.com`). `*` **solo** en desarrollo. |
+| `RELAY_ALLOWED_ORIGINS` | **obligatoria** | Lista separada por comas de los origenes permitidos del upgrade (p.ej. `https://app.ledesma-ai-labs.com`). Sin ella el relay **se niega a arrancar** (refuse-to-start, C-4): ya **no** hay default `*` que aceptaba cualquier origen en silencio. `*` es admisible pero **solo** como opt-in explicito de desarrollo. |
 | `NODE_ENV` | recomendada (`production`) | En `production` se exige `RELAY_CONSUMO_URL` (refuse-to-start). |
 | `HOST` | opcional (default `0.0.0.0`) | Interfaz de escucha. |
 | `LOG_LEVEL` | opcional (default `info`) | Nivel del logger de metadatos. |
@@ -141,3 +141,59 @@ concurrentes y hasta `maxNuevasPorVentana * N` nuevos por ventana. Es aceptable 
 exige exactitud) y queda escrito aqui para que nadie lo asuma garantizado. Lo que **si** es invariante
 (uso unico del jti y un solo canal por conexion) **no** se multiplica: lo hace atomico la autoridad
 compartida.
+
+## Limite de handshakes PRE-AUTENTICACION (B-2)
+
+El limitador por owner (arriba) solo corre **despues** de validar el token. Antes de eso, **cada** upgrade
+WebSocket costaba un par de llaves X25519 y una sesion retenida durante toda la ventana de handshake,
+**sin credenciales**: un atacante podia agotar memoria y sesiones sin token. Por eso hay un **portero
+pre-auth** (`apps/relay/src/preauth.ts`) que se evalua **antes** de completar el upgrade y de generar el
+par de llaves:
+
+- **Cap GLOBAL** de handshakes en vuelo (default `256`): la **garantia**, no depende de ningun dato del
+  cliente, ningun atacante lo evade.
+- **Cap POR IP** de handshakes en vuelo (default `32`): defensa en profundidad para que una sola fuente no
+  consuma sola el cupo global. La IP se toma del primer valor de `X-Forwarded-For` (lo pone el proxy de
+  borde de Railway); ese valor es **falsificable**, por eso el cap global es la garantia y este es el
+  respaldo. Se usa la IP declarada -y no la del socket- para **no** agrupar a todos los moviles detras del
+  proxy (o de un CGNAT del carrier) bajo una sola clave y castigar el flujo legitimo.
+
+El cupo se toma al aceptar el upgrade y se **libera** en cuanto la sesion **autentica** (deja de ser
+anonima) o cierra, lo que ocurra primero: cuenta handshakes **en vuelo**, no sesiones ya autenticadas, asi
+que un usuario legitimo no lo retiene mientras teclea. Ademas la ventana de handshake se acorto de **10s a
+5s** (un cliente real responde el `cli_hello` en sub-segundos), reduciendo cuanto puede un atacante retener
+una sesion sin autenticar. Un usuario real (un handshake que se resuelve en sub-segundos) **nunca** toca
+estos topes. Los defaults se pueden ajustar en el constructor de `PorteroPreAuth`; no requieren env nueva.
+
+## Codigo de rechazo uniforme hacia el cliente (C-2)
+
+Ante cualquier rechazo del canal el relay devuelve al cliente **siempre el mismo** codigo generico
+(`{ t: 'error', code: 'rechazado' }`): "token ya usado", "limite excedido", "conexion ocupada", "token
+invalido", etc. son **indistinguibles** desde afuera, para no darle un oraculo al atacante. El **motivo
+especifico** queda **solo** en el log de metadatos del servidor (`relay_cerrado.motivo`).
+
+## Derivacion de la clave del token (C-5)
+
+La clave AES del token se deriva con `sha256(secreto)` (`packages/shared/src/relay/relay-token.ts`). Se
+**evaluo** pasar a HKDF-SHA256 y se decidio **no** cambiarlo en esta iteracion:
+
+- `RELAY_TOKEN_SECRET` es un secreto de **alta entropia** (>= 32 chars), no una password. Contra ese
+  insumo, `sha256` y HKDF dan la **misma** resistencia a fuerza bruta: ninguno "estira" la clave (HKDF es
+  extract-and-expand, no un KDF lento tipo scrypt/argon2). El unico beneficio de HKDF seria **separacion
+  de dominio**, marginal aqui porque este secreto **no** se reutiliza con el de la boveda (es una env
+  separada).
+- Cambiar la derivacion **rompe compatibilidad**: mint (backend) y verify (relay) deben usar la **misma**
+  derivacion, asi que el cambio invalidaria **todo token en vuelo** (TTL 15 min) y ademas fallaria durante
+  el **skew de un rolling deploy** entre los dos servicios (uno acuna con el esquema nuevo mientras el otro
+  aun verifica con el viejo).
+
+**Como migrar sin invalidar sesiones activas** (si se decide hacerlo): es un cambio **staged**, no un flip.
+
+1. Versionar el token: prefijar un byte de version al formato (`version[1] | iv | tag | ciphertext`).
+2. Desplegar **primero** el lado que **verifica** (relay) aceptando **ambos** esquemas: token versionado ->
+   clave HKDF; token legacy (sin prefijo) -> clave `sha256`.
+3. Recien despues desplegar el lado que **acuna** (backend) para que emita tokens versionados (HKDF).
+4. Esperar > 15 min (el TTL): a esa altura todo token legacy ya expiro. Entonces se puede quitar el camino
+   legacy del verify.
+
+Asi ningun token en vuelo se invalida y el skew del deploy queda cubierto por la aceptacion dual.
