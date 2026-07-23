@@ -5,6 +5,14 @@ import '@testing-library/jest-dom/vitest';
 import { LoginEnVivoDialog } from '../src/components/sitios/LoginEnVivoDialog';
 import type { SitioConectado } from '../src/lib/sitios';
 
+// Se mockea el relay de teclado movil: su montaje real hace fetch + WebCrypto. Aca solo verificamos
+// que el modal lo monta SOLO en tactil y jamas en desktop (el flujo directo del iframe queda intacto).
+vi.mock('../src/components/sitios/RelayTecladoMovil', () => ({
+  RelayTecladoMovil: ({ sitioId }: { sitioId: string }) => (
+    <div data-testid="relay-movil">{sitioId}</div>
+  ),
+}));
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -42,26 +50,27 @@ function stubMatchMedia(tactil: boolean) {
   );
 }
 
-describe('LoginEnVivoDialog (aviso de teclado movil no soportado)', () => {
-  it('en dispositivo tactil muestra el aviso y la vista en vivo sigue embebida', () => {
+describe('LoginEnVivoDialog: desktop directo vs relay de teclado movil', () => {
+  it('en dispositivo tactil monta el relay de teclado movil, con la vista en vivo embebida', () => {
     stubMatchMedia(true);
     setup();
-    expect(screen.getByRole('note')).toHaveTextContent(/computadora/i);
+    expect(screen.getByTestId('relay-movil')).toHaveTextContent('sit_1');
     expect(screen.getByTitle(/en\.wikipedia\.org/)).toHaveAttribute(
       'src',
       'https://proveedor.example/vista-en-vivo/abc',
     );
   });
 
-  it('en desktop (puntero fino) no muestra el aviso', () => {
+  it('en desktop (puntero fino) NO monta el relay: entrada directa al iframe, sin cambios', () => {
     stubMatchMedia(false);
     setup();
-    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('relay-movil')).not.toBeInTheDocument();
+    expect(screen.getByTitle(/en\.wikipedia\.org/)).toBeInTheDocument();
   });
 
-  it('sin matchMedia (entorno minimo) no muestra el aviso ni truena', () => {
+  it('sin matchMedia (entorno minimo) no monta el relay ni truena', () => {
     setup();
-    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('relay-movil')).not.toBeInTheDocument();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 });
