@@ -79,6 +79,15 @@ type Estado = 'hello' | 'estableciendo' | 'relevando' | 'cerrada';
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 5_000;
 const DEFAULT_IDLE_TIMEOUT_MS = 120_000;
 
+// NEW-2: el LOCK por conexion se toma con un LEASE CORTO e INDEPENDIENTE del exp del token (que puede
+// faltar hasta 15 min). Asi un lock HUERFANO -una sesion que tomo el lock y murio sin liberarlo (p.ej. si
+// consumir-jti fallo y la liberacion best-effort por HTTP tambien, tipico en un rolling deploy)- caduca en
+// SEGUNDOS y el reintento del usuario no queda bloqueado varios minutos. Mientras el canal vive el lease se
+// RENUEVA (el mismo nonce extiende el exp) cada LOCK_RENOVACION_MS, con holgura de sobra frente al lease
+// para tolerar un hiccup transitorio de la autoridad sin perder el lock.
+const LOCK_LEASE_SECONDS = 30;
+const LOCK_RENOVACION_MS = 10_000;
+
 /**
  * Codigo UNICO de rechazo hacia el cliente (C-2). No distingue el motivo (token invalido, reuso, limite,
  * conexion ocupada, protocolo, ...): todos se ven igual desde afuera para no filtrar un oraculo. El
@@ -106,6 +115,7 @@ export class SesionRelay {
   private temporizadorHandshake: ReturnType<typeof setTimeout> | null = null;
   private temporizadorIdle: ReturnType<typeof setTimeout> | null = null;
   private temporizadorExp: ReturnType<typeof setTimeout> | null = null;
+  private temporizadorRenovacion: ReturnType<typeof setTimeout> | null = null;
 
   private readonly ahora: () => number;
   private readonly handshakeTimeoutMs: number;
@@ -218,9 +228,11 @@ export class SesionRelay {
   ): Promise<void> {
     // 1) LOCK por conexion COMPARTIDO (atomico cross-instancia). Se toma ANTES de consumir el jti para
     //    que la contienda por la conexion no queme el token. Fail-closed si la autoridad no responde.
+    //    NEW-2: se toma con un LEASE CORTO (no el exp del token) para que un lock huerfano caduque en
+    //    segundos; se renueva mientras el canal vive (ver programarRenovacionLock).
     let tomado: boolean;
     try {
-      tomado = await this.deps.autoridad.tomarConexion(connectionId, this.lockNonce, exp);
+      tomado = await this.deps.autoridad.tomarConexion(connectionId, this.lockNonce, this.leaseLock());
     } catch {
       this.rechazar('autoridad_no_disponible');
       return;
@@ -274,6 +286,9 @@ export class SesionRelay {
       if (this.estado !== 'estableciendo') return;
       this.estado = 'relevando';
       this.reiniciarIdle();
+      // NEW-2: renovar el lease corto del lock mientras el canal viva, para que no venza bajo un usuario
+      // legitimo que sigue tecleando (el lock huerfano de una sesion MUERTA si vence, en segundos).
+      this.programarRenovacionLock(connectionId);
       // El ready lleva la MAC del RELAY: el cliente la verifica antes de teclear, asi no habla con un
       // relay impostor (un MITM que sustituyo la pata del relay no conoce el secreto de enlace).
       this.enviarControl({ t: 'ready', mac: macRelay(this.par.publicKeyB64, clientPubB64, token, bindingKey) });
@@ -345,6 +360,46 @@ export class SesionRelay {
     this.temporizadorIdle = setTimeout(() => this.cerrar('idle'), this.idleTimeoutMs);
   }
 
+  /** Instante (epoch segundos) de vencimiento del lease CORTO del lock por conexion (NEW-2). */
+  private leaseLock(): number {
+    return Math.floor(this.ahora() / 1000) + LOCK_LEASE_SECONDS;
+  }
+
+  /** Programa la proxima renovacion del lease del lock (NEW-2). Un solo temporizador a la vez. */
+  private programarRenovacionLock(connectionId: string): void {
+    this.limpiarTemporizador('temporizadorRenovacion');
+    this.temporizadorRenovacion = setTimeout(() => {
+      void this.renovarLock(connectionId);
+    }, LOCK_RENOVACION_MS);
+  }
+
+  /**
+   * Renueva el lease del lock por conexion mientras el canal vive (NEW-2). Extiende el exp con el MISMO
+   * nonce. Resultados:
+   *  - renovado (true): re-programa la proxima renovacion.
+   *  - la autoridad LANZA (hiccup transitorio): NO se cierra el canal. Mientras la autoridad este caida
+   *    ningun otro canal puede establecerse (tomar el lock tambien la necesita, fail-closed), asi que el
+   *    lock no se lo lleva nadie aunque el lease venza; se reintenta en el proximo tick.
+   *  - devuelve false (se perdio el lock: otra sesion lo retomo tras un lapso): se cierra el canal para no
+   *    tener dos canales vivos sobre la misma conexion (invariante B-1 intacto).
+   */
+  private async renovarLock(connectionId: string): Promise<void> {
+    if (this.estado !== 'relevando' || this.conexionTomada === null) return;
+    let renovado: boolean;
+    try {
+      renovado = await this.deps.autoridad.tomarConexion(connectionId, this.lockNonce, this.leaseLock());
+    } catch {
+      if (this.estado === 'relevando') this.programarRenovacionLock(connectionId);
+      return;
+    }
+    if (this.estado !== 'relevando') return;
+    if (!renovado) {
+      this.cerrar('lock_perdido');
+      return;
+    }
+    this.programarRenovacionLock(connectionId);
+  }
+
   /**
    * Rechaza el canal (C-2). Hacia el CLIENTE va SIEMPRE el mismo codigo generico: "token ya usado",
    * "limite excedido", "conexion ocupada", "token invalido", etc. son INDISTINGUIBLES para quien esta
@@ -381,11 +436,13 @@ export class SesionRelay {
     this.limpiarTemporizador('temporizadorHandshake');
     this.limpiarTemporizador('temporizadorIdle');
     this.limpiarTemporizador('temporizadorExp');
+    this.limpiarTemporizador('temporizadorRenovacion');
     if (this.cdp !== null) {
       this.cdp.cerrar();
       this.cdp = null;
     }
-    // Liberar el lock por conexion COMPARTIDO (best-effort: si falla, caduca solo por exp).
+    // Liberar el lock por conexion COMPARTIDO (best-effort: si falla, caduca solo por su LEASE CORTO en
+    // segundos, no por el exp del token; NEW-2). Asi un cierre con liberacion fallida no bloquea al usuario.
     if (this.conexionTomada !== null) {
       void this.deps.autoridad.liberarConexion(this.conexionTomada.connectionId, this.lockNonce);
       this.conexionTomada = null;
@@ -411,7 +468,9 @@ export class SesionRelay {
     });
   }
 
-  private limpiarTemporizador(nombre: 'temporizadorHandshake' | 'temporizadorIdle' | 'temporizadorExp'): void {
+  private limpiarTemporizador(
+    nombre: 'temporizadorHandshake' | 'temporizadorIdle' | 'temporizadorExp' | 'temporizadorRenovacion',
+  ): void {
     const timer = this[nombre];
     if (timer !== null) {
       clearTimeout(timer);

@@ -397,6 +397,56 @@ describe('B-1: fail-closed si la autoridad de coordinacion no responde', () => {
   });
 });
 
+describe('NEW-2: el lock se toma con un lease CORTO, no con el exp del token', () => {
+  it('un fallo de consumir-jti tras tomar el lock no bloquea al usuario (lease corto, no exp del token)', async () => {
+    const autoridad = new AutoridadEnMemoria();
+    const tomarSpy = vi.spyOn(autoridad, 'tomarConexion');
+    // Rolling deploy: consumir-jti falla DESPUES de tomar el lock (el caso exacto de NEW-2).
+    vi.spyOn(autoridad, 'consumirJti').mockRejectedValue(new Error('autoridad caida'));
+    const ctx = montar({ autoridad });
+    const { token, bindingKey, expiresAt } = acunar({ ownerId: 'o', connectionId: 'con_lease', sesionExternaId: 's' });
+
+    await enviarHello(ctx, token, bindingKey);
+    await vi.waitFor(() => expect(ctx.socket.ultimo('error')?.code).toBe('rechazado'));
+    expect(motivoCierre(ctx.captura)).toBe('autoridad_no_disponible');
+
+    // El lock se tomo con un lease de ~30s, MUY por debajo del exp del token (hasta 15 min): asi un lock
+    // huerfano caduca en segundos y el reintento del usuario funciona en un plazo razonable.
+    expect(tomarSpy).toHaveBeenCalledTimes(1);
+    const leasePasado = tomarSpy.mock.calls[0]?.[2] as number;
+    const nowSec = Math.floor(Date.now() / 1000);
+    const tokenExpSec = Math.floor(new Date(expiresAt).getTime() / 1000);
+    expect(leasePasado).toBeLessThanOrEqual(nowSec + 35);
+    expect(leasePasado).toBeLessThan(tokenExpSec - 60); // claramente mas corto que la vida del token
+  });
+
+  it('renueva el lease del lock mientras el canal vive (mismo nonce, sin perderlo)', async () => {
+    const autoridad = new AutoridadEnMemoria();
+    const ctx = montar({ autoridad });
+    const { token, bindingKey } = acunar({ ownerId: 'o', connectionId: 'con_renov', sesionExternaId: 's' });
+    await establecer(ctx, token, bindingKey);
+    const tomarSpy = vi.spyOn(autoridad, 'tomarConexion');
+    // Forzar una renovacion inmediata (sin esperar el intervalo real) y verificar que conserva el lock.
+    await (ctx.sesion as unknown as { renovarLock(c: string): Promise<void> }).renovarLock('con_renov');
+    expect(tomarSpy).toHaveBeenCalledWith('con_renov', expect.any(String), expect.any(Number));
+    // Sigue vivo: no se cerro por la renovacion.
+    expect(ctx.socket.cerrado).toBe(false);
+    ctx.sesion.cerrar('fin');
+  });
+
+  it('cierra el canal si PIERDE el lock en una renovacion (otra sesion lo retomo)', async () => {
+    const autoridad = new AutoridadEnMemoria();
+    const ctx = montar({ autoridad });
+    const { token, bindingKey } = acunar({ ownerId: 'o', connectionId: 'con_perdido', sesionExternaId: 's' });
+    await establecer(ctx, token, bindingKey);
+    // Simular que la renovacion ve el lock tomado por OTRA sesion (false = se perdio).
+    vi.spyOn(autoridad, 'tomarConexion').mockResolvedValue(false);
+    await (ctx.sesion as unknown as { renovarLock(c: string): Promise<void> }).renovarLock('con_perdido');
+    expect(ctx.socket.cerrado).toBe(true);
+    expect(motivoCierre(ctx.captura)).toBe('lock_perdido');
+  });
+});
+
 describe('C-2: el codigo de error hacia el cliente es UNIFORME (sin oraculo)', () => {
   it('dos rechazos distintos dan el MISMO codigo al cliente y motivos distintos SOLO en el log', async () => {
     // Escenario A: token invalido (otro secreto) -> el relay lo ve como 'token_invalido'.

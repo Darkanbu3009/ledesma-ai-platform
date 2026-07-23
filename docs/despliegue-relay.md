@@ -51,7 +51,7 @@ que hace de relay tiene acceso efectivo a todas las sesiones vivas del proyecto.
 | --- | --- |
 | Build command | `npm ci && npm run build` (el build de la raiz compila `packages/shared` primero y luego `apps/relay`) |
 | Start command | `npm start -w apps/relay` (corre `node dist/index.js`) |
-| Health check path | `/health` (responde `200 ok`) |
+| Health check path | `/health` (responde `200 ok`; **503 `saturado`** si el cupo global esta agotado, ver NEW-1) |
 | Puerto | Railway inyecta `PORT`; el relay escucha en el (`0.0.0.0` por `HOST` default) |
 
 > El relay usa el `WebSocket` **cliente** de la libreria `ws` para hablar CDP, asi que **no** necesita el
@@ -130,6 +130,23 @@ el endpoint interno). Migracion: `apps/backend/migrations/V031__relay_coordinaci
   estado por proceso).
 - **Refuse-to-start.** En produccion, sin `RELAY_CONSUMO_URL` el relay **se niega a arrancar**. Preferimos
   no arrancar antes que operar con estado dividido sin aviso.
+- **Lease corto del lock (NEW-2).** El lock por conexion se toma con un **lease corto** (30s) e
+  **independiente** del exp del token (hasta 15 min), y se **renueva** con el mismo `lock_nonce` mientras el
+  canal vive. Asi, si una sesion toma el lock y muere sin liberarlo (p.ej. `consumir-jti` fallo en un rolling
+  deploy y la liberacion best-effort tambien), el lock **huerfano caduca en segundos** y el reintento del
+  usuario **no** queda bloqueado varios minutos. El lock **sigue** garantizando un solo canal por conexion:
+  mientras la autoridad este disponible el dueno renueva su lease, y mientras este caida **nadie** puede
+  establecer otro canal (tomar el lock tambien la necesita, fail-closed).
+
+### Purga de la coordinacion (NEW-4): OBLIGATORIA
+
+Las tablas `relay_jti_consumidos` y `relay_conexiones_activas` **NO se mantienen chicas solas**: cada
+handshake INSERTA una fila y **ninguna** ruta de la aplicacion borra. Que un token/lock deje de ser valido a
+los <= 15 min **no** achica la tabla; solo la achica la purga. Por eso hay que **activar** el barrido
+periodico aplicando **`apps/backend/migrations/V032__relay_coordinacion_purga_cron.sql`** en el SQL Editor de
+Supabase (programa `relay_coordinacion_purgar()` por `pg_cron` cada 10 min; mismo patron que V011/V016).
+Requiere la extension `pg_cron` (una sola vez por base; ya activada si se uso el scheduler o la retencion).
+Sin V032 las tablas crecen sin limite. A demanda: `select relay_coordinacion_purgar();`.
 
 ### Requisito de despliegue: red privada
 
@@ -159,17 +176,34 @@ par de llaves:
 - **Cap GLOBAL** de handshakes en vuelo (default `256`): la **garantia**, no depende de ningun dato del
   cliente, ningun atacante lo evade.
 - **Cap POR IP** de handshakes en vuelo (default `32`): defensa en profundidad para que una sola fuente no
-  consuma sola el cupo global. La IP se toma del primer valor de `X-Forwarded-For` (lo pone el proxy de
-  borde de Railway); ese valor es **falsificable**, por eso el cap global es la garantia y este es el
-  respaldo. Se usa la IP declarada -y no la del socket- para **no** agrupar a todos los moviles detras del
-  proxy (o de un CGNAT del carrier) bajo una sola clave y castigar el flujo legitimo.
+  consuma sola el cupo global. Es un cap **BEST-EFFORT y EVADIBLE** (NEW-3): detras del proxy de Railway la
+  IP del socket es la del proxy (comun a todos), asi que hay que confiar en una cabecera, y Railway da guias
+  **contradictorias** sobre cual usar (a veces "strip + primer `X-Forwarded-For`", a veces "append + ultimo
+  valor"), asi que **ninguna** es no-falsificable con certeza. `ipCliente` prefiere `x-envoy-external-address`
+  (un valor **unico** que fija Envoy, no una lista que el cliente arma) y cae al primer `X-Forwarded-For` si
+  falta. Como puede ser evadible, **la garantia real es el cap GLOBAL**, no este. Se usa la IP declarada -y
+  no la del socket- para **no** agrupar a todos los moviles detras del proxy (o de un CGNAT del carrier) bajo
+  una sola clave y castigar el flujo legitimo.
 
-El cupo se toma al aceptar el upgrade y se **libera** en cuanto la sesion **autentica** (deja de ser
-anonima) o cierra, lo que ocurra primero: cuenta handshakes **en vuelo**, no sesiones ya autenticadas, asi
-que un usuario legitimo no lo retiene mientras teclea. Ademas la ventana de handshake se acorto de **10s a
-5s** (un cliente real responde el `cli_hello` en sub-segundos), reduciendo cuanto puede un atacante retener
-una sesion sin autenticar. Un usuario real (un handshake que se resuelve en sub-segundos) **nunca** toca
-estos topes. Los defaults se pueden ajustar en el constructor de `PorteroPreAuth`; no requieren env nueva.
+> **NEW-3, honestidad:** no hay forma **confiable** de obtener la IP real del cliente en Railway hoy, asi que
+> el cap por IP no puede ser una garantia. Lo que **si** garantiza disponibilidad es el cap GLOBAL (no
+> depende de ningun dato del cliente) mas la ventana de handshake corta (5s) y la liberacion sin fugas del
+> cupo (NEW-1): un flood que quiera negar servicio debe **sostener** 256 handshakes en vuelo, y cada uno
+> caduca en <= 5s. **No** conviene bajar el cap global (lo haria mas facil de saturar); el balance memoria vs
+> saturacion en 256 es razonable para un relay de login.
+
+El cupo se toma al aceptar el upgrade y se **libera en TODA ruta de salida** (NEW-1): cuando la sesion
+**autentica** (deja de ser anonima), cuando cierra, y -como respaldo enganchado al **socket crudo**- cuando
+el socket se cierra aunque `handleUpgrade` **aborte** sin crear sesion (handshake WebSocket malformado). La
+liberacion es **idempotente**, asi que es **imposible** que un cupo quede reservado sin una sesion viva que
+lo respalde. Cuenta handshakes **en vuelo**, no sesiones ya autenticadas, asi que un usuario legitimo no lo
+retiene mientras teclea. La ventana de handshake es de **5s** (un cliente real responde el `cli_hello` en
+sub-segundos). Un usuario real **nunca** toca estos topes. Los defaults se ajustan en el constructor de
+`PorteroPreAuth`; no requieren env nueva.
+
+Ademas (NEW-1) el **health check refleja el estado real**: si el cupo global esta agotado, `GET /health`
+responde **503** (no 200) para que Railway **reinicie** el servicio en vez de dejarlo colgado sin poder
+aceptar handshakes. Con la fuga de cupo corregida, una saturacion sostenida solo ocurre ante una anomalia.
 
 ## Codigo de rechazo uniforme hacia el cliente (C-2)
 

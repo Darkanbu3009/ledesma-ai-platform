@@ -37,10 +37,12 @@ export class RelayCoordinacionRepository {
   }
 
   /**
-   * Toma el LOCK por conexion (exclusion mutua atomica). INSERT que, ante conflicto, SOLO pisa un lock
-   * VENCIDO (exp <= ahora): un lock vigente de otra sesion NO se actualiza y no se devuelve nada (false =
-   * conexion ocupada). Si no hay fila, o la habia pero vencida, se toma (true). Asi un crash del relay no
-   * deja la conexion trabada mas alla de la vida del token.
+   * Toma o RENUEVA el LOCK por conexion (exclusion mutua atomica). INSERT que, ante conflicto, actualiza si
+   * el lock esta VENCIDO (exp <= ahora) O si es de la MISMA sesion (mismo lock_nonce). Lo primero permite
+   * retomar un lock huerfano; lo segundo permite que el dueno RENUEVE su lease (NEW-2: el relay renueva un
+   * lease corto mientras el canal vive). Un lock vigente de OTRA sesion no se toca y no se devuelve nada
+   * (false = conexion ocupada). Asi nunca hay dos canales vivos sobre la misma conexion, y un lock huerfano
+   * caduca por su lease (segundos), no por la vida del token (hasta 15 min).
    */
   async tomarConexion(connectionId: string, lockNonce: string, exp: number): Promise<boolean> {
     const ahora = this.ahoraSec();
@@ -50,6 +52,7 @@ export class RelayCoordinacionRepository {
       on conflict (connection_id) do update
         set lock_nonce = excluded.lock_nonce, exp = excluded.exp, tomado_en = now()
         where relay_conexiones_activas.exp <= ${ahora}
+           or relay_conexiones_activas.lock_nonce = excluded.lock_nonce
       returning connection_id
     `;
     return filas.length > 0;
