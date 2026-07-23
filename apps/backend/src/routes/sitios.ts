@@ -9,6 +9,7 @@ import {
   parseSitioJobPayload,
   tierAllowsAutonomy,
 } from '@ledesma-platform/shared';
+import { mintRelayToken } from '@ledesma-platform/shared/relay-token';
 import type { Env } from '../config/env.js';
 import { AppError } from '../errors/app-error.js';
 import { getSql } from '../db/client.js';
@@ -233,6 +234,45 @@ export function sitiosRoutes(
           payload: { kind: CONFIRMAR_CONEXION_JOB_KIND, connectionId: sitio.id },
         });
         return reply.status(202).send({ status: 'accepted', jobId: job.id });
+      },
+    );
+
+    // TOKEN DEL RELAY DE TECLADO MOVIL (conocimiento minimo). SOLO en telefonos: cuando el cliente es
+    // tactil, la vista en vivo del proveedor no levanta el teclado nativo, asi que el usuario teclea en
+    // un campo propio de la consola y las pulsaciones se RELEVAN cifradas via el servicio relay hacia el
+    // navegador remoto. Este endpoint NO releva nada ni habla con Browserbase: ACUNA un token efimero de
+    // un solo uso, ligado a (owner, conexion, sesion del proveedor), con TTL corto. El SERVICIO RELAY lo
+    // valida con el MISMO secreto; el backend jamas ve las pulsaciones ni la API key de Browserbase.
+    //
+    // El desktop NO usa esto: sigue con entrada directa al iframe (LoginEnVivoDialog). El endpoint es
+    // agnostico del dispositivo (autoriza; no decide UI); es la consola la que solo lo invoca en tactil.
+    app.post(
+      '/v1/sitios/:id/relay-token',
+      async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+        const user = await requireUser(request, verifier);
+        await requireAutonomy(user.id);
+        const sitio = await resolveSitioParam(request, user.id);
+
+        // El relay solo tiene sentido con un login EN CURSO y una sesion del proveedor viva. En
+        // cualquier otro estado no hay nada que relevar: 400 inmediato y claro.
+        if (sitio.estado !== 'esperando_login' || sitio.sesionExternaId === null) {
+          throw new AppError('VALIDATION_ERROR', 400, 'Site has no login in progress');
+        }
+
+        // Feature opcional: sin el secreto compartido o la URL publica del relay, el canal no existe.
+        // La consola cae al aviso de "hazlo desde una computadora" (el flujo previo en tactil).
+        if (config.RELAY_TOKEN_SECRET === undefined || config.RELAY_PUBLIC_URL === undefined) {
+          throw new AppError('RELAY_NO_DISPONIBLE', 501, 'Assisted mobile keyboard relay is not configured');
+        }
+
+        const { token, expiresAt } = mintRelayToken(
+          { ownerId: user.id, connectionId: sitio.id, sesionExternaId: sitio.sesionExternaId },
+          config.RELAY_TOKEN_SECRET,
+        );
+
+        // El token es la UNICA credencial del canal (un solo uso, TTL corto). relayUrl deja que la
+        // consola descubra a donde conectar sin una env propia. Nada de esto es contenido de pulsaciones.
+        return reply.status(201).send({ token, expiresAt, relayUrl: config.RELAY_PUBLIC_URL });
       },
     );
 
