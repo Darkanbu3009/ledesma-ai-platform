@@ -39,12 +39,20 @@ export function origenPermitido(origen: string | undefined, permitidos: '*' | st
 }
 
 /**
- * IP del cliente para el cupo pre-auth por IP (B-2). Detras del proxy de borde de Railway (que termina
- * TLS) la IP del socket es la del proxy, comun a TODOS los clientes; el cliente real llega en el primer
- * valor de X-Forwarded-For. Se usa ese valor (aunque sea falsificable: por eso el cap por IP es defensa
- * en profundidad y el cap global la garantia) para no agrupar a todos los moviles bajo una sola clave.
+ * IP del cliente para el cupo pre-auth POR IP (B-2). Es una clave BEST-EFFORT (NEW-3): detras del proxy de
+ * borde de Railway (que termina TLS) la IP del socket es la del proxy, comun a TODOS los clientes, asi que
+ * hay que confiar en una cabecera. Railway da guias CONTRADICTORIAS sobre cual usar (a veces "strip +
+ * primer X-Forwarded-For", a veces "append + ultimo valor"), asi que NINGUNA es no-falsificable con
+ * certeza. Se prefiere `x-envoy-external-address` -un valor UNICO que fija Envoy, no una lista que el
+ * cliente arma- y si falta se cae al primer X-Forwarded-For (comportamiento previo). En NINGUN caso esto es
+ * peor que antes; y como puede ser evadible, el cap por IP es defensa en profundidad y la GARANTIA es el
+ * cap GLOBAL. Nunca se agrupa por la IP del socket: seria una sola clave para todos los moviles detras del
+ * proxy/CGNAT y castigaria el flujo legitimo.
  */
 export function ipCliente(req: IncomingMessage): string {
+  const envoy = req.headers['x-envoy-external-address'];
+  const envoyIp = Array.isArray(envoy) ? envoy[0] : envoy;
+  if (typeof envoyIp === 'string' && envoyIp.trim().length > 0) return envoyIp.trim();
   const xff = req.headers['x-forwarded-for'];
   const crudo = Array.isArray(xff) ? xff[0] : xff;
   if (typeof crudo === 'string') {
@@ -64,6 +72,15 @@ export function crearServidorRelay(deps: DepsServidor): ServidorRelay {
   const server = createServer((req, res) => {
     // SIN rutas de aplicacion: solo liveness para el health check del despliegue (Railway).
     if (req.method === 'GET' && (req.url === '/health' || req.url === '/')) {
+      // NEW-1: el health refleja el ESTADO REAL. Si el cupo global esta agotado el relay no puede aceptar
+      // NINGUN handshake nuevo: responde 503 para que la plataforma reinicie en vez de quedar colgado
+      // respondiendo 200. Con la fuga de cupo corregida esto solo se sostiene ante una anomalia (una fuga
+      // desconocida o un flood), no ante la operacion normal, donde el cupo siempre se libera.
+      if (portero.saturadoGlobal) {
+        res.writeHead(503, { 'content-type': 'text/plain' });
+        res.end('saturado');
+        return;
+      }
       res.writeHead(200, { 'content-type': 'text/plain' });
       res.end('ok');
       return;
@@ -88,8 +105,22 @@ export function crearServidorRelay(deps: DepsServidor): ServidorRelay {
       socket.destroy();
       return;
     }
+    // NEW-1: el cupo se libera en TODA ruta de salida. `liberar` es idempotente (una sola baja del cupo por
+    // cada admitir). Se engancha al SOCKET CRUDO (close/error) como respaldo: si `handleUpgrade` ABORTA sin
+    // llamar al callback (handshake WebSocket malformado, p.ej. `Sec-WebSocket-Version: 99`), no se crea
+    // sesion y el UNICO evento que ocurre es el cierre del socket. Asi es imposible que un cupo quede
+    // reservado sin una sesion viva que lo respalde: si hay sesion, ella lo libera (al autenticar o cerrar)
+    // y este respaldo es un no-op idempotente; si NO hay sesion, lo libera el cierre del socket.
+    let liberado = false;
+    const liberar = (): void => {
+      if (liberado) return;
+      liberado = true;
+      portero.liberar(ip);
+    };
+    socket.once('close', liberar);
+    socket.once('error', liberar);
     wss.handleUpgrade(req, socket, head, (ws) => {
-      conectar(ws, origen ?? null, ip, portero, deps, sesiones);
+      conectar(ws, origen ?? null, liberar, deps, sesiones);
     });
   });
 
@@ -99,8 +130,7 @@ export function crearServidorRelay(deps: DepsServidor): ServidorRelay {
 function conectar(
   ws: WebSocket,
   origen: string | null,
-  ip: string,
-  portero: PorteroPreAuth,
+  liberarPreAuth: () => void,
   deps: DepsServidor,
   sesiones: Set<SesionRelay>,
 ): void {
@@ -117,9 +147,9 @@ function conectar(
     logger: deps.logger,
     resolverConnectUrl: deps.resolverConnectUrl,
     crearCdp: deps.crearCdp,
-    // El cupo pre-auth se libera cuando la sesion autentica o cierra (lo que ocurra primero): la propia
-    // sesion garantiza que se llame UNA sola vez.
-    liberarPreAuth: () => portero.liberar(ip),
+    // El cupo pre-auth se libera cuando la sesion autentica o cierra (lo que ocurra primero). `liberar` es
+    // idempotente (compartido con el respaldo del socket crudo), asi que llamarlo varias veces es seguro.
+    liberarPreAuth,
   });
   sesiones.add(sesion);
   ws.on('message', (data: RawData, isBinary: boolean) => {

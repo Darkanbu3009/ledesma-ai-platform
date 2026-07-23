@@ -7,12 +7,13 @@
  * Dos topes, ambos evaluados ANTES de aceptar el upgrade (antes de generar llaves):
  *  - GLOBAL: techo duro de handshakes simultaneos sin autenticar. Es la GARANTIA: no depende de ningun
  *    dato controlable por el cliente, asi que ningun atacante lo evade.
- *  - POR IP: techo por IP de cliente, para que una sola fuente no consuma sola el cupo global. La IP se
- *    toma del primer valor de X-Forwarded-For (lo pone el proxy de borde de Railway); ese valor es
- *    CLIENT-CLAIMED y por lo tanto falsificable, por eso el tope por IP es defensa en profundidad y el
- *    tope GLOBAL es la garantia real. Usar la IP del socket en su lugar agruparia a TODOS los usuarios
- *    detras del proxy bajo una sola clave (y a los moviles detras de CGNAT), lo que castigaria el flujo
- *    legitimo; por eso se prefiere la IP declarada, holgada, con el global como respaldo.
+ *  - POR IP: techo por IP de cliente, para que una sola fuente no consuma sola el cupo global. La IP la
+ *    resuelve `ipCliente` (server.ts) BEST-EFFORT: Railway da guias CONTRADICTORIAS sobre como expone la
+ *    IP real del cliente detras de su proxy de borde (a veces "strip + primer X-Forwarded-For", a veces
+ *    "append + ultimo valor"), asi que NINGUNA cabecera es no-falsificable con certeza (NEW-3). Por eso el
+ *    tope POR IP es defensa en profundidad EVADIBLE y el tope GLOBAL es la GARANTIA real (no depende de
+ *    ningun dato del cliente). Usar la IP del socket en su lugar agruparia a TODOS los usuarios detras del
+ *    proxy bajo una sola clave (y a los moviles detras de CGNAT), lo que castigaria el flujo legitimo.
  *
  * El cupo se toma al aceptar el upgrade y se libera cuando la sesion AUTENTICA (deja de ser anonima) o
  * cierra, lo que ocurra primero: asi el tope cuenta handshakes EN VUELO y no sesiones ya autenticadas,
@@ -76,5 +77,15 @@ export class PorteroPreAuth {
   /** Cantidad de handshakes sin autenticar en vuelo (para auditoria/tests). */
   get enVueloTotal(): number {
     return this.enVuelo;
+  }
+
+  /**
+   * true si el cupo GLOBAL esta agotado: el relay NO puede aceptar ningun handshake nuevo ahora mismo. Lo
+   * consulta el health check (NEW-1): con la fuga de cupo corregida el cupo siempre se libera, asi que una
+   * saturacion SOSTENIDA es anomala (una fuga desconocida o un flood). Ante ella /health debe FALLAR para
+   * que la plataforma reinicie, en vez de quedar colgado respondiendo 200 sin poder aceptar handshakes.
+   */
+  get saturadoGlobal(): boolean {
+    return this.enVuelo >= this.opciones.maxGlobal;
   }
 }

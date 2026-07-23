@@ -51,8 +51,12 @@ alter table relay_conexiones_activas enable row level security;
 revoke insert, update, delete, select on relay_jti_consumidos from authenticated, anon;
 revoke insert, update, delete, select on relay_conexiones_activas from authenticated, anon;
 
--- PURGA de filas vencidas (acota la memoria/tamano; ambas tablas viven una ventana de <= 15 min). Se puede
--- invocar a demanda o programar por pg_cron (ver el bloque OPCIONAL de abajo). Idempotente.
+-- PURGA de filas vencidas. IMPORTANTE (NEW-4): estas tablas NO se mantienen chicas solas. El consumo del
+-- jti y la toma del lock son INSERT (con ON CONFLICT); NINGUNA ruta borra, y una fila VENCIDA (exp pasado)
+-- sigue ocupando espacio hasta que ALGO la borre. Que un token/lock deje de ser VALIDO a los <= 15 min NO
+-- achica la tabla: solo la achica esta purga. Por eso la purga periodica es OBLIGATORIA y se ACTIVA en la
+-- migracion V032 (patron V011/V016: la funcion aca, la activacion por pg_cron aparte). Idempotente; tambien
+-- se puede invocar a demanda con `select relay_coordinacion_purgar();`.
 create or replace function relay_coordinacion_purgar()
 returns void
 language sql
@@ -61,18 +65,5 @@ as $$
   delete from relay_conexiones_activas where exp < extract(epoch from now());
 $$;
 
--- =============================================================================================
--- OPCIONAL: purga automatica cada 10 minutos con pg_cron (mismo patron que V011/V016). Descomentar para
--- activarla. Requiere la extension pg_cron habilitada (una sola vez por base; ya activada si se uso el
--- scheduler o la retencion). Sin esto, las tablas se mantienen chicas igual (ventana <= 15 min) y se puede
--- purgar a demanda con `select relay_coordinacion_purgar();`.
--- ---------------------------------------------------------------------------------------------
--- create extension if not exists pg_cron;
--- do $$
--- begin
---   if exists (select 1 from cron.job where jobname = 'relay-coordinacion-purgar') then
---     perform cron.unschedule('relay-coordinacion-purgar');
---   end if;
--- end
--- $$;
--- select cron.schedule('relay-coordinacion-purgar', '*/10 * * * *', $$select relay_coordinacion_purgar();$$);
+-- La ACTIVACION por pg_cron vive en V032__relay_coordinacion_purga_cron.sql (se entrega aparte, como
+-- V011/V016, porque programar el barrido es un paso deliberado del operador). Aplicar V032 tras esta.
