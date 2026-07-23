@@ -130,56 +130,68 @@ export function RelayTecladoMovil({ sitioId }: { sitioId: string }) {
 
   return (
     <div className="flex-none border-b border-line-soft bg-field/40 px-6 py-3">
-      {/* DIVULGACION explicita ANTES de escribir, en lenguaje simple (ES/EN). */}
-      <p className="flex items-start gap-1.5 text-[13px] leading-snug text-muted">
-        <ShieldCheck className="mt-0.5 h-4 w-4 flex-none text-ok" aria-hidden="true" />
-        <span>{t('sitios.relayMovil.divulgacion')}</span>
-      </p>
+      {/* Tarjeta puramente visual: no aporta elementos enfocables ni cambia el orden de foco. */}
+      <div className="rounded-xl border border-line bg-surface p-3">
+        <p className="text-xs font-medium text-muted">{t('sitios.relayMovil.titulo')}</p>
 
-      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-        <input
-          type="text"
-          inputMode="text"
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-          spellCheck={false}
-          name="relay-teclado-efimero"
-          aria-label={t('sitios.relayMovil.campoAria')}
-          placeholder={t('sitios.relayMovil.placeholder')}
-          value={valor}
-          disabled={estado !== 'listo'}
-          onChange={(e) => alCambiar(e.target.value)}
-          onKeyDown={alTecla}
-          className="h-11 w-full flex-1 rounded-xl border border-line bg-field px-4 text-sm text-ink placeholder:text-muted-soft focus:border-brasa-line focus:outline-none disabled:opacity-60"
-        />
-        <div className="flex flex-none gap-2">
-          {teclas.map((tecla) => (
-            <button
-              key={tecla}
-              type="button"
-              disabled={estado !== 'listo'}
-              onClick={() => enviarTecla(tecla)}
-              className="inline-flex h-11 items-center justify-center rounded-[10px] border border-line bg-surface px-3 text-[13px] font-medium text-muted transition hover:border-brasa-line hover:text-ink disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {t(`sitios.relayMovil.tecla.${tecla}`)}
-            </button>
-          ))}
+        <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+          <input
+            type="text"
+            inputMode="text"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            name="relay-teclado-efimero"
+            aria-label={t('sitios.relayMovil.campoAria')}
+            placeholder={t('sitios.relayMovil.placeholder')}
+            value={valor}
+            disabled={estado !== 'listo'}
+            onChange={(e) => alCambiar(e.target.value)}
+            onKeyDown={alTecla}
+            className="w-full flex-1 rounded-xl border border-brasa bg-field px-4 py-3 text-sm text-ink placeholder:text-muted-soft focus:outline-none focus:ring-2 focus:ring-brasa-soft disabled:opacity-60"
+          />
+          <div className="flex flex-none gap-2">
+            {teclas.map((tecla) => (
+              <button
+                key={tecla}
+                type="button"
+                disabled={estado !== 'listo'}
+                onClick={() => enviarTecla(tecla)}
+                className="inline-flex h-11 items-center justify-center rounded-[10px] border border-line bg-cream px-3 text-[13px] font-medium text-ink transition hover:border-brasa-line disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {t(`sitios.relayMovil.tecla.${tecla}`)}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
 
-      <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-soft" role="status">
-        {estado === 'listo' ? (
-          t('sitios.relayMovil.listo')
-        ) : estado === 'error' ? (
-          <span className="text-brasa">{t('sitios.relayMovil.error')}</span>
-        ) : (
-          <>
-            <Loader2 className="h-3 w-3 flex-none animate-spin" aria-hidden="true" />
-            {t('sitios.relayMovil.conectando')}
-          </>
-        )}
-      </p>
+        {/* En estado listo el aviso queda solo para lectores de pantalla (sr-only): visualmente no
+            hace falta, pero conserva el elemento y su role. */}
+        <p
+          className={
+            estado === 'listo' ? 'sr-only' : 'mt-2 flex items-center gap-1.5 text-[11px] text-muted'
+          }
+          role="status"
+        >
+          {estado === 'listo' ? (
+            t('sitios.relayMovil.listo')
+          ) : estado === 'error' ? (
+            <span className="text-brasa">{t('sitios.relayMovil.error')}</span>
+          ) : (
+            <>
+              <Loader2 className="h-3 w-3 flex-none animate-spin" aria-hidden="true" />
+              {t('sitios.relayMovil.conectando')}
+            </>
+          )}
+        </p>
+
+        {/* DIVULGACION explicita en lenguaje simple (ES/EN), visible antes de escribir. */}
+        <p className="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-muted">
+          <ShieldCheck className="mt-0.5 h-4 w-4 flex-none text-ok" aria-hidden="true" />
+          <span>{t('sitios.relayMovil.divulgacion')}</span>
+        </p>
+      </div>
     </div>
   );
 }

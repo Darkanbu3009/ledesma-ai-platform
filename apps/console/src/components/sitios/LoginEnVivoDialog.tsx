@@ -54,6 +54,12 @@ export function LoginEnVivoDialog({
     typeof window.matchMedia === 'function' &&
     window.matchMedia('(hover: none) and (pointer: coarse)').matches;
 
+  // Solo presentacion: resalta el dominio dentro del titulo sin tocar la key i18n (ES y EN
+  // interpolan {{dominio}} exactamente una vez, asi que el split siempre produce dos partes).
+  const [tituloAntes, tituloDespues] = t('sitios.modal.titulo', {
+    dominio: sitio.dominio,
+  }).split(sitio.dominio);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6">
       <div className="absolute inset-0 bg-ink/40" onClick={onCerrar} aria-hidden="true" />
@@ -71,7 +77,9 @@ export function LoginEnVivoDialog({
         <div className="flex flex-none items-start justify-between gap-4 border-b border-line-soft px-6 py-4">
           <div className="min-w-0">
             <h2 id="login-en-vivo-title" className="truncate font-display text-lg font-bold text-ink">
-              {t('sitios.modal.titulo', { dominio: sitio.dominio })}
+              {tituloAntes}
+              <span className="text-brasa">{sitio.dominio}</span>
+              {tituloDespues}
             </h2>
             <p className="mt-1 flex items-start gap-1.5 text-sm text-muted">
               <ShieldCheck className="mt-0.5 h-4 w-4 flex-none text-ok" aria-hidden="true" />
@@ -124,7 +132,7 @@ export function LoginEnVivoDialog({
               type="button"
               onClick={onConfirmar}
               disabled={confirmando}
-              className="inline-flex items-center justify-center gap-2 rounded-[10px] bg-brasa px-[22px] py-2.5 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-brasa px-[22px] py-2.5 text-sm font-semibold text-white shadow-[0_1px_2px_rgba(31,30,28,0.10)] transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
               {confirmando && <Loader2 className="h-4 w-4 animate-spin" />}
               {confirmando ? t('sitios.modal.confirmando') : t('sitios.modal.confirmar')}
