@@ -17,18 +17,16 @@ const CLASES_TITULO =
   'font-display text-3xl font-bold leading-[1.1] tracking-tight text-foreground min-[420px]:text-4xl sm:text-5xl min-[900px]:text-6xl';
 
 /**
- * Eyebrow propio del hero, con mas calidez que el eyebrow generico de las secciones:
- * frase en Archivo semibold cursiva, en sentence case y color brasa, precedida por el
- * cuadrito brasa del isotipo (pulsa suave solo si el usuario acepta movimiento). Es un
- * acento superior: no compite con el h1 y en 360px cabe en una linea sin cortarse.
+ * Eyebrow propio del hero, tratamiento editorial estatico: una hairline corta y fija a
+ * la izquierda (marca editorial, como en una portada impresa) y la frase en la fuente
+ * body semibold con tracking cuidado, en color brasa. Sin caja, sin fondo y sin ninguna
+ * animacion: es un acento superior quieto que no compite con el h1. Mismo tratamiento
+ * en web y movil (solo escala el cuerpo) y en 360px cabe en una linea sin cortarse.
  */
 function EyebrowHero({ children }: { children: ReactNode }): JSX.Element {
   return (
-    <p className="inline-flex items-center gap-2.5 font-display text-base font-semibold italic tracking-tight text-accent sm:text-lg">
-      <span
-        className="h-2 w-2 shrink-0 rounded-[2px] bg-accent motion-safe:animate-splash-pulso"
-        aria-hidden="true"
-      />
+    <p className="flex items-center gap-3 font-sans text-sm font-semibold tracking-[0.04em] text-accent sm:text-base">
+      <span className="h-px w-7 shrink-0 bg-accent" aria-hidden="true" />
       {children}
     </p>
   );
