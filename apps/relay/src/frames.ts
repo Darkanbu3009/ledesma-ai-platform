@@ -8,8 +8,9 @@ import { nonceParaContador } from '@ledesma-platform/shared/relay-protocol';
  * 16 bytes son el tag GCM, tal como lo produce WebCrypto en el cliente).
  *
  * Lanza si el tag no autentica (frame manipulado, contador alterado -> nonce distinto -> falla) o si el
- * cuerpo es demasiado corto. El texto plano devuelto es un Buffer que el llamador consume y SOBREESCRIBE
- * inmediatamente tras reenviar; jamas se loguea ni se copia a un string mas de lo necesario.
+ * cuerpo es demasiado corto. El texto plano devuelto es un Buffer que el llamador SOBREESCRIBE (fill 0)
+ * tras reenviar; ese borrado solo alcanza al Buffer, porque decodificarlo para CDP obliga a copiarlo a un
+ * string inmutable que no se puede borrar de forma determinista y solo libera el GC. Jamas se loguea.
  */
 
 const AUTH_TAG_LENGTH = 16;

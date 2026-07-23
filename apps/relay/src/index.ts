@@ -13,8 +13,10 @@ import type { Logger } from './logger.js';
  * upgrade WebSocket del relay y reenviar por CDP las pulsaciones cifradas hacia la sesion de navegador
  * viva del proveedor. No toca la base de datos, no tiene VAULT_SECRET ni ninguna otra llave de la
  * plataforma: solo BROWSERBASE_API_KEY/PROJECT_ID (para el connectUrl) y RELAY_TOKEN_SECRET (para
- * validar el token efimero). El texto plano de las pulsaciones vive solo en la memoria de este proceso,
- * el menor tiempo posible, y en ningun otro lugar.
+ * validar el token efimero). El texto plano de las pulsaciones vive solo en la memoria de este proceso y
+ * en ningun otro lugar (ni disco, ni base, ni logs); no se puede borrar de la memoria de forma
+ * determinista (las copias que CDP necesita son strings inmutables que libera el GC), asi que la
+ * proteccion real es el aislamiento de este proceso.
  */
 function loadConfig(): RelayEnv {
   try {

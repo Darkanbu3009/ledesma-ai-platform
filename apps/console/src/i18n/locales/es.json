@@ -828,7 +828,7 @@
       "pasos": {
         "paso1": {
           "titulo": "Conecta tu cuenta",
-          "descripcion": "Tú inicias sesión, en tu navegador, como siempre. Tu contraseña nunca pasa por nosotros."
+          "descripcion": "Tú inicias sesión en un navegador seguro, como siempre. En computadora la conexión es directa y tu contraseña no pasa por nosotros; en teléfono viaja cifrada por nuestra infraestructura y no se guarda."
         },
         "paso2": {
           "titulo": "Dile qué necesitas",
@@ -1769,7 +1769,7 @@
     "gate": {
       "badge": "Función de planes con autonomía",
       "titulo": "Conecta tus sitios con login",
-      "descripcion": "Con un plan con autonomía puedes conectar sitios donde tú inicias sesión, en un navegador seguro, y dejar que tus agentes trabajen ahí. Tu contraseña nunca pasa por Ledesma."
+      "descripcion": "Con un plan con autonomía puedes conectar sitios donde tú inicias sesión, en un navegador seguro, y dejar que tus agentes trabajen ahí. En computadora la conexión es directa y tu contraseña no pasa por Ledesma; en teléfono viaja cifrada por nuestra infraestructura y no se guarda."
     },
     "conectar": {
       "label": "URL del sitio",
@@ -1790,8 +1790,8 @@
       "cerrarAria": "Cerrar la vista de inicio de sesión"
     },
     "relayMovil": {
-      "divulgacion": "En el teléfono, lo que escribes aquí viaja cifrado a través de nuestra infraestructura hasta el navegador seguro donde inicias sesión. No se guarda ni se registra en ningún momento. Desde una computadora, en cambio, la conexión es directa y no pasa por nosotros.",
-      "campoAria": "Campo para escribir tu inicio de sesión; las teclas se transmiten cifradas al navegador seguro",
+      "divulgacion": "En el teléfono, lo que escribes aquí viaja cifrado hasta la infraestructura de Ledesma, donde se descifra para reenviarlo al navegador seguro en el que inicias sesión. No se almacena ni se registra en ningún momento. Desde una computadora, en cambio, la conexión es directa al navegador seguro y no pasa por nosotros.",
+      "campoAria": "Campo para escribir tu inicio de sesión; las teclas se transmiten cifradas hasta la infraestructura de Ledesma, que las descifra y las reenvía al navegador seguro",
       "placeholder": "Toca aquí y escribe tu usuario y contraseña",
       "conectando": "Estableciendo el canal seguro…",
       "listo": "Canal seguro listo: ya puedes escribir.",
