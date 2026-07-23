@@ -47,8 +47,9 @@ describe('AutoridadRemota: firma MAC compatible con el backend', () => {
     const parsed = JSON.parse(body) as { jtiHash: string; exp: number };
     expect(parsed.jtiHash).toBe(createHash('sha256').update('jti-abc').digest('hex'));
     expect(body).not.toContain('jti-abc');
-    // La MAC es exactamente la que el backend recomputa: HMAC-SHA256(secret, "{ts}.{body}").
-    const macEsperada = createHmac('sha256', SECRET).update(`${TS}.${body}`).digest('hex');
+    // La MAC es exactamente la que el backend recomputa: HMAC-SHA256(secret, "{ts}.{ruta}.{body}").
+    const ruta = '/internal/relay/consumir-jti';
+    const macEsperada = createHmac('sha256', SECRET).update(`${TS}.${ruta}.${body}`).digest('hex');
     expect(header(cap!.init, 'x-relay-mac')).toBe(macEsperada);
     expect(header(cap!.init, 'x-relay-ts')).toBe(String(TS));
   });

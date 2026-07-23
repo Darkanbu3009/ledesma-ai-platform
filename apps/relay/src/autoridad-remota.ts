@@ -62,7 +62,9 @@ export class AutoridadRemota implements AutoridadRelay {
   private async pedir(ruta: string, cuerpo: Record<string, unknown>): Promise<Record<string, unknown>> {
     const body = JSON.stringify(cuerpo);
     const ts = String(this.ahoraSec());
-    const mac = createHmac('sha256', this.secret).update(`${ts}.${body}`).digest('hex');
+    // La MAC liga la RUTA ademas del cuerpo: asi un cuerpo capturado para una operacion (p.ej.
+    // tomar-conexion) no se puede reenviar como otra (liberar-conexion) aunque compartan campos.
+    const mac = createHmac('sha256', this.secret).update(`${ts}.${ruta}.${body}`).digest('hex');
     let respuesta: Response;
     try {
       respuesta = await this.fetchImpl(`${this.base}${ruta}`, {

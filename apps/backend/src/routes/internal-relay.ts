@@ -43,8 +43,12 @@ const LiberarConexionSchema = z.object({
   lockNonce: z.string().min(1).max(200),
 });
 
-/** Verifica la MAC de la peticion en tiempo constante, con ventana anti-replay. */
+/**
+ * Verifica la MAC de la peticion en tiempo constante, con ventana anti-replay. La MAC liga la RUTA
+ * (`ruta`) ademas del cuerpo: un cuerpo capturado para una operacion no se puede reenviar como otra.
+ */
 function macValida(
+  ruta: string,
   rawBody: string,
   tsHeader: string | string[] | undefined,
   macHeader: string | string[] | undefined,
@@ -54,7 +58,7 @@ function macValida(
   if (typeof tsHeader !== 'string' || typeof macHeader !== 'string') return false;
   const ts = Number(tsHeader);
   if (!Number.isFinite(ts) || Math.abs(nowSec - ts) > TOLERANCIA_SEG) return false;
-  const esperada = createHmac('sha256', secret).update(`${tsHeader}.${rawBody}`).digest('hex');
+  const esperada = createHmac('sha256', secret).update(`${tsHeader}.${ruta}.${rawBody}`).digest('hex');
   return timingSafeEqualHex(esperada, macHeader);
 }
 
@@ -83,10 +87,13 @@ export function internalRelayRoutes(
     app.addContentTypeParser('application/json', { parseAs: 'string', bodyLimit: MAX_BODY_BYTES }, rawBodyParser);
     app.addContentTypeParser('*', { parseAs: 'string', bodyLimit: MAX_BODY_BYTES }, rawBodyParser);
 
-    /** Autentica y parsea el cuerpo JSON. 401 uniforme si la MAC no valida; 400 si el JSON es invalido. */
-    function autenticarYLeer(request: FastifyRequest): unknown {
+    /**
+     * Autentica (MAC ligada a la ruta) y parsea el cuerpo JSON. 401 uniforme si la MAC no valida; 400 si
+     * el JSON es invalido. `ruta` debe ser el path exacto que el relay firmo.
+     */
+    function autenticarYLeer(request: FastifyRequest, ruta: string): unknown {
       const rawBody = typeof request.body === 'string' ? request.body : '';
-      if (!macValida(rawBody, request.headers['x-relay-ts'], request.headers['x-relay-mac'], secret, clock())) {
+      if (!macValida(ruta, rawBody, request.headers['x-relay-ts'], request.headers['x-relay-mac'], secret, clock())) {
         throw new AppError('UNAUTHORIZED', 401, 'Unauthorized');
       }
       try {
@@ -97,7 +104,7 @@ export function internalRelayRoutes(
     }
 
     app.post('/internal/relay/consumir-jti', async (request: FastifyRequest, reply: FastifyReply) => {
-      const cuerpo = ConsumirJtiSchema.safeParse(autenticarYLeer(request));
+      const cuerpo = ConsumirJtiSchema.safeParse(autenticarYLeer(request, '/internal/relay/consumir-jti'));
       if (!cuerpo.success) {
         throw new AppError('VALIDATION_ERROR', 400, 'Invalid body');
       }
@@ -106,7 +113,7 @@ export function internalRelayRoutes(
     });
 
     app.post('/internal/relay/tomar-conexion', async (request: FastifyRequest, reply: FastifyReply) => {
-      const cuerpo = TomarConexionSchema.safeParse(autenticarYLeer(request));
+      const cuerpo = TomarConexionSchema.safeParse(autenticarYLeer(request, '/internal/relay/tomar-conexion'));
       if (!cuerpo.success) {
         throw new AppError('VALIDATION_ERROR', 400, 'Invalid body');
       }
@@ -115,7 +122,7 @@ export function internalRelayRoutes(
     });
 
     app.post('/internal/relay/liberar-conexion', async (request: FastifyRequest, reply: FastifyReply) => {
-      const cuerpo = LiberarConexionSchema.safeParse(autenticarYLeer(request));
+      const cuerpo = LiberarConexionSchema.safeParse(autenticarYLeer(request, '/internal/relay/liberar-conexion'));
       if (!cuerpo.success) {
         throw new AppError('VALIDATION_ERROR', 400, 'Invalid body');
       }

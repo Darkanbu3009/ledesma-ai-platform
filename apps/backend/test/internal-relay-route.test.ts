@@ -24,8 +24,8 @@ const liberarConexion = vi.fn();
 
 const repoFake = { consumirJti, tomarConexion, liberarConexion } as unknown as RelayCoordinacionRepository;
 
-function firmar(body: string, ts: number, secret = SECRET): string {
-  return createHmac('sha256', secret).update(`${ts}.${body}`).digest('hex');
+function firmar(ruta: string, body: string, ts: number, secret = SECRET): string {
+  return createHmac('sha256', secret).update(`${ts}.${ruta}.${body}`).digest('hex');
 }
 
 async function makeApp(): Promise<FastifyInstance> {
@@ -60,7 +60,7 @@ describe('POST /internal/relay/consumir-jti', () => {
     const app = await makeApp();
     const cuerpo = { jtiHash: JTI_HASH, exp: 2000 };
     const body = JSON.stringify(cuerpo);
-    const res = await pedir(app, '/internal/relay/consumir-jti', cuerpo, firmar(body, TS));
+    const res = await pedir(app, '/internal/relay/consumir-jti', cuerpo, firmar('/internal/relay/consumir-jti', body, TS));
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ consumido: true });
     expect(consumirJti).toHaveBeenCalledWith(JTI_HASH, 2000);
@@ -70,7 +70,7 @@ describe('POST /internal/relay/consumir-jti', () => {
     consumirJti.mockResolvedValue(false);
     const app = await makeApp();
     const cuerpo = { jtiHash: JTI_HASH, exp: 2000 };
-    const res = await pedir(app, '/internal/relay/consumir-jti', cuerpo, firmar(JSON.stringify(cuerpo), TS));
+    const res = await pedir(app, '/internal/relay/consumir-jti', cuerpo, firmar('/internal/relay/consumir-jti', JSON.stringify(cuerpo), TS));
     expect(res.json()).toEqual({ consumido: false });
   });
 
@@ -85,7 +85,7 @@ describe('POST /internal/relay/consumir-jti', () => {
   it('MAC con OTRO secreto -> 401', async () => {
     const app = await makeApp();
     const cuerpo = { jtiHash: JTI_HASH, exp: 2000 };
-    const mac = firmar(JSON.stringify(cuerpo), TS, 'x'.repeat(48));
+    const mac = firmar('/internal/relay/consumir-jti', JSON.stringify(cuerpo), TS, 'x'.repeat(48));
     const res = await pedir(app, '/internal/relay/consumir-jti', cuerpo, mac);
     expect(res.statusCode).toBe(401);
   });
@@ -94,7 +94,7 @@ describe('POST /internal/relay/consumir-jti', () => {
     const app = await makeApp();
     const cuerpo = { jtiHash: JTI_HASH, exp: 2000 };
     const viejo = TS - 10_000; // > 300s
-    const res = await pedir(app, '/internal/relay/consumir-jti', cuerpo, firmar(JSON.stringify(cuerpo), viejo), viejo);
+    const res = await pedir(app, '/internal/relay/consumir-jti', cuerpo, firmar('/internal/relay/consumir-jti', JSON.stringify(cuerpo), viejo), viejo);
     expect(res.statusCode).toBe(401);
     expect(consumirJti).not.toHaveBeenCalled();
   });
@@ -102,7 +102,7 @@ describe('POST /internal/relay/consumir-jti', () => {
   it('cuerpo con jtiHash mal formado -> 400 (tras autenticar)', async () => {
     const app = await makeApp();
     const cuerpo = { jtiHash: 'no-es-hex', exp: 2000 };
-    const res = await pedir(app, '/internal/relay/consumir-jti', cuerpo, firmar(JSON.stringify(cuerpo), TS));
+    const res = await pedir(app, '/internal/relay/consumir-jti', cuerpo, firmar('/internal/relay/consumir-jti', JSON.stringify(cuerpo), TS));
     expect(res.statusCode).toBe(400);
     expect(consumirJti).not.toHaveBeenCalled();
   });
@@ -113,7 +113,7 @@ describe('POST /internal/relay/tomar-conexion y liberar-conexion', () => {
     tomarConexion.mockResolvedValue(false);
     const app = await makeApp();
     const cuerpo = { connectionId: 'con-1', lockNonce: 'nonce-1', exp: 2000 };
-    const res = await pedir(app, '/internal/relay/tomar-conexion', cuerpo, firmar(JSON.stringify(cuerpo), TS));
+    const res = await pedir(app, '/internal/relay/tomar-conexion', cuerpo, firmar('/internal/relay/tomar-conexion', JSON.stringify(cuerpo), TS));
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ tomado: false });
     expect(tomarConexion).toHaveBeenCalledWith('con-1', 'nonce-1', 2000);
@@ -122,10 +122,20 @@ describe('POST /internal/relay/tomar-conexion y liberar-conexion', () => {
   it('liberar-conexion con MAC valida llama al repo', async () => {
     const app = await makeApp();
     const cuerpo = { connectionId: 'con-1', lockNonce: 'nonce-1' };
-    const res = await pedir(app, '/internal/relay/liberar-conexion', cuerpo, firmar(JSON.stringify(cuerpo), TS));
+    const res = await pedir(app, '/internal/relay/liberar-conexion', cuerpo, firmar('/internal/relay/liberar-conexion', JSON.stringify(cuerpo), TS));
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ liberado: true });
     expect(liberarConexion).toHaveBeenCalledWith('con-1', 'nonce-1');
+  });
+
+  it('la MAC liga la RUTA: una firma de tomar-conexion NO autentica liberar-conexion', async () => {
+    const app = await makeApp();
+    const cuerpo = { connectionId: 'con-1', lockNonce: 'nonce-1' };
+    // MAC firmada para tomar-conexion, reenviada a liberar-conexion (cuerpos compatibles): 401.
+    const macDeTomar = firmar('/internal/relay/tomar-conexion', JSON.stringify(cuerpo), TS);
+    const res = await pedir(app, '/internal/relay/liberar-conexion', cuerpo, macDeTomar);
+    expect(res.statusCode).toBe(401);
+    expect(liberarConexion).not.toHaveBeenCalled();
   });
 
   it('liberar-conexion con MAC invalida -> 401', async () => {
