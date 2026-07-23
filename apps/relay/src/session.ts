@@ -54,6 +54,11 @@ export interface DepsSesion {
   logger: Logger;
   resolverConnectUrl(sesionExternaId: string): Promise<string>;
   crearCdp(connectUrl: string): Promise<CdpInyector>;
+  /**
+   * Libera el cupo PRE-AUTH del portero (B-2). La sesion lo llama UNA sola vez: al autenticar el
+   * handshake (deja de ser anonima) o al cerrar, lo que ocurra primero. Opcional (los tests no lo pasan).
+   */
+  liberarPreAuth?: () => void;
   /** Reloj inyectable (ms). Default Date.now. */
   ahora?: () => number;
   handshakeTimeoutMs?: number;
@@ -62,8 +67,19 @@ export interface DepsSesion {
 
 type Estado = 'hello' | 'estableciendo' | 'relevando' | 'cerrada';
 
-const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
+// Ventana de retencion pre-auth (B-2): tras el srv_hello, un cliente legitimo responde el cli_hello en
+// sub-segundos (un solo round trip de aplicacion sobre un WebSocket ya establecido). 5s deja margen de
+// sobra para redes moviles lentas y a la vez acota cuanto puede un atacante retener una sesion sin
+// autenticar (antes eran 10s).
+const DEFAULT_HANDSHAKE_TIMEOUT_MS = 5_000;
 const DEFAULT_IDLE_TIMEOUT_MS = 120_000;
+
+/**
+ * Codigo UNICO de rechazo hacia el cliente (C-2). No distingue el motivo (token invalido, reuso, limite,
+ * conexion ocupada, protocolo, ...): todos se ven igual desde afuera para no filtrar un oraculo. El
+ * detalle vive solo en el log de metadatos del servidor.
+ */
+const CODIGO_RECHAZO_CLIENTE = 'rechazado';
 
 export class SesionRelay {
   private readonly id = randomUUID();
@@ -78,6 +94,8 @@ export class SesionRelay {
   private eventos = 0;
   private cupoReservado: { ownerId: string } | null = null;
   private conexionTomada: { connectionId: string } | null = null;
+  /** El cupo pre-auth (B-2) se libera una sola vez; este flag garantiza la idempotencia. */
+  private preAuthLiberado = false;
   private cola: Promise<void> = Promise.resolve();
   private readonly inicioMs: number;
 
@@ -154,6 +172,10 @@ export class SesionRelay {
       this.rechazar('handshake_no_autenticado');
       return;
     }
+    // AUTENTICADO (A-1): el cliente probo poseer el secreto de enlace, ya no es un handshake anonimo.
+    // Se libera el cupo PRE-AUTH (B-2): de aca en mas la sesion la gobierna el limitador por owner, no
+    // el portero. Asi el cupo cuenta handshakes en vuelo y no se retiene mientras el usuario teclea.
+    this.liberarPreAuth();
     // Rate limiting LOCAL best-effort por owner ANTES de reservar recursos (flood + concurrencia).
     const intento = this.deps.limitador.intentar(claims.ownerId, this.ahora());
     if (!intento.ok) {
@@ -316,11 +338,23 @@ export class SesionRelay {
     this.temporizadorIdle = setTimeout(() => this.cerrar('idle'), this.idleTimeoutMs);
   }
 
-  /** Envia un codigo de error GENERICO (sin contenido) y cierra el canal. */
-  private rechazar(codigo: string): void {
+  /**
+   * Rechaza el canal (C-2). Hacia el CLIENTE va SIEMPRE el mismo codigo generico: "token ya usado",
+   * "limite excedido", "conexion ocupada", "token invalido", etc. son INDISTINGUIBLES para quien esta
+   * afuera, para no darle un oraculo que le diga por que fue rechazado. El MOTIVO especifico queda SOLO
+   * en el log de metadatos del servidor (via `cerrar` -> `relay_cerrado.motivo`).
+   */
+  private rechazar(motivo: string): void {
     if (this.estado === 'cerrada') return;
-    this.enviarControl({ t: 'error', code: codigo });
-    this.cerrar(codigo);
+    this.enviarControl({ t: 'error', code: CODIGO_RECHAZO_CLIENTE });
+    this.cerrar(motivo);
+  }
+
+  /** Libera el cupo pre-auth (B-2) una sola vez (al autenticar o al cerrar, lo que ocurra primero). */
+  private liberarPreAuth(): void {
+    if (this.preAuthLiberado) return;
+    this.preAuthLiberado = true;
+    this.deps.liberarPreAuth?.();
   }
 
   private enviarControl(objeto: Record<string, unknown>): void {
@@ -335,6 +369,8 @@ export class SesionRelay {
   cerrar(motivo: string): void {
     if (this.estado === 'cerrada') return;
     this.estado = 'cerrada';
+    // Respaldo del cupo pre-auth (B-2): si se cierra antes de autenticar, se libera aqui (idempotente).
+    this.liberarPreAuth();
     this.limpiarTemporizador('temporizadorHandshake');
     this.limpiarTemporizador('temporizadorIdle');
     this.limpiarTemporizador('temporizadorExp');
