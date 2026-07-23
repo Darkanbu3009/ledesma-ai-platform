@@ -1790,16 +1790,17 @@
       "cerrarAria": "Close the sign-in view"
     },
     "relayMovil": {
+      "titulo": "Remote keyboard",
       "divulgacion": "On your phone, what you type here travels encrypted to Ledesma's infrastructure, where it is decrypted to be forwarded to the secure browser you sign in to. It is never stored or logged. From a computer, the connection is direct to the secure browser and does not pass through us.",
       "campoAria": "Field to type your sign-in; keystrokes travel encrypted to Ledesma's infrastructure, which decrypts and forwards them to the secure browser",
-      "placeholder": "Tap here and type your username and password",
+      "placeholder": "Type your username and password here",
       "conectando": "Setting up the secure channel…",
       "listo": "Secure channel ready: you can type now.",
       "error": "The secure channel could not be opened. Try again or sign in from a computer.",
       "tecla": {
         "Tab": "Tab",
         "Enter": "Enter",
-        "Backspace": "Delete"
+        "Backspace": "Backspace"
       }
     },
     "estado": {

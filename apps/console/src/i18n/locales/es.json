@@ -1790,16 +1790,17 @@
       "cerrarAria": "Cerrar la vista de inicio de sesión"
     },
     "relayMovil": {
+      "titulo": "Teclado remoto",
       "divulgacion": "En el teléfono, lo que escribes aquí viaja cifrado hasta la infraestructura de Ledesma, donde se descifra para reenviarlo al navegador seguro en el que inicias sesión. No se almacena ni se registra en ningún momento. Desde una computadora, en cambio, la conexión es directa al navegador seguro y no pasa por nosotros.",
       "campoAria": "Campo para escribir tu inicio de sesión; las teclas se transmiten cifradas hasta la infraestructura de Ledesma, que las descifra y las reenvía al navegador seguro",
-      "placeholder": "Toca aquí y escribe tu usuario y contraseña",
+      "placeholder": "Escribe aquí tu usuario y contraseña",
       "conectando": "Estableciendo el canal seguro…",
       "listo": "Canal seguro listo: ya puedes escribir.",
       "error": "No se pudo abrir el canal seguro. Intenta de nuevo o inicia sesión desde una computadora.",
       "tecla": {
         "Tab": "Tab",
         "Enter": "Enter",
-        "Backspace": "Borrar"
+        "Backspace": "Retroceso"
       }
     },
     "estado": {

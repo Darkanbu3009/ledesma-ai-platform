@@ -66,7 +66,7 @@ describe('RelayTecladoMovil', () => {
     expect(campo.value).toBe('');
   });
 
-  it('los botones de control (Tab/Enter/Borrar) reenvian teclas', async () => {
+  it('los botones de control (Tab/Enter/Retroceso) reenvian teclas', async () => {
     render(<RelayTecladoMovil sitioId="sit_1" />);
     const campo = screen.getByLabelText(/las teclas se transmiten cifradas/i);
     await waitFor(() => expect(campo).not.toBeDisabled());
@@ -75,7 +75,7 @@ describe('RelayTecladoMovil', () => {
     expect(mockEnviarTecla).toHaveBeenCalledWith('Enter');
     fireEvent.click(screen.getByRole('button', { name: 'Tab' }));
     expect(mockEnviarTecla).toHaveBeenCalledWith('Tab');
-    fireEvent.click(screen.getByRole('button', { name: 'Borrar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Retroceso' }));
     expect(mockEnviarTecla).toHaveBeenCalledWith('Backspace');
   });
 
