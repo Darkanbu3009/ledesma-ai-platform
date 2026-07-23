@@ -107,6 +107,24 @@ function montar(overrides: Partial<DepsSesion> = {}) {
   return { sesion, socket: s, cdp: cdp as FakeCdp, captura, autoridad, limitador };
 }
 
+/** El motivo ESPECIFICO del rechazo (C-2) queda SOLO en el log del servidor (relay_cerrado.motivo). */
+function motivoCierre(captura: { lineas: string[] }): string | undefined {
+  for (let i = captura.lineas.length - 1; i >= 0; i -= 1) {
+    const obj = JSON.parse(captura.lineas[i] as string) as Record<string, unknown>;
+    if (obj.evento === 'relay_cerrado' && typeof obj.motivo === 'string') return obj.motivo;
+  }
+  return undefined;
+}
+
+/**
+ * Verifica un rechazo (C-2): el cliente SIEMPRE ve el codigo generico 'rechazado', y el motivo
+ * especifico solo aparece en el log de metadatos del servidor.
+ */
+function assertRechazo(ctx: ReturnType<typeof montar>, motivoEsperado: string): void {
+  expect(ctx.socket.ultimo('error')?.code).toBe('rechazado');
+  expect(motivoCierre(ctx.captura)).toBe(motivoEsperado);
+}
+
 /** Un token recien acunado con su secreto de enlace (hs) para las MAC del handshake. */
 function acunar(params: { ownerId?: string; connectionId?: string; sesionExternaId?: string } = {}) {
   return mintRelayToken(
@@ -201,7 +219,7 @@ describe('A-1: el handshake detecta la SUSTITUCION de llaves publicas (MITM)', (
     // MAC. El relay recomputa el transcript con la publica RECIBIDA (la del atacante) -> no coincide.
     const macLegitima = await legitimo.macCliente(relayPub, token, bindingKey);
     ctx.sesion.recibir(JSON.stringify({ t: 'cli_hello', pub: atacante.pubB64, token, mac: macLegitima }));
-    expect(ctx.socket.ultimo('error')?.code).toBe('handshake_no_autenticado');
+    assertRechazo(ctx, 'handshake_no_autenticado');
     expect(ctx.socket.cerrado).toBe(true);
   });
 
@@ -216,7 +234,7 @@ describe('A-1: el handshake detecta la SUSTITUCION de llaves publicas (MITM)', (
     expect(relayPubFalsa).not.toBe(relayPubReal);
     const mac = await cliente.macCliente(relayPubFalsa, token, bindingKey);
     ctx.sesion.recibir(JSON.stringify({ t: 'cli_hello', pub: cliente.pubB64, token, mac }));
-    expect(ctx.socket.ultimo('error')?.code).toBe('handshake_no_autenticado');
+    assertRechazo(ctx, 'handshake_no_autenticado');
     expect(ctx.socket.cerrado).toBe(true);
   });
 
@@ -229,7 +247,7 @@ describe('A-1: el handshake detecta la SUSTITUCION de llaves publicas (MITM)', (
     const hsFalso = Buffer.from('z'.repeat(32)).toString('base64url');
     const mac = await cliente.macCliente(relayPub, token, hsFalso);
     ctx.sesion.recibir(JSON.stringify({ t: 'cli_hello', pub: cliente.pubB64, token, mac }));
-    expect(ctx.socket.ultimo('error')?.code).toBe('handshake_no_autenticado');
+    assertRechazo(ctx, 'handshake_no_autenticado');
     expect(ctx.cdp.textos.length).toBe(0);
   });
 
@@ -238,7 +256,7 @@ describe('A-1: el handshake detecta la SUSTITUCION de llaves publicas (MITM)', (
     const { token } = acunar();
     const cliente = await crearClienteFake();
     ctx.sesion.recibir(JSON.stringify({ t: 'cli_hello', pub: cliente.pubB64, token }));
-    expect(ctx.socket.ultimo('error')?.code).toBe('protocolo');
+    assertRechazo(ctx, 'protocolo');
   });
 
   it('no consume el jti cuando la MAC es invalida (no se puede quemar el token de la victima)', async () => {
@@ -252,7 +270,7 @@ describe('A-1: el handshake detecta la SUSTITUCION de llaves publicas (MITM)', (
     // MAC invalida (hs equivocado) -> rechazo SIN tocar el jti.
     const macMala = await cliente.macCliente(relayPub, token, Buffer.from('q'.repeat(32)).toString('base64url'));
     ctx.sesion.recibir(JSON.stringify({ t: 'cli_hello', pub: cliente.pubB64, token, mac: macMala }));
-    expect(ctx.socket.ultimo('error')?.code).toBe('handshake_no_autenticado');
+    assertRechazo(ctx, 'handshake_no_autenticado');
     // El jti sigue disponible: un consumo directo posterior es la PRIMERA vez.
     expect(await autoridad.consumirJti(jti, exp)).toBe(true);
   });
@@ -266,7 +284,7 @@ describe('anti replay / reordenamiento (contador monotono)', () => {
     ctx.sesion.recibir(JSON.stringify({ t: 'k', c: 1, ct: await cifrarFrame(clave, 1, codificarTexto('a')) }));
     await vi.waitFor(() => expect(ctx.cdp.textos.length).toBe(1));
     ctx.sesion.recibir(JSON.stringify({ t: 'k', c: 1, ct: await cifrarFrame(clave, 1, codificarTexto('b')) }));
-    expect(ctx.socket.ultimo('error')?.code).toBe('contador');
+    assertRechazo(ctx, 'contador');
     expect(ctx.socket.cerrado).toBe(true);
   });
 
@@ -277,7 +295,7 @@ describe('anti replay / reordenamiento (contador monotono)', () => {
     ctx.sesion.recibir(JSON.stringify({ t: 'k', c: 5, ct: await cifrarFrame(clave, 5, codificarTexto('a')) }));
     await vi.waitFor(() => expect(ctx.cdp.textos.length).toBe(1));
     ctx.sesion.recibir(JSON.stringify({ t: 'k', c: 3, ct: await cifrarFrame(clave, 3, codificarTexto('b')) }));
-    expect(ctx.socket.ultimo('error')?.code).toBe('contador');
+    assertRechazo(ctx, 'contador');
   });
 
   it('rechaza un frame manipulado (tag GCM no autentica)', async () => {
@@ -288,7 +306,8 @@ describe('anti replay / reordenamiento (contador monotono)', () => {
     const bytes = Buffer.from(bueno, 'base64url');
     bytes[0] = (bytes[0] ?? 0) ^ 0x01;
     ctx.sesion.recibir(JSON.stringify({ t: 'k', c: 1, ct: bytes.toString('base64url') }));
-    await vi.waitFor(() => expect(ctx.socket.ultimo('error')?.code).toBe('descifrado'));
+    await vi.waitFor(() => expect(ctx.socket.ultimo('error')?.code).toBe('rechazado'));
+    expect(motivoCierre(ctx.captura)).toBe('descifrado');
     expect(ctx.cdp.textos.length).toBe(0);
   });
 });
@@ -304,7 +323,7 @@ describe('token: uso unico, secreto, expiracion', () => {
     const relayPub = ctx.socket.ultimo('srv_hello')?.pub as string;
     const mac = await cliente.macCliente(relayPub, ajeno.token, ajeno.bindingKey);
     ctx.sesion.recibir(JSON.stringify({ t: 'cli_hello', pub: cliente.pubB64, token: ajeno.token, mac }));
-    expect(ctx.socket.ultimo('error')?.code).toBe('token_invalido');
+    assertRechazo(ctx, 'token_invalido');
     expect(ctx.socket.cerrado).toBe(true);
   });
 
@@ -319,7 +338,8 @@ describe('token: uso unico, secreto, expiracion', () => {
 
     const ctx2 = montar({ autoridad });
     await enviarHello(ctx2, token, bindingKey);
-    await vi.waitFor(() => expect(ctx2.socket.ultimo('error')?.code).toBe('reuso'));
+    await vi.waitFor(() => expect(ctx2.socket.ultimo('error')?.code).toBe('rechazado'));
+    expect(motivoCierre(ctx2.captura)).toBe('reuso');
   });
 
   it('rechaza un SEGUNDO canal concurrente a la MISMA conexion (lock compartido, B-1)', async () => {
@@ -334,7 +354,8 @@ describe('token: uso unico, secreto, expiracion', () => {
     // compartido lo bloquea.
     const ctx2 = montar({ autoridad });
     await enviarHello(ctx2, t2.token, t2.bindingKey);
-    await vi.waitFor(() => expect(ctx2.socket.ultimo('error')?.code).toBe('conexion_ocupada'));
+    await vi.waitFor(() => expect(ctx2.socket.ultimo('error')?.code).toBe('rechazado'));
+    expect(motivoCierre(ctx2.captura)).toBe('conexion_ocupada');
 
     ctx1.sesion.cerrar('fin');
   });
@@ -349,7 +370,7 @@ describe('token: uso unico, secreto, expiracion', () => {
     const relayPub = ctx.socket.ultimo('srv_hello')?.pub as string;
     const mac = await cliente.macCliente(relayPub, expirado.token, expirado.bindingKey);
     ctx.sesion.recibir(JSON.stringify({ t: 'cli_hello', pub: cliente.pubB64, token: expirado.token, mac }));
-    expect(ctx.socket.ultimo('error')?.code).toBe('token_invalido');
+    assertRechazo(ctx, 'token_invalido');
   });
 });
 
@@ -360,7 +381,8 @@ describe('B-1: fail-closed si la autoridad de coordinacion no responde', () => {
     const ctx = montar({ autoridad });
     const { token, bindingKey } = acunar();
     await enviarHello(ctx, token, bindingKey);
-    await vi.waitFor(() => expect(ctx.socket.ultimo('error')?.code).toBe('autoridad_no_disponible'));
+    await vi.waitFor(() => expect(ctx.socket.ultimo('error')?.code).toBe('rechazado'));
+    expect(motivoCierre(ctx.captura)).toBe('autoridad_no_disponible');
     expect(ctx.cdp.textos.length).toBe(0);
   });
 
@@ -370,7 +392,68 @@ describe('B-1: fail-closed si la autoridad de coordinacion no responde', () => {
     const ctx = montar({ autoridad });
     const { token, bindingKey } = acunar();
     await enviarHello(ctx, token, bindingKey);
-    await vi.waitFor(() => expect(ctx.socket.ultimo('error')?.code).toBe('autoridad_no_disponible'));
+    await vi.waitFor(() => expect(ctx.socket.ultimo('error')?.code).toBe('rechazado'));
+    expect(motivoCierre(ctx.captura)).toBe('autoridad_no_disponible');
+  });
+});
+
+describe('C-2: el codigo de error hacia el cliente es UNIFORME (sin oraculo)', () => {
+  it('dos rechazos distintos dan el MISMO codigo al cliente y motivos distintos SOLO en el log', async () => {
+    // Escenario A: token invalido (otro secreto) -> el relay lo ve como 'token_invalido'.
+    const ctxA = montar();
+    const ajeno = mintRelayToken({ ownerId: 'x', connectionId: 'c', sesionExternaId: 's' }, 'z'.repeat(48));
+    const clienteA = await crearClienteFake();
+    const relayPubA = ctxA.socket.ultimo('srv_hello')?.pub as string;
+    const macA = await clienteA.macCliente(relayPubA, ajeno.token, ajeno.bindingKey);
+    ctxA.sesion.recibir(JSON.stringify({ t: 'cli_hello', pub: clienteA.pubB64, token: ajeno.token, mac: macA }));
+
+    // Escenario B: reuso del token (autoridad compartida) -> el relay lo ve como 'reuso'.
+    const autoridad = new AutoridadEnMemoria();
+    const { token, bindingKey } = acunar({ ownerId: 'o', connectionId: 'c', sesionExternaId: 's' });
+    const ctxB1 = montar({ autoridad });
+    await establecer(ctxB1, token, bindingKey);
+    ctxB1.sesion.cerrar('fin');
+    const ctxB2 = montar({ autoridad });
+    await enviarHello(ctxB2, token, bindingKey);
+    await vi.waitFor(() => expect(ctxB2.socket.ultimo('error')).toBeDefined());
+
+    // Hacia el CLIENTE: identico en ambos (no distingue el motivo).
+    expect(ctxA.socket.ultimo('error')?.code).toBe('rechazado');
+    expect(ctxB2.socket.ultimo('error')?.code).toBe('rechazado');
+    // En el LOG del servidor: el motivo especifico, distinto en cada caso.
+    expect(motivoCierre(ctxA.captura)).toBe('token_invalido');
+    expect(motivoCierre(ctxB2.captura)).toBe('reuso');
+  });
+});
+
+describe('B-2: liberacion del cupo pre-auth (cuenta handshakes en vuelo, no sesiones)', () => {
+  it('libera el cupo al AUTENTICAR el handshake, y el cierre posterior no re-libera', async () => {
+    const liberar = vi.fn();
+    const ctx = montar({ liberarPreAuth: liberar });
+    const { token, bindingKey } = acunar({ ownerId: 'o', connectionId: 'c', sesionExternaId: 's' });
+    await establecer(ctx, token, bindingKey);
+    expect(liberar).toHaveBeenCalledTimes(1);
+    ctx.sesion.cerrar('fin');
+    expect(liberar).toHaveBeenCalledTimes(1); // idempotente
+  });
+
+  it('libera el cupo al CERRAR si nunca autentico (una sola vez)', () => {
+    const liberar = vi.fn();
+    const ctx = montar({ liberarPreAuth: liberar });
+    expect(liberar).not.toHaveBeenCalled();
+    ctx.sesion.cerrar('socket_cerrado');
+    expect(liberar).toHaveBeenCalledTimes(1);
+  });
+
+  it('un rechazo pre-auth (token invalido, antes de la MAC) libera el cupo', async () => {
+    const liberar = vi.fn();
+    const ctx = montar({ liberarPreAuth: liberar });
+    const ajeno = mintRelayToken({ ownerId: 'x', connectionId: 'c', sesionExternaId: 's' }, 'z'.repeat(48));
+    const cliente = await crearClienteFake();
+    const relayPub = ctx.socket.ultimo('srv_hello')?.pub as string;
+    const mac = await cliente.macCliente(relayPub, ajeno.token, ajeno.bindingKey);
+    ctx.sesion.recibir(JSON.stringify({ t: 'cli_hello', pub: cliente.pubB64, token: ajeno.token, mac }));
+    expect(liberar).toHaveBeenCalledTimes(1);
   });
 });
 

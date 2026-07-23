@@ -75,6 +75,19 @@ export interface RelayTokenClaims {
   bindingKey: string;
 }
 
+/**
+ * Deriva la clave AES-256-GCM del token desde el secreto (sha256, 32 bytes).
+ *
+ * C-5 (evaluacion HKDF): se evaluo pasar a HKDF-SHA256. RELAY_TOKEN_SECRET es un secreto de ALTA ENTROPIA
+ * (>= 32 chars, compartido con el backend), no una password: contra ese insumo, sha256 y HKDF ofrecen la
+ * MISMA resistencia a fuerza bruta -- ninguno "estira" la clave (HKDF es extract-and-expand, no un KDF
+ * lento como scrypt/argon2), asi que el beneficio real es solo separacion de dominio, marginal aqui
+ * porque este secreto NO se reutiliza con el de la boveda (es una env separada). El costo, en cambio, es
+ * concreto: mint (backend) y verify (relay) DEBEN usar la MISMA derivacion, y cambiarla rompe todo token
+ * EN VUELO (TTL 15 min) y ademas rompe durante el skew de un rolling deploy entre ambos servicios. Por
+ * eso NO se cambia en esta PR (ver migracion staged en docs/despliegue-relay.md). Debe seguir byte-por-
+ * byte identica a apps/backend/src/crypto/aes-gcm.ts, que replica este mismo esquema.
+ */
 function deriveKey(secret: string): Buffer {
   return createHash('sha256').update(secret).digest(); // 32 bytes para aes-256-gcm
 }

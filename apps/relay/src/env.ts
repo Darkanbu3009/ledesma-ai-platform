@@ -29,7 +29,11 @@ export interface RelayEnv {
    * SE NIEGA A ARRANCAR (invariante multi-instancia). En dev/tests puede faltar (autoridad en memoria).
    */
   consumoUrl: string | undefined;
-  /** Origenes permitidos del upgrade WebSocket. '*' refleja cualquiera (solo para desarrollo). */
+  /**
+   * Origenes permitidos del upgrade WebSocket (C-4). OBLIGATORIA: sin ella el relay SE NIEGA A ARRANCAR
+   * (refuse-to-start), en vez de caer a un default que aceptaba cualquier origen. '*' es admisible pero
+   * SOLO como opt-in explicito para desarrollo; en produccion se configura la lista real de origenes.
+   */
   allowedOrigins: '*' | string[];
 }
 
@@ -50,11 +54,19 @@ function parseLogLevel(value: string | undefined): LogLevel {
 }
 
 function parseOrigins(value: string | undefined): '*' | string[] {
-  if (value === undefined) return '*';
-  const origins = value
+  const origins = (value ?? '')
     .split(',')
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0);
+  // REFUSE-TO-START (C-4): sin origenes configurados el relay NO arranca. Antes el default era '*' y un
+  // despliegue sin configurar aceptaba cualquier origen en silencio. Preferimos fallar ruidosamente.
+  if (origins.length === 0) {
+    throw new Error(
+      'Environment validation failed: RELAY_ALLOWED_ORIGINS es obligatorio ' +
+        '(lista de origenes permitidos del upgrade WebSocket, separada por comas; ' +
+        "usar '*' SOLO en desarrollo). Ver docs/despliegue-relay.md.",
+    );
+  }
   if (origins.length === 1 && origins[0] === '*') return '*';
   return origins;
 }

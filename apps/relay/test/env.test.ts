@@ -6,6 +6,7 @@ const BASE = {
   BROWSERBASE_API_KEY: 'bb-key',
   BROWSERBASE_PROJECT_ID: 'bb-proj',
   RELAY_TOKEN_SECRET: 'r'.repeat(48),
+  RELAY_ALLOWED_ORIGINS: 'https://app.ledesma.example',
 };
 
 describe('parseEnv del relay: autoridad de coordinacion (B-1)', () => {
@@ -32,5 +33,38 @@ describe('parseEnv del relay: autoridad de coordinacion (B-1)', () => {
     expect(() => parseEnv({ ...BASE, NODE_ENV: 'production', RELAY_CONSUMO_URL: '   ' })).toThrow(
       /RELAY_CONSUMO_URL/,
     );
+  });
+});
+
+describe('parseEnv del relay: origenes permitidos (C-4)', () => {
+  // NODE_ENV development para aislar el chequeo de origenes del refuse-to-start de RELAY_CONSUMO_URL.
+  const SIN_ORIGENES = {
+    BROWSERBASE_API_KEY: 'bb-key',
+    BROWSERBASE_PROJECT_ID: 'bb-proj',
+    RELAY_TOKEN_SECRET: 'r'.repeat(48),
+    NODE_ENV: 'development',
+  };
+
+  it('REFUSE-TO-START: sin RELAY_ALLOWED_ORIGINS el relay no arranca', () => {
+    expect(() => parseEnv({ ...SIN_ORIGENES })).toThrow(/RELAY_ALLOWED_ORIGINS/);
+  });
+
+  it('una RELAY_ALLOWED_ORIGINS vacia (solo espacios/comas) tampoco arranca', () => {
+    expect(() => parseEnv({ ...SIN_ORIGENES, RELAY_ALLOWED_ORIGINS: ' , , ' })).toThrow(
+      /RELAY_ALLOWED_ORIGINS/,
+    );
+  });
+
+  it('parsea una lista de origenes separada por comas', () => {
+    const env = parseEnv({
+      ...SIN_ORIGENES,
+      RELAY_ALLOWED_ORIGINS: 'https://a.example, https://b.example',
+    });
+    expect(env.allowedOrigins).toEqual(['https://a.example', 'https://b.example']);
+  });
+
+  it("'*' explicito sigue admitido (solo desarrollo)", () => {
+    const env = parseEnv({ ...SIN_ORIGENES, RELAY_ALLOWED_ORIGINS: '*' });
+    expect(env.allowedOrigins).toBe('*');
   });
 });
