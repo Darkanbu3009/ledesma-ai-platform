@@ -13,6 +13,15 @@
     "./plans": {
       "types": "./dist/plans/plans.d.ts",
       "import": "./src/plans/plans.ts"
+    },
+    "./relay-token": {
+      "types": "./dist/relay/relay-token.d.ts",
+      "import": "./dist/relay/relay-token.js"
+    },
+    "./relay-protocol": {
+      "types": "./dist/relay/protocol.d.ts",
+      "browser": "./src/relay/protocol.ts",
+      "import": "./dist/relay/protocol.js"
     }
   },
   "files": [

@@ -1,8 +1,9 @@
 import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, ShieldCheck, TriangleAlert, X } from 'lucide-react';
+import { Loader2, ShieldCheck, X } from 'lucide-react';
 import type { SitioConectado } from '../../lib/sitios';
 import { useDialog } from '../ui/useDialog';
+import { RelayTecladoMovil } from './RelayTecladoMovil';
 
 /**
  * Modal de la VISTA EN VIVO del login (7.1c): un iframe que apunta DIRECTO a la vista en vivo del
@@ -10,19 +11,21 @@ import { useDialog } from '../ui/useDialog';
  * Accesible via el hook compartido useDialog (trampa de foco, Escape, retorno del foco al cerrar),
  * el mismo patron del modal de triggers (5.4b).
  *
- * RESTRICCION DURA: la contrasena del usuario JAMAS toca el backend ni el dominio de Ledesma. Se
- * teclea dentro del iframe, contra el proveedor. Por eso aqui NO hay ningun input (menos aun de
- * contrasena) y NO se adjunta NINGUN listener sobre el iframe (ni load, ni message, ni nada): esta
- * consola no puede leer, interceptar ni reenviar lo que ocurre alli dentro, por construccion.
+ * DESKTOP (entrada directa, SIN cambios): la contrasena se teclea DENTRO del iframe, contra el
+ * proveedor. Por eso en desktop NO hay ningun input y NO se adjunta NINGUN listener sobre el iframe
+ * (ni load, ni message, ni nada): esta consola no lee, intercepta ni reenvia lo que ocurre alli
+ * dentro, por construccion. Este flujo es inalterado.
  *
- * LIMITACION EN TELEFONOS: la vista en vivo de Browserbase no soporta el teclado movil ("Mobile
- * keyboards aren't officially supported", doc de Session Live View). El tap si llega como click a la
- * sesion remota, pero como no existe ningun campo editable LOCAL que enfocar, el sistema operativo
- * jamas despliega su teclado: no es un problema de este iframe ni de sus estilos, y abrir la vista
- * en pestana propia tampoco lo resuelve. El unico workaround documentado (teclado virtual propio que
- * reenvia las teclas a la sesion) capturaria lo que el usuario teclea y viola la restriccion de
- * arriba, asi que queda descartado. Mientras el proveedor no lo soporte, en dispositivos tactiles
- * sin puntero fino se muestra un aviso pidiendo completar la conexion desde una computadora.
+ * MOVIL (RELAY DE TECLADO DE CONOCIMIENTO MINIMO): la vista en vivo de Browserbase no levanta el
+ * teclado nativo del telefono (es un screencast: el tap llega como click a la sesion remota, pero no
+ * hay campo editable LOCAL que enfocar, asi que el sistema operativo no despliega su teclado). Por eso
+ * en dispositivos tactiles se monta RelayTecladoMovil: el usuario teclea en un campo propio y las
+ * pulsaciones se transmiten CIFRADAS (capa de aplicacion sobre TLS) por un servicio relay minimo hacia
+ * el navegador seguro. No se almacenan ni se loguean. NO es cifrado extremo a extremo: el navegador
+ * remoto recibe el texto legible por CDP; la meta es que el texto plano no exista en el proxy que
+ * termina TLS ni en logs de plataforma. La divulgacion se muestra al usuario ANTES de escribir. Si el
+ * navegador no soporta el canal o la feature esta apagada, RelayTecladoMovil cae al aviso de siempre
+ * (completar la conexion desde una computadora).
  */
 export function LoginEnVivoDialog({
   sitio,
@@ -85,17 +88,11 @@ export function LoginEnVivoDialog({
           </button>
         </div>
 
-        {/* Aviso SOLO en dispositivos tactiles: la vista sigue visible (el usuario ve la pagina de
-            login y puede tocarla), pero sin teclado movil no puede escribir; se le pide terminar
-            desde una computadora. No es un error de esta sesion, por eso role="note" y no alert. */}
-        {esDispositivoTactil && (
-          <div role="note" className="flex-none border-b border-brasa-line bg-brasa-soft px-6 py-3">
-            <p className="flex items-start gap-1.5 text-sm font-medium text-brasa">
-              <TriangleAlert className="mt-0.5 h-4 w-4 flex-none" aria-hidden="true" />
-              <span>{t('sitios.modal.avisoMovil')}</span>
-            </p>
-          </div>
-        )}
+        {/* SOLO en dispositivos tactiles: el relay de teclado movil (campo propio + divulgacion). En
+            desktop este bloque no existe y el flujo es entrada directa al iframe, sin relay. El propio
+            RelayTecladoMovil cae al aviso de "hazlo desde una computadora" si el canal no esta
+            disponible. */}
+        {esDispositivoTactil && <RelayTecladoMovil sitioId={sitio.id} />}
 
         {/* La vista en vivo EMBEBIDA: apunta directo al proveedor. Sin listeners, por diseno.
             flex-1: llena TODO el alto que el modal (de altura fija) deja entre la cabecera y el

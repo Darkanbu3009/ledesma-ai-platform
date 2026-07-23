@@ -1781,13 +1781,26 @@
     },
     "modal": {
       "titulo": "Sign in to {{dominio}}",
-      "instruccion": "Sign in here just like you normally would. Nobody else sees your data. Your password never goes through Ledesma.",
+      "instruccion": "Sign in here just like you normally would. Nobody else sees your data.",
       "avisoMovil": "Typing inside this view is not available on phones and tablets yet: the secure browser does not support the mobile keyboard. Open this page on a computer to connect the site.",
       "iframeTitulo": "Secure browser to sign in to {{dominio}}",
       "pie": "The session opens in a secure remote browser and expires on its own if you do not confirm.",
       "confirmar": "I signed in",
       "confirmando": "Confirming",
       "cerrarAria": "Close the sign-in view"
+    },
+    "relayMovil": {
+      "divulgacion": "On your phone, what you type here travels encrypted through our infrastructure to the secure browser where you sign in. It is never stored or logged. From a computer, the connection is direct and does not pass through us.",
+      "campoAria": "Field to type your sign-in; keystrokes are transmitted encrypted to the secure browser",
+      "placeholder": "Tap here and type your username and password",
+      "conectando": "Setting up the secure channel…",
+      "listo": "Secure channel ready: you can type now.",
+      "error": "The secure channel could not be opened. Try again or sign in from a computer.",
+      "tecla": {
+        "Tab": "Tab",
+        "Enter": "Enter",
+        "Backspace": "Delete"
+      }
     },
     "estado": {
       "esperandoLogin": "Waiting for login",

@@ -25,6 +25,10 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.node } },
   },
   {
+    files: ['apps/relay/**/*.ts'],
+    languageOptions: { globals: { ...globals.node } },
+  },
+  {
     files: ['apps/backend/public/**/*.js'],
     languageOptions: { globals: { ...globals.browser } },
   },

@@ -1781,13 +1781,26 @@
     },
     "modal": {
       "titulo": "Inicia sesión en {{dominio}}",
-      "instruccion": "Inicia sesión aquí como lo harías normalmente. Nadie más ve tus datos. Tu contraseña no pasa por Ledesma.",
+      "instruccion": "Inicia sesión aquí como lo harías normalmente. Nadie más ve tus datos.",
       "avisoMovil": "En teléfonos y tablets todavía no se puede escribir dentro de esta vista: el navegador seguro aún no soporta el teclado móvil. Abre esta página en una computadora para conectar el sitio.",
       "iframeTitulo": "Navegador seguro para iniciar sesión en {{dominio}}",
       "pie": "La sesión se abre en un navegador remoto seguro y expira sola si no confirmas.",
       "confirmar": "Ya inicié sesión",
       "confirmando": "Confirmando",
       "cerrarAria": "Cerrar la vista de inicio de sesión"
+    },
+    "relayMovil": {
+      "divulgacion": "En el teléfono, lo que escribes aquí viaja cifrado a través de nuestra infraestructura hasta el navegador seguro donde inicias sesión. No se guarda ni se registra en ningún momento. Desde una computadora, en cambio, la conexión es directa y no pasa por nosotros.",
+      "campoAria": "Campo para escribir tu inicio de sesión; las teclas se transmiten cifradas al navegador seguro",
+      "placeholder": "Toca aquí y escribe tu usuario y contraseña",
+      "conectando": "Estableciendo el canal seguro…",
+      "listo": "Canal seguro listo: ya puedes escribir.",
+      "error": "No se pudo abrir el canal seguro. Intenta de nuevo o inicia sesión desde una computadora.",
+      "tecla": {
+        "Tab": "Tab",
+        "Enter": "Enter",
+        "Backspace": "Borrar"
+      }
     },
     "estado": {
       "esperandoLogin": "Esperando login",

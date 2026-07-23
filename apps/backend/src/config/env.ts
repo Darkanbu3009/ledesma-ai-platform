@@ -77,6 +77,25 @@ const EnvSchema = z.object({
   // Railway (ver docs/despliegue-backend-alerta-upgrade.md). Un valor presente pero mal formado
   // (email invalido) si lanza al arrancar (error de config explicito), igual que las otras.
   UPGRADE_ALERTS_EMAIL: z.string().email().optional(),
+  // RELAY DE TECLADO MOVIL (conocimiento minimo, aditivo, opcional). El backend NO releva pulsaciones
+  // ni habla con Browserbase: SOLO ACUNA el token efimero de un solo uso (mintRelayToken) que autoriza
+  // al servicio relay (apps/relay) a abrir el canal. Las DOS son opcionales con el patron de siempre:
+  // si falta cualquiera, el endpoint POST /v1/sitios/:id/relay-token responde 'no configurado' y la UI
+  // movil cae al aviso de "hazlo desde una computadora" (desktop no se entera). Un valor presente pero
+  // mal formado (secreto corto / url invalida) si lanza al arrancar (error de config explicito).
+  //   RELAY_TOKEN_SECRET: secreto COMPARTIDO con el servicio relay para acunar/verificar el token
+  //                       efimero. SEPARADO de VAULT_SECRET y SESSION_TOKEN_SECRET a proposito: el
+  //                       servicio relay recibe SOLO este secreto y ninguna otra llave de la plataforma.
+  //   RELAY_PUBLIC_URL:   URL wss:// publica del servicio relay que el endpoint devuelve al cliente para
+  //                       que sepa a donde conectar (asi el console DESCUBRE la URL sin una env propia).
+  RELAY_TOKEN_SECRET: z.string().min(32).optional(),
+  RELAY_PUBLIC_URL: z
+    .string()
+    .url()
+    .refine((value) => value.startsWith('wss://') || value.startsWith('ws://'), {
+      message: 'RELAY_PUBLIC_URL debe ser una URL WebSocket (wss:// en produccion)',
+    })
+    .optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
