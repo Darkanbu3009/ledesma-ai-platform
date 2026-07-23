@@ -33,6 +33,15 @@ const TAG_END = IV_LENGTH + AUTH_TAG_LENGTH;
 const JTI_BYTES = 16;
 
 /**
+ * Bytes del SECRETO DE ENLACE del handshake (256 bits). Es la raiz de confianza de la autenticacion del
+ * handshake (A-1): viaja cifrado DENTRO del token (que el cliente no puede descifrar) y el backend lo
+ * entrega ademas al cliente por su canal confiable; ambos extremos derivan de el la clave de la MAC que
+ * liga las publicas ECDH al token. Un MITM ve el token cifrado pero no este secreto, asi que no puede
+ * forjar la MAC. Impredecible, holgado como clave de HMAC-SHA256.
+ */
+const BINDING_KEY_BYTES = 32;
+
+/**
  * TTL del token (segundos). ALINEADO al timeout de esperando_login: la sesion de login del proveedor
  * caduca a los 15 min (SESSION_TIMEOUT_SECONDS del worker) y el barrido la cierra a los 10, asi que el
  * token nunca sobrevive util mas alla de la sesion a la que apunta. 15 min es el techo de la
@@ -47,6 +56,7 @@ interface RelayTokenPayload {
   s: string; // sesion_externa_id (id de la sesion de navegador viva en el proveedor)
   e: number; // expiracion epoch segundos
   j: string; // jti: identificador de un solo uso (anti reuso del token)
+  b: string; // secreto de enlace del handshake (base64url), raiz de confianza de la MAC de canal (A-1)
 }
 
 /** Reclamos ya validados de un token del relay. */
@@ -57,6 +67,12 @@ export interface RelayTokenClaims {
   jti: string;
   /** Expiracion epoch segundos (para acotar la vida del canal y la retencion del jti consumido). */
   exp: number;
+  /**
+   * Secreto de enlace del handshake (base64url, 32 bytes) con el que el relay deriva la clave de la MAC
+   * que liga las publicas ECDH al token (A-1). SECRETO: jamas se loguea ni se devuelve al cliente por el
+   * canal del relay (el cliente lo recibe aparte, del backend). Sustituir una publica invalida la MAC.
+   */
+  bindingKey: string;
 }
 
 function deriveKey(secret: string): Buffer {
@@ -96,20 +112,24 @@ export function mintRelayToken(
     nowSeconds?: number;
   },
   secret: string,
-): { token: string; jti: string; expiresAt: string } {
+): { token: string; jti: string; expiresAt: string; bindingKey: string } {
   const now = params.nowSeconds ?? Math.floor(Date.now() / 1000);
   const ttl = Math.min(params.ttlSeconds ?? RELAY_TOKEN_TTL_SECONDS, RELAY_TOKEN_TTL_SECONDS);
   const exp = now + ttl;
   const jti = randomBytes(JTI_BYTES).toString('hex');
+  // Secreto de enlace por token: viaja cifrado en el payload (para el relay) y se DEVUELVE (para que el
+  // backend lo entregue al cliente por su canal). Con el, ambos extremos autentican el handshake.
+  const bindingKey = randomBytes(BINDING_KEY_BYTES).toString('base64url');
   const payload: RelayTokenPayload = {
     o: params.ownerId,
     c: params.connectionId,
     s: params.sesionExternaId,
     e: exp,
     j: jti,
+    b: bindingKey,
   };
   const token = encrypt(JSON.stringify(payload), secret);
-  return { token, jti, expiresAt: new Date(exp * 1000).toISOString() };
+  return { token, jti, expiresAt: new Date(exp * 1000).toISOString(), bindingKey };
 }
 
 /**
@@ -131,6 +151,8 @@ export function verifyRelayToken(
       typeof payload.c !== 'string' ||
       typeof payload.s !== 'string' ||
       typeof payload.j !== 'string' ||
+      typeof payload.b !== 'string' ||
+      payload.b.length === 0 ||
       typeof payload.e !== 'number' ||
       payload.e <= now
     ) {
@@ -142,6 +164,7 @@ export function verifyRelayToken(
       sesionExternaId: payload.s,
       jti: payload.j,
       exp: payload.e,
+      bindingKey: payload.b,
     };
   } catch {
     return null;

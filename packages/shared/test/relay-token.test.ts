@@ -10,8 +10,8 @@ const SECRET = 'x'.repeat(48); // >= 32, como en produccion
 const OTHER_SECRET = 'y'.repeat(48);
 
 describe('token del relay: acunar y verificar', () => {
-  it('un token recien acunado verifica y devuelve la terna ligada', () => {
-    const { token, jti } = mintRelayToken(
+  it('un token recien acunado verifica y devuelve la terna ligada mas el secreto de enlace', () => {
+    const { token, jti, bindingKey } = mintRelayToken(
       { ownerId: 'own_1', connectionId: 'con_1', sesionExternaId: 'ses_1' },
       SECRET,
     );
@@ -21,13 +21,18 @@ describe('token del relay: acunar y verificar', () => {
     expect(claims?.connectionId).toBe('con_1');
     expect(claims?.sesionExternaId).toBe('ses_1');
     expect(claims?.jti).toBe(jti);
+    // El secreto de enlace (A-1) viaja cifrado en el token y verify lo recupera; el mint tambien lo
+    // devuelve (para que el backend lo entregue al cliente). 32 bytes -> 43 chars base64url sin padding.
+    expect(claims?.bindingKey).toBe(bindingKey);
+    expect(Buffer.from(bindingKey, 'base64url').length).toBe(32);
   });
 
-  it('cada token trae un jti distinto (uso unico posible)', () => {
+  it('cada token trae un jti y un secreto de enlace distintos', () => {
     const a = mintRelayToken({ ownerId: 'o', connectionId: 'c', sesionExternaId: 's' }, SECRET);
     const b = mintRelayToken({ ownerId: 'o', connectionId: 'c', sesionExternaId: 's' }, SECRET);
     expect(a.jti).not.toBe(b.jti);
     expect(a.token).not.toBe(b.token);
+    expect(a.bindingKey).not.toBe(b.bindingKey);
   });
 
   it('un token con otro secreto NO verifica (devuelve null, sin oraculo)', () => {

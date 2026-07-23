@@ -1,16 +1,26 @@
 import { randomUUID } from 'node:crypto';
 import { verifyRelayToken } from '@ledesma-platform/shared/relay-token';
 import { decodificarPulsacion, type TeclaControl } from '@ledesma-platform/shared/relay-protocol';
-import { generarParEfimero, derivarClaveSesion } from './handshake.js';
+import { generarParEfimero, derivarClaveSesion, verificarMacCliente, macRelay } from './handshake.js';
 import { descifrarFrame } from './frames.js';
-import type { RegistroUsoUnico } from './single-use.js';
+import type { AutoridadRelay } from './autoridad.js';
 import type { LimitadorRelay } from './rate-limit.js';
 import type { Logger } from './logger.js';
 
 /**
  * SESION DE RELAY: la maquina de estados de UN canal (handshake -> ready -> pulsaciones -> cierre).
  * Concentra toda la logica sensible y esta INYECTADA por dependencias (socket, CDP, resolver de
- * connectUrl, reloj) para poder testearla entera sin red real.
+ * connectUrl, autoridad de coordinacion, reloj) para poder testearla entera sin red real.
+ *
+ * HANDSHAKE AUTENTICADO (A-1): el ECDH X25519 no basta contra un MITM en el proxy que termina TLS. El
+ * cliente prueba, con una MAC sobre el transcript (ambas publicas + el token) keyada por el secreto de
+ * enlace del token, que las publicas que ve son las mismas que ve el relay. Si el MITM sustituyo
+ * cualquier publica, la MAC no valida y el relay RECHAZA. El relay a su vez firma su propia MAC en el
+ * `ready` para que el cliente no teclee hacia un relay impostor.
+ *
+ * ESTADO COMPARTIDO (B-1): el uso unico del jti y el lock por conexion se consultan en una autoridad
+ * COMPARTIDA por todas las instancias (fail-closed: si no responde, se rechaza el canal). Asi la ventana
+ * de un rolling deploy no permite consumir el mismo token dos veces ni abrir dos canales a la conexion.
  *
  * CERO PERSISTENCIA / CERO LOGS DE CONTENIDO: el texto plano de una pulsacion vive solo entre el
  * descifrado y el reenvio por CDP, en un Buffer que se sobreescribe (fill 0) tras reenviar. Nunca se
@@ -37,7 +47,9 @@ export interface DepsSesion {
   /** Origen validado del upgrade (solo para auditoria de metadatos). */
   origen: string | null;
   relayTokenSecret: string;
-  usoUnico: RegistroUsoUnico;
+  /** Autoridad COMPARTIDA de uso unico del jti y lock por conexion (B-1). */
+  autoridad: AutoridadRelay;
+  /** Limitador LOCAL best-effort (flood + concurrencia por owner). */
   limitador: LimitadorRelay;
   logger: Logger;
   resolverConnectUrl(sesionExternaId: string): Promise<string>;
@@ -55,6 +67,8 @@ const DEFAULT_IDLE_TIMEOUT_MS = 120_000;
 
 export class SesionRelay {
   private readonly id = randomUUID();
+  /** Nonce del lock por conexion de ESTA sesion: solo ella libera su propio lock en la autoridad. */
+  private readonly lockNonce = randomUUID();
   private estado: Estado = 'hello';
   private readonly par = generarParEfimero();
   private claveSesion: Buffer | null = null;
@@ -62,7 +76,8 @@ export class SesionRelay {
   private cdpSessionId: string | null = null;
   private ultimoContador = 0;
   private eventos = 0;
-  private cupoReservado: { ownerId: string; connectionId: string } | null = null;
+  private cupoReservado: { ownerId: string } | null = null;
+  private conexionTomada: { connectionId: string } | null = null;
   private cola: Promise<void> = Promise.resolve();
   private readonly inicioMs: number;
 
@@ -122,7 +137,8 @@ export class SesionRelay {
   private manejarHello(mensaje: Record<string, unknown>): void {
     const pub = mensaje.pub;
     const token = mensaje.token;
-    if (typeof pub !== 'string' || typeof token !== 'string') {
+    const mac = mensaje.mac;
+    if (typeof pub !== 'string' || typeof token !== 'string' || typeof mac !== 'string') {
       this.rechazar('protocolo');
       return;
     }
@@ -131,18 +147,20 @@ export class SesionRelay {
       this.rechazar('token_invalido');
       return;
     }
-    // Rate limiting por owner y por sesion ANTES de reservar recursos.
-    const intento = this.deps.limitador.intentar(claims.ownerId, claims.connectionId, this.ahora());
+    // A-1: AUTENTICAR EL HANDSHAKE antes de reservar/consumir nada (asi un MITM no puede quemar el
+    // token del usuario con una MAC invalida). La MAC del cliente liga la publica del relay que ENVIAMOS
+    // y la del cliente que RECIBIMOS al token; si el MITM sustituyo alguna, no coincide.
+    if (!verificarMacCliente(mac, this.par.publicKeyB64, pub, token, claims.bindingKey)) {
+      this.rechazar('handshake_no_autenticado');
+      return;
+    }
+    // Rate limiting LOCAL best-effort por owner ANTES de reservar recursos (flood + concurrencia).
+    const intento = this.deps.limitador.intentar(claims.ownerId, this.ahora());
     if (!intento.ok) {
       this.rechazar('limite');
       return;
     }
-    this.cupoReservado = { ownerId: claims.ownerId, connectionId: claims.connectionId };
-    // Uso UNICO: un token, una sesion de relay. Reuso -> rechazo (y se libera el cupo recien tomado).
-    if (!this.deps.usoUnico.consumir(claims.jti, claims.exp, Math.floor(this.ahora() / 1000))) {
-      this.rechazar('reuso');
-      return;
-    }
+    this.cupoReservado = { ownerId: claims.ownerId };
     // Derivar la clave de sesion (ECDH X25519 + HKDF). Entrada invalida -> corte generico.
     try {
       this.claveSesion = derivarClaveSesion(this.par.privateKey, pub);
@@ -158,11 +176,65 @@ export class SesionRelay {
     const restanteMs = Math.max(0, claims.exp * 1000 - this.ahora());
     this.temporizadorExp = setTimeout(() => this.cerrar('token_expirado'), restanteMs);
 
-    // Resolver el connectUrl y abrir CDP. sesionExternaId viene del token (no se toca la base).
-    void this.establecerCdp(claims.sesionExternaId, claims.connectionId);
+    // Coordinacion COMPARTIDA (lock + uso unico) y luego CDP. Todo async: si la autoridad no responde,
+    // se rechaza el canal (fail-closed).
+    void this.autorizarYEstablecer(claims.connectionId, claims.jti, claims.sesionExternaId, claims.exp, pub, token, claims.bindingKey);
   }
 
-  private async establecerCdp(sesionExternaId: string, connectionId: string): Promise<void> {
+  private async autorizarYEstablecer(
+    connectionId: string,
+    jti: string,
+    sesionExternaId: string,
+    exp: number,
+    clientPubB64: string,
+    token: string,
+    bindingKey: string,
+  ): Promise<void> {
+    // 1) LOCK por conexion COMPARTIDO (atomico cross-instancia). Se toma ANTES de consumir el jti para
+    //    que la contienda por la conexion no queme el token. Fail-closed si la autoridad no responde.
+    let tomado: boolean;
+    try {
+      tomado = await this.deps.autoridad.tomarConexion(connectionId, this.lockNonce, exp);
+    } catch {
+      this.rechazar('autoridad_no_disponible');
+      return;
+    }
+    if (this.estado !== 'estableciendo') {
+      // Se cerro mientras consultabamos: si alcanzamos a tomar el lock, liberarlo.
+      if (tomado) void this.deps.autoridad.liberarConexion(connectionId, this.lockNonce);
+      return;
+    }
+    if (!tomado) {
+      this.rechazar('conexion_ocupada');
+      return;
+    }
+    this.conexionTomada = { connectionId };
+
+    // 2) USO UNICO del jti COMPARTIDO (atomico). Reuso -> rechazo (el lock lo libera cerrar()).
+    let consumido: boolean;
+    try {
+      consumido = await this.deps.autoridad.consumirJti(jti, exp);
+    } catch {
+      this.rechazar('autoridad_no_disponible');
+      return;
+    }
+    if (this.estado !== 'estableciendo') return; // se cerro mientras consultabamos
+    if (!consumido) {
+      this.rechazar('reuso');
+      return;
+    }
+
+    // 3) Resolver el connectUrl, abrir CDP y confirmar con el ready (que lleva la MAC del relay).
+    await this.establecerCdp(connectionId, sesionExternaId, clientPubB64, token, bindingKey);
+  }
+
+  private async establecerCdp(
+    connectionId: string,
+    sesionExternaId: string,
+    clientPubB64: string,
+    token: string,
+    bindingKey: string,
+  ): Promise<void> {
     try {
       const connectUrl = await this.deps.resolverConnectUrl(sesionExternaId);
       if (this.estado !== 'estableciendo') return; // se cerro mientras resolviamos
@@ -176,7 +248,9 @@ export class SesionRelay {
       if (this.estado !== 'estableciendo') return;
       this.estado = 'relevando';
       this.reiniciarIdle();
-      this.enviarControl({ t: 'ready' });
+      // El ready lleva la MAC del RELAY: el cliente la verifica antes de teclear, asi no habla con un
+      // relay impostor (un MITM que sustituyo la pata del relay no conoce el secreto de enlace).
+      this.enviarControl({ t: 'ready', mac: macRelay(this.par.publicKeyB64, clientPubB64, token, bindingKey) });
       this.deps.logger.info('relay_abierto', {
         relaySesionId: this.id,
         connectionId,
@@ -257,7 +331,7 @@ export class SesionRelay {
     }
   }
 
-  /** Cierre GARANTIZADO e idempotente: timers, CDP, cupo, clave y socket. Audita SOLO metadatos. */
+  /** Cierre GARANTIZADO e idempotente: timers, CDP, lock, cupo, clave y socket. Audita SOLO metadatos. */
   cerrar(motivo: string): void {
     if (this.estado === 'cerrada') return;
     this.estado = 'cerrada';
@@ -268,8 +342,13 @@ export class SesionRelay {
       this.cdp.cerrar();
       this.cdp = null;
     }
+    // Liberar el lock por conexion COMPARTIDO (best-effort: si falla, caduca solo por exp).
+    if (this.conexionTomada !== null) {
+      void this.deps.autoridad.liberarConexion(this.conexionTomada.connectionId, this.lockNonce);
+      this.conexionTomada = null;
+    }
     if (this.cupoReservado !== null) {
-      this.deps.limitador.liberar(this.cupoReservado.ownerId, this.cupoReservado.connectionId);
+      this.deps.limitador.liberar(this.cupoReservado.ownerId);
       this.cupoReservado = null;
     }
     // Descartar la clave de sesion (la privada efimera muere con el par al salir de scope).

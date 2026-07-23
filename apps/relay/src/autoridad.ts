@@ -1,0 +1,83 @@
+/**
+ * AUTORIDAD COMPARTIDA de uso unico del token y lock por conexion (B-1). El uso unico del jti y el lock
+ * "un solo canal por conexion" son INVARIANTES DE SEGURIDAD: si viven en la memoria de cada proceso, en
+ * un rolling deploy de Railway (dos instancias solapadas) un token se consume una vez POR INSTANCIA y se
+ * abre un segundo canal a la misma sesion de login. Para cerrar esa ventana estos dos estados se delegan
+ * a una autoridad COMPARTIDA por todas las instancias.
+ *
+ * En produccion la implementacion es `AutoridadRemota` (media el backend, atomico en su base; el relay
+ * sigue SIN DATABASE_URL). En dev/tests se usa `AutoridadEnMemoria` (una sola instancia, sin red).
+ *
+ * FAIL-CLOSED: si la autoridad no responde, el metodo LANZA y el llamador rechaza el handshake. Jamas se
+ * degrada en silencio a estado por proceso: preferimos negar un canal antes que operar con estado
+ * dividido. Lo que NO es invariante de seguridad (contadores de flood y concurrencia por owner) queda en
+ * memoria por instancia a proposito (ver rate-limit.ts); con N instancias esos limites se multiplican.
+ */
+export interface AutoridadRelay {
+  /**
+   * Consume el jti (uso UNICO, atomico y compartido). Devuelve true si es la PRIMERA vez (canal
+   * autorizado) y false si ya fue consumido (reuso -> el llamador rechaza). Lanza si la autoridad no
+   * responde (fail-closed). El jti se retiene hasta `expEpochSec` (el token ya no verifica pasado eso).
+   */
+  consumirJti(jti: string, expEpochSec: number): Promise<boolean>;
+
+  /**
+   * Toma el LOCK por conexion (exclusion mutua atomica y compartida): nunca dos canales vivos sobre la
+   * misma `connectionId`. Devuelve true si lo tomo y false si ya estaba tomado (conexion ocupada ->
+   * rechazo). `lockNonce` identifica a ESTA sesion para que solo ella libere su lock. Lanza si la
+   * autoridad no responde (fail-closed). Un lock vencido (mas alla de `expEpochSec`) se puede retomar.
+   */
+  tomarConexion(connectionId: string, lockNonce: string, expEpochSec: number): Promise<boolean>;
+
+  /**
+   * Libera el lock por conexion (idempotente, best-effort). Solo libera si el `lockNonce` coincide con el
+   * que lo tomo (no pisa un lock ya retomado por otra sesion). No lanza: un fallo aqui no rompe el cierre;
+   * el lock caduca solo por `expEpochSec`.
+   */
+  liberarConexion(connectionId: string, lockNonce: string): Promise<void>;
+}
+
+/**
+ * Implementacion EN MEMORIA (una sola instancia). Autoritativa solo si el proceso es unico; por eso en
+ * produccion se exige `AutoridadRemota` (el arranque falla ruidoso sin ella). Util en dev/tests.
+ */
+export class AutoridadEnMemoria implements AutoridadRelay {
+  private readonly jtiConsumidos = new Map<string, number>(); // jti -> exp epoch segundos
+  private readonly conexiones = new Map<string, { nonce: string; exp: number }>(); // connectionId -> lock
+
+  constructor(private readonly ahoraSec: () => number = () => Math.floor(Date.now() / 1000)) {}
+
+  async consumirJti(jti: string, expEpochSec: number): Promise<boolean> {
+    this.purgarJti();
+    if (this.jtiConsumidos.has(jti)) return false;
+    this.jtiConsumidos.set(jti, expEpochSec);
+    return true;
+  }
+
+  async tomarConexion(connectionId: string, lockNonce: string, expEpochSec: number): Promise<boolean> {
+    const ahora = this.ahoraSec();
+    const actual = this.conexiones.get(connectionId);
+    if (actual !== undefined && actual.exp > ahora) return false; // ocupada y vigente
+    this.conexiones.set(connectionId, { nonce: lockNonce, exp: expEpochSec });
+    return true;
+  }
+
+  async liberarConexion(connectionId: string, lockNonce: string): Promise<void> {
+    const actual = this.conexiones.get(connectionId);
+    if (actual !== undefined && actual.nonce === lockNonce) {
+      this.conexiones.delete(connectionId);
+    }
+  }
+
+  private purgarJti(): void {
+    const ahora = this.ahoraSec();
+    for (const [jti, exp] of this.jtiConsumidos) {
+      if (exp <= ahora) this.jtiConsumidos.delete(jti);
+    }
+  }
+
+  /** Solo para tests/observabilidad: cantidad de jti retenidos. */
+  get jtiRetenidos(): number {
+    return this.jtiConsumidos.size;
+  }
+}

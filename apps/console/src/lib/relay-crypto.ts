@@ -1,4 +1,12 @@
-import { HKDF_INFO, HKDF_SALT, nonceParaContador } from '@ledesma-platform/shared/relay-protocol';
+import {
+  HKDF_INFO,
+  HKDF_SALT,
+  HKDF_MAC_INFO,
+  MAC_ROLE_CLIENTE,
+  MAC_ROLE_RELAY,
+  mensajeMacHandshake,
+  nonceParaContador,
+} from '@ledesma-platform/shared/relay-protocol';
 
 /**
  * Capa de cifrado del cliente para el relay de teclado movil (conocimiento minimo), con WebCrypto del
@@ -80,6 +88,56 @@ export async function derivarClaveSesion(par: CryptoKeyPair, relayPubB64: string
     false,
     ['encrypt'],
   );
+}
+
+/**
+ * Deriva la clave de la MAC de confirmacion del handshake (A-1) desde el secreto de enlace `hs` que el
+ * backend entrego al cliente (base64url). HKDF-SHA256 con un `info` DISTINTO al de la clave AES: la MAC
+ * no comparte material con el cifrado. Interopera byte a byte con node:crypto del relay (mismo ikm/salt/
+ * info/hash -> misma clave). La clave se importa para 'sign' y 'verify' (el cliente firma la suya y
+ * verifica la del relay).
+ */
+async function derivarClaveMac(hsB64: string): Promise<CryptoKey> {
+  const hkdf = await crypto.subtle.importKey('raw', ab(b64urlToU8(hsB64)), 'HKDF', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'HKDF', hash: 'SHA-256', salt: ab(HKDF_SALT), info: ab(HKDF_MAC_INFO) },
+    hkdf,
+    256,
+  );
+  return crypto.subtle.importKey('raw', bits, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+}
+
+/**
+ * Calcula la MAC del CLIENTE sobre el transcript del handshake (la publica del relay que RECIBIO, la
+ * propia que ENVIA, el token). El relay la verifica: si un MITM sustituyo cualquier publica, el
+ * transcript difiere y la MAC no valida. Devuelve base64url.
+ */
+export async function macClienteHandshake(
+  hsB64: string,
+  relayPubB64: string,
+  clientPubB64: string,
+  token: string,
+): Promise<string> {
+  const clave = await derivarClaveMac(hsB64);
+  const mensaje = mensajeMacHandshake(MAC_ROLE_CLIENTE, relayPubB64, clientPubB64, token);
+  const firma = await crypto.subtle.sign('HMAC', clave, ab(mensaje));
+  return u8ToB64url(new Uint8Array(firma));
+}
+
+/**
+ * Verifica la MAC del RELAY (base64url) sobre el mismo transcript antes de teclear: si no valida, el otro
+ * extremo no conoce el secreto de enlace (es un impostor / MITM) y el cliente NO debe enviar pulsaciones.
+ */
+export async function verificarMacRelay(
+  hsB64: string,
+  relayPubB64: string,
+  clientPubB64: string,
+  token: string,
+  macB64: string,
+): Promise<boolean> {
+  const clave = await derivarClaveMac(hsB64);
+  const mensaje = mensajeMacHandshake(MAC_ROLE_RELAY, relayPubB64, clientPubB64, token);
+  return crypto.subtle.verify('HMAC', clave, ab(b64urlToU8(macB64)), ab(mensaje));
 }
 
 /** Cifra una pulsacion ya codificada con el nonce derivado del contador. Devuelve base64url(ct||tag). */

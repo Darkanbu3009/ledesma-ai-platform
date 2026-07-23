@@ -94,7 +94,7 @@ describe('POST /v1/sitios/:id/relay-token', () => {
       headers: { authorization: 'Bearer valid-user-1' },
     });
     expect(res.statusCode).toBe(201);
-    const body = res.json() as { token: string; expiresAt: string; relayUrl: string };
+    const body = res.json() as { token: string; expiresAt: string; relayUrl: string; hs: string };
     expect(body.relayUrl).toBe(RELAY_ENV.RELAY_PUBLIC_URL);
     const claims = verifyRelayToken(body.token, RELAY_SECRET);
     expect(claims).not.toBeNull();
@@ -103,6 +103,10 @@ describe('POST /v1/sitios/:id/relay-token', () => {
     expect(claims?.sesionExternaId).toBe('ses-remota-1');
     // El token NUNCA es la vista en vivo ni el connectUrl: solo la terna cifrada.
     expect(body.token).not.toContain('browserbase');
+    // `hs` es el secreto de enlace del handshake (A-1): 32 bytes base64url, y coincide con el que el
+    // token trae cifrado (bindingKey). El cliente lo recibe POR ESTE canal confiable con el backend.
+    expect(Buffer.from(body.hs, 'base64url').length).toBe(32);
+    expect(body.hs).toBe(claims?.bindingKey);
   });
 
   it('sitio de OTRO owner -> 404, sin acunar token', async () => {

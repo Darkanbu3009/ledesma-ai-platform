@@ -265,14 +265,17 @@ export function sitiosRoutes(
           throw new AppError('RELAY_NO_DISPONIBLE', 501, 'Assisted mobile keyboard relay is not configured');
         }
 
-        const { token, expiresAt } = mintRelayToken(
+        const { token, expiresAt, bindingKey } = mintRelayToken(
           { ownerId: user.id, connectionId: sitio.id, sesionExternaId: sitio.sesionExternaId },
           config.RELAY_TOKEN_SECRET,
         );
 
         // El token es la UNICA credencial del canal (un solo uso, TTL corto). relayUrl deja que la
-        // consola descubra a donde conectar sin una env propia. Nada de esto es contenido de pulsaciones.
-        return reply.status(201).send({ token, expiresAt, relayUrl: config.RELAY_PUBLIC_URL });
+        // consola descubra a donde conectar sin una env propia. `hs` es el secreto de enlace del
+        // handshake (A-1): raiz de confianza de la MAC de canal, entregado al cliente POR ESTE canal
+        // confiable con el backend (no por el del relay, donde estaria el MITM). Va TAMBIEN cifrado
+        // dentro del token para el relay. Nada de esto es contenido de pulsaciones.
+        return reply.status(201).send({ token, expiresAt, relayUrl: config.RELAY_PUBLIC_URL, hs: bindingKey });
       },
     );
 
