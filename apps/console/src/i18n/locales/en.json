@@ -808,7 +808,7 @@
     "hero": {
       "eyebrow": "The future is now",
       "titulo": "Just ask. Your agent does it.",
-      "descripcion": "An AI assistant that works inside your accounts and your systems. You talk to it in your own words, and it goes in and does the work for you. No tabs to open, no forms to fill. For people and for companies."
+      "descripcion": "An AI assistant that works inside your accounts and your systems. You talk to it in your own words, and it goes in and does the work for you. No tabs, no apps, no platforms, no forms. For people and for companies."
     },
     "heroShowcase": {
       "tusSistemas": "Your systems",
@@ -1029,7 +1029,7 @@
     "capacidades": {
       "eyebrow": "For everyday life",
       "titulo": "Everything in one message",
-      "descripcion": "This is what's coming to your agent. Features marked Beta are in development: they don't run these actions yet, and you'll see them arrive in your account.",
+      "descripcion": "We have it in beta for your agent, and it will be available in your account.",
       "chips": {
         "reservarMesa": "Book your table",
         "comprarMejorPrecio": "Buy at the best price",
