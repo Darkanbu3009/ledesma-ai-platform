@@ -20,6 +20,7 @@
     },
     "./relay-protocol": {
       "types": "./dist/relay/protocol.d.ts",
+      "browser": "./src/relay/protocol.ts",
       "import": "./dist/relay/protocol.js"
     }
   },
