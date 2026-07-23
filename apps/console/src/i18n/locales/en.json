@@ -1782,6 +1782,7 @@
     "modal": {
       "titulo": "Sign in to {{dominio}}",
       "instruccion": "Sign in here just like you normally would. Nobody else sees your data. Your password never goes through Ledesma.",
+      "avisoMovil": "Typing inside this view is not available on phones and tablets yet: the secure browser does not support the mobile keyboard. Open this page on a computer to connect the site.",
       "iframeTitulo": "Secure browser to sign in to {{dominio}}",
       "pie": "The session opens in a secure remote browser and expires on its own if you do not confirm.",
       "confirmar": "I signed in",
