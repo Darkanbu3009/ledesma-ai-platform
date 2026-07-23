@@ -19,8 +19,9 @@ Reemplaza el aviso previo (`prueba-manual-aviso-teclado-movil.md`), que solo com
 2. Pega `https://en.wikipedia.org/w/index.php?title=Special:UserLogin` (o `en.wikipedia.org`) y toca
    **Conectar**. Espera a que aparezca el modal con la vista en vivo.
 3. Confirma que arriba de la vista aparece el **aviso de divulgacion** (que en el telefono lo que escribes
-   viaja cifrado por nuestra infraestructura, no se guarda ni se registra, y que desde una computadora la
-   conexion es directa) y un **campo** para escribir con tres botones: **Tab**, **Borrar**, **Enter**.
+   viaja cifrado hasta la infraestructura de Ledesma, donde se descifra para reenviarlo al navegador
+   seguro, no se guarda ni se registra, y que desde una computadora la conexion es directa) y un **campo**
+   para escribir con tres botones: **Tab**, **Borrar**, **Enter**.
 4. Espera a "**Canal seguro listo**". Toca el campo: **el teclado nativo del telefono debe levantarse**.
 5. Escribe el **usuario** en el campo. Observa en la vista en vivo que las letras aparecen en el campo de
    usuario del sitio. Usa **Tab** (o toca el campo de contrasena en la vista) para pasar a la contrasena.
@@ -52,7 +53,7 @@ sigue funcionando.
 ## D. No fuga (revisar durante A)
 
 - Los logs del servicio relay durante el login deben mostrar **solo metadatos** (`relay_abierto`,
-  `relay_cerrado`, conteo de eventos, duracion): **nunca** el usuario, la contrasena, el codigo, el
-  `connectUrl` ni el token.
+  `relay_cerrado`, motivo de cierre, duracion; **ya no** se registra el conteo de pulsaciones): **nunca**
+  el usuario, la contrasena, el codigo, el `connectUrl` ni el token.
 - Los logs del **backend** durante `POST /v1/sitios/:id/relay-token` no deben contener el token ni
   pulsaciones (solo la linea de request estandar).

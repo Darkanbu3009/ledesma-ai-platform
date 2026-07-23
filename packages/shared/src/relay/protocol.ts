@@ -116,7 +116,12 @@ export type TeclaControl = 'Enter' | 'Backspace' | 'Tab';
 const ID_POR_TECLA: Record<TeclaControl, number> = { Enter: 1, Backspace: 2, Tab: 3 };
 const TECLA_POR_ID: Record<number, TeclaControl> = { 1: 'Enter', 2: 'Backspace', 3: 'Tab' };
 
-/** Pulsacion ya decodificada del texto plano (nunca se loguea ni persiste). */
+/**
+ * Pulsacion ya decodificada del texto plano. NO se loguea ni persiste, pero para el caso 'texto' el
+ * `texto` es un string de JavaScript INMUTABLE: una copia del texto plano que no se puede borrar de
+ * forma determinista y solo se libera cuando la recolecta el GC. La mitigacion real es el aislamiento
+ * del proceso relay y la ausencia de persistencia (ver apps/relay/src/session.ts).
+ */
 export type Pulsacion =
   | { tipo: 'texto'; texto: string }
   | { tipo: 'tecla'; tecla: TeclaControl };

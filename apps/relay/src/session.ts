@@ -22,10 +22,15 @@ import type { Logger } from './logger.js';
  * COMPARTIDA por todas las instancias (fail-closed: si no responde, se rechaza el canal). Asi la ventana
  * de un rolling deploy no permite consumir el mismo token dos veces ni abrir dos canales a la conexion.
  *
- * CERO PERSISTENCIA / CERO LOGS DE CONTENIDO: el texto plano de una pulsacion vive solo entre el
- * descifrado y el reenvio por CDP, en un Buffer que se sobreescribe (fill 0) tras reenviar. Nunca se
- * escribe a disco/base/cola, nunca se loguea (ni completo, ni truncado, ni su longitud), y los errores
- * son codigos genericos sin contenido. La auditoria (logger) recibe SOLO metadatos.
+ * CERO PERSISTENCIA / CERO LOGS DE CONTENIDO: el texto plano de una pulsacion se descifra en un Buffer
+ * que se sobreescribe (fill 0) en cuanto se reenvia por CDP. Ese fill NO borra TODO el texto plano:
+ * decodificarlo para CDP (TextDecoder en decodificarPulsacion y el JSON.stringify del frame CDP) produce
+ * copias en strings de JavaScript, INMUTABLES, que no se pueden borrar de forma determinista y solo
+ * desaparecen cuando el recolector de basura las libera. Por eso la mitigacion REAL no es el fill sino el
+ * AISLAMIENTO DEL PROCESO (un servicio relay minimo, de un solo proposito, sin VAULT_SECRET ni
+ * DATABASE_URL) y la AUSENCIA DE PERSISTENCIA: el texto plano nunca se escribe a disco/base/cola y nunca
+ * se loguea. Tampoco se registra el conteo de pulsaciones (equivalia al numero de teclas y filtraba la
+ * longitud de lo tecleado). La auditoria (logger) recibe SOLO metadatos no sensibles.
  */
 
 /** El socket del cliente, visto por la sesion (lo cablea el servidor sobre el WebSocket real). */
@@ -75,7 +80,6 @@ export class SesionRelay {
   private cdp: CdpInyector | null = null;
   private cdpSessionId: string | null = null;
   private ultimoContador = 0;
-  private eventos = 0;
   private cupoReservado: { ownerId: string } | null = null;
   private conexionTomada: { connectionId: string } | null = null;
   private cola: Promise<void> = Promise.resolve();
@@ -276,8 +280,10 @@ export class SesionRelay {
     }
     this.ultimoContador = contador;
     this.reiniciarIdle();
-    // Descifrar y reenviar en una cola secuencial (preserva el orden de tecleo). El texto plano vive
-    // solo dentro de esta tarea y su Buffer se sobreescribe al terminar.
+    // Descifrar y reenviar en una cola secuencial (preserva el orden de tecleo). El Buffer del texto
+    // plano se sobreescribe al terminar, pero las copias en strings que CDP necesita no se pueden borrar
+    // (ver la nota de la clase): el texto plano vive dentro de esta tarea y, como strings inmutables,
+    // hasta que el GC los recolecte.
     this.encolar(async () => {
       if (this.estado !== 'relevando' || this.claveSesion === null || this.cdp === null || this.cdpSessionId === null) {
         return;
@@ -299,9 +305,10 @@ export class SesionRelay {
         } else {
           await this.cdp.despacharTecla(pulsacion.tecla, this.cdpSessionId);
         }
-        this.eventos += 1;
       } finally {
-        // Sobreescribir el texto plano en cuanto se reenvio (donde el runtime lo permite: el Buffer).
+        // Sobreescribir el Buffer del texto plano en cuanto se reenvio. Solo alcanza al Buffer: las
+        // copias en strings inmutables que produjo decodificarlo para CDP no se pueden borrar aqui y
+        // solo desaparecen cuando el GC las libera.
         plano.fill(0);
       }
     });
@@ -364,7 +371,6 @@ export class SesionRelay {
     this.deps.logger.info('relay_cerrado', {
       relaySesionId: this.id,
       motivo,
-      eventos: this.eventos,
       duracionMs: this.ahora() - this.inicioMs,
     });
   }

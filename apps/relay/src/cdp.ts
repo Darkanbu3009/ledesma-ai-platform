@@ -9,7 +9,10 @@ import type { TeclaControl } from '@ledesma-platform/shared/relay-protocol';
  *
  * SEGURIDAD: el connectUrl embebe el signing key de la sesion -> JAMAS se loguea (ni aca ni en los
  * llamadores) y NINGUN error de este modulo lo incluye. El texto de Input.insertText es contenido de la
- * pulsacion: no se loguea, no se retiene, solo se reenvia.
+ * pulsacion: no se loguea y solo se reenvia. No se retiene a proposito, pero armar el frame CDP
+ * (JSON.stringify) crea una copia en un string INMUTABLE que no se puede borrar de forma determinista y
+ * vive hasta que el GC la recolecta; por eso la proteccion real es el aislamiento del proceso, no un
+ * borrado en memoria.
  */
 
 const CDP_TIMEOUT_MS = 15_000;
@@ -128,8 +131,9 @@ export class ClienteCdp {
 
   /**
    * Inserta TEXTO en el elemento enfocado de la pagina remota (Input.insertText). `texto` es contenido
-   * de la pulsacion: se reenvia y no se retiene. No devuelve nada al cliente (fire-and-forget) para no
-   * eco de contenido ni latencia extra.
+   * de la pulsacion: se reenvia y no se retiene a proposito, aunque el JSON.stringify del frame deja una
+   * copia inmutable en memoria hasta el GC (ver la nota de SEGURIDAD del modulo). No devuelve nada al
+   * cliente (fire-and-forget) para no eco de contenido ni latencia extra.
    */
   async insertarTexto(texto: string, sessionId: string): Promise<void> {
     await this.enviar('Input.insertText', { text: texto }, sessionId);

@@ -828,7 +828,7 @@
       "pasos": {
         "paso1": {
           "titulo": "Connect your account",
-          "descripcion": "You sign in, in your own browser, like you always do. Your password never goes through us."
+          "descripcion": "You sign in yourself in a secure browser, like always. On a computer the connection is direct and your password never goes through us; on a phone it travels encrypted through our infrastructure and is never stored."
         },
         "paso2": {
           "titulo": "Tell it what you need",
@@ -1769,7 +1769,7 @@
     "gate": {
       "badge": "Feature of plans with autonomy",
       "titulo": "Connect your sites with login",
-      "descripcion": "With a plan with autonomy you can connect sites where you sign in yourself, in a secure browser, and let your agents work there. Your password never goes through Ledesma."
+      "descripcion": "With a plan with autonomy you can connect sites where you sign in yourself, in a secure browser, and let your agents work there. On a computer the connection is direct and your password never goes through Ledesma; on a phone it travels encrypted through our infrastructure and is never stored."
     },
     "conectar": {
       "label": "Site URL",
@@ -1790,8 +1790,8 @@
       "cerrarAria": "Close the sign-in view"
     },
     "relayMovil": {
-      "divulgacion": "On your phone, what you type here travels encrypted through our infrastructure to the secure browser where you sign in. It is never stored or logged. From a computer, the connection is direct and does not pass through us.",
-      "campoAria": "Field to type your sign-in; keystrokes are transmitted encrypted to the secure browser",
+      "divulgacion": "On your phone, what you type here travels encrypted to Ledesma's infrastructure, where it is decrypted to be forwarded to the secure browser you sign in to. It is never stored or logged. From a computer, the connection is direct to the secure browser and does not pass through us.",
+      "campoAria": "Field to type your sign-in; keystrokes travel encrypted to Ledesma's infrastructure, which decrypts and forwards them to the secure browser",
       "placeholder": "Tap here and type your username and password",
       "conectando": "Setting up the secure channel…",
       "listo": "Secure channel ready: you can type now.",

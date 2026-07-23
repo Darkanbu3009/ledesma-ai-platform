@@ -4,11 +4,16 @@ Este documento describe como desplegar el **servicio relay de teclado movil** (`
 servicio **separado** en Railway, y las variables de entorno que necesitan **el relay** y **el backend**.
 
 > **Que es (y que NO es).** En telefonos, la vista en vivo de Browserbase no levanta el teclado nativo
-> (es un screencast). El usuario teclea en un campo propio de la consola y las pulsaciones se **relevan
-> cifradas** hacia el navegador remoto. Es un **relay de conocimiento minimo**, **NO** cifrado extremo a
-> extremo: Browserbase recibe el texto legible por CDP. La meta de seguridad es que el texto plano exista
-> **solo** en la memoria del proceso relay, el menor tiempo posible, y en ningun otro lugar (ni logs, ni
-> disco, ni base, ni otros procesos). En **desktop** no se usa nada de esto: entrada directa al iframe.
+> (es un screencast). El usuario teclea en un campo propio de la consola y las pulsaciones viajan
+> **cifradas** hasta el servicio relay, que las **descifra** para reenviarlas por CDP al navegador remoto.
+> Es un **relay de conocimiento minimo**, **NO** cifrado extremo a extremo: el relay ve el texto plano y
+> Browserbase lo recibe legible por CDP. La meta de seguridad es que ese texto plano exista **solo** en la
+> memoria del proceso relay y en ningun otro lugar (ni logs, ni disco, ni base, ni otros procesos). El
+> Buffer del descifrado se sobreescribe tras reenviar, pero decodificarlo para CDP deja **copias en
+> strings inmutables** que no se pueden borrar de forma determinista y viven hasta que las recolecta el
+> recolector de basura; por eso la mitigacion real es el **aislamiento del proceso** (este servicio
+> aparte) y la **ausencia de persistencia**, no un borrado en memoria. En **desktop** no se usa nada de
+> esto: entrada directa al iframe.
 
 ## Por que un servicio APARTE (no el backend, no el worker)
 
@@ -34,8 +39,9 @@ que hace de relay tiene acceso efectivo a todas las sesiones vivas del proyecto.
 - **Abre su propia conexion CDP.** Durante `esperando_login` ningun proceso mantiene un CDP vivo, asi que
   el relay pide el `connectUrl` con `GET /v1/sessions/{id}` (`apps/relay/src/browserbase.ts`) y abre el
   WebSocket CDP para inyectar `Input.insertText` / `Input.dispatchKeyEvent`.
-- **Auditoria solo de metadatos** (id de sesion, timestamps, conteo de eventos, resultado). Ninguna
-  llamada al logger con contenido de pulsaciones; los errores se sanitizan antes de emitirse.
+- **Auditoria solo de metadatos** (id de sesion, timestamps, motivo de cierre, duracion). El **conteo de
+  pulsaciones ya no se registra**: equivalia al numero de teclas y filtraba la longitud de lo tecleado.
+  Ninguna llamada al logger con contenido de pulsaciones; los errores se sanitizan antes de emitirse.
 - **Shutdown graceful:** `SIGTERM`/`SIGINT` cierran toda sesion viva (y su CDP) antes de salir; sin
   sesiones huerfanas (`apps/relay/src/index.ts`).
 
