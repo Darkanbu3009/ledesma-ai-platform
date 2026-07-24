@@ -53,7 +53,7 @@ function makeDeps(overrides: Partial<JobRunnerDeps> = {}): JobRunnerDeps {
     })),
     runAgent: vi.fn(() => successRun()),
     logger: makeLogger(),
-    config: { runTimeoutMs: 600_000, runMaxTokens: 1_000_000 },
+    config: { runTimeoutMs: 600_000, tareaWebTimeoutMs: 1_500_000, runMaxTokens: 1_000_000 },
     ...overrides,
   };
 }
@@ -142,7 +142,7 @@ describe('startWorker', () => {
 
 describe('reaper de huerfanos en el loop del worker', () => {
   it('corre el reaper en la PRIMERA pasada, con umbrales derivados de runTimeoutMs y MAX_ATTEMPTS', async () => {
-    const deps = makeDeps({ config: { runTimeoutMs: 600_000, runMaxTokens: 1_000_000 } });
+    const deps = makeDeps({ config: { runTimeoutMs: 600_000, tareaWebTimeoutMs: 1_500_000, runMaxTokens: 1_000_000 } });
     (deps.jobs.claimNextJob as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
     const handle = startWorker({ deps, logger: deps.logger, intervalMs: 60_000 });
@@ -151,10 +151,12 @@ describe('reaper de huerfanos en el loop del worker', () => {
 
     expect(deps.jobs.reapOrphanedJobs).toHaveBeenCalled();
     const arg = (deps.jobs.reapOrphanedJobs as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
-    // simple = 3 * runTimeoutMs; receta = 50 * runTimeoutMs * 1.5; maxAttempts = 3.
+    // simple = 3 * runTimeoutMs; receta = 50 * runTimeoutMs * 1.5; tarea_web = 3 * tareaWebTimeoutMs;
+    // maxAttempts = 3.
     expect(arg).toMatchObject({
       simpleThresholdMs: 600_000 * 3,
       recipeThresholdMs: 50 * 600_000 * 1.5,
+      tareaWebThresholdMs: 1_500_000 * 3,
       maxAttempts: 3,
     });
   });

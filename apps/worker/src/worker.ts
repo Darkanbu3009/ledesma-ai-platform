@@ -23,11 +23,15 @@ const REAP_INTERVAL_MS = 60_000;
  * un MARGEN AMPLIO por tipo (ver reapThresholdsMs), que excede el maximo wall-clock legitimo. Doble red.
  */
 async function reapOrphans(deps: JobRunnerDeps): Promise<void> {
-  const { simpleMs, recipeMs } = reapThresholdsMs(deps.config.runTimeoutMs);
+  const { simpleMs, recipeMs, tareaWebMs } = reapThresholdsMs(
+    deps.config.runTimeoutMs,
+    deps.config.tareaWebTimeoutMs,
+  );
   try {
     const reaped = await deps.jobs.reapOrphanedJobs({
       simpleThresholdMs: simpleMs,
       recipeThresholdMs: recipeMs,
+      tareaWebThresholdMs: tareaWebMs,
       maxAttempts: MAX_ATTEMPTS,
     });
     if (reaped.length > 0) {

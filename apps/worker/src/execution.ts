@@ -70,15 +70,23 @@ const SIMPLE_REAP_MULTIPLIER = 3;
 const RECIPE_REAP_MULTIPLIER = 1.5;
 
 /**
- * Umbrales (ms) del reaper de huerfanos POR TIPO de job, derivados del deadline de pared (runTimeoutMs).
+ * Umbrales (ms) del reaper de huerfanos POR TIPO de job, derivados del deadline de pared de cada tipo:
+ * runTimeoutMs para simple/receta y tareaWebTimeoutMs (TAREA_WEB_TIMEOUT_SECONDS) para tarea_web, que
+ * tiene su PROPIO deadline y podria configurarse por encima del umbral simple si compartieran margen.
  * Un job 'running' cuyo started_at sea mas viejo que su umbral es, con CERTEZA, un huerfano de un worker
  * muerto: el margen supera el maximo wall-clock legitimo de cada tipo, asi que nunca corresponde a un job
  * realmente en ejecucion. Exportada para testear la calibracion (la propiedad critica: "jamas toca vivos").
  */
-export function reapThresholdsMs(runTimeoutMs: number): { simpleMs: number; recipeMs: number } {
+export function reapThresholdsMs(
+  runTimeoutMs: number,
+  tareaWebTimeoutMs: number,
+): { simpleMs: number; recipeMs: number; tareaWebMs: number } {
   return {
     simpleMs: runTimeoutMs * SIMPLE_REAP_MULTIPLIER,
     recipeMs: MAX_RECIPE_STEPS * runTimeoutMs * RECIPE_REAP_MULTIPLIER,
+    // Una tarea web corre a lo sumo ~1 deadline por corrida (la reanudacion tras un checkpoint
+    // re-reclama el job y resetea started_at), asi que el mismo multiplicador de simple alcanza.
+    tareaWebMs: tareaWebTimeoutMs * SIMPLE_REAP_MULTIPLIER,
   };
 }
 
@@ -117,6 +125,7 @@ export interface JobQueue {
   reapOrphanedJobs(params: {
     simpleThresholdMs: number;
     recipeThresholdMs: number;
+    tareaWebThresholdMs: number;
     maxAttempts: number;
   }): Promise<ReapedJob[]>;
 }
@@ -125,6 +134,10 @@ export interface JobQueue {
 export interface ExecutionConfig {
   /** Deadline de pared del run, en ms (RUN_TIMEOUT_SECONDS * 1000). Lo aplica el worker, no runAgent. */
   runTimeoutMs: number;
+  /** Deadline de pared de los jobs de tarea_web, en ms (TAREA_WEB_TIMEOUT_SECONDS * 1000). Solo lo
+   *  consume el reaper para calibrar el umbral de huerfanos de ese tipo; el handler recibe el suyo
+   *  via TareaWebDeps.runTimeoutMs. */
+  tareaWebTimeoutMs: number;
   /** Cap de tokens acumulados del run (RUN_MAX_TOKENS). */
   runMaxTokens: number;
   /** Worker nativo de plataforma (tools nativas). Si falta alguno, no se inyectan nativas. */

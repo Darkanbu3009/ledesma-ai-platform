@@ -1,10 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Job } from '@ledesma-platform/shared';
 import type { SitioConectado } from '@ledesma-platform/backend/sitios';
-import {
-  MAX_PASOS_TAREA_WEB,
-  procesarTareaWeb,
-} from '../src/tarea-web.js';
+import { procesarTareaWeb } from '../src/tarea-web.js';
 import type {
   MotorDeTareaWeb,
   NavegadorParaTarea,
@@ -121,6 +118,7 @@ function makeDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
     motor: makeMotor({ exito: true, mensaje: 'el panel muestra 3 agentes activos' }),
     vaultSecret: VAULT_SECRET,
     model: 'anthropic/claude-sonnet-4-6',
+    maxPasos: 120,
     runTimeoutMs: 600_000,
     resolveCredential: vi.fn(async () => ({
       id: 'cred-1',
@@ -363,7 +361,8 @@ describe('procesarTareaWeb', () => {
       model: string;
     };
     expect(params.objetivo).toBe(OBJETIVO);
-    expect(params.maxPasos).toBe(MAX_PASOS_TAREA_WEB);
+    // El cap de pasos viaja desde las deps (TAREA_WEB_MAX_STEPS via env), no de una constante fija.
+    expect(params.maxPasos).toBe(120);
     expect(params.model).toBe('anthropic/claude-sonnet-4-6');
     expect(params.systemPrompt).toBe(construirSystemPromptTareaWeb());
   });

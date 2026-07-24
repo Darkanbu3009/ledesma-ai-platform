@@ -97,7 +97,7 @@ function makeDeps(overrides: Partial<JobRunnerDeps> = {}): JobRunnerDeps {
     })),
     runAgent: successRun(),
     logger: makeLogger(),
-    config: { runTimeoutMs: 600_000, runMaxTokens: 1_000_000 },
+    config: { runTimeoutMs: 600_000, tareaWebTimeoutMs: 1_500_000, runMaxTokens: 1_000_000 },
     notifyJobFailure: vi.fn(async () => {}),
     recordRun: vi.fn(async () => {}),
     ...overrides,

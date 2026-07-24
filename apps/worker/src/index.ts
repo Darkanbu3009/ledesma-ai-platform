@@ -126,7 +126,8 @@ function main(): void {
       notificadorAprobaciones,
       vaultSecret: config.VAULT_SECRET,
       model: config.TAREA_WEB_MODEL,
-      runTimeoutMs: config.RUN_TIMEOUT_SECONDS * 1000,
+      maxPasos: config.TAREA_WEB_MAX_STEPS,
+      runTimeoutMs: config.TAREA_WEB_TIMEOUT_SECONDS * 1000,
       resolveCredential: (ownerId, credentialId) =>
         resolveStoredCredential(credentialRepo, ownerId, credentialId, config.VAULT_SECRET),
       guardarResultado: (jobId, resultado) => jobs.guardarResultado(jobId, resultado),
@@ -174,6 +175,7 @@ function main(): void {
     logger,
     config: {
       runTimeoutMs: config.RUN_TIMEOUT_SECONDS * 1000,
+      tareaWebTimeoutMs: config.TAREA_WEB_TIMEOUT_SECONDS * 1000,
       runMaxTokens: config.RUN_MAX_TOKENS,
       ...(config.WEB_WORKER_URL !== undefined ? { webWorkerUrl: config.WEB_WORKER_URL } : {}),
       ...(config.WEB_WORKER_SECRET !== undefined ? { webWorkerSecret: config.WEB_WORKER_SECRET } : {}),

@@ -57,9 +57,6 @@ import type { Logger } from './logger.js';
  *    loguea (ni el, ni el objetivo, ni URLs internas: solo ids y dominios).
  */
 
-/** Cap DURO de iteraciones (pasos del agente de navegacion) por tarea. */
-export const MAX_PASOS_TAREA_WEB = 30;
-
 /** Desenlace del handler hacia execution.ts: completada (markCompleted) o pausada (el job ya quedo
  *  'pausado' esperando la decision humana; NO se marca completado). */
 export type ResultadoTareaWeb = 'completada' | 'pausada';
@@ -202,7 +199,9 @@ export interface TareaWebDeps {
   vaultSecret: string;
   /** Modelo de la navegacion (TAREA_WEB_MODEL; Haiku prohibido, validado al parsear el env). */
   model: string;
-  /** Deadline de pared de la tarea, en ms (el mismo runTimeoutMs del worker). */
+  /** Cap DURO de iteraciones (pasos del agente de navegacion) por corrida (TAREA_WEB_MAX_STEPS). */
+  maxPasos: number;
+  /** Deadline de pared de la tarea, en ms (TAREA_WEB_TIMEOUT_SECONDS * 1000). */
   runTimeoutMs: number;
   /** Resuelve y descifra la credencial del owner (la key del modelo sale de la boveda). */
   resolveCredential(ownerId: string, credentialId: string): Promise<DecryptedProviderCredential>;
@@ -536,8 +535,8 @@ export async function procesarTareaWeb(
 
     if (!resultado.exito) {
       throw new PermanentExecutionError(
-        'la tarea no se pudo completar dentro de sus limites (pasos o tiempo); no se reintenta ' +
-          'automaticamente para no repetir acciones sobre la cuenta del usuario',
+        `la tarea no se pudo completar dentro del limite de pasos configurado (${deps.maxPasos} ` +
+          'pasos); no se reintenta automaticamente para no repetir acciones sobre la cuenta del usuario',
       );
     }
 
@@ -656,7 +655,11 @@ async function ejecutarMotor(
   prompt: { objetivo: string; systemPrompt: string },
 ): Promise<ResultadoMotor> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), deps.runTimeoutMs);
+  let expiroDeadline = false;
+  const timer = setTimeout(() => {
+    expiroDeadline = true;
+    controller.abort();
+  }, deps.runTimeoutMs);
   try {
     return await deps.motor.ejecutar({
       sesionExternaId,
@@ -664,12 +667,21 @@ async function ejecutarMotor(
       systemPrompt: prompt.systemPrompt,
       apiKey,
       model: deps.model,
-      maxPasos: MAX_PASOS_TAREA_WEB,
+      maxPasos: deps.maxPasos,
       signal: controller.signal,
     });
   } catch (error) {
     // Fallo del motor con la sesion ya abierta: PERMANENTE (no se re-ejecuta una navegacion a
-    // medias sobre la cuenta real). El mensaje va sanitizado: nunca el objetivo ni contenido.
+    // medias sobre la cuenta real). El mensaje va sanitizado: nunca el objetivo ni contenido. Si el
+    // que corto fue el deadline de pared, el mensaje lo dice con los segundos configurados
+    // (diagnostico interno); cualquier otro fallo conserva el mensaje sanitizado de siempre.
+    if (expiroDeadline) {
+      throw new PermanentExecutionError(
+        `la tarea no se pudo completar dentro del deadline de pared configurado ` +
+          `(${Math.round(deps.runTimeoutMs / 1000)} segundos); no se reintenta automaticamente ` +
+          'para no repetir acciones sobre la cuenta del usuario',
+      );
+    }
     throw new PermanentExecutionError(`la navegacion fallo: ${describir(error)}`);
   } finally {
     clearTimeout(timer);
@@ -804,8 +816,9 @@ async function reanudarTrasDecision(
 
     if (!resultado.exito) {
       throw new PermanentExecutionError(
-        'la tarea reanudada no se pudo completar dentro de sus limites (pasos o tiempo); no se ' +
-          'reintenta automaticamente para no repetir acciones sobre la cuenta del usuario',
+        `la tarea reanudada no se pudo completar dentro del limite de pasos configurado ` +
+          `(${deps.maxPasos} pasos); no se reintenta automaticamente para no repetir acciones ` +
+          'sobre la cuenta del usuario',
       );
     }
 
