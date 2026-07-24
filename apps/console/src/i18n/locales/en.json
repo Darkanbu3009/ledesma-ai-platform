@@ -1847,6 +1847,29 @@
       "generico": "Something went wrong. Try again.",
       "cargarLista": "We could not load your connected sites",
       "eliminarFallo": "We could not delete the connection because of a platform issue. Try again in a few minutes."
+    },
+    "catalogo": {
+      "listaAria": "Suggested sites",
+      "conectado": "Connected",
+      "grupo": {
+        "correo": "Email",
+        "productividad": "Productivity",
+        "almacenamiento": "Storage",
+        "desarrollo": "Development",
+        "comercio": "Shopping",
+        "viajes": "Travel",
+        "medios": "Media",
+        "gobierno_mx": "Mexican government",
+        "social": "Social networks"
+      },
+      "advertencia": {
+        "automatizacionRestringida": "This platform restricts automation and your account may be affected.",
+        "datosSensibles": "This site handles tax or identity data; consider it carefully before connecting it."
+      },
+      "nota": {
+        "atlassian": "Your workspace lives at yourcompany.atlassian.net.",
+        "whatsapp": "Access is via QR code, not typing."
+      }
     }
   },
   "aprobaciones": {

@@ -20,6 +20,7 @@ import {
 } from '../lib/sitios';
 import { isJobInFlight } from '../lib/jobs';
 import { formatRunAt } from '../lib/schedule';
+import { CatalogoSitiosCombobox } from '../components/sitios/CatalogoSitiosCombobox';
 import { LoginEnVivoDialog } from '../components/sitios/LoginEnVivoDialog';
 import { SeleccionPaisDialog } from '../components/sitios/SeleccionPaisDialog';
 import { EliminarSitioDialog } from '../components/sitios/EliminarSitioDialog';
@@ -303,6 +304,9 @@ export function SitiosConectadosPage() {
   }
 
   const hasSitios = sitiosVisibles.length > 0;
+  // Dominios ya conectados: el catalogo los atenua y no permite re-seleccionarlos. Sale de la
+  // lista que la pagina ya tiene; cero peticiones nuevas.
+  const dominiosConectados = new Set(sitios.map((sitio) => sitio.dominio));
 
   return (
     <div className="mx-auto flex min-h-full max-w-4xl flex-col">
@@ -324,17 +328,15 @@ export function SitiosConectadosPage() {
               <label htmlFor="sitio-url" className="sr-only">
                 {t('sitios.conectar.label')}
               </label>
-              <input
-                id="sitio-url"
-                type="url"
-                inputMode="url"
+              {/* Combobox del catalogo de sitios sugeridos: solo rellena el input; teclear una URL
+                  arbitraria y el submit del formulario funcionan exactamente igual que antes. */}
+              <CatalogoSitiosCombobox
                 value={url}
-                onChange={(e) => {
-                  setUrl(e.target.value);
+                onChange={(valor) => {
+                  setUrl(valor);
                   setUrlError(null);
                 }}
-                placeholder={t('sitios.conectar.placeholder')}
-                className="h-12 w-full flex-1 rounded-xl border border-line bg-field px-4 text-sm text-ink placeholder:text-muted-soft focus:border-brasa-line focus:outline-none sm:h-11"
+                dominiosConectados={dominiosConectados}
               />
               <button
                 type="submit"
