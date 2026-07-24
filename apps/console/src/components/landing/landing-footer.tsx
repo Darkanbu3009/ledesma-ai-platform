@@ -52,7 +52,13 @@ export function LandingFooter(): JSX.Element {
       <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-12">
         <div className="flex flex-col gap-10 min-[900px]:flex-row min-[900px]:justify-between">
           <div className="max-w-sm">
-            <Logo className="h-16 w-auto text-cream [&_rect]:fill-current" />
+            <Link
+              to="/"
+              aria-label={t('landing.footer.logoInicio')}
+              className="inline-flex rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-brasa"
+            >
+              <Logo className="h-16 w-auto text-cream [&_rect]:fill-current" />
+            </Link>
             <p className="mt-4 text-sm text-cream/85">
               {t('landing.footer.descripcion')}
             </p>
