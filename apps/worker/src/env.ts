@@ -77,6 +77,19 @@ const EnvSchema = z.object({
     .refine((model) => !/haiku/i.test(model), {
       message: 'TAREA_WEB_MODEL no permite Haiku para trabajo de agente (regla de plataforma); usa p.ej. anthropic/claude-sonnet-4-6',
     }),
+  // PRESUPUESTO DE LA TAREA WEB (pasos y tiempo), separado de las corridas de agente simple y de
+  // receta (que siguen con RUN_TIMEOUT_SECONDS). Mismo patron que WORKER_POLL_INTERVAL_MS: numerica
+  // opcional con default; un valor fuera de rango hace fallar el arranque como cualquier variable
+  // mal formada.
+  //   TAREA_WEB_MAX_STEPS: cap duro de pasos del agente de navegacion (Stagehand maxSteps). Acotado
+  //   a 10..300: menos de 10 no completa ni una tarea trivial y mas de 300 excede lo que cabe en el
+  //   deadline de pared.
+  TAREA_WEB_MAX_STEPS: z.coerce.number().int().min(10).max(300).default(120),
+  //   TAREA_WEB_TIMEOUT_SECONDS: deadline de pared SOLO para jobs de tipo tarea_web. El maximo es
+  //   el timeout de la sesion de tarea en Browserbase (TAREA_SESSION_TIMEOUT_SECONDS = 2700 s,
+  //   browserbase.ts) menos un margen de 120 s: la sesion remota jamas debe morir antes que nuestro
+  //   deadline.
+  TAREA_WEB_TIMEOUT_SECONDS: z.coerce.number().int().min(60).max(2580).default(1500),
 });
 
 export type WorkerEnv = z.infer<typeof EnvSchema>;

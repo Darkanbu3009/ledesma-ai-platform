@@ -270,6 +270,7 @@ describe('JobsRepository', () => {
       await new JobsRepository(sql).reapOrphanedJobs({
         simpleThresholdMs: 1_800_000,
         recipeThresholdMs: 45_000_000,
+        tareaWebThresholdMs: 4_500_000,
         maxAttempts: 3,
       });
       const texto = sqlText(sql).toLowerCase();
@@ -295,6 +296,7 @@ describe('JobsRepository', () => {
       await new JobsRepository(sql).reapOrphanedJobs({
         simpleThresholdMs: 1000,
         recipeThresholdMs: 2000,
+        tareaWebThresholdMs: 3000,
         maxAttempts: 3,
       });
       const texto = sqlText(sql).toLowerCase();
@@ -315,6 +317,7 @@ describe('JobsRepository', () => {
       const reaped = await new JobsRepository(sql).reapOrphanedJobs({
         simpleThresholdMs: 1000,
         recipeThresholdMs: 2000,
+        tareaWebThresholdMs: 3000,
         maxAttempts: 3,
       });
       expect(reaped).toEqual([
@@ -327,6 +330,7 @@ describe('JobsRepository', () => {
       const reaped = await new JobsRepository(makeSqlReturning([])).reapOrphanedJobs({
         simpleThresholdMs: 1000,
         recipeThresholdMs: 2000,
+        tareaWebThresholdMs: 3000,
         maxAttempts: 3,
       });
       expect(reaped).toEqual([]);
@@ -590,6 +594,7 @@ describe('JobsRepository (7.1e: checkpoints de aprobacion, estado pausado)', () 
       await new JobsRepository(sqlReap).reapOrphanedJobs({
         simpleThresholdMs: 1000,
         recipeThresholdMs: 2000,
+        tareaWebThresholdMs: 3000,
         maxAttempts: 3,
       });
       expect(sqlText(sqlReap)).toContain("where status = 'running'");

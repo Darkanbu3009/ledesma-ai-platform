@@ -99,5 +99,7 @@ Este proceso **no se despliega** aun; solo debe compilar y poder correrse localm
 | `WEB_WORKER_URL` / `WEB_WORKER_SECRET` | no | — | Tools nativas; si falta alguna, no se inyectan. |
 | `RUN_TIMEOUT_SECONDS` | no | `600` | Deadline de pared del run (lo aplica el worker). |
 | `RUN_MAX_TOKENS` | no | `1000000` | Cap de tokens acumulados del run. |
+| `TAREA_WEB_MAX_STEPS` | no | `120` | Cap de pasos del agente de navegacion por tarea web (10..300). |
+| `TAREA_WEB_TIMEOUT_SECONDS` | no | `1500` | Deadline de pared SOLO de los jobs `tarea_web` (60..2580). |
 | `WORKER_POLL_INTERVAL_MS` | no | `5000` | Cada cuanto consulta la cola. |
 | `LOG_LEVEL` | no | `info` | Nivel de log. |

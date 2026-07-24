@@ -97,6 +97,7 @@ function makeTareaWebDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
     },
     vaultSecret: '0123456789abcdef0123456789abcdef',
     model: 'anthropic/claude-sonnet-4-6',
+    maxPasos: 120,
     runTimeoutMs: 600_000,
     resolveCredential: vi.fn(async () => ({
       id: 'cred-1',
@@ -133,7 +134,7 @@ function makeDeps(overrides: Partial<JobRunnerDeps> = {}): JobRunnerDeps {
     }),
     notifyJobFailure: vi.fn(async () => {}),
     logger: makeLogger(),
-    config: { runTimeoutMs: 600_000, runMaxTokens: 1_000_000 },
+    config: { runTimeoutMs: 600_000, tareaWebTimeoutMs: 1_500_000, runMaxTokens: 1_000_000 },
     ...overrides,
   };
 }

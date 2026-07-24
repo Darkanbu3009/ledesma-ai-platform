@@ -42,6 +42,48 @@ describe('parseEnv (worker)', () => {
   });
 });
 
+describe('parseEnv (worker): presupuesto de la tarea web (TAREA_WEB_MAX_STEPS / TAREA_WEB_TIMEOUT_SECONDS)', () => {
+  it('defaults: 120 pasos y 1500 segundos cuando faltan', () => {
+    const env = parseEnv(VALID as NodeJS.ProcessEnv);
+    expect(env.TAREA_WEB_MAX_STEPS).toBe(120);
+    expect(env.TAREA_WEB_TIMEOUT_SECONDS).toBe(1500);
+  });
+
+  it('coacciona ambas desde string', () => {
+    const env = parseEnv({
+      ...VALID,
+      TAREA_WEB_MAX_STEPS: '200',
+      TAREA_WEB_TIMEOUT_SECONDS: '900',
+    } as NodeJS.ProcessEnv);
+    expect(env.TAREA_WEB_MAX_STEPS).toBe(200);
+    expect(env.TAREA_WEB_TIMEOUT_SECONDS).toBe(900);
+  });
+
+  it('acepta los bordes del rango (10..300 pasos, 60..2580 segundos)', () => {
+    const bajo = parseEnv({ ...VALID, TAREA_WEB_MAX_STEPS: '10', TAREA_WEB_TIMEOUT_SECONDS: '60' } as NodeJS.ProcessEnv);
+    expect(bajo.TAREA_WEB_MAX_STEPS).toBe(10);
+    expect(bajo.TAREA_WEB_TIMEOUT_SECONDS).toBe(60);
+    const alto = parseEnv({ ...VALID, TAREA_WEB_MAX_STEPS: '300', TAREA_WEB_TIMEOUT_SECONDS: '2580' } as NodeJS.ProcessEnv);
+    expect(alto.TAREA_WEB_MAX_STEPS).toBe(300);
+    expect(alto.TAREA_WEB_TIMEOUT_SECONDS).toBe(2580);
+  });
+
+  it('RECHAZA valores fuera de rango: el arranque falla como con cualquier variable mal formada', () => {
+    for (const maxSteps of ['9', '301', '0', '-5', 'abc']) {
+      expect(() => parseEnv({ ...VALID, TAREA_WEB_MAX_STEPS: maxSteps } as NodeJS.ProcessEnv)).toThrow(
+        /Environment validation failed/,
+      );
+    }
+    // El techo (2580 s) es el timeout de la sesion de tarea en Browserbase (2700 s) menos 120 s de
+    // margen: nunca se puede configurar un deadline que sobreviva a la sesion remota.
+    for (const timeout of ['59', '2581', '0', '-1', 'abc']) {
+      expect(() => parseEnv({ ...VALID, TAREA_WEB_TIMEOUT_SECONDS: timeout } as NodeJS.ProcessEnv)).toThrow(
+        /Environment validation failed/,
+      );
+    }
+  });
+});
+
 describe('parseEnv (worker): TAREA_WEB_MODEL, 7.1d)', () => {
   it('default: Claude Sonnet en formato proveedor/modelo', () => {
     const env = parseEnv(VALID as NodeJS.ProcessEnv);

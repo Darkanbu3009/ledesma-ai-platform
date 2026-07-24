@@ -124,7 +124,7 @@ function makeDeps(overrides: Partial<JobRunnerDeps> = {}): JobRunnerDeps {
     })),
     runAgent: vi.fn(() => successRun()),
     logger: makeLogger(),
-    config: { runTimeoutMs: 600_000, runMaxTokens: 1_000_000 },
+    config: { runTimeoutMs: 600_000, tareaWebTimeoutMs: 1_500_000, runMaxTokens: 1_000_000 },
     notifyJobFailure: vi.fn(async () => {}),
     ...overrides,
   };
@@ -247,7 +247,7 @@ describe('processClaimedJob', () => {
     vi.useFakeTimers();
     const deps = makeDeps({
       runAgent: vi.fn((input: AgentRunInput) => hangingRun(input)),
-      config: { runTimeoutMs: 1_000, runMaxTokens: 1_000_000 },
+      config: { runTimeoutMs: 1_000, tareaWebTimeoutMs: 1_500_000, runMaxTokens: 1_000_000 },
     });
     const job = makeJob({ attempts: 1 });
 
@@ -356,28 +356,35 @@ describe('notificacion de fallo definitivo (hook en handleFailure)', () => {
 });
 
 describe('reapThresholdsMs (calibracion del margen del reaper)', () => {
-  it('deriva umbrales por tipo desde runTimeoutMs (simple = 3x, receta = MAX_RECIPE_STEPS * 1.5x)', () => {
-    const { simpleMs, recipeMs } = reapThresholdsMs(600_000);
+  it('deriva umbrales por tipo (simple = 3x, receta = MAX_RECIPE_STEPS * 1.5x, tarea_web = 3x su deadline)', () => {
+    const { simpleMs, recipeMs, tareaWebMs } = reapThresholdsMs(600_000, 1_500_000);
     expect(simpleMs).toBe(600_000 * 3);
     expect(recipeMs).toBe(MAX_RECIPE_STEPS * 600_000 * 1.5);
+    expect(tareaWebMs).toBe(1_500_000 * 3);
   });
 
   it('PROPIEDAD CRITICA: el margen SUPERA el maximo wall-clock legitimo de cada tipo (jamas toca vivos)', () => {
     const runTimeoutMs = 600_000;
-    const { simpleMs, recipeMs } = reapThresholdsMs(runTimeoutMs);
+    // El deadline de tarea_web al MAXIMO configurable (2580 s, el techo de env.ts): incluso ahi el
+    // margen debe superar el wall-clock legitimo de una corrida de tarea web.
+    const tareaWebTimeoutMs = 2_580_000;
+    const { simpleMs, recipeMs, tareaWebMs } = reapThresholdsMs(runTimeoutMs, tareaWebTimeoutMs);
     // Un job simple corre a lo sumo ~1 runTimeoutMs; el margen lo supera con holgura.
     expect(simpleMs).toBeGreaterThan(runTimeoutMs);
     // Una receta corre a lo sumo MAX_RECIPE_STEPS pasos, cada uno hasta runTimeoutMs; el margen lo supera.
     expect(recipeMs).toBeGreaterThan(MAX_RECIPE_STEPS * runTimeoutMs);
     // Y el margen de receta es mucho mayor que el de simple (una receta vive legitimamente mucho mas).
     expect(recipeMs).toBeGreaterThan(simpleMs);
+    // Una tarea web corre a lo sumo ~1 deadline propio por corrida; el margen lo supera con holgura.
+    expect(tareaWebMs).toBeGreaterThan(tareaWebTimeoutMs);
   });
 
-  it('escala proporcional con runTimeoutMs (subir el deadline sube el margen)', () => {
-    const a = reapThresholdsMs(600_000);
-    const b = reapThresholdsMs(1_200_000);
+  it('escala proporcional con cada deadline (subir el deadline sube el margen)', () => {
+    const a = reapThresholdsMs(600_000, 1_500_000);
+    const b = reapThresholdsMs(1_200_000, 3_000_000);
     expect(b.simpleMs).toBe(a.simpleMs * 2);
     expect(b.recipeMs).toBe(a.recipeMs * 2);
+    expect(b.tareaWebMs).toBe(a.tareaWebMs * 2);
   });
 });
 
@@ -616,7 +623,7 @@ describe('processClaimedJob - recetas (kind:recipe)', () => {
         call += 1;
         return call === 1 ? successRun() : hangingRun(input);
       }),
-      config: { runTimeoutMs: 1_000, runMaxTokens: 1_000_000 },
+      config: { runTimeoutMs: 1_000, tareaWebTimeoutMs: 1_500_000, runMaxTokens: 1_000_000 },
     });
     const job = makeJob({ payload: recipePayload(['p1', 'p2', 'p3']), attempts: 1 });
 

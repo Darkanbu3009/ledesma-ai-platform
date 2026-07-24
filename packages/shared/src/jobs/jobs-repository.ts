@@ -420,6 +420,8 @@ export class JobsRepository {
    *     runTimeoutMs).
    *   - job de RECETA (payload.kind = 'recipe'): hasta MAX_RECIPE_STEPS pasos, cada uno con su propio
    *     deadline runTimeoutMs -> margen `recipeThresholdMs` (> MAX_RECIPE_STEPS * runTimeoutMs).
+   *   - job de TAREA WEB (payload.kind = 'tarea_web'): una corrida acotada a su PROPIO deadline
+   *     (TAREA_WEB_TIMEOUT_SECONDS) -> margen `tareaWebThresholdMs` (varias veces ese deadline).
    * El discriminador se lee del propio payload (`payload->>'kind'`, el mismo criterio que listByOwner),
    * sin traer el payload a memoria. Un job dentro de su margen (posiblemente vivo) NUNCA se toca: un
    * margen mal calibrado mataria jobs vivos, por eso es holgado.
@@ -437,9 +439,10 @@ export class JobsRepository {
   async reapOrphanedJobs(params: {
     simpleThresholdMs: number;
     recipeThresholdMs: number;
+    tareaWebThresholdMs: number;
     maxAttempts: number;
   }): Promise<ReapedJob[]> {
-    const { simpleThresholdMs, recipeThresholdMs, maxAttempts } = params;
+    const { simpleThresholdMs, recipeThresholdMs, tareaWebThresholdMs, maxAttempts } = params;
     const pendingMessage =
       'recuperado de estado huerfano: el worker murio entre el claim y el cierre; devuelto a pending para reintento';
     const failedMessage =
@@ -457,6 +460,8 @@ export class JobsRepository {
         and started_at < now() - case
           when payload->>'kind' = ${RECIPE_JOB_KIND}
             then make_interval(secs => ${recipeThresholdMs / 1000})
+          when payload->>'kind' = ${TAREA_WEB_JOB_KIND}
+            then make_interval(secs => ${tareaWebThresholdMs / 1000})
           else make_interval(secs => ${simpleThresholdMs / 1000})
         end
       returning id, status, attempts
