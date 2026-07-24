@@ -1847,6 +1847,29 @@
       "generico": "Algo salió mal. Intenta de nuevo.",
       "cargarLista": "No pudimos cargar tus sitios conectados",
       "eliminarFallo": "No pudimos eliminar la conexión por un problema de la plataforma. Intenta de nuevo en unos minutos."
+    },
+    "catalogo": {
+      "listaAria": "Sitios sugeridos",
+      "conectado": "Conectado",
+      "grupo": {
+        "correo": "Correo",
+        "productividad": "Productividad",
+        "almacenamiento": "Almacenamiento",
+        "desarrollo": "Desarrollo",
+        "comercio": "Comercio",
+        "viajes": "Viajes",
+        "medios": "Medios",
+        "gobierno_mx": "Gobierno de México",
+        "social": "Redes sociales"
+      },
+      "advertencia": {
+        "automatizacionRestringida": "Esta plataforma restringe la automatización y tu cuenta puede verse afectada.",
+        "datosSensibles": "Este sitio maneja datos fiscales o de identidad; conviene evaluarlo antes de conectarlo."
+      },
+      "nota": {
+        "atlassian": "Tu espacio de trabajo vive en tuempresa.atlassian.net.",
+        "whatsapp": "El acceso es por código QR, no por teclado."
+      }
     }
   },
   "aprobaciones": {
