@@ -372,7 +372,8 @@
     "marca": {
       "eyebrow": "Plataforma de agentes",
       "titular": "Agentes que ejecutan trabajo real dentro de tus sistemas.",
-      "soporte": "Multi-tenant · BYOK · Trazabilidad completa"
+      "soporte": "Multi-tenant · BYOK · Trazabilidad completa",
+      "logoInicio": "Ledesma AI Labs, ir al inicio"
     },
     "errores": {
       "correoInvalido": "Ingresa un correo válido.",
@@ -1024,7 +1025,8 @@
       "contactanos": "Contáctanos",
       "facebookAria": "Facebook de Ledesma AI Labs",
       "copyright": "© 2026 Ledesma AI Labs. Todos los derechos reservados",
-      "politicaPrivacidad": "Política de privacidad"
+      "politicaPrivacidad": "Política de privacidad",
+      "logoInicio": "Ledesma AI Labs, ir al inicio"
     },
     "capacidades": {
       "eyebrow": "Para tu día a día",

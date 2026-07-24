@@ -372,7 +372,8 @@
     "marca": {
       "eyebrow": "Agent platform",
       "titular": "Agents that do real work inside your systems.",
-      "soporte": "Multi-tenant · BYOK · Full traceability"
+      "soporte": "Multi-tenant · BYOK · Full traceability",
+      "logoInicio": "Ledesma AI Labs, go to home"
     },
     "errores": {
       "correoInvalido": "Enter a valid email.",
@@ -1024,7 +1025,8 @@
       "contactanos": "Contact us",
       "facebookAria": "Ledesma AI Labs on Facebook",
       "copyright": "© 2026 Ledesma AI Labs. All rights reserved",
-      "politicaPrivacidad": "Privacy Policy"
+      "politicaPrivacidad": "Privacy Policy",
+      "logoInicio": "Ledesma AI Labs, go to home"
     },
     "capacidades": {
       "eyebrow": "For everyday life",

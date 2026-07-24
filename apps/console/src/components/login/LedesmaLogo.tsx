@@ -1,9 +1,20 @@
+import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { useAuth } from '../../auth/useAuth';
+import { focusRing } from '../../lib/utils';
+
 /**
  * Logo apilado oficial de Ledesma AI Labs para la pantalla de acceso: isotipo
  * "L" vectorial (barra vertical ink 12x56 + base horizontal 34x8 + cuadro
  * naranja 10x10 arriba a la derecha de la barra) con el wordmark "Ledesma /
  * AI LABS" debajo. `compact` reduce el lockup para el header movil y
  * `large` lo agranda para placements centrados (gate de consentimiento).
+ *
+ * Sin sesion el lockup enlaza a la landing publica (/), para dar salida hacia el
+ * inicio desde las pantallas de acceso donde aparece (login, crear cuenta,
+ * recuperar, nueva contrasena). Con sesion se queda igual, sin enlace, para no
+ * cambiar el comportamiento de las pantallas autenticadas donde tambien se usa
+ * (p. ej. el gate de consentimiento).
  */
 export function LedesmaLogo({
   compact = false,
@@ -12,7 +23,10 @@ export function LedesmaLogo({
   compact?: boolean;
   large?: boolean;
 }) {
-  return (
+  const { t } = useTranslation();
+  const { session } = useAuth();
+
+  const lockup = (
     <div className={compact || large ? 'flex flex-col items-center text-center' : ''}>
       <svg
         viewBox="0 0 34 56"
@@ -38,5 +52,13 @@ export function LedesmaLogo({
         AI LABS
       </p>
     </div>
+  );
+
+  if (session) return lockup;
+
+  return (
+    <Link to="/" aria-label={t('auth.marca.logoInicio')} className={`inline-flex rounded-md ${focusRing}`}>
+      {lockup}
+    </Link>
   );
 }
