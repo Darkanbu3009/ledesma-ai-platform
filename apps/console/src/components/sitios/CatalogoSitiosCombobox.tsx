@@ -6,7 +6,12 @@ import {
   filtrarCatalogo,
   type SitioSugerido,
 } from '../../lib/catalogo-sitios';
-import { LOGOS_CATALOGO, usaColorDeMarca } from '../../lib/logos-catalogo';
+import {
+  LOGOS_CATALOGO,
+  coloresFallback,
+  inicialUsaTextoInk,
+  usaColorDeMarca,
+} from '../../lib/logos-catalogo';
 
 const INPUT_ID = 'sitio-url';
 const LISTBOX_ID = 'sitio-url-listbox';
@@ -19,11 +24,35 @@ function opcionId(sitioId: string): string {
  * Logo de una fila del catalogo: SVG inline de simple-icons (20x20, un solo path) con el hex de
  * marca, o currentColor sobre text-ink cuando el hex no contrasta 3:1 contra el panel. Para
  * iconoSlug null (o slug sin logo empaquetado), circulo de la MISMA medida con la inicial del
- * nombre, para que la lista no baile.
+ * nombre, para que la lista no baile: relleno con el color de coloresFallback si el id esta ahi
+ * (la inicial va en ink o blanco segun la luminancia del fondo), o el neutro de siempre si no.
  */
-function LogoSitio({ nombre, iconoSlug }: { nombre: string; iconoSlug: string | null }) {
+function LogoSitio({
+  id,
+  nombre,
+  iconoSlug,
+}: {
+  id: string;
+  nombre: string;
+  iconoSlug: string | null;
+}) {
   const logo = iconoSlug === null ? undefined : LOGOS_CATALOGO[iconoSlug];
   if (logo === undefined) {
+    const colorFondo = coloresFallback[id];
+    if (colorFondo !== undefined) {
+      return (
+        <span
+          aria-hidden="true"
+          style={{ backgroundColor: `#${colorFondo}` }}
+          className={[
+            'flex h-5 w-5 flex-none items-center justify-center rounded-full text-[10px] font-semibold',
+            inicialUsaTextoInk(colorFondo) ? 'text-ink' : 'text-white',
+          ].join(' ')}
+        >
+          {nombre.charAt(0).toUpperCase()}
+        </span>
+      );
+    }
     return (
       <span
         aria-hidden="true"
@@ -141,6 +170,8 @@ export function CatalogoSitiosCombobox({
         id={INPUT_ID}
         type="url"
         inputMode="url"
+        autoComplete="off"
+        name="conectar-sitio-url-libre"
         role="combobox"
         aria-expanded={visible}
         aria-controls={LISTBOX_ID}
@@ -194,7 +225,7 @@ export function CatalogoSitiosCombobox({
                   ].join(' ')}
                 >
                   <span className="mt-0.5 flex-none">
-                    <LogoSitio nombre={sitio.nombre} iconoSlug={sitio.iconoSlug} />
+                    <LogoSitio id={sitio.id} nombre={sitio.nombre} iconoSlug={sitio.iconoSlug} />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="flex flex-wrap items-baseline gap-x-2">
