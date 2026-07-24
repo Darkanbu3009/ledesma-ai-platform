@@ -3,6 +3,9 @@ import { CATALOGO_SITIOS } from '../src/lib/catalogo-sitios';
 import {
   FONDO_PANEL_HEX,
   LOGOS_CATALOGO,
+  TEXTO_INK_HEX,
+  coloresFallback,
+  inicialUsaTextoInk,
   ratioDeContraste,
   usaColorDeMarca,
 } from '../src/lib/logos-catalogo';
@@ -21,6 +24,30 @@ describe('LOGOS_CATALOGO', () => {
       expect(logo.path.length, slug).toBeGreaterThan(0);
       expect(logo.hex, slug).toMatch(/^[0-9A-F]{6}$/i);
     }
+  });
+});
+
+describe('coloresFallback', () => {
+  it('cada entrada apunta a un id real del catalogo SIN logo empaquetado y trae hex de 6 digitos', () => {
+    for (const [id, hex] of Object.entries(coloresFallback)) {
+      const sitio = CATALOGO_SITIOS.find((s) => s.id === id);
+      expect(sitio, id).toBeDefined();
+      // Con logo empaquetado el color jamas se pintaria: seria una entrada muerta.
+      expect(sitio?.iconoSlug, id).toBeNull();
+      expect(hex, id).toMatch(/^[0-9A-F]{6}$/i);
+    }
+  });
+
+  it('la inicial elegida (ink o blanco) contrasta al menos 3:1 contra cada fondo', () => {
+    for (const [id, hex] of Object.entries(coloresFallback)) {
+      const texto = inicialUsaTextoInk(hex) ? TEXTO_INK_HEX : 'FFFFFF';
+      expect(ratioDeContraste(hex, texto), id).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it('inicialUsaTextoInk: fondo claro (Mercado Libre) va en ink y oscuro (SAT) en blanco', () => {
+    expect(inicialUsaTextoInk('FFE600')).toBe(true);
+    expect(inicialUsaTextoInk('691C32')).toBe(false);
   });
 });
 

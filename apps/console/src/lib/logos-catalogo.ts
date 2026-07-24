@@ -13,6 +13,7 @@
  */
 
 import {
+  siAeromexico,
   siAirbnb,
   siAirtable,
   siAliexpress,
@@ -71,6 +72,7 @@ function logo(icono: { path: string; hex: string }): LogoCatalogo {
 
 /** Mapa iconoSlug (catalogo-sitios.ts) -> logo empaquetado. */
 export const LOGOS_CATALOGO: Readonly<Record<string, LogoCatalogo>> = {
+  aeromexico: logo(siAeromexico),
   airbnb: logo(siAirbnb),
   airtable: logo(siAirtable),
   aliexpress: logo(siAliexpress),
@@ -145,4 +147,37 @@ export function ratioDeContraste(hexA: string, hexB: string): number {
  */
 export function usaColorDeMarca(hex: string): boolean {
   return ratioDeContraste(hex, FONDO_PANEL_HEX) >= 3;
+}
+
+/**
+ * COLOR DE FALLBACK por id de sitio (no por slug) para entradas cuyo icono no se distribuye en
+ * simple-icons: el circulo de la inicial se rellena con este hex en vez del neutro, para que a un
+ * lado de logos a color no se lea como error de carga. Son APROXIMACIONES de color de marca
+ * pendientes de verificacion, no assets de marca. Hex de 6 digitos sin '#'. Un id que no este
+ * aqui (y sin logo empaquetado) conserva el fallback neutro de siempre.
+ */
+export const coloresFallback: Readonly<Record<string, string>> = {
+  outlook_personal: '0078D4',
+  outlook_365: '0078D4',
+  onedrive: '0078D4',
+  monday: 'FF3D57',
+  amazon_mx: 'FF9900',
+  mercado_libre: 'FFE600',
+  yahoo_mail: '6001D2',
+  linkedin: '0A66C2',
+  despegar: '0099FF',
+  sat: '691C32',
+  imss: '1A5632',
+  cfe: '009540',
+};
+
+/** Hex del token `ink` (tailwind.config.js): texto oscuro de la inicial del fallback con color. */
+export const TEXTO_INK_HEX = '1F1E1C';
+
+/**
+ * ¿La inicial sobre este fondo va en ink (fondo claro) o en blanco (fondo oscuro)? Se decide por
+ * luminancia relativa del fondo: gana el texto con MAYOR ratio de contraste contra el hex.
+ */
+export function inicialUsaTextoInk(hexFondo: string): boolean {
+  return ratioDeContraste(hexFondo, TEXTO_INK_HEX) >= ratioDeContraste(hexFondo, 'FFFFFF');
 }
