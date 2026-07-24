@@ -108,7 +108,7 @@ export const CATALOGO_SITIOS: readonly SitioSugerido[] = [
   { id: 'airbnb', nombre: 'Airbnb', dominio: 'www.airbnb.mx', urlLogin: 'https://www.airbnb.mx/login', categoria: 'viajes', iconoSlug: 'airbnb' },
   { id: 'expedia', nombre: 'Expedia', dominio: 'www.expedia.mx', urlLogin: 'https://www.expedia.mx', categoria: 'viajes', iconoSlug: 'expedia' },
   { id: 'despegar', nombre: 'Despegar', dominio: 'www.despegar.com.mx', urlLogin: 'https://www.despegar.com.mx', categoria: 'viajes', iconoSlug: null },
-  { id: 'aeromexico', nombre: 'Aeromexico', dominio: 'www.aeromexico.com', urlLogin: 'https://www.aeromexico.com', categoria: 'viajes', iconoSlug: null },
+  { id: 'aeromexico', nombre: 'Aeromexico', dominio: 'www.aeromexico.com', urlLogin: 'https://www.aeromexico.com', categoria: 'viajes', iconoSlug: 'aeromexico' },
   // medios
   { id: 'wikipedia', nombre: 'Wikipedia', dominio: 'en.wikipedia.org', urlLogin: 'https://en.wikipedia.org/wiki/Special:UserLogin', categoria: 'medios', iconoSlug: 'wikipedia' },
   { id: 'youtube', nombre: 'YouTube', dominio: 'www.youtube.com', urlLogin: 'https://www.youtube.com', categoria: 'medios', iconoSlug: 'youtube' },
