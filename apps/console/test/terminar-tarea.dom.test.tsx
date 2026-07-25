@@ -6,7 +6,9 @@ import type { JobActivity } from '../src/lib/jobs';
 
 // Mismo aislamiento que trayectoria-detalle.dom.test.tsx: se mockean los hooks con red para
 // renderizar la tarjeta sin QueryClient ni backend.
-const useTrayectoriasDeJob = vi.fn(() => ({ data: [], isLoading: false, isError: false }));
+const useTrayectoriasDeJob = vi.fn<
+  (jobId: string, enabled: boolean) => { data: never[]; isLoading: boolean; isError: boolean }
+>(() => ({ data: [], isLoading: false, isError: false }));
 vi.mock('../src/lib/queries', () => ({
   useTrayectoriasDeJob: (jobId: string, enabled: boolean) => useTrayectoriasDeJob(jobId, enabled),
 }));
