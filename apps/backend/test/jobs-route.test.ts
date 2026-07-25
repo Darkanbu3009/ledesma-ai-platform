@@ -28,6 +28,9 @@ const verifier: JwtVerifier = {
 
 const listByOwner = vi.fn();
 const getSummaryForOwner = vi.fn();
+const cancelarPorUsuario = vi.fn();
+const cerrarPendientePorCancelacion = vi.fn();
+const registrarIntervencion = vi.fn();
 
 /** Resumen de job tal como lo devuelve JobsRepository.listByOwner (camelCase, sin payload). */
 function makeJobSummary(overrides: Record<string, unknown> = {}) {
@@ -50,7 +53,13 @@ async function makeApp(): Promise<FastifyInstance> {
   const config = parseEnv(BASE);
   const app = Fastify();
   registerErrorHandler(app, config);
-  await app.register(jobsRoutes(config, { verifier, jobsRepo: { listByOwner, getSummaryForOwner } }));
+  await app.register(
+    jobsRoutes(config, {
+      verifier,
+      jobsRepo: { listByOwner, getSummaryForOwner, cancelarPorUsuario },
+      aprobacionesRepo: { cerrarPendientePorCancelacion, registrarIntervencion },
+    }),
+  );
   return app;
 }
 
@@ -59,6 +68,9 @@ beforeEach(async () => {
   vi.clearAllMocks();
   listByOwner.mockResolvedValue([]);
   getSummaryForOwner.mockResolvedValue(null);
+  cancelarPorUsuario.mockResolvedValue({ resultado: 'no_encontrado' });
+  cerrarPendientePorCancelacion.mockResolvedValue(null);
+  registrarIntervencion.mockResolvedValue(undefined);
   app = await makeApp();
 });
 
@@ -295,5 +307,102 @@ describe('GET /v1/jobs/:id: detalle para polling', () => {
       headers: { authorization: 'Bearer valid-user-1' },
     });
     expect(res.json().job.lastError).toBe(`${'x'.repeat(500)}...`);
+  });
+});
+
+describe('POST /v1/jobs/:id/cancelar (terminar desde la consola)', () => {
+  it('sin JWT -> 401 (no toca el repo)', async () => {
+    const res = await app.inject({ method: 'POST', url: `/v1/jobs/${JOB_ID}/cancelar` });
+    expect(res.statusCode).toBe(401);
+    expect(cancelarPorUsuario).not.toHaveBeenCalled();
+  });
+
+  it('id no-uuid -> 400 (no consulta)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/jobs/no-es-uuid/cancelar',
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(cancelarPorUsuario).not.toHaveBeenCalled();
+  });
+
+  it('cancela un job running propio: 200 con el DTO seguro y sin tocar aprobaciones', async () => {
+    cancelarPorUsuario.mockResolvedValue({ resultado: 'cancelado', estadoPrevio: 'running' });
+    getSummaryForOwner.mockResolvedValue(
+      makeJobSummary({ status: 'failed', lastError: 'CANCELADO_POR_USUARIO: terminada por el usuario' }),
+    );
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/jobs/${JOB_ID}/cancelar`,
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(res.statusCode).toBe(200);
+    // El owner SIEMPRE sale del token, jamas del cliente.
+    expect(cancelarPorUsuario).toHaveBeenCalledWith(JOB_ID, 'user-1');
+    expect(res.json().job).toMatchObject({
+      id: JOB_ID,
+      status: 'failed',
+      lastError: 'CANCELADO_POR_USUARIO: terminada por el usuario',
+    });
+    expect(res.json().job.payload).toBeUndefined();
+    expect(cerrarPendientePorCancelacion).not.toHaveBeenCalled();
+  });
+
+  it('cancelar un job pausado ademas cierra su aprobacion pendiente con constancia Art.22', async () => {
+    cancelarPorUsuario.mockResolvedValue({ resultado: 'cancelado', estadoPrevio: 'pausado' });
+    cerrarPendientePorCancelacion.mockResolvedValue({
+      id: 'apr-1',
+      ownerId: 'user-1',
+      jobId: JOB_ID,
+      connectionId: 'conn-1',
+      sesionExternaId: 'ses-1',
+      accionTipo: 'financiera',
+      descripcion: 'Enviar el pago',
+      screenshotPath: 'user-1/apr-1.png',
+      estado: 'rechazada',
+      instruccionRechazo: 'cancelada por el usuario: la tarea se termino desde la consola',
+      decididaPor: 'user-1',
+      decididaEn: '2026-07-24T00:00:00.000Z',
+      creadaEn: '2026-07-24T00:00:00.000Z',
+      expiraEn: '2026-07-24T00:15:00.000Z',
+    });
+    getSummaryForOwner.mockResolvedValue(makeJobSummary({ status: 'failed' }));
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/jobs/${JOB_ID}/cancelar`,
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(cerrarPendientePorCancelacion).toHaveBeenCalledWith(JOB_ID, 'user-1', 'user-1');
+    expect(registrarIntervencion).toHaveBeenCalledWith(
+      expect.objectContaining({ decision: 'rechazada', decididaPor: 'user-1', aprobacionId: 'apr-1' }),
+    );
+  });
+
+  it('cancelar un job ya terminado -> 409 CONFLICT, sin efectos', async () => {
+    cancelarPorUsuario.mockResolvedValue({ resultado: 'conflicto' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/jobs/${JOB_ID}/cancelar`,
+      headers: { authorization: 'Bearer valid-user-1' },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(cerrarPendientePorCancelacion).not.toHaveBeenCalled();
+    expect(getSummaryForOwner).not.toHaveBeenCalled();
+  });
+
+  it('un usuario NO puede cancelar un job de otro owner: 404 sin revelar nada', async () => {
+    // El repo, acotado por owner_id, responde no_encontrado para el job ajeno.
+    cancelarPorUsuario.mockResolvedValue({ resultado: 'no_encontrado' });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/jobs/${JOB_ID}/cancelar`,
+      headers: { authorization: 'Bearer valid-user-2' },
+    });
+    expect(res.statusCode).toBe(404);
+    // La cancelacion viajo con el owner del token (user-2), no con el dueno real del job.
+    expect(cancelarPorUsuario).toHaveBeenCalledWith(JOB_ID, 'user-2');
+    expect(cerrarPendientePorCancelacion).not.toHaveBeenCalled();
   });
 });

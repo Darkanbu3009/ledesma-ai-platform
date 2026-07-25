@@ -17,6 +17,18 @@ import type { Sql } from '@ledesma-platform/shared';
 export type AprobacionEstado = 'pendiente' | 'aprobada' | 'rechazada' | 'expirada';
 export type AccionTipo = 'irreversible' | 'financiera';
 
+/**
+ * instruccion_rechazo con la que la CANCELACION de un job pausado (POST /v1/jobs/:id/cancelar)
+ * cierra su aprobacion pendiente como 'rechazada' sin reanudar nada. Es ademas la MARCA que el
+ * barrido del worker reclama para cerrar la sesion de navegador que el checkpoint mantuvo viva
+ * (el backend no tiene cliente de Browserbase): ver reclamarCanceladasParaCerrarSesion.
+ */
+export const INSTRUCCION_CANCELADA_POR_USUARIO = 'cancelada por el usuario: la tarea se termino desde la consola';
+
+/** La misma marca, ya PROCESADA por el barrido (la sesion de navegador quedo cerrada o liberada). */
+export const INSTRUCCION_CANCELADA_SESION_CERRADA =
+  'cancelada por el usuario: la tarea se termino desde la consola; sesion de navegador cerrada';
+
 export interface AprobacionWeb {
   id: string;
   ownerId: string;
@@ -190,6 +202,55 @@ export class AprobacionesWebRepository {
     `;
     const row = rows[0];
     return row ? rowToAprobacion(row) : null;
+  }
+
+  /**
+   * CIERRA la aprobacion pendiente de un job CANCELADO por su dueno (CAMBIO 5): 'pendiente' ->
+   * 'rechazada' con la marca INSTRUCCION_CANCELADA_POR_USUARIO. COMPARE-AND-SET sobre 'pendiente'
+   * (una decision o el barrido de expiradas que gano la carrera dejan 0 filas -> null) y acotado por
+   * owner_id + job_id: solo el dueno del job cierra su aprobacion. A diferencia de decidir(), NO
+   * exige expira_en > now(): cancelar un job pausado siempre cierra su checkpoint. NO reanuda el job
+   * (ya quedo 'failed'); la sesion viva la cierra el barrido del worker al reclamar la marca.
+   */
+  async cerrarPendientePorCancelacion(
+    jobId: string,
+    ownerId: string,
+    decididaPor: string,
+  ): Promise<AprobacionWeb | null> {
+    const rows = await this.sql<AprobacionRow[]>`
+      update aprobaciones_web set
+        estado = 'rechazada',
+        instruccion_rechazo = ${INSTRUCCION_CANCELADA_POR_USUARIO},
+        decidida_por = ${decididaPor},
+        decidida_en = now()
+      where job_id = ${jobId} and owner_id = ${ownerId} and estado = 'pendiente'
+      returning id, owner_id, job_id, connection_id, sesion_externa_id, accion_tipo, descripcion,
+        screenshot_path, estado, instruccion_rechazo, decidida_por, decidida_en, creada_en, expira_en
+    `;
+    const row = rows[0];
+    return row ? rowToAprobacion(row) : null;
+  }
+
+  /**
+   * RECLAMA (para el barrido del worker) las aprobaciones cerradas por CANCELACION cuya sesion de
+   * navegador sigue por cerrar: en un solo UPDATE atomico cambia la marca 'cancelada por el usuario'
+   * a su version PROCESADA y devuelve las filas, asi cada sesion se intenta cerrar UNA sola vez
+   * aunque haya varios workers (el segundo barrido ve la marca procesada y no reclama nada). El
+   * cierre en el proveedor es best-effort del llamador; si fallara, el timeout de la sesion en el
+   * proveedor es la red de seguridad (misma politica que el barrido de expiradas).
+   */
+  async reclamarCanceladasParaCerrarSesion(): Promise<AprobacionWeb[]> {
+    const rows = await this.sql<AprobacionRow[]>`
+      update aprobaciones_web set instruccion_rechazo = ${INSTRUCCION_CANCELADA_SESION_CERRADA}
+      where id in (
+        select id from aprobaciones_web
+        where estado = 'rechazada' and instruccion_rechazo = ${INSTRUCCION_CANCELADA_POR_USUARIO}
+        limit 50
+      )
+      returning id, owner_id, job_id, connection_id, sesion_externa_id, accion_tipo, descripcion,
+        screenshot_path, estado, instruccion_rechazo, decidida_por, decidida_en, creada_en, expira_en
+    `;
+    return rows.map(rowToAprobacion);
   }
 
   /** Las aprobaciones 'pendiente' cuyo expira_en ya vencio (para el barrido del worker). */

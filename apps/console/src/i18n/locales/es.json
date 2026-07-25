@@ -1898,5 +1898,20 @@
       "fallo": "No pudimos registrar tu decisión. Inténtalo de nuevo.",
       "cerrarAria": "Cerrar la aprobación (queda pendiente)"
     }
-  }
+  },
+  "avisoTareaLenta": {
+    "titulo": "Esta tarea esta tardando mas de lo normal",
+    "detalle": "Lleva {{minutos}} minutos en ejecucion. Puedes esperar o terminarla.",
+    "boton": "Terminar tarea"
+  },
+  "confirmarTerminar": {
+    "titulo": "Terminar esta tarea",
+    "detalle": "La tarea se detendra donde va. Lo que ya haya hecho en el sitio no se deshace.",
+    "confirmar": "Si, terminar",
+    "cancelar": "Seguir esperando",
+    "error": "No pudimos terminar la tarea. Refresca e intenta de nuevo."
+  },
+  "estadoCancelada": "Cancelada",
+  "estadoDetenida": "Detenida",
+  "detenidaPorSistema": "El sistema termino esta tarea porque dejo de responder."
 }

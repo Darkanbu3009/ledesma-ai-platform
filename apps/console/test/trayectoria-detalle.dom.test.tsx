@@ -5,11 +5,16 @@ import '@testing-library/jest-dom/vitest';
 import type { Trayectoria } from '../src/lib/trayectorias';
 import type { JobActivity } from '../src/lib/jobs';
 
-// La tarjeta usa react-query via useTrayectoriasDeJob (TrayectoriaDetalle); se mockea el hook para
-// renderizar sin red ni QueryClient, mismo aislamiento que los otros dom tests.
+// La tarjeta usa react-query via useTrayectoriasDeJob (TrayectoriaDetalle) y useTerminarJob (boton
+// Terminar tarea); se mockean los hooks para renderizar sin red ni QueryClient, mismo aislamiento
+// que los otros dom tests.
 const useTrayectoriasDeJob = vi.fn();
 vi.mock('../src/lib/queries', () => ({
   useTrayectoriasDeJob: (jobId: string, enabled: boolean) => useTrayectoriasDeJob(jobId, enabled),
+}));
+const useTerminarJob = vi.fn(() => ({ isPending: false, isError: false, mutate: vi.fn() }));
+vi.mock('../src/lib/mutations', () => ({
+  useTerminarJob: () => useTerminarJob(),
 }));
 
 import { JobActivityCard } from '../src/components/activity/JobActivityCard';

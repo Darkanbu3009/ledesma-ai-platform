@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from './api';
+import { ApiError, apiFetch } from './api';
 import type { AgentConfig } from './agents';
 import type { AgentFormParsed } from './agent-schema';
 import { toApiInput } from './agent-schema';
@@ -19,6 +19,7 @@ import type {
   UpdateTriggerResponse,
 } from './triggers';
 import type { CreateRecipeInput, Recipe, RecipePatch, RunRecipeResult } from './recipes';
+import type { JobActivity } from './jobs';
 import type {
   IndividualInput,
   OrganizationInput,
@@ -492,6 +493,32 @@ export function useRequestUpgrade() {
         body: JSON.stringify(input),
       }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['upgrade-requests', 'me'] }),
+  });
+}
+
+/**
+ * TERMINAR una tarea del historial (POST /v1/jobs/:id/cancelar): el backend cierra un job propio en
+ * pending/running/pausado como fallido con el prefijo CANCELADO_POR_USUARIO (la UI lo etiqueta
+ * "Cancelada"); un job en ejecucion lo aborta el ejecutor en su siguiente relectura de estado. Un
+ * 409 significa que la tarea ya habia terminado (doble click / carrera con el cierre real): la UI
+ * refresca y lo muestra. Al exito invalida ['jobs'] (la tarjeta refleja el estado nuevo) y
+ * ['aprobaciones'] (si estaba pausada, su aprobacion quedo cerrada y el modal debe desaparecer).
+ */
+export function useTerminarJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ job: JobActivity | null }>(`/v1/jobs/${id}/cancelar`, { method: 'POST' }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['jobs'] });
+      void qc.invalidateQueries({ queryKey: ['aprobaciones'] });
+    },
+    onError: (error: unknown) => {
+      // 409: la tarea ya habia terminado. Refrescar la lista hace visible el estado real.
+      if (error instanceof ApiError && error.status === 409) {
+        void qc.invalidateQueries({ queryKey: ['jobs'] });
+      }
+    },
   });
 }
 

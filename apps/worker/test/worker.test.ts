@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { AgentEvent, Job } from '@ledesma-platform/shared';
 import type { AgentConfig, AgentRunInput, DecryptedProviderCredential } from '@ledesma-platform/backend/execution';
 import { drainQueue, startWorker } from '../src/worker.js';
+import { REAP_STALE_MS } from '../src/execution.js';
 import type { JobRunnerDeps } from '../src/execution.js';
 import type { Logger } from '../src/logger.js';
 
@@ -42,6 +43,7 @@ function makeDeps(overrides: Partial<JobRunnerDeps> = {}): JobRunnerDeps {
       markCompleted: vi.fn(async () => {}),
       markFailed: vi.fn(async () => {}),
       markPendingRetry: vi.fn(async () => {}),
+      latirJob: vi.fn(async () => 'running' as const),
       reapOrphanedJobs: vi.fn(async () => []),
     },
     getProfileTier: vi.fn(async () => 'autonomous' as const),
@@ -140,8 +142,8 @@ describe('startWorker', () => {
   });
 });
 
-describe('reaper de huerfanos en el loop del worker', () => {
-  it('corre el reaper en la PRIMERA pasada, con umbrales derivados de runTimeoutMs y MAX_ATTEMPTS', async () => {
+describe('reaper de jobs detenidos en el loop del worker', () => {
+  it('corre el reaper en la PRIMERA pasada, con el umbral por latido (90s) y MAX_ATTEMPTS', async () => {
     const deps = makeDeps({ config: { runTimeoutMs: 600_000, tareaWebTimeoutMs: 1_500_000, runMaxTokens: 1_000_000 } });
     (deps.jobs.claimNextJob as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
@@ -151,14 +153,9 @@ describe('reaper de huerfanos en el loop del worker', () => {
 
     expect(deps.jobs.reapOrphanedJobs).toHaveBeenCalled();
     const arg = (deps.jobs.reapOrphanedJobs as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
-    // simple = 3 * runTimeoutMs; receta = 50 * runTimeoutMs * 1.5; tarea_web = 3 * tareaWebTimeoutMs;
-    // maxAttempts = 3.
-    expect(arg).toMatchObject({
-      simpleThresholdMs: 600_000 * 3,
-      recipeThresholdMs: 50 * 600_000 * 1.5,
-      tareaWebThresholdMs: 1_500_000 * 3,
-      maxAttempts: 3,
-    });
+    // Umbral por LATIDO: 3 x HEARTBEAT_INTERVAL_MS (90s), sin margenes por tipo; maxAttempts = 3.
+    expect(arg).toMatchObject({ staleMs: REAP_STALE_MS, maxAttempts: 3 });
+    expect(REAP_STALE_MS).toBe(90_000);
   });
 
   it('un fallo del reaper NO rompe la pasada: la cola igual se drena', async () => {

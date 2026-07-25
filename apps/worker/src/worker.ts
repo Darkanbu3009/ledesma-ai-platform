@@ -1,37 +1,34 @@
-import { claimAndProcessOne, MAX_ATTEMPTS, reapThresholdsMs, type JobRunnerDeps } from './execution.js';
+import { claimAndProcessOne, MAX_ATTEMPTS, REAP_STALE_MS, type JobRunnerDeps } from './execution.js';
 import { barrerLoginsVencidos } from './sitios.js';
 import { barrerAprobacionesVencidas } from './aprobaciones.js';
 import type { Logger } from './logger.js';
 
 /**
- * Cada cuanto, COMO MAXIMO, el worker corre el reaper de jobs huerfanos (ms). El reaper es barato (un
- * UPDATE indexado que casi siempre afecta 0 filas), pero no hace falta correrlo en cada tick de polling:
- * un huerfano solo aparece cuando un worker muere, y el margen de recuperacion ya es de decenas de
- * minutos. 60s da una recuperacion pronta sin ruido de escritura. La PRIMERA pasada siempre reapea
- * (lastReapAtMs arranca en 0), asi un worker que reinicia (Railway) recupera de inmediato los huerfanos
- * que dejo el proceso anterior muerto.
+ * Cada cuanto, COMO MAXIMO, el worker corre el reaper de jobs detenidos (ms). El reaper es barato (un
+ * SELECT indexado que casi siempre devuelve 0 filas), y con el umbral por LATIDO (90s, ver
+ * REAP_STALE_MS) el barrido debe ser mas frecuente que antes para que un job detenido se detecte en
+ * menos de 2 minutos de punta a punta (90s de umbral + hasta 30s de espera del barrido). La PRIMERA
+ * pasada siempre reapea (lastReapAtMs arranca en 0), asi un worker que reinicia (Railway) recupera de
+ * inmediato los jobs que dejo el proceso anterior muerto.
  */
-const REAP_INTERVAL_MS = 60_000;
+const REAP_INTERVAL_MS = 30_000;
 
 /**
- * REAPER de jobs huerfanos (cierra H3/H4 del informe 06): devuelve a 'pending' (o 'failed' si ya
- * agotaron intentos) los jobs 'running' que quedaron atascados porque el worker murio entre el claim y
- * el cierre. Best-effort: un fallo del reaper se registra y NO rompe la pasada (el proximo tick reintenta).
+ * REAPER de jobs detenidos POR LATIDO: recoge los jobs 'running' que dejaron de latir (worker muerto
+ * entre el claim y el cierre, o proceso colgado sin event loop). Un job de sitio o tarea_web recogido
+ * va DIRECTO a 'failed' (jamas se reencola: repetiria acciones sobre la cuenta del usuario); el resto
+ * vuelve a 'pending' mientras le queden intentos. Best-effort: un fallo del reaper se registra y NO
+ * rompe la pasada (el proximo tick reintenta).
  *
- * SEGURIDAD (jamas toca un job vivo): corre DENTRO del guard `inFlight` del tick, asi que nunca se
- * solapa con un job que ESTE proceso este ejecutando; y ademas solo recupera jobs cuyo started_at supera
- * un MARGEN AMPLIO por tipo (ver reapThresholdsMs), que excede el maximo wall-clock legitimo. Doble red.
+ * SEGURIDAD (jamas toca un job vivo): el umbral (REAP_STALE_MS = 3 latidos) supera con margen el
+ * intervalo real de latido, el reclamo es un CAS por fila sobre status + updated_at (D2) y ademas el
+ * reaper corre DENTRO del guard `inFlight` del tick, asi que nunca se solapa con un job que ESTE
+ * proceso este ejecutando (que, por definicion, esta latiendo).
  */
 async function reapOrphans(deps: JobRunnerDeps): Promise<void> {
-  const { simpleMs, recipeMs, tareaWebMs } = reapThresholdsMs(
-    deps.config.runTimeoutMs,
-    deps.config.tareaWebTimeoutMs,
-  );
   try {
     const reaped = await deps.jobs.reapOrphanedJobs({
-      simpleThresholdMs: simpleMs,
-      recipeThresholdMs: recipeMs,
-      tareaWebThresholdMs: tareaWebMs,
+      staleMs: REAP_STALE_MS,
       maxAttempts: MAX_ATTEMPTS,
     });
     if (reaped.length > 0) {
