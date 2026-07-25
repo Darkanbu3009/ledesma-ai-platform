@@ -14,6 +14,7 @@ import type { Recipe, RecipeSummary } from './recipes';
 import type { JobActivity, JobsPage, JobStatusFilter } from './jobs';
 import { JOB_PAGE_SIZE, JOBS_REFETCH_MS, buildJobsQuery, hasInFlightJobs, isJobInFlight } from './jobs';
 import type { SitioConectado } from './sitios';
+import type { PoliticaEjecucion } from './politicas';
 import type { Trayectoria } from './trayectorias';
 import { JOB_SEGUIMIENTO_REFETCH_MS, SITIOS_REFETCH_MS, haySitiosEnTransicion } from './sitios';
 import type { ConsentsState, DataRequest } from './privacy';
@@ -364,6 +365,19 @@ export function useOnboardingProgress(): OnboardingProgressResult {
   const progress = deriveOnboardingProgress({ hasCredential, hasAgent, hasRun });
 
   return { ...progress, firstAgentId: agents.data?.[0]?.id ?? null, isLoading, isError };
+}
+
+/**
+ * POLITICA DE EJECUCION del usuario (GET /v1/politicas-ejecucion). Sin fila configurada el backend
+ * devuelve los defaults con `configurada: false`, asi que la pantalla siempre tiene algo que
+ * mostrar. Es un ajuste de "una sola vez": sin refetch por intervalo ni polling.
+ */
+export function usePoliticaEjecucion() {
+  return useQuery({
+    queryKey: ['politica-ejecucion'],
+    queryFn: () =>
+      apiFetch<{ politica: PoliticaEjecucion }>('/v1/politicas-ejecucion').then((r) => r.politica),
+  });
 }
 
 export function useAgentUsage(id: string | undefined, range: UsageRange = {}) {

@@ -7,6 +7,7 @@ import type { ProviderCredential } from './credentials';
 import type { CredentialFormParsed } from './credential-schema';
 import { toCredentialApiInput } from './credential-schema';
 import { specToAgentInput, type AgentSpecDraft } from './configurator';
+import type { PoliticaEjecucion, PoliticaEjecucionInput } from './politicas';
 import type {
   CreateScheduledTaskInput,
   ScheduledTask,
@@ -564,6 +565,25 @@ export function useRechazarAprobacion() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['aprobaciones'] });
       void qc.invalidateQueries({ queryKey: ['jobs'] });
+    },
+  });
+}
+
+/**
+ * Guarda la POLITICA DE EJECUCION del usuario (PUT /v1/politicas-ejecucion): los tres ajustes que
+ * decide UNA sola vez. El owner sale del token en el backend; el body solo lleva los ajustes. La
+ * respuesta reemplaza la cache de la query para que la pantalla muestre lo guardado sin refetch.
+ */
+export function useGuardarPoliticaEjecucion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: PoliticaEjecucionInput) =>
+      apiFetch<{ politica: PoliticaEjecucion }>('/v1/politicas-ejecucion', {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      }).then((r) => r.politica),
+    onSuccess: (politica) => {
+      qc.setQueryData<PoliticaEjecucion>(['politica-ejecucion'], politica);
     },
   });
 }
