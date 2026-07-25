@@ -83,10 +83,16 @@ export function construirOpcionesStagehand(params: {
  * devuelve ese fallo a la tool y el agente vuelve a intentar lo mismo, sin espera y sin cota: en
  * produccion (25 jul 2026) giro casi 4 minutos sin registrar un solo paso.
  *
- * Es INTERMITENTE por naturaleza (depende de que rama del arbol se renderice), asi que la
- * mitigacion principal es el REINTENTO INMEDIATO de la misma llamada; el corte por fallos
- * consecutivos existe para que, cuando el sitio este en un estado que lo reproduce siempre, la
- * corrida termine con un diagnostico veraz en vez de consumir el deadline entero.
+ * La causa raiz la ataca el PARCHE de la libreria (patches/@browserbasehq+stagehand+3.6.0.patch):
+ * un nodo sin `encodedId` valido ya no se rotula, asi que el modelo no puede copiar un id que el
+ * esquema vaya a rechazar. Lo de aca abajo es la red de seguridad para lo que el parche no cubra.
+ *
+ * REINTENTO SOLO SI EL ID CAMBIA. El fallo NO es intermitente: el mismo arbol produce el mismo id
+ * malformado y el mismo rechazo (produccion, 25 jul 2026: elementId "5662" rechazado cinco veces en
+ * dos minutos). Por eso el reintento se condiciona al identificador: si dos intentos seguidos fallan
+ * con el MISMO elementId, la corrida se corta en el acto en vez de quemar pasos y minutos de
+ * navegador en algo que no se va a resolver solo. Solo se reintenta cuando el id cambia entre
+ * intentos (ahi si puede ser otra rama del arbol) o cuando no se pudo leer del error.
  */
 /** Reintentos de la MISMA llamada de act ante un rechazo de esquema, antes de darla por fallida. */
 export const MAX_REINTENTOS_ESQUEMA = 2;
@@ -126,6 +132,68 @@ export function esFalloDeEsquemaDelMotor(error: unknown, profundidad = 0): boole
   return esFalloDeEsquemaDelMotor(cause, profundidad + 1);
 }
 
+/** El `elementId` dentro de un objeto con la forma de la salida de `act` ({ action: { elementId } }). */
+function elementIdDeSalida(valor: unknown): string | null {
+  if (typeof valor !== 'object' || valor === null) return null;
+  const accion = (valor as { action?: unknown }).action;
+  if (typeof accion !== 'object' || accion === null) return null;
+  const elementId = (accion as { elementId?: unknown }).elementId;
+  return typeof elementId === 'string' && elementId.length > 0 ? elementId : null;
+}
+
+/** El `elementId` de una issue de Zod cuyo path termina en 'elementId' (Zod v4 adjunta el input). */
+function elementIdDeIssues(valor: unknown): string | null {
+  if (!Array.isArray(valor)) return null;
+  for (const issue of valor) {
+    if (typeof issue !== 'object' || issue === null) continue;
+    const { path, input } = issue as { path?: unknown; input?: unknown };
+    if (!Array.isArray(path) || path[path.length - 1] !== 'elementId') continue;
+    if (typeof input === 'string' && input.length > 0) return input;
+  }
+  return null;
+}
+
+/**
+ * Lee el `elementId` que el motor RECHAZO, recorriendo la cadena de `cause` igual que
+ * esFalloDeEsquemaDelMotor. El AI SDK deja el valor en varios sitios segun la envoltura, asi que se
+ * prueban todos, del mas estructurado al mas debil:
+ *
+ *  1. `value` de TypeValidationError: el objeto ya parseado que no valido.
+ *  2. `text` de NoObjectGeneratedError: el JSON crudo que devolvio el modelo.
+ *  3. `issues` de ZodError: la issue de `elementId` con su input.
+ *  4. El mensaje, por si la envoltura perdio todo lo anterior y solo dejo el texto serializado.
+ *
+ * null = no se pudo leer. El llamador NO asume nada en ese caso: sin identificador no se puede
+ * afirmar que el fallo se repita, asi que el reintento sigue su curso normal.
+ */
+export function elementIdDeFalloDeEsquema(error: unknown, profundidad = 0): string | null {
+  if (typeof error !== 'object' || error === null || profundidad > 3) return null;
+  const { value, text, issues, message, cause } = error as {
+    value?: unknown;
+    text?: unknown;
+    issues?: unknown;
+    message?: unknown;
+    cause?: unknown;
+  };
+  const deValue = elementIdDeSalida(value);
+  if (deValue !== null) return deValue;
+  if (typeof text === 'string') {
+    try {
+      const deTexto = elementIdDeSalida(JSON.parse(text));
+      if (deTexto !== null) return deTexto;
+    } catch {
+      // texto que no es JSON: se sigue con las otras fuentes
+    }
+  }
+  const deIssues = elementIdDeIssues(issues);
+  if (deIssues !== null) return deIssues;
+  if (typeof message === 'string') {
+    const enMensaje = /"elementId"\s*:\s*"([^"]+)"/.exec(message);
+    if (enMensaje?.[1] !== undefined) return enMensaje[1];
+  }
+  return elementIdDeFalloDeEsquema(cause, profundidad + 1);
+}
+
 /** Salida de la tool `act` hacia el modelo, con la MISMA forma que la nativa de Stagehand. */
 export interface SalidaDeActBlindado {
   success: boolean;
@@ -144,8 +212,15 @@ interface ResultadoDeActCrudo {
 export interface ActBlindado {
   /** Ejecuta UNA accion con reintento ante rechazo de esquema. Lanza al alcanzar el corte. */
   ejecutar(accion: string): Promise<SalidaDeActBlindado>;
-  /** true si la corrida se corto por fallos de esquema consecutivos (CAMBIO 3). */
+  /** true si la corrida se corto por fallo de esquema del motor (CAMBIO 3). */
   corto(): boolean;
+  /**
+   * El error EXACTO con el que se corto la corrida (racha de fallos o repeticion determinista del
+   * mismo elementId), o null si no se corto. El adaptador lo re-lanza tal cual: el handler de
+   * Stagehand atrapa lo que sale de la tool, asi que este es el unico camino por el que el motivo
+   * real del corte llega al diagnostico.
+   */
+  corte(): FalloDeEsquemaDelMotorError | null;
   /** Mensaje de la detencion si la GUARDIA bloqueo una accion; null si nunca bloqueo. */
   bloqueo(): string | null;
 }
@@ -163,17 +238,24 @@ function mensajeDeError(error: unknown): string {
  * Envuelve la llamada de act del agente (CAMBIO 2 y 3). Modulo puro sobre una funcion `actuar`: se
  * testea sin navegador y sin modelo.
  *
- *  - Rechazo de esquema: hasta MAX_REINTENTOS_ESQUEMA reintentos con ESPERA_ENTRE_REINTENTOS_ESQUEMA_MS
- *    entre ellos, cada uno logueado en warn como fallo del MOTOR (no del objetivo del usuario).
- *    Agotados, la llamada se devuelve al modelo como fallo de la tool, igual que la act nativa.
- *  - MAX_FALLOS_ESQUEMA_CONSECUTIVOS de esos fallos seguidos: LANZA. Lanzar desde la tool corta el
- *    bucle del agente en el acto; el adaptador convierte el corte en FalloDeEsquemaDelMotorError.
- *  - Un act exitoso reinicia el contador.
+ *  - Rechazo de esquema con un elementId DISTINTO al del intento anterior (o ilegible): hasta
+ *    MAX_REINTENTOS_ESQUEMA reintentos con ESPERA_ENTRE_REINTENTOS_ESQUEMA_MS entre ellos, cada uno
+ *    logueado en warn como fallo del MOTOR (no del objetivo del usuario). Agotados, la llamada se
+ *    devuelve al modelo como fallo de la tool, igual que la act nativa.
+ *  - Rechazo de esquema con el MISMO elementId que el intento anterior: NO se reintenta. Es el fallo
+ *    determinista de produccion; reintentarlo solo quema pasos y minutos de navegador. LANZA en el
+ *    acto con el identificador en el mensaje.
+ *  - MAX_FALLOS_ESQUEMA_CONSECUTIVOS de fallos seguidos (contando por llamada de tool): LANZA.
+ *    Lanzar desde la tool corta el bucle del agente en el acto; el adaptador re-lanza el error
+ *    exacto que se guardo en `corte()`.
+ *  - Un act exitoso reinicia el contador y el ultimo elementId visto.
  *  - Cualquier OTRO fallo (elemento inexistente, timeout) se devuelve al modelo tal como hace la act
  *    nativa y NO cuenta para el corte: no es un fallo del motor.
  *
- * Cada intento (exitoso o no) se reporta por `registrarAccion` para que la trayectoria conserve lo
- * que paso aunque el motor termine lanzando (CAMBIO 7).
+ * TRAYECTORIA (CAMBIO 7 y este PR): la accion se reporta por `registrarAccion` ANTES de tocar el
+ * navegador y el MISMO registro se completa con el desenlace cuando la llamada termina. Registrarla
+ * despues perdia toda accion que estuviera en vuelo (o entre reintentos) cuando la corrida se
+ * cancelaba, que es por lo que una tarea cancelada quedaba con cero pasos.
  *
  * GUARDIA (este PR): `guardia` es el UNICO punto del sistema en que codigo del worker ve una accion
  * del agente ANTES de que llegue al navegador. Se consulta UNA vez por llamada (no por reintento de
@@ -190,20 +272,22 @@ export function crearActBlindado(params: {
 }): ActBlindado {
   const esperar = params.esperar ?? esperarMs;
   let fallosConsecutivos = 0;
-  let corto = false;
+  let corte: FalloDeEsquemaDelMotorError | null = null;
   let bloqueo: string | null = null;
+  /** Ultimo elementId que el motor rechazo; se compara con el del intento siguiente. */
+  let elementIdRechazado: string | null = null;
 
-  const registrar = (exito: boolean, accion: string, argumentos?: unknown): void => {
-    params.registrarAccion?.({
-      type: 'act',
-      action: accion,
-      success: exito,
-      ...(argumentos !== undefined ? { playwrightArguments: argumentos } : {}),
-    });
+  // La accion entra a la traza al EMPEZAR y este registro se completa al terminar: lo que quede en
+  // vuelo cuando la corrida se cancele ya esta registrado (como no exitoso, que es lo veraz).
+  const registrarInicio = (accion: string): AccionCrudaDeMotor => {
+    const registro: AccionCrudaDeMotor = { type: 'act', action: accion, success: false };
+    params.registrarAccion?.(registro);
+    return registro;
   };
 
   return {
-    corto: () => corto,
+    corto: () => corte !== null,
+    corte: () => corte,
     bloqueo: () => bloqueo,
     ejecutar: async (accion: string): Promise<SalidaDeActBlindado> => {
       // La accion NO se registra en la traza: no llego al navegador. La constancia de por que se
@@ -213,13 +297,16 @@ export function crearActBlindado(params: {
         bloqueo = veredicto.mensaje;
         throw new AccionBloqueadaError(veredicto.mensaje);
       }
+      const registro = registrarInicio(accion);
       for (let intento = 0; ; intento++) {
         try {
           const resultado = await params.actuar(accion);
           fallosConsecutivos = 0;
+          elementIdRechazado = null;
           const exito = resultado.success ?? true;
           const primera = resultado.actions?.[0];
-          registrar(exito, accion, primera);
+          registro.success = exito;
+          if (primera !== undefined) registro.playwrightArguments = primera;
           return {
             success: exito,
             action: resultado.actionDescription ?? accion,
@@ -227,8 +314,22 @@ export function crearActBlindado(params: {
           };
         } catch (error) {
           if (!esFalloDeEsquemaDelMotor(error)) {
-            registrar(false, accion);
             return { success: false, error: mensajeDeError(error) };
+          }
+          // REPETICION DETERMINISTA: el motor rechazo el MISMO identificador dos veces seguidas. El
+          // arbol que lo produce no cambia solo, asi que reintentar es tiempo de navegador tirado.
+          const elementId = elementIdDeFalloDeEsquema(error);
+          const repetido = elementId !== null && elementId === elementIdRechazado;
+          elementIdRechazado = elementId;
+          if (repetido) {
+            fallosConsecutivos += 1;
+            // El identificador es un numero del arbol de accesibilidad: no arrastra contenido.
+            params.logger.warn(
+              'tarea web: el motor de navegacion rechazo dos veces el MISMO identificador de elemento; se corta',
+              { elementId },
+            );
+            corte = new FalloDeEsquemaDelMotorError(fallosConsecutivos, elementId);
+            throw corte;
           }
           if (intento < MAX_REINTENTOS_ESQUEMA) {
             // Sin el texto de la accion ni el del error: pueden arrastrar contenido de la pagina.
@@ -240,10 +341,9 @@ export function crearActBlindado(params: {
             continue;
           }
           fallosConsecutivos += 1;
-          registrar(false, accion);
           if (fallosConsecutivos >= MAX_FALLOS_ESQUEMA_CONSECUTIVOS) {
-            corto = true;
-            throw new FalloDeEsquemaDelMotorError(fallosConsecutivos);
+            corte = new FalloDeEsquemaDelMotorError(fallosConsecutivos);
+            throw corte;
           }
           return {
             success: false,
@@ -307,23 +407,35 @@ export function construirOpcionesDeEjecucion(params: {
   toolTimeoutMs: number;
   signal?: AbortSignal | undefined;
   observador?: ((paso: PasoObservado) => Promise<void>) | undefined;
+  /**
+   * REGISTRO EN VIVO de las tools que NO son `act` (goto, extract, click, type, fillForm, keys...).
+   * `act` no entra por aca: crearActBlindado ya la registra, y ademas la registra ANTES de tocar el
+   * navegador. Sin esto, una corrida que LANZA (cancelacion, deadline o corte por esquema) perdia
+   * todas las acciones que no fueran `act`, porque la traza del motor solo llega cuando devuelve.
+   */
+  registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined;
   /** La corrida lleva guardia: se retiran las tools que llegarian al navegador sin pasar por ella. */
   conGuardia?: boolean | undefined;
 }): AgentExecuteOptions {
   const observador = params.observador;
+  const registrarAccion = params.registrarAccion;
   return {
     instruction: params.objetivo,
     maxSteps: params.maxPasos,
     toolTimeout: params.toolTimeoutMs,
     ...(params.signal !== undefined ? { signal: params.signal } : {}),
     ...(params.conGuardia === true ? { excludeTools: [...TOOLS_RETIRADAS_CON_GUARDIA] } : {}),
-    ...(observador !== undefined
+    ...(observador !== undefined || registrarAccion !== undefined
       ? {
           callbacks: {
             // Best-effort SIEMPRE: la observacion enriquece la traza; si falla, la tarea sigue
             // igual y esa corrida simplemente no se podra promover a receta.
             onEvidence: async (evento): Promise<void> => {
               if (evento.type !== 'step_finished') return;
+              if (registrarAccion !== undefined && evento.actionName !== 'act') {
+                registrarAccion(accionCrudaDeEvidencia(evento));
+              }
+              if (observador === undefined) return;
               try {
                 for (const paso of pasosObservadosDeEvidencia(evento)) await observador(paso);
               } catch {
@@ -334,6 +446,31 @@ export function construirOpcionesDeEjecucion(params: {
         }
       : {}),
   };
+}
+
+/** Campos de `actionArgs` que describen la accion en TEXTO y que la traza del motor tambien lleva. */
+const CAMPOS_DE_TEXTO_DE_TOOL = ['action', 'instruction', 'describe', 'text'] as const;
+
+/**
+ * Traduce UN evento `step_finished` a la accion CRUDA que corresponde, con la misma forma con la que
+ * el motor la pondria en su traza (`type`, texto de la accion, `success`).
+ *
+ * WHITELIST, igual que trayectoria.ts: de `actionArgs` se copian SOLO los campos de texto conocidos
+ * y solo si son string. Nunca un spread del objeto crudo: los argumentos de una tool pueden traer
+ * esquemas de extraccion, selectores y contenido de la pagina que no tienen por que entrar a la
+ * traza (la censura de trayectoria.ts corre despues, pero el recorte empieza aca).
+ */
+export function accionCrudaDeEvidencia(evento: {
+  actionName: string;
+  actionArgs: Record<string, unknown>;
+  toolOutput: { ok?: boolean };
+}): AccionCrudaDeMotor {
+  const textos: Record<string, string> = {};
+  for (const campo of CAMPOS_DE_TEXTO_DE_TOOL) {
+    const valor = evento.actionArgs[campo];
+    if (typeof valor === 'string' && valor.length > 0) textos[campo] = valor;
+  }
+  return { type: evento.actionName, success: evento.toolOutput.ok !== false, ...textos };
 }
 
 /** Forma minima de la salida de una tool que trae selectores resueltos (act / fillForm). */
@@ -449,6 +586,8 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
           toolTimeoutMs: this.config.toolTimeoutMs,
           signal: params.signal,
           observador: params.observador,
+          // Las tools que no son `act` se registran por evidencia; `act` ya la registra el blindaje.
+          registrarAccion: params.registrarAccion,
           conGuardia: params.guardia !== undefined,
         }),
       );
@@ -463,8 +602,11 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
       if (bloqueo !== null) {
         throw new AccionBloqueadaError(bloqueo);
       }
-      if (blindado.corto()) {
-        throw new FalloDeEsquemaDelMotorError(MAX_FALLOS_ESQUEMA_CONSECUTIVOS);
+      // El error EXACTO del corte (racha de fallos o repeticion determinista del mismo elementId):
+      // reconstruirlo aca perderia el identificador que hace veraz el diagnostico.
+      const corte = blindado.corte();
+      if (corte !== null) {
+        throw corte;
       }
       // AgentResult (v3, types/public/agent.d.ts:64-89) ya trae la TRAZA estructurada: `actions`
       // (una por tool ejecutada, con playwrightArguments.selector en 'act'/'fillForm') y `usage`

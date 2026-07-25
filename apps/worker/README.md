@@ -86,7 +86,9 @@ Este proceso **no se despliega** aun; solo debe compilar y poder correrse localm
 
 - `npm run dev -w apps/worker` — corre con `tsx watch` (requiere el backend construido: `npm run build
   -w apps/backend`, porque importa `@ledesma-platform/backend/execution` de su `dist`).
-- `npm run build -w apps/worker` — compila a `dist/`.
+- `npm run parche -w apps/worker` — aplica el parche de Stagehand sobre `node_modules` (ver abajo).
+  Va encadenado en `build` y en `dev`, asi que rara vez hace falta a mano.
+- `npm run build -w apps/worker` — aplica el parche y compila a `dist/`.
 - `npm run start -w apps/worker` — corre el build (`node dist/index.js`).
 - `npm run typecheck -w apps/worker` / `npm run test -w apps/worker`.
 
@@ -106,28 +108,102 @@ Este proceso **no se despliega** aun; solo debe compilar y poder correrse localm
 | `WORKER_POLL_INTERVAL_MS` | no | `5000` | Cada cuanto consulta la cola. |
 | `LOG_LEVEL` | no | `info` | Nivel de log. |
 
+### Parche de Stagehand: identificadores malformados en el arbol de accesibilidad
+
+El motor de navegacion (Stagehand 3.6.0) rotulaba cada linea del arbol de accesibilidad con
+`encodedId ?? nodeId` (`understudy/a11y/snapshot/treeFormatUtils.js`). `encodedId` solo se calcula
+para los nodos AX con `backendDOMNodeId` numerico (`decorateRoles`, `a11yTree.js`), asi que cuando
+quedaba `undefined` el modelo veia `[5662]` en vez de `[0-5662]`, lo copiaba y el esquema de `act`
+(`lib/inference.js`, que exige `numero-numero` en `elementId`) rechazaba la respuesta con
+`NoObjectGeneratedError`. **El fallo es DETERMINISTA**: mismo arbol, mismo id malformado, mismo
+rechazo (produccion, 25 jul 2026: `elementId "5662"` rechazado cinco veces en dos minutos). El
+modelo no se equivocaba, obedecia un arbol mal formado.
+
+**La causa raiz se ataca con un parche de la libreria**: `patches/@browserbasehq+stagehand+3.6.0.patch`,
+aplicado por `patch-package`. Un nodo cuyo `encodedId` no cumpla `/^\d+-\d+$/` (incluido `undefined`)
+deja de rotularse: su linea se omite y sus hijos validos toman su lugar, asi que el modelo solo puede
+elegir entre identificadores que el esquema acepta. Con todos los nodos validos, el arbol es byte a
+byte el de siempre.
+
+#### Donde se aplica: en el worker, NO en el `postinstall` de la raiz
+
+El parche cuelga del script `parche` de **este** workspace, encadenado en su `build` y en su `dev`
+(`apps/worker/package.json:8-10`):
+
+```
+"parche": "cd ../.. && patch-package --error-on-fail --error-on-warn"
+```
+
+- **Por que no un `postinstall`** (ni en la raiz ni aca). `npm ci` en la raiz corre el `postinstall`
+  de la raiz **y tambien el de cada workspace** (verificado). Vercel construye `apps/console`, que no
+  usa Stagehand, y corre `npm ci` en la raiz: con el parche en cualquier `postinstall`, el build de la
+  consola queda enganchado a una dependencia del worker que no necesita. Eso es lo que tumbo dos
+  despliegues con `sh: line 1: patch-package: command not found` (exit 127). Colgado del `build` del
+  worker, Vercel deja de tocarlo por completo.
+- **Railway lo sigue aplicando solo.** Su Build Command es `npm run build` en la raiz, que encadena
+  `npm run build --workspaces` y por tanto el `build` del worker. No hay paso manual que agregar.
+- **El `cd ../..` no es cosmetico.** `patch-package` resuelve su raiz subiendo desde el cwd hasta el
+  primer `package.json` (`getAppRootPath`), y ahi busca `patches/` **y** `node_modules/`. Desde
+  `apps/worker` esa raiz seria el propio workspace: `patches/` no existe ahi y `node_modules` esta
+  hoisteado en la raiz del monorepo, asi que imprime `No patch files found` y **sale 0** sin parchear
+  nada (verificado). Con el `cd`, el binario sigue resolviendo por PATH (npm agrega el
+  `node_modules/.bin` de la raiz al correr un script de workspace) y el parche aplica.
+- **`patch-package` va en las `dependencies` del worker, NO en `devDependencies`**
+  (`apps/worker/package.json:17`). Railway instala en modo produccion (su log avisa
+  `npm warn config production Use --omit=dev instead`) y ahi las `devDependencies` se omiten: como
+  devDependency el binario no existiria. Verificado con `npm ci --omit=dev`.
+- **Falla RUIDOSAMENTE**: `--error-on-fail --error-on-warn`. Fuera de CI, `patch-package` imprime el
+  error de un parche que no aplica y **sale con codigo 0** (verificado: un parche roto sale 0 sin los
+  flags y 1 con ellos), asi que el build quedaria verde con un worker sin parchear. `--error-on-warn`
+  cubre ademas el aviso por version distinta: si alguien sube Stagehand y el parche aplica a medias,
+  el build se detiene en vez de seguir. Es idempotente: correrlo dos veces vuelve a dar `✔` y 0.
+- **`postinstall-postinstall` NO se usa.** Es un parche para un hueco de yarn v1 y este repo es npm
+  puro; ademas su propio `postinstall` invoca `yarn run postinstall` en cuanto encuentra `yarnpkg` en
+  el PATH, y yarn aplica `engines` de forma estricta: con un node fuera de `>=20 <21` aborta la
+  instalacion entera (reproducido con node 22).
+
+#### Dos guardas para que un parche no aplicado no pase desapercibido
+
+Un script se puede saltar (un `npm ci` que no construye, un `node_modules` reinstalado despues del
+build), y un worker sin parche **no se rompe de forma visible**: navega igual y falla mas tarde en la
+tarea web. Por eso hay dos redes:
+
+- **El worker no arranca sin el parche.** `src/parche-stagehand.ts` corre en `src/index.ts` **antes**
+  de leer la config y de tocar la base: carga el `formatTreeLine` REAL de `node_modules` y comprueba
+  su COMPORTAMIENTO (que un nodo con `encodedId` invalido no se rotule y que sus hijos validos
+  sobrevivan), no la presencia de un comentario. Si no cumple, imprime el motivo y sale con codigo 1.
+- **CI lo vigila**: `test/parche-stagehand.test.ts` importa ese mismo `formatTreeLine` real y falla si
+  el parche no esta aplicado (el orden de CI es `build` -> `test`, asi que el `build` del worker ya lo
+  aplico).
+
+**Retirarlo** cuando Stagehand lo corrija upstream. Verificado AUSENTE en 3.7.1 (su
+`treeFormatUtils.js` es identico al de 3.6.0), asi que subir de version NO reemplaza al parche.
+
 ### Blindaje de la tarea web (fallo de esquema del motor)
 
-El motor de navegacion (Stagehand 3.6.0) tiene un fallo propio e INTERMITENTE: al renderizar el
-arbol de accesibilidad rotula cada linea con `encodedId ?? nodeId`
-(`understudy/a11y/snapshot/treeFormatUtils.js`), asi que cuando `encodedId` queda `undefined` el
-modelo ve `[8246]` en vez de `[0-8246]`, lo copia tal cual y el esquema de `act`
-(`lib/inference.js`, que exige `numero-numero` en `elementId`) rechaza la respuesta con
-`NoObjectGeneratedError`. El agente reintentaba lo mismo sin espera y sin cota: en produccion giro
-casi 4 minutos sin registrar un solo paso. El worker lo blinda en tres capas:
+Red de seguridad para lo que el parche no cubra, en la tool `act` del agente:
 
-- **Reintento inmediato** de la MISMA llamada de `act`, hasta 2 veces con 1 segundo entre intentos
-  (el fallo es intermitente, asi que este reintento es la mitigacion principal). Cada reintento se
-  loguea en `warn` como fallo del motor.
-- **Corte por 3 fallos de esquema consecutivos** (ya agotados los reintentos): la tarea termina con
-  un error propio que dice que fallo el MOTOR, distinto del limite de pasos y de un error del
-  usuario. Un `act` exitoso reinicia el contador.
+- **Reintento SOLO si el identificador cambia.** Un rechazo de esquema con un `elementId` distinto
+  al del intento anterior (o ilegible) se reintenta hasta 2 veces con 1 segundo entre intentos. Un
+  rechazo con el MISMO `elementId` que el intento anterior NO se reintenta: es determinista y
+  reintentarlo solo quema pasos y minutos de navegador. Corta en el acto, con el identificador en el
+  mensaje del error.
+- **Corte por 3 fallos de esquema consecutivos** (identificadores distintos, reintentos agotados): la
+  tarea termina con un error propio que dice que fallo el MOTOR, distinto del limite de pasos y de un
+  error del usuario. Un `act` exitoso reinicia el contador y el ultimo identificador rechazado.
 - **`toolTimeout`** (`TAREA_WEB_TOOL_TIMEOUT_SECONDS`): techo por llamada de tool. Sin el, Stagehand
   aplica su default de 45 s y el despliegue no puede ajustarlo.
 
 La trayectoria de la corrida se persiste con las acciones acumuladas EN VIVO aunque el motor lance
 (corte por esquema, deadline de pared o cancelacion); los intentos fallidos quedan como pasos con
-`exito: false`.
+`exito: false`. Dos detalles que hacian que una tarea CANCELADA quedara con cero pasos:
+
+- La accion de `act` entra a la traza **antes** de tocar el navegador y el mismo registro se completa
+  con el desenlace al terminar. Registrarla despues perdia la que estuviera en vuelo (o entre
+  reintentos) cuando llegaba la cancelacion.
+- Las tools que no son `act` (`goto`, `extract`, `click`, `type`, ...) se registran en vivo por el
+  callback de evidencia. La traza del motor solo llega cuando `execute()` DEVUELVE, asi que una
+  corrida que lanza no la trae, y una tarea cancelada antes de su primer `act` no dejaba nada.
 
 ### Observador de pasos (`TAREA_WEB_OBSERVADOR_PASOS`)
 

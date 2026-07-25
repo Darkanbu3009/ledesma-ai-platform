@@ -1,0 +1,81 @@
+diff --git a/node_modules/@browserbasehq/stagehand/dist/cjs/lib/v3/understudy/a11y/snapshot/treeFormatUtils.js b/node_modules/@browserbasehq/stagehand/dist/cjs/lib/v3/understudy/a11y/snapshot/treeFormatUtils.js
+index 6d2ae06..e7f5ece 100644
+--- a/node_modules/@browserbasehq/stagehand/dist/cjs/lib/v3/understudy/a11y/snapshot/treeFormatUtils.js
++++ b/node_modules/@browserbasehq/stagehand/dist/cjs/lib/v3/understudy/a11y/snapshot/treeFormatUtils.js
+@@ -11,12 +11,27 @@ exports.normaliseSpaces = normaliseSpaces;
+  * Keeps indentation logic shared between modules so unit tests can cover these
+  * pure formatting helpers without a full snapshot pipeline.
+  */
++/**
++ * PARCHE DEL WORKER (misma correccion que en dist/esm; ver el comentario extenso de ese archivo).
++ * Un nodo cuyo `encodedId` no cumpla /^\d+-\d+$/ no se rotula, para que el modelo jamas vea un
++ * identificador que el esquema de `act` va a rechazar. RETIRAR cuando Stagehand lo corrija upstream.
++ */
++const PATRON_ID_VALIDO_PARCHE = /^\d+-\d+$/;
++function tieneIdValidoParche(node) {
++    return (typeof node.encodedId === "string" && PATRON_ID_VALIDO_PARCHE.test(node.encodedId));
++}
+ function formatTreeLine(node, level = 0) {
++    const valido = tieneIdValidoParche(node);
++    // Un nodo omitido no consume nivel de indentacion: sus hijos toman su lugar en el arbol.
++    const kids = (node.children ?? [])
++        .map((c) => formatTreeLine(c, valido ? level + 1 : level))
++        .filter((linea) => linea.length > 0)
++        .join("\n");
++    if (!valido)
++        return kids;
+     const indent = "  ".repeat(level);
+-    const labelId = node.encodedId ?? node.nodeId;
+     const stateFlags = formatStateFlags(node);
+-    const label = `[${labelId}] ${node.role}${node.name ? `: ${cleanText(node.name)}` : ""}${stateFlags}`;
+-    const kids = node.children?.map((c) => formatTreeLine(c, level + 1)).join("\n") ?? "";
++    const label = `[${node.encodedId}] ${node.role}${node.name ? `: ${cleanText(node.name)}` : ""}${stateFlags}`;
+     return kids ? `${indent}${label}\n${kids}` : `${indent}${label}`;
+ }
+ function formatStateFlags(node) {
+diff --git a/node_modules/@browserbasehq/stagehand/dist/esm/lib/v3/understudy/a11y/snapshot/treeFormatUtils.js b/node_modules/@browserbasehq/stagehand/dist/esm/lib/v3/understudy/a11y/snapshot/treeFormatUtils.js
+index 380da63..9e910a7 100644
+--- a/node_modules/@browserbasehq/stagehand/dist/esm/lib/v3/understudy/a11y/snapshot/treeFormatUtils.js
++++ b/node_modules/@browserbasehq/stagehand/dist/esm/lib/v3/understudy/a11y/snapshot/treeFormatUtils.js
+@@ -3,12 +3,38 @@
+  * Keeps indentation logic shared between modules so unit tests can cover these
+  * pure formatting helpers without a full snapshot pipeline.
+  */
++/**
++ * PARCHE DEL WORKER (patches/@browserbasehq+stagehand+3.6.0.patch). RETIRAR cuando Stagehand lo
++ * corrija upstream: verificado AUSENTE en 3.7.1, cuyo treeFormatUtils.js es identico a este.
++ *
++ * CAUSA. Esta funcion rotulaba cada linea con `node.encodedId ?? node.nodeId`. `encodedId` solo se
++ * calcula para los nodos AX que traen `backendDOMNodeId` numerico (decorateRoles, a11yTree.js);
++ * cuando queda undefined, el fallback imprimia el `nodeId` crudo y el modelo veia `[5662]` en vez de
++ * `[0-5662]`. El modelo copia el identificador que el arbol le muestra y el esquema de `act`
++ * (lib/inference.js: elementId con /^\d+-\d+$/) rechaza la respuesta con NoObjectGeneratedError.
++ * El fallo es DETERMINISTA: mismo arbol, mismo id malformado, mismo rechazo en cada reintento.
++ *
++ * PARCHE. Un nodo cuyo `encodedId` no cumpla /^\d+-\d+$/ (incluido undefined) NO se rotula: su linea
++ * se omite y sus hijos con id valido se conservan, ocupando el lugar del padre omitido. Asi el
++ * modelo solo puede elegir entre identificadores que el esquema acepta. Con todos los nodos validos
++ * la salida es byte a byte la de siempre.
++ */
++const PATRON_ID_VALIDO_PARCHE = /^\d+-\d+$/;
++function tieneIdValidoParche(node) {
++    return (typeof node.encodedId === "string" && PATRON_ID_VALIDO_PARCHE.test(node.encodedId));
++}
+ export function formatTreeLine(node, level = 0) {
++    const valido = tieneIdValidoParche(node);
++    // Un nodo omitido no consume nivel de indentacion: sus hijos toman su lugar en el arbol.
++    const kids = (node.children ?? [])
++        .map((c) => formatTreeLine(c, valido ? level + 1 : level))
++        .filter((linea) => linea.length > 0)
++        .join("\n");
++    if (!valido)
++        return kids;
+     const indent = "  ".repeat(level);
+-    const labelId = node.encodedId ?? node.nodeId;
+     const stateFlags = formatStateFlags(node);
+-    const label = `[${labelId}] ${node.role}${node.name ? `: ${cleanText(node.name)}` : ""}${stateFlags}`;
+-    const kids = node.children?.map((c) => formatTreeLine(c, level + 1)).join("\n") ?? "";
++    const label = `[${node.encodedId}] ${node.role}${node.name ? `: ${cleanText(node.name)}` : ""}${stateFlags}`;
+     return kids ? `${indent}${label}\n${kids}` : `${indent}${label}`;
+ }
+ function formatStateFlags(node) {

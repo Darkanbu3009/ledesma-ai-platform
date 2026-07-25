@@ -31,12 +31,21 @@ export class RunTimeoutError extends Error {
  * undefined, el modelo lo copia tal cual y el esquema de `act`, que exige `numero-numero`, lo
  * rechaza). Se distingue del resto para que el diagnostico no culpe al objetivo del usuario y para
  * que la corrida no gire minutos reintentando lo mismo.
+ *
+ * Con `elementIdRepetido` el corte es por REPETICION DETERMINISTA: el motor rechazo dos intentos
+ * seguidos con el MISMO identificador malformado. Ese caso no se reintenta mas (el arbol que lo
+ * produce no cambia solo) y el mensaje lo dice, para que el diagnostico distinga un fallo que se
+ * repite exacto de una racha de fallos distintos.
  */
 export class FalloDeEsquemaDelMotorError extends Error {
-  constructor(fallosConsecutivos: number) {
+  constructor(fallosConsecutivos: number, elementIdRepetido?: string) {
     super(
-      `el motor de navegacion rechazo por esquema la salida del modelo ${fallosConsecutivos} veces ` +
-        'seguidas (fallo conocido e intermitente del motor, no del objetivo)',
+      elementIdRepetido !== undefined
+        ? 'el motor de navegacion rechazo por esquema la salida del modelo dos veces seguidas con el ' +
+            `MISMO identificador de elemento malformado (${elementIdRepetido}): el fallo es ` +
+            'determinista y reintentar no lo cambia'
+        : `el motor de navegacion rechazo por esquema la salida del modelo ${fallosConsecutivos} veces ` +
+            'seguidas (fallo conocido e intermitente del motor, no del objetivo)',
     );
     this.name = 'FalloDeEsquemaDelMotorError';
   }

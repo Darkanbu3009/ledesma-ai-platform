@@ -39,6 +39,39 @@ compile Y antes de que arranque en runtime:
 Orden requerido: **`shared` -> `backend` -> `worker`** (documentado tambien en
 `apps/backend/src/execution/index.ts:14`).
 
+### Parche de dependencia en el build del worker (obligatorio para la tarea web)
+
+`apps/worker` tiene `"parche": "cd ../.. && patch-package --error-on-fail --error-on-warn"`
+encadenado en su `build` (`apps/worker/package.json:8-10`). Aplica
+`patches/@browserbasehq+stagehand+3.6.0.patch`, que corrige el arbol de accesibilidad de Stagehand
+para que el modelo no reciba identificadores que su propio esquema de `act` va a rechazar (ver
+`apps/worker/README.md`). Sin el parche, la tarea web falla de forma determinista en las paginas que
+producen nodos sin `encodedId`.
+
+El Build Command de este servicio es `npm run build` en la raiz, que encadena
+`npm run build --workspaces` y por tanto el `build` del worker, asi que **no hay ningun paso manual
+que agregar en Railway**. Tres condiciones que si hay que respetar:
+
+- **NO devolverlo a un `postinstall`.** `npm ci` en la raiz corre el `postinstall` de la raiz **y el
+  de cada workspace**, y Vercel corre `npm ci` en la raiz para construir `apps/console`, que no usa
+  Stagehand. Enganchado a un `postinstall`, el parche del worker tumba el build de la consola
+  (`sh: line 1: patch-package: command not found`, exit 127). Colgado del `build` del worker, Vercel
+  ni lo ve.
+- **`patch-package` vive en las `dependencies` del worker, no en `devDependencies`**
+  (`apps/worker/package.json:17`). Railway instala en modo produccion (su log avisa
+  `npm warn config production Use --omit=dev instead`) y ahi las `devDependencies` se omiten: como
+  devDependency el binario no existiria. Verificado con `NODE_ENV=production npm ci --omit=dev`: con
+  la dependencia en `dependencies`, `patch-package` queda en `node_modules/.bin` y el parche aplica.
+- **Los flags `--error-on-fail --error-on-warn` no son opcionales.** Fuera de CI, `patch-package`
+  imprime el error de un parche que no aplica y **sale con codigo 0**: el despliegue quedaria verde
+  con un worker sin parchear. Con los flags, el build se detiene.
+
+Y si aun asi el parche no llegara al contenedor (build saltado, `node_modules` reinstalado despues
+del build), **el worker no arranca**: `apps/worker/src/parche-stagehand.ts` comprueba en el arranque
+el `formatTreeLine` real de `node_modules` y, si no esta parcheado, imprime el motivo y sale con
+codigo 1 antes de tocar la base. Un despliegue sin parche se ve en los logs al instante en vez de
+fallar mas tarde dentro de una tarea web.
+
 El `build` del root ya respeta ese orden. `package.json:17`:
 
 ```

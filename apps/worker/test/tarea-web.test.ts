@@ -669,6 +669,49 @@ describe('registro de trayectorias (Fase F, V030)', () => {
     expect(guardada.pasos[1]).toMatchObject({ idx: 1, exito: false });
   });
 
+  it('tarea CANCELADA: la trayectoria conserva las acciones que el agente alcanzo a ejecutar', async () => {
+    const trayectorias = makeTrayectorias();
+    const cancelacion = new AbortController();
+    let motorEnMarcha: () => void = () => {};
+    const enMarcha = new Promise<void>((resolver) => {
+      motorEnMarcha = resolver;
+    });
+    // Motor que imita la corrida real: registra en vivo lo que va haciendo (una navegacion y una
+    // accion en vuelo, que es como queda la que se estaba ejecutando al cancelar) y rechaza cuando
+    // llega el abort, sin devolver traza. Es el mismo camino del corte duro de execution.ts.
+    const motor: MotorDeTareaWeb = {
+      ejecutar: vi.fn(
+        async (params: {
+          signal?: AbortSignal;
+          registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined;
+        }) => {
+          params.registrarAccion?.({ type: 'goto', success: true });
+          params.registrarAccion?.({ type: 'act', action: 'click en Enviar', success: false });
+          motorEnMarcha();
+          return new Promise<ResultadoMotor>((_resolver, rechazar) => {
+            const abortar = (): void => rechazar(new Error('AgentAbortError: aborted'));
+            if (params.signal?.aborted === true) abortar();
+            else params.signal?.addEventListener('abort', abortar, { once: true });
+          });
+        },
+      ),
+    } as unknown as MotorDeTareaWeb;
+
+    const corrida = procesarTareaWeb(makeDeps({ motor, trayectorias }), makeJob(), {
+      signal: cancelacion.signal,
+    });
+    await enMarcha;
+    cancelacion.abort();
+    await expect(corrida).rejects.toThrow(PermanentExecutionError);
+
+    const guardada = guardadaEn(trayectorias);
+    expect(guardada).toMatchObject({ estado: 'fallida' });
+    // Las dos acciones sobreviven a la cancelacion, incluida la que quedo en vuelo.
+    expect(guardada.pasos).toHaveLength(2);
+    expect(guardada.pasos[0]).toMatchObject({ idx: 0, accion: { tipo: 'goto' }, exito: true });
+    expect(guardada.pasos[1]).toMatchObject({ idx: 1, accion: { tipo: 'act' }, exito: false });
+  });
+
   it('sin registrador cableado (deploy sin V030): la tarea corre igual, sin trayectoria', async () => {
     const deps = makeDeps({ motor: makeMotorConTraza({ exito: true, mensaje: 'listo' }) });
     await expect(procesarTareaWeb(deps, makeJob())).resolves.toBe('completada');
