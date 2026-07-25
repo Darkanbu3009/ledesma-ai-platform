@@ -215,6 +215,8 @@ function makeDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
     vaultSecret: 'a'.repeat(64),
     model: 'anthropic/claude-opus-4-5',
     maxPasos: 40,
+    historialPasos: 8,
+    modoScreenshots: 'cambios',
     runTimeoutMs: 60_000,
     resolveCredential: vi.fn(async () => ({
       providerId: 'anthropic' as const,

@@ -146,3 +146,49 @@ describe('parseEnv (worker): TAREA_WEB_MODEL, 7.1d)', () => {
     }
   });
 });
+
+/**
+ * PALANCAS DE COSTO por corrida. Las dos son numericas/enumeradas con default, con el mismo criterio
+ * que el resto: un valor fuera de rango o mal escrito hace fallar el arranque, no se degrada en
+ * silencio a un default (una tarea corriendo con la ventana equivocada cuesta dinero real).
+ */
+describe('parseEnv (worker): costo de la corrida (screenshots e historial)', () => {
+  it('defaults: capturas solo ante cambios y ventana de 8 pasos', () => {
+    const env = parseEnv(VALID as NodeJS.ProcessEnv);
+    expect(env.TAREA_WEB_SCREENSHOTS).toBe('cambios');
+    expect(env.TAREA_WEB_HISTORIAL_PASOS).toBe(8);
+  });
+
+  it('acepta los tres modos de captura y rechaza cualquier otro', () => {
+    for (const modo of ['siempre', 'cambios', 'minimo']) {
+      expect(
+        parseEnv({ ...VALID, TAREA_WEB_SCREENSHOTS: modo } as NodeJS.ProcessEnv)
+          .TAREA_WEB_SCREENSHOTS,
+      ).toBe(modo);
+    }
+    for (const modo of ['nunca', 'true', '']) {
+      expect(() =>
+        parseEnv({ ...VALID, TAREA_WEB_SCREENSHOTS: modo } as NodeJS.ProcessEnv),
+      ).toThrow(/Environment validation failed/);
+    }
+  });
+
+  it('acepta los bordes de la ventana de historial (3..40)', () => {
+    expect(
+      parseEnv({ ...VALID, TAREA_WEB_HISTORIAL_PASOS: '3' } as NodeJS.ProcessEnv)
+        .TAREA_WEB_HISTORIAL_PASOS,
+    ).toBe(3);
+    expect(
+      parseEnv({ ...VALID, TAREA_WEB_HISTORIAL_PASOS: '40' } as NodeJS.ProcessEnv)
+        .TAREA_WEB_HISTORIAL_PASOS,
+    ).toBe(40);
+  });
+
+  it('RECHAZA una ventana de historial fuera de rango o mal formada', () => {
+    for (const valor of ['2', '41', '0', '-1', 'abc', '8.5']) {
+      expect(() =>
+        parseEnv({ ...VALID, TAREA_WEB_HISTORIAL_PASOS: valor } as NodeJS.ProcessEnv),
+      ).toThrow(/Environment validation failed/);
+    }
+  });
+});

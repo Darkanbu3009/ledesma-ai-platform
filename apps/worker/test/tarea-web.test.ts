@@ -219,6 +219,8 @@ function makeDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
     vaultSecret: VAULT_SECRET,
     model: 'anthropic/claude-sonnet-4-6',
     maxPasos: 120,
+    historialPasos: 8,
+    modoScreenshots: 'cambios',
     runTimeoutMs: 600_000,
     resolveCredential: vi.fn(async () => ({
       id: 'cred-1',
@@ -426,6 +428,9 @@ describe('procesarTareaWeb', () => {
       resumen: 'el panel muestra 3 agentes activos',
       // El resultado declara POR DONDE corrio la tarea, para poder medir el ahorro (CAMBIO 5).
       via: 'modelo',
+      // El id de la sesion del proveedor queda EN el resultado: es lo que permite localizar
+      // despues la grabacion de esta corrida a partir del job.
+      sesionExternaId: 'ses-1',
     });
     expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
   });
@@ -497,7 +502,7 @@ describe('procesarTareaWeb', () => {
     expect(deps.navegador.abrirSesionParaTarea).not.toHaveBeenCalled();
   });
 
-  it('NUNCA loguea secretos: ni contexto, ni api keys, ni el objetivo', async () => {
+  it('NUNCA loguea secretos: ni el contexto de sesion, ni la api key del owner', async () => {
     const logger = makeLogger();
     const deps = makeDeps({ logger });
     await procesarTareaWeb(deps, makeJob());
@@ -507,8 +512,34 @@ describe('procesarTareaWeb', () => {
     for (const llamada of llamadas) {
       expect(llamada).not.toContain('cookie-secreta-del-usuario');
       expect(llamada).not.toContain('sk-ant-secreta');
-      expect(llamada).not.toContain(OBJETIVO);
     }
+  });
+
+  /**
+   * El OBJETIVO si se loguea, y a proposito: hasta ahora no quedaba en ningun punto, asi que una
+   * tarea que terminaba mal no se podia ni empezar a diagnosticar. Va por la MISMA censura con la
+   * que ya se persiste en la trayectoria, con los nombres de los parametros declarados y sin sus
+   * valores.
+   */
+  it('loguea el objetivo tal como llego, censurado, con los NOMBRES de los parametros', async () => {
+    const logger = makeLogger();
+    const deps = makeDeps({ logger });
+    const objetivo = 'dime si el pedido de 250 MXN de juan@ejemplo.com ya llego, contrasena hunter2';
+    await procesarTareaWeb(
+      deps,
+      makeJob({ payload: { kind: 'tarea_web', connectionId: CONNECTION_ID, objetivo } }),
+    );
+    const registro = (logger.info as ReturnType<typeof vi.fn>).mock.calls.find(
+      (call) => call[0] === 'tarea web: objetivo recibido',
+    );
+    expect(registro).toBeDefined();
+    const meta = registro?.[1] as { objetivo: string; parametros: string[] };
+    expect(meta.objetivo).toContain('el pedido de 250 MXN de juan@ejemplo.com');
+    // La credencial DICTADA dentro del objetivo no sobrevive al log.
+    expect(meta.objetivo).not.toContain('hunter2');
+    expect(meta.objetivo).toContain('[CENSURADO]');
+    // Solo los NOMBRES de lo declarado: ni el correo ni el monto viajan como valores aparte.
+    expect(meta.parametros).toEqual(['destinatarios', 'monto']);
   });
 });
 

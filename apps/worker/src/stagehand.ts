@@ -6,6 +6,15 @@ import {
   AccionSinConfirmarError,
   FalloDeEsquemaDelMotorError,
 } from './errores.js';
+import {
+  crearAcumuladorDeConsumo,
+  crearPoliticaDeScreenshots,
+  crearPreparadorDePaso,
+  numeroDeMetadatos,
+  type ConsumoDeCorrida,
+  type ModoScreenshots,
+  type PoliticaDeScreenshots,
+} from './costo-modelo.js';
 import type { Logger } from './logger.js';
 import type { EscaladorDePaso, ResultadoEscalada } from './ejecutor-receta.js';
 import type { AccionCrudaDeMotor } from './trayectoria.js';
@@ -228,6 +237,12 @@ export interface ActBlindado {
   /** Mensaje de la detencion si la GUARDIA bloqueo una accion; null si nunca bloqueo. */
   bloqueo(): string | null;
   /**
+   * true en cuanto la guardia AUTORIZO una accion irreversible (veredicto 'permitir' con
+   * confirmacion). Marca el fin del tramo que PRECEDE a esa accion, que es lo que la politica de
+   * capturas necesita saber en modo 'minimo'.
+   */
+  autorizoIrreversible(): boolean;
+  /**
    * Mensaje del cierre si una accion irreversible se ejecuto y NO se pudo confirmar su efecto
    * (CAMBIO 4); null si no ocurrio. Viaja por el mismo camino que el bloqueo: la excepcion que sale
    * de la tool la atrapa el handler de Stagehand, asi que el adaptador la reconstruye al terminar.
@@ -285,6 +300,7 @@ export function crearActBlindado(params: {
   let corte: FalloDeEsquemaDelMotorError | null = null;
   let bloqueo: string | null = null;
   let sinConfirmar: string | null = null;
+  let autorizoIrreversible = false;
   /** Ultimo elementId que el motor rechazo; se compara con el del intento siguiente. */
   let elementIdRechazado: string | null = null;
 
@@ -363,6 +379,7 @@ export function crearActBlindado(params: {
     corte: () => corte,
     bloqueo: () => bloqueo,
     sinConfirmar: () => sinConfirmar,
+    autorizoIrreversible: () => autorizoIrreversible,
     ejecutar: async (accion: string): Promise<SalidaDeActBlindado> => {
       // La accion NO se registra en la traza: no llego al navegador. La constancia de por que se
       // bloqueo es el paso de verificacion que deja la propia guardia.
@@ -383,6 +400,7 @@ export function crearActBlindado(params: {
       // surtio efecto. Corre haya salido bien o mal la llamada: lo que decide es la pagina, no lo
       // que reporte la tool. Sin confirmacion la tarea termina aqui y NO se reintenta.
       if (veredicto?.tipo === 'permitir' && veredicto.confirmar === true && params.guardia) {
+        autorizoIrreversible = true;
         const confirmacion = await params.guardia.confirmar();
         if (!confirmacion.confirmada) {
           sinConfirmar = confirmacion.mensaje;
@@ -413,6 +431,98 @@ function herramientaActBlindada(blindado: ActBlindado): NonNullable<
           ),
       }),
       execute: async ({ action }): Promise<SalidaDeActBlindado> => blindado.ejecutar(action),
+    }),
+  };
+}
+
+/** Salida de la tool `screenshot`, con la MISMA forma que la nativa de Stagehand (agent/tools). */
+export interface SalidaDeScreenshot {
+  success: boolean;
+  base64?: string;
+  timestamp?: number;
+  pageUrl?: string;
+  /** true cuando la politica de capturas decidio NO tomar la foto (no es un fallo). */
+  omitido?: boolean;
+  error?: string;
+}
+
+/**
+ * Texto que vuelve al modelo cuando la captura se omite. Dice el MOTIVO, no una negativa a secas: el
+ * agente pidio la foto para ver el estado de la pagina, y "la pagina sigue siendo la misma" es
+ * exactamente esa informacion, sin los miles de tokens que cuesta la imagen.
+ */
+const MOTIVO_SCREENSHOT_OMITIDO =
+  'screenshot no tomado: la pagina no cambio desde la observacion anterior (misma URL y mismo ' +
+  'titulo), asi que la imagen seria identica a la que ya tienes. Sigue con la tarea.';
+
+/** Descripcion de la tool `screenshot`, calcada de la nativa para no cambiar el prompt del modelo. */
+const DESCRIPCION_SCREENSHOT =
+  'Takes a screenshot (PNG) of the current page. Use this to quickly verify page state.';
+
+/** Lo minimo que la tool necesita de la pagina de Stagehand (los tests pasan un objeto propio). */
+export interface PaginaObservable {
+  url(): string;
+  title(): Promise<string>;
+  screenshot(opciones: { fullPage: boolean }): Promise<Buffer>;
+}
+
+/**
+ * Tool `screenshot` BAJO POLITICA (TAREA_WEB_SCREENSHOTS), que reemplaza a la nativa por el mismo
+ * mecanismo que `act` (mismo nombre y misma forma de salida, fusionada DESPUES del toolset nativo).
+ *
+ * Una captura es lo mas caro que entra al contexto del modelo, y en la mayoria de los pasos es la
+ * MISMA pagina que el agente ya tiene delante. La politica decide; la tool solo obedece y, cuando
+ * captura, devuelve exactamente lo que devolveria la nativa (mismo `toModelOutput`, mismo formato de
+ * imagen), asi que el modelo no puede notar diferencia alguna en las capturas que si se toman.
+ *
+ * La URL y el titulo se leen de la pagina YA conectada (sin abrir nada nuevo) y JAMAS se loguean: los
+ * logs del worker no arrastran URLs ni contenido del sitio.
+ */
+export function herramientaScreenshotConPolitica(params: {
+  politica: PoliticaDeScreenshots;
+  pagina: () => Promise<PaginaObservable>;
+}): NonNullable<Parameters<Stagehand['agent']>[0]>['tools'] {
+  return {
+    screenshot: tool({
+      description: DESCRIPCION_SCREENSHOT,
+      inputSchema: z.object({}),
+      execute: async (): Promise<SalidaDeScreenshot> => {
+        try {
+          const pagina = await params.pagina();
+          const url = pagina.url();
+          const titulo = await pagina.title();
+          if (!params.politica.permitir({ url, titulo })) {
+            return { success: true, omitido: true, pageUrl: url };
+          }
+          const imagen = await pagina.screenshot({ fullPage: false });
+          return {
+            success: true,
+            base64: imagen.toString('base64'),
+            timestamp: Date.now(),
+            pageUrl: url,
+          };
+        } catch (error) {
+          return { success: false, error: `Error taking screenshot: ${mensajeDeError(error)}` };
+        }
+      },
+      toModelOutput: (resultado: SalidaDeScreenshot) => {
+        if (resultado.omitido === true) {
+          return {
+            type: 'content' as const,
+            value: [{ type: 'text' as const, text: MOTIVO_SCREENSHOT_OMITIDO }],
+          };
+        }
+        if (resultado.success === false || resultado.base64 === undefined) {
+          return {
+            type: 'content' as const,
+            value: [{ type: 'text' as const, text: JSON.stringify(resultado) }],
+          };
+        }
+        return {
+          type: 'content' as const,
+          value: [{ type: 'media' as const, mediaType: 'image/png', data: resultado.base64 }],
+        };
+      },
     }),
   };
 }
@@ -453,20 +563,58 @@ export function construirOpcionesDeEjecucion(params: {
   registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined;
   /** La corrida lleva guardia: se retiran las tools que llegarian al navegador sin pasar por ella. */
   conGuardia?: boolean | undefined;
+  /** Ventana de historial que se reenvia al modelo (TAREA_WEB_HISTORIAL_PASOS). */
+  historialPasos: number;
+  /** Recibe el consumo de CADA llamada al modelo (tokens de entrada, salida y de cache). */
+  registrarConsumo?: ((paso: PasoDeConsumoDelBucle) => void) | undefined;
 }): AgentExecuteOptions {
   const observador = params.observador;
   const registrarAccion = params.registrarAccion;
+  const registrarConsumo = params.registrarConsumo;
+  // PREPARACION POR PASO (cache de prompt + system por su canal + ventana de historial). Tiene
+  // estado (la longitud del envio anterior), asi que se crea uno por corrida.
+  const preparador = crearPreparadorDePaso({ historialPasos: params.historialPasos });
   return {
     instruction: params.objetivo,
     maxSteps: params.maxPasos,
     toolTimeout: params.toolTimeoutMs,
     ...(params.signal !== undefined ? { signal: params.signal } : {}),
     ...(params.conGuardia === true ? { excludeTools: [...TOOLS_RETIRADAS_CON_GUARDIA] } : {}),
-    ...(observador !== undefined || registrarAccion !== undefined
-      ? {
-          callbacks: {
-            // Best-effort SIEMPRE: la observacion enriquece la traza; si falla, la tarea sigue
-            // igual y esa corrida simplemente no se podra promover a receta.
+    callbacks: {
+      // Stagehand invoca este callback al final de SU preparacion de cada paso y usa tal cual lo que
+      // devuelve (v3AgentHandler.createPrepareStep): es el unico punto desde el que el worker decide
+      // que mensajes viajan, por que canal van las instrucciones de sistema y que prefijo se cachea.
+      prepareStep: (opciones) => {
+        const preparado = preparador(opciones.messages);
+        return {
+          ...(preparado.system !== undefined ? { system: preparado.system } : {}),
+          // El tipo estructural de costo-modelo.ts y el ModelMessage del AI SDK describen la misma
+          // forma; este es el UNICO punto del worker en que se cruzan.
+          messages: preparado.messages as unknown as typeof opciones.messages,
+        };
+      },
+      // CONSUMO POR PASO: el resultado del motor solo reporta entrada y salida totales; los tokens
+      // leidos y creados en cache -- lo unico que dice si el cache de prompt esta funcionando --
+      // solo viajan aca (el creado en cache, en los metadatos del proveedor).
+      ...(registrarConsumo !== undefined
+        ? {
+            onStepFinish: (paso): void => {
+              const anthropic = (paso.providerMetadata as Record<string, unknown> | undefined)?.[
+                'anthropic'
+              ];
+              registrarConsumo({
+                tokensEntrada: paso.usage.inputTokens,
+                tokensSalida: paso.usage.outputTokens,
+                tokensLeidosDeCache: paso.usage.cachedInputTokens,
+                tokensCreadosEnCache: numeroDeMetadatos(anthropic, 'cacheCreationInputTokens'),
+              });
+            },
+          }
+        : {}),
+      // Best-effort SIEMPRE: la observacion enriquece la traza; si falla, la tarea sigue
+      // igual y esa corrida simplemente no se podra promover a receta.
+      ...(observador !== undefined || registrarAccion !== undefined
+        ? {
             onEvidence: async (evento): Promise<void> => {
               if (evento.type !== 'step_finished') return;
               if (registrarAccion !== undefined && evento.actionName !== 'act') {
@@ -479,10 +627,18 @@ export function construirOpcionesDeEjecucion(params: {
                 // una observacion fallida jamas cambia el desenlace de la tarea
               }
             },
-          },
-        }
-      : {}),
+          }
+        : {}),
+    },
   };
+}
+
+/** Lo que el bucle del agente reporta de consumo en CADA llamada al modelo. */
+export interface PasoDeConsumoDelBucle {
+  tokensEntrada?: number | undefined;
+  tokensSalida?: number | undefined;
+  tokensLeidosDeCache?: number | undefined;
+  tokensCreadosEnCache?: number | undefined;
 }
 
 /** Campos de `actionArgs` que describen la accion en TEXTO y que la traza del motor tambien lleva. */
@@ -591,6 +747,9 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
     observador?: ((paso: PasoObservado) => Promise<void>) | undefined;
     registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined;
     guardia?: GuardiaDeAccion | undefined;
+    historialPasos: number;
+    modoScreenshots: ModoScreenshots;
+    reportarConsumo?: ((consumo: ConsumoDeCorrida) => void) | undefined;
   }): Promise<ResultadoMotor> {
     const stagehand = new Stagehand(
       construirOpcionesStagehand({
@@ -602,6 +761,9 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
       }),
     );
     await stagehand.init();
+    // El reporte se emite en el `finally`: una corrida que LANZA (deadline, cancelacion o corte por
+    // esquema) es justo donde mas hace falta saber cuanto se gasto antes de cortarse.
+    const consumo = crearAcumuladorDeConsumo();
     try {
       // La tool `act` del agente va BLINDADA (CAMBIO 2 y 3): misma forma que la nativa, con
       // reintento ante rechazo de esquema y corte por fallos consecutivos. Se pasa por `tools`, que
@@ -612,9 +774,28 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
         registrarAccion: params.registrarAccion,
         guardia: params.guardia,
       });
+      // CAPTURAS BAJO POLITICA (TAREA_WEB_SCREENSHOTS): con 'siempre' NO se reemplaza la tool nativa
+      // (cero intervencion, comportamiento historico exacto). Con los otros dos modos, la tool del
+      // worker decide si la foto se toma; cuando se toma, devuelve lo mismo que la nativa.
+      const politicaScreenshots =
+        params.modoScreenshots === 'siempre'
+          ? null
+          : crearPoliticaDeScreenshots({
+              modo: params.modoScreenshots,
+              conGuardia: params.guardia !== undefined,
+              yaAutorizo: () => blindado.autorizoIrreversible(),
+            });
       const agente = stagehand.agent({
         systemPrompt: params.systemPrompt,
-        tools: herramientaActBlindada(blindado),
+        tools: {
+          ...herramientaActBlindada(blindado),
+          ...(politicaScreenshots !== null
+            ? herramientaScreenshotConPolitica({
+                politica: politicaScreenshots,
+                pagina: () => stagehand.context.awaitActivePage(),
+              })
+            : {}),
+        },
       });
       const resultado = await agente.execute(
         construirOpcionesDeEjecucion({
@@ -626,6 +807,10 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
           // Las tools que no son `act` se registran por evidencia; `act` ya la registra el blindaje.
           registrarAccion: params.registrarAccion,
           conGuardia: params.guardia !== undefined,
+          historialPasos: params.historialPasos,
+          ...(params.reportarConsumo !== undefined
+            ? { registrarConsumo: (paso) => consumo.registrarPaso(paso) }
+            : {}),
         }),
       );
       // Ni el bloqueo de la guardia ni el corte por fallos de esquema pueden viajar como excepcion
@@ -665,6 +850,7 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
         tokensOut: resultado.usage?.output_tokens ?? null,
       };
     } finally {
+      params.reportarConsumo?.(consumo.total());
       // Cierre del CLIENTE Stagehand (no de la sesion: keepAlive la mantiene viva para que el
       // handler extraiga el contexto; la sesion la cierra el handler en su finally).
       await stagehand.close().catch(() => {});

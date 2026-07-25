@@ -167,6 +167,10 @@ function main(): void {
       vaultSecret: config.VAULT_SECRET,
       model: config.TAREA_WEB_MODEL,
       maxPasos: config.TAREA_WEB_MAX_STEPS,
+      // Las dos palancas de COSTO por corrida: cuanta conversacion se le reenvia al modelo en cada
+      // llamada y cuando se toma una captura de pantalla. Ninguna cambia lo que el agente decide.
+      historialPasos: config.TAREA_WEB_HISTORIAL_PASOS,
+      modoScreenshots: config.TAREA_WEB_SCREENSHOTS,
       runTimeoutMs: config.TAREA_WEB_TIMEOUT_SECONDS * 1000,
       resolveCredential: (ownerId, credentialId) =>
         resolveStoredCredential(credentialRepo, ownerId, credentialId, config.VAULT_SECRET),

@@ -105,6 +105,8 @@ Este proceso **no se despliega** aun; solo debe compilar y poder correrse localm
 | `TAREA_WEB_TIMEOUT_SECONDS` | no | `1500` | Deadline de pared SOLO de los jobs `tarea_web` (60..2580). |
 | `TAREA_WEB_TOOL_TIMEOUT_SECONDS` | no | `90` | Techo por LLAMADA de tool del agente de navegacion (30..300). |
 | `TAREA_WEB_OBSERVADOR_PASOS` | no | `false` | Observador de pasos: `true` o `false` (ver abajo). |
+| `TAREA_WEB_SCREENSHOTS` | no | `cambios` | Cuando se captura la pantalla: `siempre`, `cambios` o `minimo` (ver abajo). |
+| `TAREA_WEB_HISTORIAL_PASOS` | no | `8` | Pasos de conversacion que se reenvian al modelo en cada llamada (3..40). |
 | `WORKER_POLL_INTERVAL_MS` | no | `5000` | Cada cuanto consulta la cola. |
 | `LOG_LEVEL` | no | `info` | Nivel de log. |
 
@@ -217,3 +219,28 @@ paso re-ejecutable que guardar). Lo demas no cambia: las recetas YA aprendidas s
 de forma determinista, se reparan y se jubilan igual, y la trayectoria se sigue registrando. Se
 enciende (`TAREA_WEB_OBSERVADOR_PASOS=true`) en los despliegues donde interese volver a aprender
 recetas nuevas.
+
+### Costo por corrida (`TAREA_WEB_SCREENSHOTS` y `TAREA_WEB_HISTORIAL_PASOS`)
+
+El bucle del agente reenvia la conversacion COMPLETA en cada llamada al modelo, asi que el costo de
+entrada crece con el cuadrado de los pasos: una corrida de 26 pasos consumio 208111 tokens de
+entrada y 3007 de salida. Las palancas de `src/costo-modelo.ts` atacan las tres causas, y ninguna
+cambia lo que el agente decide (mismo objetivo, mismas reglas de sistema, mismas herramientas):
+
+- **Cache de prompt.** El prefijo estable de la corrida (definicion de herramientas + instrucciones
+  de sistema + objetivo del usuario) se marca como cacheable, y mientras la ventana de historial no
+  se desliza se marca ademas el final del envio anterior. Con eso, cada paso LEE de cache lo que
+  antes volvia a pagar como entrada nueva. Se verifica en el log `tarea web: consumo de la corrida
+  del motor`: `tokensLeidosDeCache` en cero significa que el cache no esta funcionando.
+- **`TAREA_WEB_HISTORIAL_PASOS`** (default `8`, rango 3..40): cuantos pasos de ida y vuelta se
+  reenvian. El objetivo original viaja SIEMPRE; esto acota solo la conversacion posterior. El corte
+  cae siempre en un mensaje del asistente, nunca dejando un resultado de tool huerfano.
+- **`TAREA_WEB_SCREENSHOTS`** (default `cambios`): una captura es lo mas caro que entra al contexto
+  del modelo y, paso a paso, suele ser la MISMA pagina.
+  - `cambios`: se captura solo si la URL o el titulo cambiaron desde la observacion anterior.
+  - `minimo`: solo la primera de la corrida y las del tramo que precede a una accion irreversible.
+  - `siempre`: comportamiento historico, sin intervencion alguna sobre la tool nativa.
+
+Al terminar cada corrida del motor (haya devuelto o haya sido cortada por deadline o cancelacion) se
+loguea `tarea web: consumo de la corrida del motor` con los tokens de entrada, de salida, leidos de
+cache y creados en cache, mas el numero de llamadas al modelo. Es la medida directa del ahorro.
