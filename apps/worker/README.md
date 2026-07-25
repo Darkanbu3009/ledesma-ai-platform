@@ -125,14 +125,24 @@ los nodos validos, el arbol es byte a byte el de siempre.
 
 - **El parche se aplica solo** con cualquier `npm ci` / `npm install` en la raiz (Railway usa
   Nixpacks, que corre `npm ci` y por tanto el `postinstall`). No hay paso manual.
-- **Sin `postinstall-postinstall`, a proposito.** Ese paquete solo existe para un hueco de yarn v1
-  (no re-corre el `postinstall` tras un `yarn remove`) y este repo es npm puro (`package-lock.json`,
-  `npm ci` en CI y en Railway). Ademas su propio `postinstall` invoca `yarn run postinstall` en
-  cuanto encuentra `yarnpkg` en el PATH, y yarn aplica `engines` de forma estricta: con un node
-  fuera de `>=20 <21` **aborta el `npm ci` entero** (verificado en este repo con node 22). No
-  agregarlo.
+- **`patch-package` y `postinstall-postinstall` van en `dependencies`, NO en `devDependencies`**
+  (`package.json:20-23`). Railway y Vercel instalan en modo produccion (el log de Railway avisa
+  `npm warn config production Use --omit=dev instead`), y ahi las `devDependencies` se omiten: con
+  `patch-package` como devDependency, el `postinstall` moria con
+  `sh: line 1: patch-package: command not found` (Vercel, exit 127) y, peor, el parche NO se habria
+  aplicado en el worker aunque el build no fallara. En `dependencies` el binario existe en los dos
+  modos de instalacion.
+- **El `postinstall` falla RUIDOSAMENTE**: `patch-package --error-on-fail --error-on-warn`. Fuera de
+  CI, `patch-package` imprime el error y **sale con codigo 0** (verificado: un parche roto sale 0 sin
+  los flags y 1 con ellos), asi que un despliegue de Railway se habria llevado un worker sin parchear
+  creyendo que todo salio bien. `--error-on-warn` cubre ademas el aviso por version distinta: si
+  alguien sube Stagehand y el parche aplica a medias, la instalacion se detiene en vez de seguir.
 - **CI lo vigila**: `apps/worker/test/parche-stagehand.test.ts` importa el `formatTreeLine` REAL de
   `node_modules` y falla si el parche no esta aplicado.
+- **Node 20 obligatorio** (`.nvmrc`, `engines` en la raiz). El `postinstall` de
+  `postinstall-postinstall` invoca `yarn run postinstall` en cuanto encuentra `yarnpkg` en el PATH, y
+  yarn aplica `engines` de forma estricta: con un node fuera de `>=20 <21` aborta la instalacion
+  entera (verificado con node 22). Con node 20 la instalacion pasa limpia.
 - **Retirarlo** cuando Stagehand lo corrija upstream. Verificado AUSENTE en 3.7.1 (su
   `treeFormatUtils.js` es identico al de 3.6.0), asi que subir de version NO reemplaza al parche.
 

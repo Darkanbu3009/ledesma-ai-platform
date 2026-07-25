@@ -12,11 +12,15 @@
     "packages/*"
   ],
   "scripts": {
-    "postinstall": "patch-package",
+    "postinstall": "patch-package --error-on-fail --error-on-warn",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint .",
     "build": "npm run build -w packages/shared && npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present"
+  },
+  "dependencies": {
+    "patch-package": "8.0.1",
+    "postinstall-postinstall": "2.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -24,7 +28,6 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
-    "patch-package": "8.0.1",
     "prettier": "^3.8.3",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.60.1"

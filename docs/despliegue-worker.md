@@ -41,16 +41,28 @@ Orden requerido: **`shared` -> `backend` -> `worker`** (documentado tambien en
 
 ### Parche de dependencia en el postinstall (obligatorio para la tarea web)
 
-La raiz tiene `"postinstall": "patch-package"` (`package.json:15`). Aplica
-`patches/@browserbasehq+stagehand+3.6.0.patch`, que corrige el arbol de accesibilidad de Stagehand
-para que el modelo no reciba identificadores que su propio esquema de `act` va a rechazar (ver
-`apps/worker/README.md`). Sin el parche, la tarea web falla de forma determinista en las paginas que
-producen nodos sin `encodedId`.
+La raiz tiene `"postinstall": "patch-package --error-on-fail --error-on-warn"` (`package.json:15`).
+Aplica `patches/@browserbasehq+stagehand+3.6.0.patch`, que corrige el arbol de accesibilidad de
+Stagehand para que el modelo no reciba identificadores que su propio esquema de `act` va a rechazar
+(ver `apps/worker/README.md`). Sin el parche, la tarea web falla de forma determinista en las
+paginas que producen nodos sin `encodedId`.
 
 Nixpacks corre `npm ci`, y `npm ci` ejecuta el `postinstall` de la raiz, asi que **no hay ningun paso
-manual que agregar en Railway**. Lo unico que lo rompe es instalar con los scripts desactivados
-(`npm ci --ignore-scripts`): si alguna vez se configura asi, hay que agregar `npx patch-package` al
-Build Command antes de `npm run build`.
+manual que agregar en Railway**. Dos condiciones que si hay que respetar:
+
+- **`patch-package` vive en `dependencies`, no en `devDependencies`** (`package.json:20-23`). Railway
+  instala en modo produccion (su log avisa `npm warn config production Use --omit=dev instead`) y ahi
+  las `devDependencies` se omiten: como devDependency, el binario no existe cuando corre el
+  `postinstall` y el worker arranca SIN parche. Verificado con
+  `NODE_ENV=production npm ci --omit=dev`: con la dependencia en `dependencies`, `patch-package`
+  queda en `node_modules/.bin` y el parche se aplica.
+- **Los flags `--error-on-fail --error-on-warn` no son opcionales.** Fuera de CI, `patch-package`
+  imprime el error de un parche que no aplica y **sale con codigo 0**: el despliegue quedaria verde
+  con un worker sin parchear. Con los flags, la instalacion se detiene.
+
+Lo unico que lo rompe es instalar con los scripts desactivados (`npm ci --ignore-scripts`): si alguna
+vez se configura asi, hay que agregar `npx patch-package --error-on-fail --error-on-warn` al Build
+Command antes de `npm run build`.
 
 El `build` del root ya respeta ese orden. `package.json:17`:
 
