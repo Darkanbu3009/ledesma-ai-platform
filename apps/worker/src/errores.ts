@@ -43,6 +43,21 @@ export class FalloDeEsquemaDelMotorError extends Error {
 }
 
 /**
+ * La GUARDIA DE ACCION del worker BLOQUEO una accion del agente ANTES de que llegara al navegador: la
+ * verificacion determinista comparo lo que hay en la pagina contra lo que declaro el objetivo y no
+ * coincidio (o la politica del usuario no la permite). `message` es el mensaje de la detencion ya
+ * serializado (DETENIDA_VERIFICACION), asi que viaja intacto hasta el last_error del job y la consola
+ * lo sabe traducir. Lanzarlo desde la tool corta el bucle del agente en el acto: es lo que garantiza
+ * que no busque una ruta alternativa para la misma accion.
+ */
+export class AccionBloqueadaError extends Error {
+  constructor(mensajeDeDetencion: string) {
+    super(mensajeDeDetencion);
+    this.name = 'AccionBloqueadaError';
+  }
+}
+
+/**
  * El worker se esta apagando (SIGTERM/SIGINT) y aborto el run en curso. NO es culpa del job: se devuelve
  * a 'pending' para que se re-reclame, sin marcarlo failed aunque haya agotado intentos.
  */

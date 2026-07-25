@@ -9,9 +9,11 @@ import {
   ESPERA_ENTRE_REINTENTOS_ESQUEMA_MS,
   MAX_FALLOS_ESQUEMA_CONSECUTIVOS,
   MAX_REINTENTOS_ESQUEMA,
+  TOOLS_RETIRADAS_CON_GUARDIA,
 } from '../src/stagehand.js';
-import { FalloDeEsquemaDelMotorError } from '../src/errores.js';
+import { AccionBloqueadaError, FalloDeEsquemaDelMotorError } from '../src/errores.js';
 import type { AccionCrudaDeMotor } from '../src/trayectoria.js';
+import type { GuardiaDeAccion } from '../src/tarea-web.js';
 import type { Logger } from '../src/logger.js';
 
 /**
@@ -174,6 +176,103 @@ describe('crearActBlindado', () => {
   });
 });
 
+/**
+ * PUNTO DE INTERCEPCION: la tool `act` del agente pasa por la guardia del worker ANTES de tocar el
+ * navegador. Estos tests fijan que el bloqueo NO es una sugerencia (`actuar` no se llama) y que corta
+ * la corrida en el acto (lanza), que es lo que impide que el agente busque otra ruta.
+ */
+describe('crearActBlindado con GUARDIA', () => {
+  function guardiaQueBloquea(mensaje: string): GuardiaDeAccion & { revisadas: string[] } {
+    const revisadas: string[] = [];
+    return {
+      revisadas,
+      revisar: async (accion: string) => {
+        revisadas.push(accion);
+        return { tipo: 'bloquear', mensaje };
+      },
+    };
+  }
+
+  it('la guardia se consulta ANTES de actuar y un bloqueo impide que la accion llegue al navegador', async () => {
+    const actuar = vi.fn(async () => ({ success: true }));
+    const guardia = guardiaQueBloquea('DETENIDA_VERIFICACION: {"motivo":"noCoincide"}');
+    const acciones: AccionCrudaDeMotor[] = [];
+    const blindado = crearActBlindado({
+      actuar,
+      logger: makeLogger(),
+      guardia,
+      registrarAccion: (accion) => acciones.push(accion),
+    });
+
+    await expect(blindado.ejecutar('click en Enviar')).rejects.toThrow(AccionBloqueadaError);
+
+    expect(guardia.revisadas).toEqual(['click en Enviar']);
+    // Lo que importa: el navegador nunca se toco y la traza no registra una accion que no ocurrio.
+    expect(actuar).not.toHaveBeenCalled();
+    expect(acciones).toEqual([]);
+    // El mensaje de la detencion viaja intacto para que la consola pueda traducirlo.
+    expect(blindado.bloqueo()).toBe('DETENIDA_VERIFICACION: {"motivo":"noCoincide"}');
+  });
+
+  it('una guardia que permite deja pasar la accion y no registra bloqueo', async () => {
+    const actuar = vi.fn(async () => ({ success: true }));
+    const revisadas: string[] = [];
+    const guardia: GuardiaDeAccion = {
+      revisar: async (accion) => {
+        revisadas.push(accion);
+        return { tipo: 'permitir' };
+      },
+    };
+    const blindado = crearActBlindado({ actuar, logger: makeLogger(), guardia });
+
+    const salida = await blindado.ejecutar('escribe el destinatario');
+
+    expect(salida.success).toBe(true);
+    expect(actuar).toHaveBeenCalledTimes(1);
+    expect(revisadas).toEqual(['escribe el destinatario']);
+    expect(blindado.bloqueo()).toBeNull();
+  });
+
+  it('sin guardia cableada, el comportamiento es exactamente el de antes', async () => {
+    const actuar = vi.fn(async () => ({ success: true }));
+    const blindado = crearActBlindado({ actuar, logger: makeLogger() });
+    await blindado.ejecutar('click en Enviar');
+    expect(actuar).toHaveBeenCalledTimes(1);
+    expect(blindado.bloqueo()).toBeNull();
+  });
+
+  it('la guardia se consulta UNA vez por llamada de tool, no por reintento de esquema', async () => {
+    let falla = true;
+    const actuar = vi.fn(async () => {
+      if (falla) {
+        falla = false;
+        throw errorDeEsquema();
+      }
+      return { success: true };
+    });
+    const revisadas: string[] = [];
+    const guardia: GuardiaDeAccion = {
+      revisar: async (accion) => {
+        revisadas.push(accion);
+        return { tipo: 'permitir' };
+      },
+    };
+    const blindado = crearActBlindado({
+      actuar,
+      logger: makeLogger(),
+      guardia,
+      esperar: async () => {},
+    });
+
+    await blindado.ejecutar('click en Enviar');
+
+    // Dos intentos de la MISMA accion (el primero rechazado por esquema) y una sola comparacion: el
+    // reintento repite una accion que nunca llego a ejecutarse.
+    expect(actuar).toHaveBeenCalledTimes(2);
+    expect(revisadas).toEqual(['click en Enviar']);
+  });
+});
+
 describe('esFalloDeEsquemaDelMotor', () => {
   it('reconoce el rechazo de esquema por nombre, por mensaje y por la cadena de cause', () => {
     expect(esFalloDeEsquemaDelMotor(errorDeEsquema())).toBe(true);
@@ -222,5 +321,38 @@ describe('construirOpcionesDeEjecucion', () => {
       },
     });
     expect(pasos).toEqual([{ selector: 'xpath=//button', punto: null }]);
+  });
+
+  it('SIN guardia el toolset queda intacto: no se retira ninguna tool', () => {
+    const opciones = construirOpcionesDeEjecucion({
+      objetivo: 'abre el ultimo correo',
+      maxPasos: 120,
+      toolTimeoutMs: 90_000,
+    });
+    expect(opciones.excludeTools).toBeUndefined();
+  });
+
+  it('CON guardia se retiran las tools que llegarian al navegador sin pasar por ella', () => {
+    const opciones = construirOpcionesDeEjecucion({
+      objetivo: 'envia el resumen a juan@ejemplo.com',
+      maxPasos: 120,
+      toolTimeoutMs: 90_000,
+      conGuardia: true,
+    });
+    // `keys` manda un Control+Enter a donde este el foco y `fillForm` actua sobre cualquier elemento
+    // que le describan: las dos alcanzan la accion irreversible sin pasar por la comparacion.
+    expect(opciones.excludeTools).toEqual(['keys', 'fillForm']);
+    expect(TOOLS_RETIRADAS_CON_GUARDIA).toEqual(['keys', 'fillForm']);
+    // La tool que SI lleva guardia sigue disponible: es la unica via de interaccion que queda.
+    expect(opciones.excludeTools).not.toContain('act');
+  });
+
+  it('la validacion real de Stagehand acepta excludeTools con experimental: true', () => {
+    expect(() =>
+      validateExperimentalFeatures({
+        isExperimental: true,
+        executeOptions: { excludeTools: [...TOOLS_RETIRADAS_CON_GUARDIA] },
+      }),
+    ).not.toThrow();
   });
 });

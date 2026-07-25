@@ -13,7 +13,6 @@ import {
   type ParametrosDeclarados,
 } from './parametros-objetivo.js';
 import { censurarValor } from './censura.js';
-import { construirSystemPromptTareaWeb } from './prompt-tarea-web.js';
 import type { PasoCensurado } from './trayectoria.js';
 
 /**
@@ -419,34 +418,5 @@ export function construirPasoDeVerificacion(veredicto: Veredicto): PasoCensurado
     estrategias: [],
     url: null,
     exito: veredicto.tipo === 'ejecutar',
-  };
-}
-
-/**
- * Prompt de la corrida que EJECUTA la accion ya verificada. Se construye SOLO con texto fijo y con
- * el objetivo ORIGINAL del usuario: nada de lo que el modelo dijo en su mensaje final (que puede
- * venir contaminado por el contenido de la pagina) entra a este prompt. La autorizacion la da el
- * sistema tras comparar, no el modelo al describirse a si mismo.
- */
-export function construirEjecucionVerificada(objetivoOriginal: string): {
-  objetivo: string;
-  systemPrompt: string;
-} {
-  return {
-    systemPrompt: [
-      construirSystemPromptTareaWeb(),
-      '',
-      'VERIFICACION DEL SISTEMA COMPLETADA:',
-      '- El sistema ya comparo, fuera de tu alcance, los datos de la accion pendiente contra lo que',
-      '  pidio el usuario, y coinciden.',
-      '- Ejecuta ESA accion ahora, UNA sola vez, y termina la tarea.',
-      '- NO ejecutes ninguna OTRA accion irreversible o financiera: si aparece una, reportala como',
-      '  siempre y termina sin ejecutarla.',
-    ].join('\n'),
-    objetivo:
-      `Tu tarea original era: ${objetivoOriginal}\n` +
-      'Ya dejaste la pagina lista en la accion que quedo pendiente y el sistema verifico que los ' +
-      'datos en pantalla coinciden con lo que pidio el usuario. Ejecuta esa accion ahora, UNA sola ' +
-      'vez, y completa la tarea.',
   };
 }
