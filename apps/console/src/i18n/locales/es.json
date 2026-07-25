@@ -1903,6 +1903,52 @@
       "cerrarAria": "Cerrar la aprobación (queda pendiente)"
     }
   },
+  "verificacion": {
+    "noCoincide": {
+      "titulo": "La tarea se detuvo antes de ejecutar",
+      "detalle": "Pediste {{pedido}} y en el sitio aparecia {{encontrado}}. No se ejecuto nada. Revisa y vuelve a pedirlo."
+    },
+    "faltaDato": {
+      "detalle": "Falta un dato para completar esta accion: {{campo}}. Pidelo de nuevo incluyendolo."
+    },
+    "otraAccion": {
+      "detalle": "La tarea llego a otra accion que no se puede deshacer y se detuvo. No se ejecuto nada. Pidela por separado."
+    },
+    "nada": "nada",
+    "campos": {
+      "destinatario": "a quien enviarlo",
+      "monto": "el monto"
+    }
+  },
+  "politica": {
+    "topeExcedido": {
+      "detalle": "El monto de {{monto}} supera tu limite configurado de {{tope}}. No se ejecuto nada. Puedes ajustar tu limite en Configuracion."
+    },
+    "sitioExcluido": {
+      "detalle": "Tienes desactivadas las acciones en {{dominio}}. No se ejecuto nada."
+    },
+    "accionesDesactivadas": {
+      "detalle": "Tienes desactivadas las acciones que no se pueden deshacer. No se ejecuto nada."
+    },
+    "noDisponible": {
+      "detalle": "No pudimos revisar tus preferencias antes de actuar. No se ejecuto nada. Intentalo de nuevo en un momento."
+    },
+    "configuracion": {
+      "titulo": "Acciones que no se pueden deshacer",
+      "descripcion": "Enviar, pagar, comprar o borrar son acciones que no tienen vuelta atrás. Antes de hacer una, tu asistente compara lo que pediste con lo que hay en la pantalla; si no coincide, se detiene y te avisa. Aquí decides los límites, una sola vez.",
+      "permitirTitulo": "Dejar que se hagan estas acciones",
+      "permitirDescripcion": "Si lo desactivas, tu asistente nunca las hará: solo te dirá qué encontró.",
+      "topeLabel": "Límite por acción (MXN)",
+      "topeDescripcion": "Si una acción implica más de esta cantidad, se detiene y te avisa. En 0, ninguna acción con dinero se hace sola.",
+      "sitiosLabel": "Sitios donde nunca actuar",
+      "sitiosDescripcion": "Separa los sitios con comas. Ejemplo: banco.com, sat.gob.mx",
+      "sitiosPlaceholder": "banco.com, sat.gob.mx",
+      "guardado": "Listo, guardamos tus límites.",
+      "error": "No pudimos guardar tus límites. Inténtalo de nuevo.",
+      "errorCarga": "No pudimos cargar tus límites.",
+      "sitioInvalido": "Revisa los sitios: escribe solo el dominio, como banco.com."
+    }
+  },
   "avisoTareaLenta": {
     "titulo": "Esta tarea esta tardando mas de lo normal",
     "detalle": "Lleva {{minutos}} minutos en ejecucion. Puedes esperar o terminarla.",

@@ -1902,6 +1902,52 @@
       "cerrarAria": "Close the approval (it stays pending)"
     }
   },
+  "verificacion": {
+    "noCoincide": {
+      "titulo": "The task stopped before doing it",
+      "detalle": "You asked for {{pedido}} and the site showed {{encontrado}}. Nothing was done. Check it and ask again."
+    },
+    "faltaDato": {
+      "detalle": "One detail is missing to complete this action: {{campo}}. Ask again and include it."
+    },
+    "otraAccion": {
+      "detalle": "The task reached another action that cannot be undone and stopped. Nothing was done. Ask for it separately."
+    },
+    "nada": "nothing",
+    "campos": {
+      "destinatario": "who to send it to",
+      "monto": "the amount"
+    }
+  },
+  "politica": {
+    "topeExcedido": {
+      "detalle": "The amount of {{monto}} is over your limit of {{tope}}. Nothing was done. You can change your limit in Settings."
+    },
+    "sitioExcluido": {
+      "detalle": "You turned off actions on {{dominio}}. Nothing was done."
+    },
+    "accionesDesactivadas": {
+      "detalle": "You turned off actions that cannot be undone. Nothing was done."
+    },
+    "noDisponible": {
+      "detalle": "We could not check your preferences before acting. Nothing was done. Please try again in a moment."
+    },
+    "configuracion": {
+      "titulo": "Actions that cannot be undone",
+      "descripcion": "Sending, paying, buying or deleting cannot be taken back. Before doing one, your assistant compares what you asked for with what is on the screen; if they do not match, it stops and tells you. Set your limits here, once.",
+      "permitirTitulo": "Let these actions happen",
+      "permitirDescripcion": "If you turn this off, your assistant will never do them: it will only tell you what it found.",
+      "topeLabel": "Limit per action (MXN)",
+      "topeDescripcion": "If an action involves more than this amount, it stops and tells you. At 0, no action involving money happens on its own.",
+      "sitiosLabel": "Sites to never act on",
+      "sitiosDescripcion": "Separate sites with commas. Example: banco.com, sat.gob.mx",
+      "sitiosPlaceholder": "banco.com, sat.gob.mx",
+      "guardado": "Done, your limits are saved.",
+      "error": "We could not save your limits. Please try again.",
+      "errorCarga": "We could not load your limits.",
+      "sitioInvalido": "Check the sites: write only the domain, like banco.com."
+    }
+  },
   "avisoTareaLenta": {
     "titulo": "This task is taking longer than usual",
     "detalle": "It has been running for {{minutos}} minutes. You can wait or end it.",

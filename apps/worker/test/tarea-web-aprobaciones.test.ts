@@ -92,6 +92,8 @@ function makeNavegador(overrides: Partial<NavegadorParaTarea> = {}): NavegadorPa
     extraerContexto: vi.fn(async () => CONTEXTO_PLANO),
     estadoDeSesion: vi.fn(async () => 'viva' as const),
     capturarPantalla: vi.fn(async () => 'cGxhY2Vob2xkZXI='),
+    leerCamposDeLaPagina: vi.fn(async () => []),
+    leerTextoVisible: vi.fn(async () => ''),
     observarSalida: vi.fn(async () => ({ egressIp: '203.0.113.7', egressCountry: 'AR' })),
     cerrarSesion: vi.fn(async () => {}),
     ...overrides,
@@ -143,88 +145,68 @@ function makeDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
 
 const MENSAJE_CHECKPOINT = `${MARCADOR_REQUIERE_APROBACION}: financiera: Enviar el formulario de pago por 2,400 MXN a Aeromexico`;
 
-describe('pausa en checkpoint (accion financiera detectada)', () => {
-  it('crea la aprobacion pendiente, sube el screenshot, notifica, pausa el job y NO ejecuta la accion', async () => {
-    const motor = makeMotor({ exito: false, mensaje: MENSAJE_CHECKPOINT });
-    const deps = makeDeps({ motor });
-    const resultado = await procesarTareaWeb(deps, makeJob());
-
-    expect(resultado).toBe('pausada');
-    expect(deps.aprobaciones.crear).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ownerId: 'user-1',
-        jobId: 'job-1',
-        connectionId: CONNECTION_ID,
-        sesionExternaId: 'ses-1',
-        accionTipo: 'financiera',
-        descripcion: 'Enviar el formulario de pago por 2,400 MXN a Aeromexico',
+describe('corrida inicial: la aprobacion por accion ya no es el default (D1)', () => {
+  /** Motor con un resultado distinto por llamada (reportar la accion / ejecutarla ya verificada). */
+  function makeMotorSecuencia(resultados: { exito: boolean; mensaje: string }[]): MotorDeTareaWeb {
+    let llamada = 0;
+    return {
+      ejecutar: vi.fn(async () => {
+        const resultado = resultados[Math.min(llamada++, resultados.length - 1)] as {
+          exito: boolean;
+          mensaje: string;
+        };
+        return { ...resultado, completado: true, acciones: [], tokensIn: null, tokensOut: null };
       }),
-    );
-    expect(deps.subidorScreenshots?.subir).toHaveBeenCalledWith('user-1', 'apr-1', 'cGxhY2Vob2xkZXI=');
-    expect(deps.aprobaciones.guardarScreenshotPath).toHaveBeenCalledWith('apr-1', 'user-1/apr-1.png');
-    expect(deps.notificadorAprobaciones?.notificarPendiente).toHaveBeenCalledWith(
-      expect.objectContaining({ ownerId: 'user-1', dominio: 'app.ejemplo.com' }),
-    );
-    expect(deps.marcarJobPausado).toHaveBeenCalledWith('job-1');
-    // El motor corrio UNA sola vez (la deteccion); la accion NO se ejecuto.
-    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
-  });
+    };
+  }
 
-  it('LA SESION NO SE CIERRA mientras la aprobacion queda pendiente', async () => {
-    const motor = makeMotor({ exito: false, mensaje: MENSAJE_CHECKPOINT });
+  it('accion financiera detectada: NO crea checkpoint, NO pausa el job y NO notifica', async () => {
+    const motor = makeMotorSecuencia([
+      { exito: false, mensaje: MENSAJE_CHECKPOINT },
+      { exito: true, mensaje: 'compra confirmada' },
+    ]);
     const navegador = makeNavegador();
     const deps = makeDeps({ motor, navegador });
-    await procesarTareaWeb(deps, makeJob());
-    expect(navegador.cerrarSesion).not.toHaveBeenCalled();
-  });
 
-  it('la aprobacion expira en el TTL configurado (expira_en corto)', async () => {
-    const motor = makeMotor({ exito: false, mensaje: MENSAJE_CHECKPOINT });
-    const deps = makeDeps({ motor, aprobacionTtlMs: 5 * 60 * 1000 });
-    const antes = Date.now();
-    await procesarTareaWeb(deps, makeJob());
-    const input = (deps.aprobaciones.crear as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
-      expiraEn: Date;
-    };
-    const delta = new Date(input.expiraEn).getTime() - antes;
-    expect(delta).toBeGreaterThan(4 * 60 * 1000);
-    expect(delta).toBeLessThanOrEqual(5 * 60 * 1000 + 5_000);
-  });
+    // El objetivo ("compra el vuelo a Cancun del 12 de agosto") no declara datos y el verbo no exige
+    // ninguno: la verificacion no encuentra nada que pueda no coincidir y la accion se ejecuta.
+    await expect(procesarTareaWeb(deps, makeJob())).resolves.toBe('completada');
 
-  it('sin screenshot ni subidor, el checkpoint se crea igual (best-effort)', async () => {
-    const motor = makeMotor({ exito: false, mensaje: MENSAJE_CHECKPOINT });
-    const navegador = makeNavegador({
-      capturarPantalla: vi.fn(async () => {
-        throw new Error('sin captura');
-      }),
-    });
-    const deps = makeDeps({ motor, navegador, subidorScreenshots: undefined });
-    const resultado = await procesarTareaWeb(deps, makeJob());
-    expect(resultado).toBe('pausada');
-    expect(deps.aprobaciones.crear).toHaveBeenCalledTimes(1);
-  });
-
-  it('si el checkpoint NO se puede persistir: fallback 7.1d (bloquear, cerrar sesion, completar)', async () => {
-    const motor = makeMotor({ exito: false, mensaje: MENSAJE_CHECKPOINT });
-    const navegador = makeNavegador();
-    const deps = makeDeps({
-      motor,
-      navegador,
-      aprobaciones: makeAprobacionesRepo({
-        crear: vi.fn(async () => {
-          throw new Error('db caida');
-        }),
-      }),
-    });
-    const resultado = await procesarTareaWeb(deps, makeJob());
-    expect(resultado).toBe('completada');
-    expect(deps.guardarResultado).toHaveBeenCalledWith(
-      'job-1',
-      expect.objectContaining({ estado: 'requiere_aprobacion' }),
-    );
-    // Sin checkpoint no hay quien apruebe: la sesion NO se deja viva.
-    expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
+    expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
     expect(deps.marcarJobPausado).not.toHaveBeenCalled();
+    expect(deps.notificadorAprobaciones?.notificarPendiente).not.toHaveBeenCalled();
+    expect(deps.subidorScreenshots?.subir).not.toHaveBeenCalled();
+    // La sesion se cierra: ya no queda viva esperando a que alguien apruebe.
+    expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
+  });
+
+  it('la accion se DETIENE (no se ejecuta) cuando lo pedido no coincide con lo que hay en pantalla', async () => {
+    const motor = makeMotorSecuencia([{ exito: false, mensaje: MENSAJE_CHECKPOINT }]);
+    const navegador = makeNavegador({
+      leerCamposDeLaPagina: vi.fn(async () => [
+        { contexto: 'input text total a pagar', valor: '$ 9,900.00' },
+      ]),
+    });
+    const deps = makeDeps({ motor, navegador });
+    await expect(procesarTareaWeb(deps, makeJob())).rejects.toThrow(/DETENIDA_VERIFICACION/);
+    // El motor corrio UNA sola vez: la accion jamas se ejecuto.
+    expect(motor.ejecutar).toHaveBeenCalledTimes(1);
+    expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
+    expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
+  });
+
+  it('la infraestructura de aprobaciones sigue INTACTA: el repositorio no se toca en la corrida inicial', async () => {
+    const aprobaciones = makeAprobacionesRepo();
+    const motor = makeMotorSecuencia([
+      { exito: false, mensaje: MENSAJE_CHECKPOINT },
+      { exito: true, mensaje: 'listo' },
+    ]);
+    const deps = makeDeps({ motor, aprobaciones });
+    await procesarTareaWeb(deps, makeJob());
+    // Solo la consulta de reanudacion (que devuelve null en una corrida fresca).
+    expect(aprobaciones.obtenerVigentePorJob).toHaveBeenCalledTimes(1);
+    expect(aprobaciones.crear).not.toHaveBeenCalled();
+    expect(aprobaciones.registrarIntervencion).not.toHaveBeenCalled();
   });
 });
 

@@ -24,6 +24,7 @@ import {
   type JobActivity,
   type JobStatus,
 } from '../../lib/jobs';
+import { detencionDeJob, textoDeDetencion } from '../../lib/politicas';
 import { useTerminarJob } from '../../lib/mutations';
 import { TerminarTareaDialog } from './TerminarTareaDialog';
 import { TrayectoriaDetalle } from './TrayectoriaDetalle';
@@ -100,6 +101,11 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
   const terminable = isJobInFlight(job.status);
   const cancelada = esJobCancelado(job);
   const detenida = esJobDetenido(job);
+  // DETENIDA ANTES DE EJECUTAR: el sistema comparo lo que el usuario pidio con lo que habia en el
+  // sitio y no coincidio (o sus propios limites lo impedian). No es un fallo tecnico: lleva su
+  // propio texto, sin detalle tecnico que abrir.
+  const detencion = detencionDeJob(job);
+  const textoDetencion = detencion ? textoDeDetencion(detencion) : null;
   // AVISO de tarea lenta: en curso por encima del umbral. El reloj por cubetas mantiene fresco el
   // tiempo mostrado aunque el refetch tarde.
   const ahora = useSyncExternalStore(suscribirReloj, leerReloj);
@@ -161,15 +167,27 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
               <div className="mt-2.5 rounded-lg border border-[rgba(192,73,43,0.25)] bg-[rgba(192,73,43,0.05)] px-2.5 py-1.5 text-[12px] text-[#C0492B]">
                 <div className="flex items-start gap-1.5">
                   <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-none" />
-                  {/* Tres desenlaces distintos sobre 'failed': Cancelada no muestra caja (fue una
+                  {/* Cuatro desenlaces distintos sobre 'failed': Cancelada no muestra caja (fue una
                       decision del usuario, no un fallo); Detenida trae su propio texto legible en
-                      lugar del prefijo tecnico; cualquier otro fallo muestra el texto amable y deja
+                      lugar del prefijo tecnico; una tarea DETENIDA ANTES DE EJECUTAR muestra que se
+                      pidio, que se encontro y que hacer (tampoco es un fallo tecnico, asi que no
+                      ofrece detalle tecnico); cualquier otro fallo muestra el texto amable y deja
                       el error crudo detras de "Detalle tecnico". */}
                   <span className="whitespace-pre-wrap break-words">
-                    {detenida ? t('detenidaPorSistema') : t('actividad.errorAmable.generico')}
+                    {textoDetencion ? (
+                      <>
+                        <strong className="font-semibold">{textoDetencion.titulo}</strong>
+                        <br />
+                        {textoDetencion.detalle}
+                      </>
+                    ) : detenida ? (
+                      t('detenidaPorSistema')
+                    ) : (
+                      t('actividad.errorAmable.generico')
+                    )}
                   </span>
                 </div>
-                {!detenida && job.lastError && (
+                {!detenida && !textoDetencion && job.lastError && (
                   <>
                     <button
                       type="button"

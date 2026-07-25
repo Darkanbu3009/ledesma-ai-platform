@@ -105,4 +105,44 @@ describe('JobActivityCard: error amable con detalle tecnico colapsable (BUG C)',
     expect(screen.queryByRole('button', { name: /Detalle tecnico/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/SISTEMA_DETUVO_TAREA/)).not.toBeInTheDocument();
   });
+
+  // Tarea DETENIDA ANTES DE EJECUTAR (verificacion determinista): no es un fallo tecnico, asi que
+  // muestra que se pidio, que se encontro y que hacer, y NO ofrece detalle tecnico.
+  it('un job detenido antes de ejecutar muestra que se pidio y que se encontro', () => {
+    render(
+      <JobActivityCard
+        job={makeJob({
+          lastError:
+            'PermanentExecutionError: DETENIDA_VERIFICACION: ' +
+            JSON.stringify({
+              motivo: 'noCoincide',
+              pedido: 'juan@ejemplo.com',
+              encontrado: 'otro@atacante.com',
+            }),
+        })}
+        agentName={null}
+      />,
+    );
+    expect(screen.getByText('La tarea se detuvo antes de ejecutar')).toBeInTheDocument();
+    expect(
+      screen.getByText(/Pediste juan@ejemplo.com y en el sitio aparecia otro@atacante.com/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('La tarea no se pudo completar.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Detalle tecnico/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/DETENIDA_VERIFICACION/)).not.toBeInTheDocument();
+  });
+
+  it('un job detenido por el limite de monto explica el limite y donde cambiarlo', () => {
+    render(
+      <JobActivityCard
+        job={makeJob({
+          lastError:
+            'PermanentExecutionError: DETENIDA_VERIFICACION: ' +
+            JSON.stringify({ motivo: 'topeExcedido', monto: '9900 MXN', tope: '5000 MXN' }),
+        })}
+        agentName={null}
+      />,
+    );
+    expect(screen.getByText(/supera tu limite configurado de 5000 MXN/)).toBeInTheDocument();
+  });
 });

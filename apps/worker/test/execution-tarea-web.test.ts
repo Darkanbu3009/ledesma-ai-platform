@@ -83,6 +83,8 @@ function makeTareaWebDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
       extraerContexto: vi.fn(async () => JSON.stringify({ formato: 'cookies-cdp-v1', cookies: [] })),
       estadoDeSesion: vi.fn(async () => 'viva' as const),
       capturarPantalla: vi.fn(async () => 'cGxhY2Vob2xkZXI='),
+      leerCamposDeLaPagina: vi.fn(async () => []),
+      leerTextoVisible: vi.fn(async () => ''),
       observarSalida: vi.fn(async () => ({ egressIp: '203.0.113.7', egressCountry: 'AR' })),
       cerrarSesion: vi.fn(async () => {}),
     },

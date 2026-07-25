@@ -7,18 +7,31 @@ import type { RegistrationState } from '../src/lib/registration';
 
 // Los hooks de datos, la mutation, el email (Supabase) y el cliente Supabase se mockean: asi se ejerce la
 // pantalla y el flujo del form sin red, sin react-query y sin leer las env (supabase.ts lanza sin ellas).
-const { useMeMock, useAuthMock, useUpdateProfileNameMock, useUpdateProfilePaisMock, useDeleteAccountMock } = vi.hoisted(() => ({
+const {
+  useMeMock,
+  useAuthMock,
+  useUpdateProfileNameMock,
+  useUpdateProfilePaisMock,
+  useDeleteAccountMock,
+  usePoliticaMock,
+  useGuardarPoliticaMock,
+} = vi.hoisted(() => ({
   useMeMock: vi.fn(),
   useAuthMock: vi.fn(),
   useUpdateProfileNameMock: vi.fn(),
   useUpdateProfilePaisMock: vi.fn(),
   useDeleteAccountMock: vi.fn(),
+  // La seccion de limites de acciones irreversibles tiene sus propios tests
+  // (politica-ejecucion-section.dom.test.tsx); aqui solo necesita no romper el render.
+  usePoliticaMock: vi.fn(() => ({ data: undefined, isLoading: true, isError: false })),
+  useGuardarPoliticaMock: vi.fn(() => ({ isPending: false, mutate: vi.fn() })),
 }));
-vi.mock('../src/lib/queries', () => ({ useMe: useMeMock }));
+vi.mock('../src/lib/queries', () => ({ useMe: useMeMock, usePoliticaEjecucion: usePoliticaMock }));
 vi.mock('../src/auth/useAuth', () => ({ useAuth: useAuthMock }));
 vi.mock('../src/lib/mutations', () => ({
   useUpdateProfileName: useUpdateProfileNameMock,
   useUpdateProfilePais: useUpdateProfilePaisMock,
+  useGuardarPoliticaEjecucion: useGuardarPoliticaMock,
 }));
 // La Zona de peligro usa useDeleteAccount (arrastra supabase + react-router): se mockea para ejercer la
 // pantalla sin QueryClient ni Router real; su comportamiento propio se testea en danger-zone.dom.test.tsx.
