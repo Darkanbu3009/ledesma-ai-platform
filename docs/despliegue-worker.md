@@ -39,6 +39,19 @@ compile Y antes de que arranque en runtime:
 Orden requerido: **`shared` -> `backend` -> `worker`** (documentado tambien en
 `apps/backend/src/execution/index.ts:14`).
 
+### Parche de dependencia en el postinstall (obligatorio para la tarea web)
+
+La raiz tiene `"postinstall": "patch-package"` (`package.json:15`). Aplica
+`patches/@browserbasehq+stagehand+3.6.0.patch`, que corrige el arbol de accesibilidad de Stagehand
+para que el modelo no reciba identificadores que su propio esquema de `act` va a rechazar (ver
+`apps/worker/README.md`). Sin el parche, la tarea web falla de forma determinista en las paginas que
+producen nodos sin `encodedId`.
+
+Nixpacks corre `npm ci`, y `npm ci` ejecuta el `postinstall` de la raiz, asi que **no hay ningun paso
+manual que agregar en Railway**. Lo unico que lo rompe es instalar con los scripts desactivados
+(`npm ci --ignore-scripts`): si alguna vez se configura asi, hay que agregar `npx patch-package` al
+Build Command antes de `npm run build`.
+
 El `build` del root ya respeta ese orden. `package.json:17`:
 
 ```
@@ -72,7 +85,7 @@ Crear un **servicio nuevo** en el mismo proyecto de Railway, apuntando al mismo 
 | Ajuste | Valor |
 | --- | --- |
 | **Root Directory** | `/` (raiz del repo; necesario para que resuelvan los workspaces de npm) |
-| **Builder** | Nixpacks (autodeteccion; detecta `package-lock.json` y corre `npm ci`) |
+| **Builder** | Nixpacks (autodeteccion; detecta `package-lock.json` y corre `npm ci`, que dispara el `postinstall` del parche, ver abajo) |
 | **Build Command** | `npm run build` |
 | **Start Command** | `npm run start -w apps/worker` |
 | **Health check** | ninguno (proceso de background, no sirve HTTP) |
