@@ -90,6 +90,20 @@ const EnvSchema = z.object({
   //   browserbase.ts) menos un margen de 120 s: la sesion remota jamas debe morir antes que nuestro
   //   deadline.
   TAREA_WEB_TIMEOUT_SECONDS: z.coerce.number().int().min(60).max(2580).default(1500),
+  //   TAREA_WEB_TOOL_TIMEOUT_SECONDS: techo por LLAMADA DE TOOL del agente de navegacion
+  //   (Stagehand toolTimeout). Sin el, una tool colgada (un act que no resuelve, un extract sobre
+  //   una pagina enorme) se come el deadline de pared entero sin que el agente pueda corregir.
+  //   Acotado a 30..300 s: menos de 30 corta acciones legitimas de un sitio lento y mas de 300 ya
+  //   no deja margen para que el agente reaccione dentro del deadline.
+  TAREA_WEB_TOOL_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(300).default(90),
+  //   TAREA_WEB_OBSERVADOR_PASOS: enciende el OBSERVADOR de pasos (lee del DOM las estrategias de
+  //   localizacion de cada paso mientras el motor corre). APAGADO por defecto porque abre UNA
+  //   conexion CDP nueva por paso durante la corrida; con el apagado, las recetas se siguen
+  //   promoviendo pero SIN estrategias enriquecidas (ver README del worker).
+  TAREA_WEB_OBSERVADOR_PASOS: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((valor) => valor === 'true'),
 });
 
 export type WorkerEnv = z.infer<typeof EnvSchema>;
