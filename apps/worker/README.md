@@ -86,7 +86,9 @@ Este proceso **no se despliega** aun; solo debe compilar y poder correrse localm
 
 - `npm run dev -w apps/worker` — corre con `tsx watch` (requiere el backend construido: `npm run build
   -w apps/backend`, porque importa `@ledesma-platform/backend/execution` de su `dist`).
-- `npm run build -w apps/worker` — compila a `dist/`.
+- `npm run parche -w apps/worker` — aplica el parche de Stagehand sobre `node_modules` (ver abajo).
+  Va encadenado en `build` y en `dev`, asi que rara vez hace falta a mano.
+- `npm run build -w apps/worker` — aplica el parche y compila a `dist/`.
 - `npm run start -w apps/worker` — corre el build (`node dist/index.js`).
 - `npm run typecheck -w apps/worker` / `npm run test -w apps/worker`.
 
@@ -118,33 +120,64 @@ rechazo (produccion, 25 jul 2026: `elementId "5662"` rechazado cinco veces en do
 modelo no se equivocaba, obedecia un arbol mal formado.
 
 **La causa raiz se ataca con un parche de la libreria**: `patches/@browserbasehq+stagehand+3.6.0.patch`,
-aplicado por `patch-package` en el `postinstall` de la raiz. Un nodo cuyo `encodedId` no cumpla
-`/^\d+-\d+$/` (incluido `undefined`) deja de rotularse: su linea se omite y sus hijos validos toman
-su lugar, asi que el modelo solo puede elegir entre identificadores que el esquema acepta. Con todos
-los nodos validos, el arbol es byte a byte el de siempre.
+aplicado por `patch-package`. Un nodo cuyo `encodedId` no cumpla `/^\d+-\d+$/` (incluido `undefined`)
+deja de rotularse: su linea se omite y sus hijos validos toman su lugar, asi que el modelo solo puede
+elegir entre identificadores que el esquema acepta. Con todos los nodos validos, el arbol es byte a
+byte el de siempre.
 
-- **El parche se aplica solo** con cualquier `npm ci` / `npm install` en la raiz (Railway usa
-  Nixpacks, que corre `npm ci` y por tanto el `postinstall`). No hay paso manual.
-- **`patch-package` y `postinstall-postinstall` van en `dependencies`, NO en `devDependencies`**
-  (`package.json:20-23`). Railway y Vercel instalan en modo produccion (el log de Railway avisa
-  `npm warn config production Use --omit=dev instead`), y ahi las `devDependencies` se omiten: con
-  `patch-package` como devDependency, el `postinstall` moria con
-  `sh: line 1: patch-package: command not found` (Vercel, exit 127) y, peor, el parche NO se habria
-  aplicado en el worker aunque el build no fallara. En `dependencies` el binario existe en los dos
-  modos de instalacion.
-- **El `postinstall` falla RUIDOSAMENTE**: `patch-package --error-on-fail --error-on-warn`. Fuera de
-  CI, `patch-package` imprime el error y **sale con codigo 0** (verificado: un parche roto sale 0 sin
-  los flags y 1 con ellos), asi que un despliegue de Railway se habria llevado un worker sin parchear
-  creyendo que todo salio bien. `--error-on-warn` cubre ademas el aviso por version distinta: si
-  alguien sube Stagehand y el parche aplica a medias, la instalacion se detiene en vez de seguir.
-- **CI lo vigila**: `apps/worker/test/parche-stagehand.test.ts` importa el `formatTreeLine` REAL de
-  `node_modules` y falla si el parche no esta aplicado.
-- **Node 20 obligatorio** (`.nvmrc`, `engines` en la raiz). El `postinstall` de
-  `postinstall-postinstall` invoca `yarn run postinstall` en cuanto encuentra `yarnpkg` en el PATH, y
-  yarn aplica `engines` de forma estricta: con un node fuera de `>=20 <21` aborta la instalacion
-  entera (verificado con node 22). Con node 20 la instalacion pasa limpia.
-- **Retirarlo** cuando Stagehand lo corrija upstream. Verificado AUSENTE en 3.7.1 (su
-  `treeFormatUtils.js` es identico al de 3.6.0), asi que subir de version NO reemplaza al parche.
+#### Donde se aplica: en el worker, NO en el `postinstall` de la raiz
+
+El parche cuelga del script `parche` de **este** workspace, encadenado en su `build` y en su `dev`
+(`apps/worker/package.json:8-10`):
+
+```
+"parche": "cd ../.. && patch-package --error-on-fail --error-on-warn"
+```
+
+- **Por que no un `postinstall`** (ni en la raiz ni aca). `npm ci` en la raiz corre el `postinstall`
+  de la raiz **y tambien el de cada workspace** (verificado). Vercel construye `apps/console`, que no
+  usa Stagehand, y corre `npm ci` en la raiz: con el parche en cualquier `postinstall`, el build de la
+  consola queda enganchado a una dependencia del worker que no necesita. Eso es lo que tumbo dos
+  despliegues con `sh: line 1: patch-package: command not found` (exit 127). Colgado del `build` del
+  worker, Vercel deja de tocarlo por completo.
+- **Railway lo sigue aplicando solo.** Su Build Command es `npm run build` en la raiz, que encadena
+  `npm run build --workspaces` y por tanto el `build` del worker. No hay paso manual que agregar.
+- **El `cd ../..` no es cosmetico.** `patch-package` resuelve su raiz subiendo desde el cwd hasta el
+  primer `package.json` (`getAppRootPath`), y ahi busca `patches/` **y** `node_modules/`. Desde
+  `apps/worker` esa raiz seria el propio workspace: `patches/` no existe ahi y `node_modules` esta
+  hoisteado en la raiz del monorepo, asi que imprime `No patch files found` y **sale 0** sin parchear
+  nada (verificado). Con el `cd`, el binario sigue resolviendo por PATH (npm agrega el
+  `node_modules/.bin` de la raiz al correr un script de workspace) y el parche aplica.
+- **`patch-package` va en las `dependencies` del worker, NO en `devDependencies`**
+  (`apps/worker/package.json:17`). Railway instala en modo produccion (su log avisa
+  `npm warn config production Use --omit=dev instead`) y ahi las `devDependencies` se omiten: como
+  devDependency el binario no existiria. Verificado con `npm ci --omit=dev`.
+- **Falla RUIDOSAMENTE**: `--error-on-fail --error-on-warn`. Fuera de CI, `patch-package` imprime el
+  error de un parche que no aplica y **sale con codigo 0** (verificado: un parche roto sale 0 sin los
+  flags y 1 con ellos), asi que el build quedaria verde con un worker sin parchear. `--error-on-warn`
+  cubre ademas el aviso por version distinta: si alguien sube Stagehand y el parche aplica a medias,
+  el build se detiene en vez de seguir. Es idempotente: correrlo dos veces vuelve a dar `✔` y 0.
+- **`postinstall-postinstall` NO se usa.** Es un parche para un hueco de yarn v1 y este repo es npm
+  puro; ademas su propio `postinstall` invoca `yarn run postinstall` en cuanto encuentra `yarnpkg` en
+  el PATH, y yarn aplica `engines` de forma estricta: con un node fuera de `>=20 <21` aborta la
+  instalacion entera (reproducido con node 22).
+
+#### Dos guardas para que un parche no aplicado no pase desapercibido
+
+Un script se puede saltar (un `npm ci` que no construye, un `node_modules` reinstalado despues del
+build), y un worker sin parche **no se rompe de forma visible**: navega igual y falla mas tarde en la
+tarea web. Por eso hay dos redes:
+
+- **El worker no arranca sin el parche.** `src/parche-stagehand.ts` corre en `src/index.ts` **antes**
+  de leer la config y de tocar la base: carga el `formatTreeLine` REAL de `node_modules` y comprueba
+  su COMPORTAMIENTO (que un nodo con `encodedId` invalido no se rotule y que sus hijos validos
+  sobrevivan), no la presencia de un comentario. Si no cumple, imprime el motivo y sale con codigo 1.
+- **CI lo vigila**: `test/parche-stagehand.test.ts` importa ese mismo `formatTreeLine` real y falla si
+  el parche no esta aplicado (el orden de CI es `build` -> `test`, asi que el `build` del worker ya lo
+  aplico).
+
+**Retirarlo** cuando Stagehand lo corrija upstream. Verificado AUSENTE en 3.7.1 (su
+`treeFormatUtils.js` es identico al de 3.6.0), asi que subir de version NO reemplaza al parche.
 
 ### Blindaje de la tarea web (fallo de esquema del motor)
 

@@ -21,6 +21,7 @@ import type { SitiosJobDeps } from './sitios.js';
 import { MotorStagehand } from './stagehand.js';
 import type { TareaWebDeps } from './tarea-web.js';
 import { createLogger } from './logger.js';
+import { verificarParcheStagehand } from './parche-stagehand.js';
 import { getSql, closeSql } from './db.js';
 import { startWorker } from './worker.js';
 import { crearNotificadorFallos, leerEmailOwner, leerNombreAgente } from './alertas.js';
@@ -39,6 +40,21 @@ function loadConfig(): WorkerEnv {
     return parseEnv();
   } catch (err) {
     console.error('Configuracion de entorno invalida:');
+    console.error(err instanceof Error ? err.message : err);
+    process.exit(1);
+  }
+}
+
+/**
+ * El parche de Stagehand se comprueba ANTES de leer la config y de tocar la base: un worker sin
+ * parche navega igual y falla mas tarde, de forma determinista, en la tarea web. Preferimos que no
+ * arranque y que el motivo quede en el log del despliegue (ver src/parche-stagehand.ts).
+ */
+async function verificarParche(): Promise<void> {
+  try {
+    await verificarParcheStagehand();
+  } catch (err) {
+    console.error('Parche de Stagehand no aplicado: el worker no arranca.');
     console.error(err instanceof Error ? err.message : err);
     process.exit(1);
   }
@@ -237,4 +253,5 @@ function main(): void {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
+await verificarParche();
 main();

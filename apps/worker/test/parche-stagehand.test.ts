@@ -1,14 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import { formatTreeLine } from '@browserbasehq/stagehand/lib/v3/understudy/a11y/snapshot/treeFormatUtils.js';
 import type { A11yNode } from '@browserbasehq/stagehand/lib/v3/types/private/snapshot.js';
+import {
+  comprobarFormateador,
+  verificarParcheStagehand,
+  ParcheStagehandAusenteError,
+  type FormateadorDeArbol,
+} from '../src/parche-stagehand.js';
 
 /**
  * PARCHE de @browserbasehq/stagehand (patches/@browserbasehq+stagehand+3.6.0.patch), aplicado por
- * patch-package en el postinstall de la raiz.
+ * patch-package desde el script `parche` de este workspace, encadenado en su `build` y en su `dev`.
  *
  * Estos tests corren contra el archivo REAL de node_modules, no contra una copia: si el parche no se
- * aplico (npm ci sin postinstall, patches/ borrado, upgrade de version que lo deja fuera de sitio),
- * fallan y CI lo detiene. Es la unica forma de vigilar un parche de dependencia.
+ * aplico (build saltado, patches/ borrado, upgrade de version que lo deja fuera de sitio), fallan y
+ * CI lo detiene. Es la unica forma de vigilar un parche de dependencia.
  *
  * CAUSA que ataca el parche: `formatTreeLine` rotulaba cada linea con `node.encodedId ?? node.nodeId`
  * y, con `encodedId` undefined, el modelo veia `[5662]` en vez de `[0-5662]`. El esquema de `act`
@@ -111,5 +117,43 @@ describe('parche de treeFormatUtils: el modelo solo ve identificadores validos',
     expect(arbol).toBe(
       ['[0-1] RootWebArea: Bandeja', '  [0-2] navigation', '    [0-3] button: Redactar'].join('\n'),
     );
+  });
+});
+
+/**
+ * El formateador TAL CUAL viene en Stagehand 3.6.0 sin parchear (copiado de
+ * dist/esm/.../treeFormatUtils.js). Es el unico modo de probar el camino negativo de la verificacion
+ * de arranque sin desparchear node_modules a media suite.
+ */
+const formateadorSinParche: FormateadorDeArbol = function sinParche(node, level = 0): string {
+  const indent = '  '.repeat(level);
+  const labelId = node.encodedId ?? node.nodeId;
+  const label = `[${labelId}] ${node.role}${node.name ? `: ${node.name}` : ''}`;
+  const kids = node.children?.map((c) => sinParche(c, level + 1)).join('\n') ?? '';
+  return kids ? `${indent}${label}\n${kids}` : `${indent}${label}`;
+};
+
+describe('verificacion de arranque: el worker no arranca sin el parche', () => {
+  it('con el formateador SIN parchear, la verificacion lanza y dice que identificador sobra', () => {
+    expect(() => comprobarFormateador(formateadorSinParche)).toThrow(ParcheStagehandAusenteError);
+    expect(() => comprobarFormateador(formateadorSinParche)).toThrow(/"5662"/);
+  });
+
+  it('el motivo del fallo dice como aplicar el parche', () => {
+    expect(() => comprobarFormateador(formateadorSinParche)).toThrow(
+      /npm run parche -w apps\/worker/,
+    );
+  });
+
+  it('un formateador que se come los hijos validos tampoco pasa', () => {
+    expect(() => comprobarFormateador(() => '')).toThrow(/"0-5663"/);
+  });
+
+  it('con el formateador REAL de node_modules (parcheado), la verificacion pasa', () => {
+    expect(() => comprobarFormateador(formatTreeLine)).not.toThrow();
+  });
+
+  it('verificarParcheStagehand carga el modulo real y no lanza', async () => {
+    await expect(verificarParcheStagehand()).resolves.toBeUndefined();
   });
 });

@@ -12,15 +12,10 @@
     "packages/*"
   ],
   "scripts": {
-    "postinstall": "patch-package --error-on-fail --error-on-warn",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint .",
     "build": "npm run build -w packages/shared && npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present"
-  },
-  "dependencies": {
-    "patch-package": "8.0.1",
-    "postinstall-postinstall": "2.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
