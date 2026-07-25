@@ -40,9 +40,24 @@ import {
   extraerPasosCensurados,
   type AccionCrudaDeMotor,
   type EstadoTrayectoria,
+  type ObservacionDePaso,
   type PasoCensurado,
   type RegistradorDeTrayectorias,
 } from './trayectoria.js';
+import type { NuevaRecetaWeb, RecetaWeb } from '@ledesma-platform/backend/recetas-web';
+import type { EstrategiaLocalizacion, PasoDeReceta } from '@ledesma-platform/shared';
+import {
+  ejecutarReceta,
+  recetaAplicable,
+  type EscaladorDePaso,
+  type NavegadorDeterminista,
+  type VeredictoDeVerificacion,
+} from './ejecutor-receta.js';
+import {
+  firmaDeObjetivo,
+  promoverTrayectoria,
+  valoresDeParametros,
+} from './receta-web.js';
 import type { Logger } from './logger.js';
 
 /**
@@ -172,7 +187,24 @@ export interface MotorDeTareaWeb {
     model: string;
     maxPasos: number;
     signal?: AbortSignal;
+    /**
+     * OBSERVADOR de pasos (Fase F paso 2, CAMBIO 1): el motor lo invoca por cada accion que ejecuta,
+     * en el mismo orden en que la empuja a su traza. El handler lo usa para leer del DOM las
+     * estrategias de localizacion que la traza no trae. Best-effort: su fallo no cambia nada.
+     */
+    observador?: ((paso: PasoObservado) => Promise<void>) | undefined;
   }): Promise<ResultadoMotor>;
+}
+
+/**
+ * Lo que el motor expone de un paso recien ejecutado: el selector que resolvio (tools 'act' y
+ * 'fillForm') o el punto sobre el que actuo (tools por coordenadas 'click' y 'type', que NO resuelven
+ * ningun selector). Con cualquiera de los dos, el handler puede pedirle al navegador las estrategias
+ * de localizacion del elemento.
+ */
+export interface PasoObservado {
+  selector: string | null;
+  punto: { x: number; y: number } | null;
 }
 
 /**
@@ -219,6 +251,19 @@ export interface RepositorioSitiosParaTarea {
   ): Promise<SitioConectado | null>;
 }
 
+/**
+ * Subconjunto del RecetasWebRepository (V035) que la tarea web usa. Puerto propio (no la clase) para
+ * que los tests pasen fakes sin base y para que quede a la vista lo unico que este handler puede
+ * hacerle a una receta: buscarla, promoverla, repararla, jubilarla y contabilizarla.
+ */
+export interface RepositorioRecetasParaWorker {
+  buscarActiva(ownerId: string, dominio: string, firmaObjetivo: string): Promise<RecetaWeb | null>;
+  promover(input: NuevaRecetaWeb): Promise<RecetaWeb | null>;
+  marcarObsoleta(id: string, ownerId: string): Promise<void>;
+  reemplazarPasos(id: string, ownerId: string, pasos: PasoDeReceta[]): Promise<void>;
+  registrarEjecucion(id: string, ownerId: string, exitosa: boolean): Promise<void>;
+}
+
 /** Dependencias del job de tarea web. index.ts cablea las reales; los tests pasan fakes. */
 export interface TareaWebDeps {
   repo: RepositorioSitiosParaTarea;
@@ -245,6 +290,17 @@ export interface TareaWebDeps {
    * desenlace de la tarea. OPCIONAL para no romper el cableado en despliegues sin la migracion.
    */
   trayectorias?: RegistradorDeTrayectorias | undefined;
+  /**
+   * RECETAS DE TAREA WEB (Fase F paso 2, V035): el procedimiento aprendido de una corrida exitosa.
+   * Las TRES piezas del camino determinista son OPCIONALES y van JUNTAS (mismo criterio que
+   * `trayectorias`): sin cualquiera de ellas, la tarea corre con el motor exactamente como hoy.
+   *  - `recetas`: donde se buscan, se promueven y se marcan obsoletas.
+   *  - `determinista`: las primitivas de bajo nivel (CDP) que repiten un paso sin modelo.
+   *  - `escalador`: la escalada de UN paso al motor cuando su elemento ya no aparece (D5).
+   */
+  recetas?: RepositorioRecetasParaWorker | undefined;
+  determinista?: NavegadorDeterminista | undefined;
+  escalador?: EscaladorDePaso | undefined;
   /** Notifica por correo la aprobacion pendiente/expirada (best-effort). OPCIONAL. */
   notificadorAprobaciones?: NotificadorAprobaciones | undefined;
   /** Secreto de la boveda: descifra el contexto (7.1a) y re-cifra el actualizado. */
@@ -546,6 +602,32 @@ function detencionDirecta(motivo: 'otraAccion' | 'politicaNoDisponible'): Extrac
 }
 
 /**
+ * VERIFICACION DETERMINISTA completa: politica del usuario + parametros del objetivo + foto del DOM.
+ * UNA sola implementacion para los DOS caminos (el del motor y el de la receta): que la ejecucion por
+ * receta pudiera verificar con otro criterio seria exactamente la puerta trasera que D7 prohibe.
+ *
+ * El modelo no participa de ninguno de los tres insumos: la politica sale de la base, los parametros
+ * del texto del usuario y los valores del DOM leido en un mundo aislado.
+ */
+async function resolverVerificacion(
+  deps: TareaWebDeps,
+  job: Job,
+  sitio: SitioConectado,
+  objetivo: string,
+  sesionExternaId: string,
+  opciones: { politica: PoliticaVigente | null; verboBloqueado: string | null },
+): Promise<Veredicto> {
+  if (opciones.politica === null) return detencionDirecta('politicaNoDisponible');
+  return verificarAccion({
+    politica: opciones.politica,
+    dominio: sitio.dominio,
+    verbo: opciones.verboBloqueado,
+    parametros: extraerParametrosDeclarados(objetivo),
+    pagina: await leerEstadoDeLaPagina(deps, job, sesionExternaId),
+  });
+}
+
+/**
  * VERIFICACION DETERMINISTA y, si pasa, EJECUCION de la accion (CAMBIO 3 + 4, D1/D2/D5). Es lo que
  * sustituye al checkpoint de aprobacion en la corrida INICIAL.
  *
@@ -572,6 +654,10 @@ async function verificarYEjecutar(
     verboBloqueado: string | null;
     contexto: string;
     apiKey: string;
+    /** Traza acumulada del job: esta corrida la completa y, si sale bien, se promueve a receta. */
+    pasosDelJob: PasoCensurado[];
+    /** false cuando una receta ya avanzo la pagina: la traza no describe la tarea desde el principio. */
+    promovible: boolean;
     control?: ControlDeTareaWeb;
   },
 ): Promise<ResultadoTareaWeb> {
@@ -586,16 +672,10 @@ async function verificarYEjecutar(
   }
 
   const iniciadaEn = new Date();
-  const veredicto: Veredicto =
-    opciones.politica === null
-      ? detencionDirecta('politicaNoDisponible')
-      : verificarAccion({
-          politica: opciones.politica,
-          dominio: sitio.dominio,
-          verbo: opciones.verboBloqueado,
-          parametros: extraerParametrosDeclarados(objetivo),
-          pagina: await leerEstadoDeLaPagina(deps, job, sesionExternaId),
-        });
+  const veredicto = await resolverVerificacion(deps, job, sitio, objetivo, sesionExternaId, {
+    politica: opciones.politica,
+    verboBloqueado: opciones.verboBloqueado,
+  });
 
   // El resultado de la verificacion queda como UN PASO de la trayectoria (valores comparados +
   // veredicto), ya censurado. Si se detiene, esa trayectoria es la unica constancia de la corrida.
@@ -639,6 +719,7 @@ async function verificarYEjecutar(
     opciones.control?.signal,
     null,
     [paso],
+    opciones.pasosDelJob,
   );
 
   if (desenlace.tipo === 'sesion_caducada') {
@@ -667,13 +748,285 @@ async function verificarYEjecutar(
   }
 
   await refrescarContextoBestEffort(deps, sitio, job.ownerId, sesionExternaId, opciones.contexto);
-  await deps.guardarResultado(job.id, { estado: 'ok', resumen: desenlace.resumen, verificada: true });
+  // PROMOCION AUTOMATICA (CAMBIO 3) con la traza COMPLETA del job: la corrida que preparo la pagina
+  // MAS el paso de verificacion MAS la que ejecuto la accion. Asi la receta aprende donde hay que
+  // volver a comparar antes de ejecutar (D7).
+  if (opciones.promovible) {
+    await promoverRecetaBestEffort(
+      deps,
+      job,
+      sitio,
+      objetivo,
+      opciones.pasosDelJob,
+      opciones.verboBloqueado,
+    );
+  }
+  await deps.guardarResultado(job.id, {
+    estado: 'ok',
+    resumen: desenlace.resumen,
+    verificada: true,
+    via: 'modelo',
+  });
   deps.logger.info('tarea web completada: accion verificada y ejecutada', {
     jobId: job.id,
     connectionId: sitio.id,
     dominio: sitio.dominio,
   });
   return 'completada';
+}
+
+/**
+ * CAMINO POR RECETA (CAMBIO 5): busca la receta ACTIVA de este owner, dominio y firma de objetivo.
+ * Devuelve null (y la tarea corre con el motor, como siempre) cuando:
+ *  - el camino determinista no esta cableado entero;
+ *  - no hay receta para esa firma, o sus pasos no validan (una receta manipulada se ignora);
+ *  - el objetivo pide una accion irreversible y la receta NO trae su paso de verificacion (D7: sin
+ *    ese paso, ejecutarla se saltaria la comparacion previa; mejor no usarla);
+ *  - la lectura falla (nunca se ejecuta a ciegas por un fallo de base).
+ */
+async function buscarRecetaAplicable(
+  deps: TareaWebDeps,
+  job: Job,
+  sitio: SitioConectado,
+  objetivo: string,
+  verboBloqueado: string | null,
+): Promise<RecetaWeb | null> {
+  if (!deps.recetas || !deps.determinista || !deps.escalador) return null;
+  let receta: RecetaWeb | null;
+  try {
+    receta = await deps.recetas.buscarActiva(job.ownerId, sitio.dominio, firmaDeObjetivo(objetivo));
+  } catch (error) {
+    deps.logger.warn('tarea web: no se pudo consultar lo aprendido del sitio; se ejecuta con el motor', {
+      jobId: job.id,
+      err: describir(error),
+    });
+    return null;
+  }
+  if (receta === null) return null;
+  if (!recetaAplicable(receta.pasos, verboBloqueado)) {
+    deps.logger.warn(
+      'tarea web: lo aprendido no incluye el punto de verificacion que este objetivo exige; se ejecuta con el motor',
+      { jobId: job.id, recetaId: receta.id },
+    );
+    return null;
+  }
+  return receta;
+}
+
+/** Lo que el camino por receta le devuelve a `procesarTareaWeb`. */
+type DesenlaceDelCaminoPorReceta =
+  /** La receta completo la tarea: el job se cierra aqui. */
+  | { tipo: 'completada' }
+  /**
+   * La receta no sirve (o se agoto): se sigue con el motor en la MISMA sesion. `pagina Avanzada`
+   * dice si la receta llego a tocar la pagina antes de rendirse: en ese caso la corrida del motor
+   * que la termine arranca a mitad de camino y NO se puede promover (seria una receta que empieza
+   * por el medio).
+   */
+  | { tipo: 'seguir_con_motor'; paginaAvanzada: boolean };
+
+/**
+ * EJECUTA la tarea con la receta (CAMBIO 4). Registra su propia trayectoria, aplica la verificacion
+ * determinista donde la receta la aprendio (D7), repara las estrategias que hayan cambiado (D5) y
+ * jubila la receta si el sitio cambio demasiado (D6).
+ *
+ * Una DETENCION de la verificacion se propaga como fallo permanente, igual que en el camino con
+ * motor: la tarea termina sin ejecutar y el usuario ve que se pidio y que se encontro.
+ */
+async function ejecutarPorReceta(
+  deps: TareaWebDeps,
+  job: Job,
+  sitio: SitioConectado,
+  objetivo: string,
+  sesionExternaId: string,
+  receta: RecetaWeb,
+  opciones: {
+    politica: PoliticaVigente | null;
+    verboBloqueado: string | null;
+    contexto: string;
+    apiKey: string;
+    control?: ControlDeTareaWeb | undefined;
+  },
+): Promise<DesenlaceDelCaminoPorReceta> {
+  const recetas = deps.recetas;
+  const determinista = deps.determinista;
+  const escalador = deps.escalador;
+  if (!recetas || !determinista || !escalador) {
+    return { tipo: 'seguir_con_motor', paginaAvanzada: false };
+  }
+
+  const iniciadaEn = new Date();
+  const resultado = await ejecutarReceta(
+    receta.pasos,
+    valoresDeParametros(extraerParametrosDeclarados(objetivo)),
+    {
+      navegador: determinista,
+      escalador,
+      // El paso `verificar` de la receta resuelve con la MISMA funcion que el camino con motor.
+      verificar: async (): Promise<VeredictoDeVerificacion> => {
+        const veredicto = await resolverVerificacion(deps, job, sitio, objetivo, sesionExternaId, {
+          politica: opciones.politica,
+          verboBloqueado: opciones.verboBloqueado,
+        });
+        return veredicto.tipo === 'ejecutar'
+          ? { tipo: 'ejecutar' }
+          : { tipo: 'detener', mensaje: mensajeDeDetencion(veredicto) };
+      },
+      sesionExternaId,
+      apiKey: opciones.apiKey,
+      dominio: sitio.dominio,
+      signal: opciones.control?.signal,
+    },
+  );
+
+  const completada = resultado.desenlace.tipo === 'completada';
+  await guardarTrayectoriaBestEffort(
+    deps,
+    job,
+    sitio,
+    objetivo,
+    completada ? 'exitosa' : 'fallida',
+    iniciadaEn,
+    { acciones: [], tokensIn: resultado.tokensIn, tokensOut: resultado.tokensOut },
+    resultado.pasos,
+  );
+
+  // AUTO REPARACION (D5) y JUBILACION (D6): las dos son best-effort; su fallo no cambia el desenlace.
+  // Una receta que se rindio DESPUES de tocar la pagina se jubila aunque no haya llegado al umbral
+  // de escaladas de D6: dejarla activa condenaria a la siguiente corrida a estrellarse igual.
+  const seRindioAMedias =
+    resultado.desenlace.tipo === 'abandonada' &&
+    resultado.pasosEjecutados > 0 &&
+    opciones.control?.signal?.aborted !== true;
+  await mantenerRecetaBestEffort(deps, job, receta, resultado.pasosReparados, {
+    tipo: resultado.desenlace.tipo,
+    obsoleta:
+      (resultado.desenlace.tipo === 'abandonada' && resultado.desenlace.obsoleta) || seRindioAMedias,
+  });
+
+  if (resultado.desenlace.tipo === 'detenida') {
+    deps.logger.warn('tarea web DETENIDA antes de ejecutar la accion (ejecucion por receta)', {
+      jobId: job.id,
+      connectionId: sitio.id,
+      recetaId: receta.id,
+    });
+    throw new PermanentExecutionError(resultado.desenlace.mensaje);
+  }
+
+  if (!completada) {
+    deps.logger.info('tarea web: lo aprendido ya no describe el sitio; se sigue con el motor', {
+      jobId: job.id,
+      connectionId: sitio.id,
+      recetaId: receta.id,
+      escalados: resultado.escalados,
+      pasosEjecutados: resultado.pasosEjecutados,
+    });
+    return { tipo: 'seguir_con_motor', paginaAvanzada: resultado.pasosEjecutados > 0 };
+  }
+
+  await refrescarContextoBestEffort(deps, sitio, job.ownerId, sesionExternaId, opciones.contexto);
+  // El resultado del job declara POR DONDE corrio y cuanto costo: es lo que la consola convierte en
+  // "Tarea aprendida" y lo que permite medir el ahorro contra una corrida con modelo.
+  await deps.guardarResultado(job.id, {
+    estado: 'ok',
+    resumen: 'tarea completada con lo aprendido de una ejecucion anterior',
+    via: 'receta',
+    reparada: resultado.escalados > 0,
+    tokensIn: resultado.tokensIn,
+    tokensOut: resultado.tokensOut,
+  });
+  deps.logger.info('tarea web completada con lo aprendido, sin llamadas al modelo por paso', {
+    jobId: job.id,
+    connectionId: sitio.id,
+    dominio: sitio.dominio,
+    recetaId: receta.id,
+    pasos: receta.pasos.length,
+    escalados: resultado.escalados,
+  });
+  return { tipo: 'completada' };
+}
+
+/** Repara, jubila y contabiliza la receta tras una corrida. Best-effort: nunca cambia el desenlace. */
+async function mantenerRecetaBestEffort(
+  deps: TareaWebDeps,
+  job: Job,
+  receta: RecetaWeb,
+  pasosReparados: PasoDeReceta[] | null,
+  desenlace: { tipo: string; obsoleta?: boolean },
+): Promise<void> {
+  const recetas = deps.recetas;
+  if (!recetas) return;
+  try {
+    if (desenlace.obsoleta === true) {
+      await recetas.marcarObsoleta(receta.id, job.ownerId);
+    } else if (pasosReparados !== null) {
+      await recetas.reemplazarPasos(receta.id, job.ownerId, pasosReparados);
+    }
+    await recetas.registrarEjecucion(receta.id, job.ownerId, desenlace.tipo === 'completada');
+  } catch (error) {
+    deps.logger.warn('tarea web: no se pudo actualizar lo aprendido (se ignora, best-effort)', {
+      jobId: job.id,
+      err: describir(error),
+    });
+  }
+}
+
+/**
+ * PROMOCION AUTOMATICA (CAMBIO 3, D4): al terminar con exito una tarea que corrio CON EL MOTOR, la
+ * traza acumulada del job se convierte en receta activa para (owner, dominio, firma del objetivo).
+ * Sin intervencion del usuario y SIEMPRE best-effort: promover es una optimizacion, no parte del
+ * desenlace de la tarea.
+ *
+ * Se promueve la traza de TODO el job, no la de la ultima corrida: cuando hay una accion irreversible
+ * de por medio, la preparacion vive en la primera corrida y la ejecucion verificada en la segunda;
+ * una receta con solo la segunda mitad haria algo distinto de lo aprendido.
+ */
+async function promoverRecetaBestEffort(
+  deps: TareaWebDeps,
+  job: Job,
+  sitio: SitioConectado,
+  objetivo: string,
+  pasos: PasoCensurado[],
+  verboBloqueado: string | null,
+): Promise<void> {
+  const recetas = deps.recetas;
+  if (!recetas || !deps.determinista || !deps.escalador) return;
+  const promocion = promoverTrayectoria({
+    pasos,
+    dominio: sitio.dominio,
+    objetivo,
+    estado: 'exitosa',
+    exigeVerificacion: verboBloqueado !== null,
+  });
+  if (!promocion.promovida) {
+    deps.logger.info('tarea web: la corrida no se pudo convertir en algo repetible', {
+      jobId: job.id,
+      connectionId: sitio.id,
+      motivo: promocion.motivo,
+    });
+    return;
+  }
+  try {
+    const receta = await recetas.promover({
+      ownerId: job.ownerId,
+      dominio: sitio.dominio,
+      firmaObjetivo: firmaDeObjetivo(objetivo),
+      pasos: promocion.pasos,
+      creadaDesdeTrayectoria: null,
+    });
+    deps.logger.info('tarea web: la corrida quedo aprendida para repetirla sin modelo', {
+      jobId: job.id,
+      connectionId: sitio.id,
+      dominio: sitio.dominio,
+      recetaId: receta?.id ?? null,
+      pasos: promocion.pasos.length,
+    });
+  } catch (error) {
+    deps.logger.warn('tarea web: no se pudo guardar lo aprendido (se ignora, best-effort)', {
+      jobId: job.id,
+      err: describir(error),
+    });
+  }
 }
 
 /**
@@ -758,6 +1111,12 @@ export async function procesarTareaWeb(
   //      detiene la accion (falla cerrada).
   const politica = await leerPoliticaVigente(deps, job.ownerId);
 
+  // 2.9. TRAZA ACUMULADA de todo el job (CAMBIO 3): las corridas del motor la van llenando y, si la
+  //      tarea termina bien, es lo que se promueve a receta. Cuando hay una accion irreversible de
+  //      por medio son DOS corridas (la que prepara y la que ejecuta ya verificada) y la receta
+  //      necesita las dos.
+  const pasosDelJob: PasoCensurado[] = [];
+
   // 3. Abrir la sesion RECONECTANDO el contexto guardado y FORZANDO el proxy pineado con la
   //    geolocalizacion del PAIS pineado. El adaptador lanza SalidaDeRedNoDisponibleError
   //    (permanente) si el pin no es reconstruible.
@@ -806,6 +1165,33 @@ export async function procesarTareaWeb(
       );
     }
 
+    // 5.5. CAMINO POR RECETA (CAMBIO 5): si este owner ya hizo esta misma tarea con exito en este
+    //      dominio, se repite lo aprendido SIN llamar al modelo. Si la receta se agota (el sitio
+    //      cambio demasiado, D6), se sigue con el motor en LA MISMA sesion, sin reabrir nada.
+    const receta = await buscarRecetaAplicable(deps, job, sitio, objetivo, verboBloqueado);
+    // Si la receta avanzo la pagina y despues se rindio, la corrida del motor que la termine arranca
+    // por la mitad: sirve para completar la tarea, NO para volver a aprenderla.
+    let promovible = true;
+    if (receta !== null) {
+      const porReceta = await ejecutarPorReceta(
+        deps,
+        job,
+        sitio,
+        objetivo,
+        sesion.sesionExternaId,
+        receta,
+        {
+          politica,
+          verboBloqueado,
+          contexto,
+          apiKey: credential.apiKey,
+          control,
+        },
+      );
+      if (porReceta.tipo === 'completada') return 'completada';
+      promovible = !porReceta.paginaAvanzada;
+    }
+
     // 6. Ejecutar el objetivo con el motor de navegacion, bajo el deadline de pared del worker y el
     //    cap DURO de pasos. La ejecucion queda REGISTRADA como trayectoria (V030) sea cual sea el
     //    desenlace, ya clasificado por los marcadores del prompt.
@@ -819,6 +1205,8 @@ export async function procesarTareaWeb(
       { objetivo, systemPrompt: construirSystemPromptTareaWeb() },
       control?.signal,
       verboBloqueado,
+      [],
+      pasosDelJob,
     );
 
     if (desenlace.tipo === 'sesion_caducada') {
@@ -838,6 +1226,8 @@ export async function procesarTareaWeb(
         verboBloqueado,
         contexto,
         apiKey: credential.apiKey,
+        pasosDelJob,
+        promovible,
         ...(control !== undefined ? { control } : {}),
       });
     }
@@ -851,7 +1241,11 @@ export async function procesarTareaWeb(
     // 8. Exito: guardar el contexto ACTUALIZADO (re-cifrado) + refrescar ultimo_uso_en, y devolver
     //    el resultado al agente via jobs.resultado (V026).
     await refrescarContextoBestEffort(deps, sitio, job.ownerId, sesion.sesionExternaId, contexto);
-    await deps.guardarResultado(job.id, { estado: 'ok', resumen: desenlace.resumen });
+    // PROMOCION AUTOMATICA (CAMBIO 3): lo que acaba de funcionar queda aprendido para la proxima.
+    if (promovible) {
+      await promoverRecetaBestEffort(deps, job, sitio, objetivo, pasosDelJob, verboBloqueado);
+    }
+    await deps.guardarResultado(job.id, { estado: 'ok', resumen: desenlace.resumen, via: 'modelo' });
     deps.logger.info('tarea web completada dentro de la sesion del sitio', {
       jobId: job.id,
       connectionId: sitio.id,
@@ -892,7 +1286,19 @@ async function guardarTrayectoriaBestEffort(
   resultado: Pick<ResultadoMotor, 'acciones' | 'tokensIn' | 'tokensOut'>,
   /** Pasos SINTETICOS que van ANTES de los del motor (hoy: el resultado de la verificacion previa). */
   pasosPrevios: PasoCensurado[] = [],
+  /** Observaciones del DOM tomadas durante la corrida (CAMBIO 1), para enriquecer cada paso. */
+  observaciones: ObservacionDePaso[] = [],
+  /**
+   * ACUMULADOR de los pasos de TODO el job (no de esta corrida): es lo que se promueve a receta al
+   * final. Se llena SIEMPRE, aunque el registro de trayectorias no este cableado, porque la
+   * promocion no depende de que V030 este aplicada.
+   */
+  acumulador?: PasoCensurado[],
 ): Promise<void> {
+  const pasos = [...pasosPrevios, ...extraerPasosCensurados(resultado.acciones, observaciones)].map(
+    (paso, idx) => ({ ...paso, idx }),
+  );
+  acumulador?.push(...pasos);
   if (!deps.trayectorias) return;
   const terminadaEn = new Date();
   try {
@@ -908,12 +1314,9 @@ async function guardarTrayectoriaBestEffort(
       duracionMs: Math.max(0, terminadaEn.getTime() - iniciadaEn.getTime()),
       tokensIn: resultado.tokensIn,
       tokensOut: resultado.tokensOut,
-      // Los pasos previos (verificacion) abren la traza y el idx se renumera para que el orden
-      // persistido sea el orden real de lo que paso.
-      pasos: [...pasosPrevios, ...extraerPasosCensurados(resultado.acciones)].map((paso, idx) => ({
-        ...paso,
-        idx,
-      })),
+      // Los pasos previos (verificacion) abren la traza y el idx ya viene renumerado para que el
+      // orden persistido sea el orden real de lo que paso.
+      pasos,
     });
   } catch (error) {
     deps.logger.warn('tarea web: no se pudo registrar la trayectoria (se ignora, best-effort)', {
@@ -945,11 +1348,17 @@ async function ejecutarMotorConRegistro(
   verboBloqueado: string | null = null,
   // Pasos sinteticos que preceden a los del motor en la trayectoria (el paso de verificacion).
   pasosPrevios: PasoCensurado[] = [],
+  // Acumulador de los pasos de TODO el job, insumo de la promocion a receta (CAMBIO 3).
+  acumulador?: PasoCensurado[],
 ): Promise<{ resultado: ResultadoMotor; desenlace: DesenlaceTareaWeb }> {
   const iniciadaEn = new Date();
+  // OBSERVACION de cada paso mientras el motor corre (CAMBIO 1): lee del DOM las estrategias de
+  // localizacion que la traza del motor no trae. Best-effort de punta a punta.
+  const observaciones: ObservacionDePaso[] = [];
+  const observador = crearObservadorDePasos(deps, sesionExternaId, observaciones);
   let resultado: ResultadoMotor;
   try {
-    resultado = await ejecutarMotor(deps, sesionExternaId, apiKey, prompt, senalExterna);
+    resultado = await ejecutarMotor(deps, sesionExternaId, apiKey, prompt, senalExterna, observador);
   } catch (error) {
     await guardarTrayectoriaBestEffort(
       deps,
@@ -960,6 +1369,7 @@ async function ejecutarMotorConRegistro(
       iniciadaEn,
       { acciones: [], tokensIn: null, tokensOut: null },
       pasosPrevios,
+      observaciones,
     );
     throw error;
   }
@@ -1005,8 +1415,56 @@ async function ejecutarMotorConRegistro(
     iniciadaEn,
     resultado,
     pasosPrevios,
+    observaciones,
+    acumulador,
   );
   return { resultado, desenlace };
+}
+
+/**
+ * OBSERVADOR de pasos (CAMBIO 1). Por cada accion que el motor ejecuta, le pide al navegador las
+ * estrategias de localizacion del elemento que toco y las acumula EN ORDEN. Devuelve undefined si el
+ * camino determinista no esta cableado: sin el, no hay nada que observar ni receta que promover.
+ *
+ * BEST-EFFORT en los dos sentidos:
+ *  - Un fallo de lectura acumula una observacion VACIA, para no desalinear el orden con las acciones.
+ *  - El elemento puede haber desaparecido (un click que navego): tambien acumula vacia y ese paso
+ *    simplemente no sera promovible.
+ */
+function crearObservadorDePasos(
+  deps: TareaWebDeps,
+  sesionExternaId: string,
+  observaciones: ObservacionDePaso[],
+): ((paso: PasoObservado) => Promise<void>) | undefined {
+  const determinista = deps.determinista;
+  if (!determinista || !deps.recetas) return undefined;
+  return async (paso: PasoObservado): Promise<void> => {
+    const referencia =
+      paso.selector !== null
+        ? ({ tipo: 'xpath', xpath: paso.selector } as const)
+        : paso.punto !== null
+          ? ({ tipo: 'punto', x: paso.punto.x, y: paso.punto.y } as const)
+          : null;
+    if (referencia === null) {
+      observaciones.push({ selector: null, estrategias: [] });
+      return;
+    }
+    let estrategias: EstrategiaLocalizacion[] = [];
+    try {
+      estrategias = await determinista.leerEstrategiasDeElemento(sesionExternaId, referencia);
+    } catch (error) {
+      deps.logger.warn('tarea web: no se pudieron leer las estrategias de un paso (se sigue sin ellas)', {
+        err: describir(error),
+      });
+    }
+    const xpath = estrategias.find((e) => e.tipo === 'xpath');
+    observaciones.push({
+      // Un paso por coordenadas no traia selector: el xpath recalculado sobre el elemento pasa a
+      // serlo, y con eso el paso deja de ser irrepetible (CAMBIO 2).
+      selector: paso.selector ?? (xpath?.tipo === 'xpath' ? xpath.xpath : null),
+      estrategias,
+    });
+  };
 }
 
 /**
@@ -1020,6 +1478,7 @@ async function ejecutarMotor(
   apiKey: string,
   prompt: { objetivo: string; systemPrompt: string },
   senalExterna?: AbortSignal,
+  observador?: ((paso: PasoObservado) => Promise<void>) | undefined,
 ): Promise<ResultadoMotor> {
   const controller = new AbortController();
   let expiroDeadline = false;
@@ -1039,6 +1498,7 @@ async function ejecutarMotor(
       model: deps.model,
       maxPasos: deps.maxPasos,
       signal: controller.signal,
+      observador,
     });
   } catch (error) {
     // Fallo del motor con la sesion ya abierta: PERMANENTE (no se re-ejecuta una navegacion a

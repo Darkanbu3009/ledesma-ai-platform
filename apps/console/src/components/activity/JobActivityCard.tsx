@@ -10,6 +10,7 @@ import {
   ListTree,
   Loader2,
   MessageSquare,
+  Sparkles,
   XCircle,
 } from 'lucide-react';
 import { formatRunAt } from '../../lib/schedule';
@@ -148,7 +149,25 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
               <span className="flex-none rounded-full border border-line bg-line-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
                 {jobTypeLabel(job.type)}
               </span>
+              {/* TAREA APRENDIDA: esta ejecucion repitio lo que ya habia funcionado antes, sin
+                  volver a analizar el sitio. Se cuenta en lenguaje llano; el mecanismo no aparece. */}
+              {job.conLoAprendido === true && (
+                <span
+                  title={t('receta.detalle')}
+                  className="inline-flex flex-none items-center gap-1 rounded-full border border-ok/30 bg-ok/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ok"
+                >
+                  <Sparkles className="h-3 w-3" />
+                  {t('receta.etiqueta')}
+                </span>
+              )}
             </div>
+
+            {job.conLoAprendido === true && (
+              <p className="mt-1 text-[12px] text-muted">
+                {t('receta.detalle')}
+                {job.ajustadaSola === true ? ` ${t('receta.reparada')}` : ''}
+              </p>
+            )}
 
             <div className="mt-1.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[12.5px] text-muted">
               <span className="inline-flex items-center gap-1.5">

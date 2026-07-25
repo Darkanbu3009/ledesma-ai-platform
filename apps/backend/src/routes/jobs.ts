@@ -54,6 +54,11 @@ function toJobActivity(job: JobSummary) {
     createdAt: job.createdAt,
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
+    // DOS BOOLEANOS derivados del resultado (Fase F paso 2): la tarea corrio con lo aprendido de una
+    // vez anterior, y si ademas hubo que ajustarla porque el sitio cambio. El resultado en si NO se
+    // expone (puede llevar el resumen de la tarea, que es dato del usuario): solo estos escalares.
+    conLoAprendido: job.conLoAprendido,
+    ajustadaSola: job.ajustadaSola,
   };
 }
 

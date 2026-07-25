@@ -31,6 +31,13 @@ export interface JobActivity {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+  /**
+   * La tarea se ejecuto con lo APRENDIDO de una vez anterior, sin volver a analizar el sitio. Lo
+   * deriva el backend de jobs.resultado; aqui solo se pinta la etiqueta.
+   */
+  conLoAprendido?: boolean;
+  /** Ademas, el sitio habia cambiado y la tarea se ajusto sola. */
+  ajustadaSola?: boolean;
 }
 
 /** Una pagina del historial: los jobs + la metadata de paginacion que devuelve el backend. */

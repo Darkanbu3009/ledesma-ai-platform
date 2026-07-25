@@ -119,6 +119,10 @@ interface JobSummaryRow {
   created_at: Date | string;
   started_at: Date | string | null;
   finished_at: Date | string | null;
+  /** `resultado->>'via'`: por donde corrio una tarea web ('receta' | 'modelo'). Ver rowToSummary. */
+  resultado_via: string | null;
+  /** `resultado->>'reparada'`: la ejecucion por receta tuvo que ajustar algun paso. */
+  resultado_reparada: string | null;
 }
 
 function rowToSummary(row: JobSummaryRow): JobSummary {
@@ -142,6 +146,10 @@ function rowToSummary(row: JobSummaryRow): JobSummary {
     createdAt: toIso(row.created_at) ?? EPOCH_ISO,
     startedAt: toIso(row.started_at),
     finishedAt: toIso(row.finished_at),
+    // Dos ESCALARES del resultado, nunca el resultado entero (mismo criterio que payload_kind): el
+    // listado no debe traer a memoria ni exponer lo que el worker guardo de la tarea.
+    conLoAprendido: row.resultado_via === 'receta',
+    ajustadaSola: row.resultado_via === 'receta' && row.resultado_reparada === 'true',
   };
 }
 
@@ -249,7 +257,8 @@ export class JobsRepository {
       status === undefined
         ? await this.sql<JobSummaryRow[]>`
             select id, agent_id, status, payload->>'kind' as payload_kind, attempts, last_error,
-              scheduled_for, created_at, started_at, finished_at
+              scheduled_for, created_at, started_at, finished_at,
+              resultado->>'via' as resultado_via, resultado->>'reparada' as resultado_reparada
             from jobs
             where owner_id = ${ownerId}
             order by created_at desc
@@ -257,7 +266,8 @@ export class JobsRepository {
           `
         : await this.sql<JobSummaryRow[]>`
             select id, agent_id, status, payload->>'kind' as payload_kind, attempts, last_error,
-              scheduled_for, created_at, started_at, finished_at
+              scheduled_for, created_at, started_at, finished_at,
+              resultado->>'via' as resultado_via, resultado->>'reparada' as resultado_reparada
             from jobs
             where owner_id = ${ownerId} and status = ${status}
             order by created_at desc
@@ -275,7 +285,8 @@ export class JobsRepository {
   async getSummaryForOwner(id: string, ownerId: string): Promise<JobSummary | null> {
     const rows = await this.sql<JobSummaryRow[]>`
       select id, agent_id, status, payload->>'kind' as payload_kind, attempts, last_error,
-        scheduled_for, created_at, started_at, finished_at
+        scheduled_for, created_at, started_at, finished_at,
+        resultado->>'via' as resultado_via, resultado->>'reparada' as resultado_reparada
       from jobs
       where id = ${id} and owner_id = ${ownerId}
     `;

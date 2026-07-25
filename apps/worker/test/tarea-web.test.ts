@@ -357,6 +357,8 @@ describe('procesarTareaWeb', () => {
     expect(deps.guardarResultado).toHaveBeenCalledWith('job-1', {
       estado: 'ok',
       resumen: 'el panel muestra 3 agentes activos',
+      // El resultado declara POR DONDE corrio la tarea, para poder medir el ahorro (CAMBIO 5).
+      via: 'modelo',
     });
     expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
   });

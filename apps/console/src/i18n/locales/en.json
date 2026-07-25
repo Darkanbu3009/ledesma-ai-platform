@@ -1948,6 +1948,11 @@
       "sitioInvalido": "Check the sites: write only the domain, like banco.com."
     }
   },
+  "receta": {
+    "etiqueta": "Learned task",
+    "detalle": "This task ran using what was learned from a previous time, without analyzing the site again.",
+    "reparada": "The site changed and the task adjusted itself."
+  },
   "avisoTareaLenta": {
     "titulo": "This task is taking longer than usual",
     "detalle": "It has been running for {{minutos}} minutes. You can wait or end it.",

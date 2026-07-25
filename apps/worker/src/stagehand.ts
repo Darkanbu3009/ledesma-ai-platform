@@ -1,6 +1,7 @@
 import { Stagehand } from '@browserbasehq/stagehand';
 import type { V3Options } from '@browserbasehq/stagehand';
-import type { MotorDeTareaWeb, ResultadoMotor } from './tarea-web.js';
+import type { EscaladorDePaso, ResultadoEscalada } from './ejecutor-receta.js';
+import type { MotorDeTareaWeb, PasoObservado, ResultadoMotor } from './tarea-web.js';
 
 /**
  * ADAPTADOR real del puerto MotorDeTareaWeb (tarea-web.ts) sobre Stagehand v3
@@ -22,6 +23,9 @@ import type { MotorDeTareaWeb, ResultadoMotor } from './tarea-web.js';
  *    instruccion; el contenido de las paginas jamas entra a ninguno de los dos.
  *  - `disablePino: true` y `verbose: 0`: cero logging propio de Stagehand (los logs del worker no
  *    deben arrastrar URLs ni contenido del sitio).
+ *  - `callbacks.onEvidence`: Stagehand emite `step_finished` justo DESPUES de empujar las acciones
+ *    de esa tool a la traza (v3AgentHandler). Es el gancho con el que el handler observa cada paso
+ *    mientras corre y lee del DOM las estrategias de localizacion que la traza no trae (CAMBIO 1).
  */
 /**
  * Opciones del constructor de Stagehand. Exportada SOLO para que los tests validen esta
@@ -60,8 +64,66 @@ export function construirOpcionesStagehand(params: {
   };
 }
 
-export class MotorStagehand implements MotorDeTareaWeb {
-  constructor(private readonly config: { apiKey: string; projectId: string }) {}
+/** Forma minima de la salida de una tool que trae selectores resueltos (act / fillForm). */
+interface SalidaConSelectores {
+  output?: unknown;
+  playwrightArguments?: unknown;
+}
+
+/** El `selector` de un objeto Action de Stagehand ({ selector, description, method, arguments }). */
+function selectorDeAction(valor: unknown): string | null {
+  if (typeof valor !== 'object' || valor === null) return null;
+  const selector = (valor as { selector?: unknown }).selector;
+  return typeof selector === 'string' && selector !== '' ? selector : null;
+}
+
+/**
+ * Traduce UN evento `step_finished` a los pasos observados que le corresponden, en el MISMO orden y
+ * cantidad en que Stagehand empuja acciones a la traza (mapToolResultToActions):
+ *  - 'act' -> UNA accion con playwrightArguments.
+ *  - 'fillForm' -> UNA accion de la propia tool MAS una por cada campo resuelto.
+ *  - 'click' / 'type' (modo hibrido) -> UNA accion, sin selector: solo coordenadas.
+ *  - cualquier otra tool -> UNA accion sin elemento.
+ * Mantener la correspondencia 1 a 1 es lo que permite emparejar por posicion en trayectoria.ts.
+ */
+export function pasosObservadosDeEvidencia(evento: {
+  actionName: string;
+  actionArgs: Record<string, unknown>;
+  toolOutput: { result: unknown };
+}): PasoObservado[] {
+  const crudo = evento.toolOutput.result;
+  const envoltorio: SalidaConSelectores =
+    typeof crudo === 'object' && crudo !== null ? (crudo as SalidaConSelectores) : {};
+  const salida: SalidaConSelectores =
+    typeof envoltorio.output === 'object' && envoltorio.output !== null
+      ? (envoltorio.output as SalidaConSelectores)
+      : envoltorio;
+
+  if (evento.actionName === 'fillForm') {
+    const campos = Array.isArray(salida.playwrightArguments) ? salida.playwrightArguments : [];
+    return [
+      { selector: null, punto: null },
+      ...campos.map((campo) => ({ selector: selectorDeAction(campo), punto: null })),
+    ];
+  }
+  if (evento.actionName === 'act') {
+    return [{ selector: selectorDeAction(salida.playwrightArguments), punto: null }];
+  }
+  if (evento.actionName === 'click' || evento.actionName === 'type') {
+    const coordenadas = evento.actionArgs.coordinates;
+    const punto =
+      Array.isArray(coordenadas) &&
+      typeof coordenadas[0] === 'number' &&
+      typeof coordenadas[1] === 'number'
+        ? { x: coordenadas[0], y: coordenadas[1] }
+        : null;
+    return [{ selector: null, punto }];
+  }
+  return [{ selector: null, punto: null }];
+}
+
+export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
+  constructor(private readonly config: { apiKey: string; projectId: string; model: string }) {}
 
   async ejecutar(params: {
     sesionExternaId: string;
@@ -71,6 +133,7 @@ export class MotorStagehand implements MotorDeTareaWeb {
     model: string;
     maxPasos: number;
     signal?: AbortSignal;
+    observador?: ((paso: PasoObservado) => Promise<void>) | undefined;
   }): Promise<ResultadoMotor> {
     const stagehand = new Stagehand(
       construirOpcionesStagehand({
@@ -84,10 +147,27 @@ export class MotorStagehand implements MotorDeTareaWeb {
     await stagehand.init();
     try {
       const agente = stagehand.agent({ systemPrompt: params.systemPrompt });
+      const observador = params.observador;
       const resultado = await agente.execute({
         instruction: params.objetivo,
         maxSteps: params.maxPasos,
         ...(params.signal !== undefined ? { signal: params.signal } : {}),
+        ...(observador !== undefined
+          ? {
+              callbacks: {
+                // Best-effort SIEMPRE: la observacion enriquece la traza; si falla, la tarea sigue
+                // igual y esa corrida simplemente no se podra promover a receta.
+                onEvidence: async (evento) => {
+                  if (evento.type !== 'step_finished') return;
+                  try {
+                    for (const paso of pasosObservadosDeEvidencia(evento)) await observador(paso);
+                  } catch {
+                    // una observacion fallida jamas cambia el desenlace de la tarea
+                  }
+                },
+              },
+            }
+          : {}),
       });
       // AgentResult (v3, types/public/agent.d.ts:64-89) ya trae la TRAZA estructurada: `actions`
       // (una por tool ejecutada, con playwrightArguments.selector en 'act'/'fillForm') y `usage`
@@ -104,6 +184,51 @@ export class MotorStagehand implements MotorDeTareaWeb {
     } finally {
       // Cierre del CLIENTE Stagehand (no de la sesion: keepAlive la mantiene viva para que el
       // handler extraiga el contexto; la sesion la cierra el handler en su finally).
+      await stagehand.close().catch(() => {});
+    }
+  }
+
+  /**
+   * ESCALADA DE UN PASO (D5): ejecuta UNA accion puntual sobre UN elemento con el motor, cuando la
+   * ejecucion determinista no logro localizarlo. Es `act(instruccion)`, NO un agente: Stagehand
+   * observa la pagina, resuelve UN elemento y aplica UN metodo sobre el. No hay bucle, no hay tools
+   * de navegacion y no hay forma de que encadene otra accion; el alcance del modelo en este camino
+   * es elegir a que elemento se parece la descripcion.
+   *
+   * Devuelve el SELECTOR que resolvio: es el insumo con el que el ejecutor relee del DOM las
+   * estrategias actuales y repara la receta.
+   */
+  async ejecutarPasoConModelo(params: {
+    sesionExternaId: string;
+    instruccion: string;
+    apiKey: string;
+    signal?: AbortSignal | undefined;
+  }): Promise<ResultadoEscalada> {
+    if (params.signal?.aborted === true) {
+      return { ok: false, selector: null, tokensIn: null, tokensOut: null };
+    }
+    const stagehand = new Stagehand(
+      construirOpcionesStagehand({
+        apiKey: this.config.apiKey,
+        projectId: this.config.projectId,
+        sesionExternaId: params.sesionExternaId,
+        model: this.config.model,
+        modelApiKey: params.apiKey,
+      }),
+    );
+    await stagehand.init();
+    try {
+      const resultado = await stagehand.act(params.instruccion);
+      const primera = resultado.actions?.[0];
+      return {
+        ok: resultado.success === true,
+        selector: selectorDeAction(primera),
+        // act() no reporta usage; los tokens de una escalada se contabilizan como no reportados y la
+        // comparacion de ahorro usa el numero de escaladas, que si es exacto.
+        tokensIn: null,
+        tokensOut: null,
+      };
+    } finally {
       await stagehand.close().catch(() => {});
     }
   }

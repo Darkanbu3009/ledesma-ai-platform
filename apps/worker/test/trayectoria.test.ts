@@ -34,6 +34,8 @@ describe('extraerPasosCensurados', () => {
       },
       selector: 'xpath=/html/body/div[1]/form/button',
       valorCensurado: null,
+      // Sin observaciones no hay estrategias: la traza es la de siempre y esa corrida no se promueve.
+      estrategias: [],
       url: 'https://en.wikipedia.org/',
       exito: true,
     });
@@ -166,5 +168,84 @@ describe('extraerPasosCensurados', () => {
     expect(pasos).toHaveLength(2);
     expect(pasos[0]).toMatchObject({ accion: { tipo: 'desconocida' }, selector: null, url: null });
     expect(pasos[1]).toMatchObject({ idx: 1, accion: { tipo: 'desconocida' } });
+  });
+});
+
+describe('enriquecimiento con observaciones del DOM (CAMBIO 1)', () => {
+  const ATRIBUTO = { tipo: 'atributo', atributo: 'id', valor: 'enviar' } as const;
+  const XPATH_OBSERVADO = { tipo: 'xpath', xpath: '/html[1]/body[1]/button[1]' } as const;
+
+  it('empareja por POSICION cuando hay una observacion por accion', () => {
+    const acciones: AccionCrudaDeMotor[] = [
+      { type: 'goto', pageUrl: 'https://app.ejemplo.com/' },
+      {
+        type: 'act',
+        action: 'click Enviar',
+        playwrightArguments: { selector: 'xpath=/html/body/button', method: 'click', arguments: [] },
+      },
+    ];
+    const pasos = extraerPasosCensurados(acciones, [
+      { selector: null, estrategias: [] },
+      { selector: 'xpath=/html/body/button', estrategias: [ATRIBUTO, XPATH_OBSERVADO] },
+    ]);
+    expect(pasos[0]?.estrategias).toEqual([]);
+    expect(pasos[1]?.estrategias).toEqual([ATRIBUTO, XPATH_OBSERVADO]);
+  });
+
+  it('un paso por COORDENADAS (click sin playwrightArguments) recibe selector y metodo (CAMBIO 2)', () => {
+    const acciones: AccionCrudaDeMotor[] = [
+      { type: 'click', describe: 'el boton azul de enviar', coordinates: [120, 340] },
+    ];
+    const pasos = extraerPasosCensurados(acciones, [
+      { selector: XPATH_OBSERVADO.xpath, estrategias: [ATRIBUTO, XPATH_OBSERVADO] },
+    ]);
+    // Antes de este PR: selector null, metodo null -> paso irrepetible.
+    expect(pasos[0]?.selector).toBe(XPATH_OBSERVADO.xpath);
+    expect(pasos[0]?.accion.metodo).toBe('click');
+    expect(pasos[0]?.estrategias).toEqual([ATRIBUTO, XPATH_OBSERVADO]);
+  });
+
+  it('un TYPE por coordenadas registra el texto tecleado, CENSURADO segun su descripcion', () => {
+    const acciones: AccionCrudaDeMotor[] = [
+      { type: 'type', describe: 'campo de destinatario', text: 'ana@ejemplo.com', coordinates: [1, 2] },
+      { type: 'type', describe: 'el campo de contrasena', text: 'hunter2', coordinates: [3, 4] },
+    ];
+    const pasos = extraerPasosCensurados(acciones, [
+      { selector: null, estrategias: [] },
+      { selector: null, estrategias: [] },
+    ]);
+    expect(pasos[0]?.valorCensurado).toBe('ana@ejemplo.com');
+    // El contexto delata el campo sensible: el valor jamas se persiste.
+    expect(pasos[1]?.valorCensurado).toBe(VALOR_CENSURADO);
+  });
+
+  it('con cantidades distintas empareja SOLO por selector inequivoco', () => {
+    const acciones: AccionCrudaDeMotor[] = [
+      { type: 'fillForm' },
+      { type: 'act', playwrightArguments: { selector: 'xpath=/a', method: 'fill', arguments: ['x'] } },
+      { type: 'act', playwrightArguments: { selector: 'xpath=/b', method: 'fill', arguments: ['y'] } },
+    ];
+    const pasos = extraerPasosCensurados(acciones, [
+      { selector: 'xpath=/b', estrategias: [ATRIBUTO] },
+    ]);
+    expect(pasos[1]?.estrategias).toEqual([]);
+    expect(pasos[2]?.estrategias).toEqual([ATRIBUTO]);
+  });
+
+  it('un selector REPETIDO entre acciones no empareja: mejor sin estrategias que con las de otro', () => {
+    const acciones: AccionCrudaDeMotor[] = [
+      { type: 'fillForm' },
+      { type: 'act', playwrightArguments: { selector: 'xpath=/a', method: 'click', arguments: [] } },
+      { type: 'act', playwrightArguments: { selector: 'xpath=/a', method: 'click', arguments: [] } },
+    ];
+    const pasos = extraerPasosCensurados(acciones, [{ selector: 'xpath=/a', estrategias: [ATRIBUTO] }]);
+    expect(pasos.every((paso) => paso.estrategias.length === 0)).toBe(true);
+  });
+
+  it('sin observaciones la traza es EXACTAMENTE la de antes (nada cambia para quien no promueve)', () => {
+    const acciones: AccionCrudaDeMotor[] = [
+      { type: 'act', playwrightArguments: { selector: 'xpath=/a', method: 'click', arguments: [] } },
+    ];
+    expect(extraerPasosCensurados(acciones)[0]?.estrategias).toEqual([]);
   });
 });
