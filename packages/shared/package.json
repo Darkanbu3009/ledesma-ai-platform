@@ -14,6 +14,10 @@
       "types": "./dist/plans/plans.d.ts",
       "import": "./src/plans/plans.ts"
     },
+    "./verificacion": {
+      "types": "./dist/verificacion/contrato.d.ts",
+      "import": "./src/verificacion/contrato.ts"
+    },
     "./relay-token": {
       "types": "./dist/relay/relay-token.d.ts",
       "import": "./dist/relay/relay-token.js"
