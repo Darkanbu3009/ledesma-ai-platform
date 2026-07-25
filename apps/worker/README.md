@@ -106,28 +106,61 @@ Este proceso **no se despliega** aun; solo debe compilar y poder correrse localm
 | `WORKER_POLL_INTERVAL_MS` | no | `5000` | Cada cuanto consulta la cola. |
 | `LOG_LEVEL` | no | `info` | Nivel de log. |
 
+### Parche de Stagehand: identificadores malformados en el arbol de accesibilidad
+
+El motor de navegacion (Stagehand 3.6.0) rotulaba cada linea del arbol de accesibilidad con
+`encodedId ?? nodeId` (`understudy/a11y/snapshot/treeFormatUtils.js`). `encodedId` solo se calcula
+para los nodos AX con `backendDOMNodeId` numerico (`decorateRoles`, `a11yTree.js`), asi que cuando
+quedaba `undefined` el modelo veia `[5662]` en vez de `[0-5662]`, lo copiaba y el esquema de `act`
+(`lib/inference.js`, que exige `numero-numero` en `elementId`) rechazaba la respuesta con
+`NoObjectGeneratedError`. **El fallo es DETERMINISTA**: mismo arbol, mismo id malformado, mismo
+rechazo (produccion, 25 jul 2026: `elementId "5662"` rechazado cinco veces en dos minutos). El
+modelo no se equivocaba, obedecia un arbol mal formado.
+
+**La causa raiz se ataca con un parche de la libreria**: `patches/@browserbasehq+stagehand+3.6.0.patch`,
+aplicado por `patch-package` en el `postinstall` de la raiz. Un nodo cuyo `encodedId` no cumpla
+`/^\d+-\d+$/` (incluido `undefined`) deja de rotularse: su linea se omite y sus hijos validos toman
+su lugar, asi que el modelo solo puede elegir entre identificadores que el esquema acepta. Con todos
+los nodos validos, el arbol es byte a byte el de siempre.
+
+- **El parche se aplica solo** con cualquier `npm ci` / `npm install` en la raiz (Railway usa
+  Nixpacks, que corre `npm ci` y por tanto el `postinstall`). No hay paso manual.
+- **Sin `postinstall-postinstall`, a proposito.** Ese paquete solo existe para un hueco de yarn v1
+  (no re-corre el `postinstall` tras un `yarn remove`) y este repo es npm puro (`package-lock.json`,
+  `npm ci` en CI y en Railway). Ademas su propio `postinstall` invoca `yarn run postinstall` en
+  cuanto encuentra `yarnpkg` en el PATH, y yarn aplica `engines` de forma estricta: con un node
+  fuera de `>=20 <21` **aborta el `npm ci` entero** (verificado en este repo con node 22). No
+  agregarlo.
+- **CI lo vigila**: `apps/worker/test/parche-stagehand.test.ts` importa el `formatTreeLine` REAL de
+  `node_modules` y falla si el parche no esta aplicado.
+- **Retirarlo** cuando Stagehand lo corrija upstream. Verificado AUSENTE en 3.7.1 (su
+  `treeFormatUtils.js` es identico al de 3.6.0), asi que subir de version NO reemplaza al parche.
+
 ### Blindaje de la tarea web (fallo de esquema del motor)
 
-El motor de navegacion (Stagehand 3.6.0) tiene un fallo propio e INTERMITENTE: al renderizar el
-arbol de accesibilidad rotula cada linea con `encodedId ?? nodeId`
-(`understudy/a11y/snapshot/treeFormatUtils.js`), asi que cuando `encodedId` queda `undefined` el
-modelo ve `[8246]` en vez de `[0-8246]`, lo copia tal cual y el esquema de `act`
-(`lib/inference.js`, que exige `numero-numero` en `elementId`) rechaza la respuesta con
-`NoObjectGeneratedError`. El agente reintentaba lo mismo sin espera y sin cota: en produccion giro
-casi 4 minutos sin registrar un solo paso. El worker lo blinda en tres capas:
+Red de seguridad para lo que el parche no cubra, en la tool `act` del agente:
 
-- **Reintento inmediato** de la MISMA llamada de `act`, hasta 2 veces con 1 segundo entre intentos
-  (el fallo es intermitente, asi que este reintento es la mitigacion principal). Cada reintento se
-  loguea en `warn` como fallo del motor.
-- **Corte por 3 fallos de esquema consecutivos** (ya agotados los reintentos): la tarea termina con
-  un error propio que dice que fallo el MOTOR, distinto del limite de pasos y de un error del
-  usuario. Un `act` exitoso reinicia el contador.
+- **Reintento SOLO si el identificador cambia.** Un rechazo de esquema con un `elementId` distinto
+  al del intento anterior (o ilegible) se reintenta hasta 2 veces con 1 segundo entre intentos. Un
+  rechazo con el MISMO `elementId` que el intento anterior NO se reintenta: es determinista y
+  reintentarlo solo quema pasos y minutos de navegador. Corta en el acto, con el identificador en el
+  mensaje del error.
+- **Corte por 3 fallos de esquema consecutivos** (identificadores distintos, reintentos agotados): la
+  tarea termina con un error propio que dice que fallo el MOTOR, distinto del limite de pasos y de un
+  error del usuario. Un `act` exitoso reinicia el contador y el ultimo identificador rechazado.
 - **`toolTimeout`** (`TAREA_WEB_TOOL_TIMEOUT_SECONDS`): techo por llamada de tool. Sin el, Stagehand
   aplica su default de 45 s y el despliegue no puede ajustarlo.
 
 La trayectoria de la corrida se persiste con las acciones acumuladas EN VIVO aunque el motor lance
 (corte por esquema, deadline de pared o cancelacion); los intentos fallidos quedan como pasos con
-`exito: false`.
+`exito: false`. Dos detalles que hacian que una tarea CANCELADA quedara con cero pasos:
+
+- La accion de `act` entra a la traza **antes** de tocar el navegador y el mismo registro se completa
+  con el desenlace al terminar. Registrarla despues perdia la que estuviera en vuelo (o entre
+  reintentos) cuando llegaba la cancelacion.
+- Las tools que no son `act` (`goto`, `extract`, `click`, `type`, ...) se registran en vivo por el
+  callback de evidencia. La traza del motor solo llega cuando `execute()` DEVUELVE, asi que una
+  corrida que lanza no la trae, y una tarea cancelada antes de su primer `act` no dejaba nada.
 
 ### Observador de pasos (`TAREA_WEB_OBSERVADOR_PASOS`)
 

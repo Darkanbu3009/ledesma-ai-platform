@@ -2,9 +2,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { Stagehand, ExperimentalNotConfiguredError } from '@browserbasehq/stagehand';
 import { validateExperimentalFeatures } from '@browserbasehq/stagehand/lib/v3/agent/utils/validateExperimentalFeatures.js';
 import {
+  accionCrudaDeEvidencia,
   construirOpcionesDeEjecucion,
   construirOpcionesStagehand,
   crearActBlindado,
+  elementIdDeFalloDeEsquema,
   esFalloDeEsquemaDelMotor,
   ESPERA_ENTRE_REINTENTOS_ESQUEMA_MS,
   MAX_FALLOS_ESQUEMA_CONSECUTIVOS,
@@ -71,6 +73,29 @@ function errorDeEsquema(): Error {
   const error = new Error('No object generated: response did not match schema.');
   error.name = 'AI_NoObjectGeneratedError';
   return error;
+}
+
+/**
+ * Rechazo de esquema con el elementId que lo provoco, como el de produccion (25 jul 2026): el AI SDK
+ * envuelve el TypeValidationError (con el objeto parseado en `value`) dentro del
+ * NoObjectGeneratedError (con el JSON crudo en `text`), y el ZodError va al fondo de la cadena.
+ */
+function errorDeEsquemaCon(elementId: string): Error {
+  const salida = { action: { elementId, description: 'boton', method: 'click', arguments: [] } };
+  const zod = new Error('invalid_format');
+  zod.name = 'ZodError';
+  Object.assign(zod, {
+    issues: [
+      { code: 'invalid_format', format: 'regex', path: ['action', 'elementId'], input: elementId },
+    ],
+  });
+  const validacion = new Error('Type validation failed');
+  validacion.name = 'AI_TypeValidationError';
+  Object.assign(validacion, { value: salida, cause: zod });
+  const generacion = new Error('No object generated: response did not match schema.');
+  generacion.name = 'AI_NoObjectGeneratedError';
+  Object.assign(generacion, { text: JSON.stringify(salida), cause: validacion });
+  return generacion;
 }
 
 /**
@@ -173,6 +198,159 @@ describe('crearActBlindado', () => {
     expect(acciones[0]).toMatchObject({ type: 'act', action: 'click en Enviar', success: false });
     expect(acciones[1]).toMatchObject({ type: 'act', success: true });
     expect(acciones[1]?.playwrightArguments).toMatchObject({ selector: 'xpath=//button' });
+  });
+});
+
+/**
+ * CAMBIO 3: el reintento por esquema deja de ser inutil. El fallo de produccion NO era intermitente:
+ * el mismo arbol producia el mismo elementId malformado ("5662") y el mismo rechazo, cinco veces en
+ * dos minutos. Un reintento sobre el MISMO identificador solo quema pasos y minutos de navegador.
+ */
+describe('elementIdDeFalloDeEsquema', () => {
+  it('lee el elementId de la cadena de errores del AI SDK', () => {
+    expect(elementIdDeFalloDeEsquema(errorDeEsquemaCon('5662'))).toBe('5662');
+  });
+
+  it('lo lee tambien cuando la envoltura solo dejo el mensaje serializado', () => {
+    const error = new Error('response did not match schema: {"action":{"elementId":"5662"}}');
+    error.name = 'AI_NoObjectGeneratedError';
+    expect(elementIdDeFalloDeEsquema(error)).toBe('5662');
+  });
+
+  it('null cuando el error no trae ningun identificador (no se puede afirmar que se repita)', () => {
+    expect(elementIdDeFalloDeEsquema(errorDeEsquema())).toBeNull();
+    expect(elementIdDeFalloDeEsquema(null)).toBeNull();
+  });
+});
+
+describe('crearActBlindado ante un fallo de esquema DETERMINISTA', () => {
+  it('dos fallos con el MISMO elementId cortan en el acto, sin reintentar mas', async () => {
+    const actuar = vi.fn(async () => {
+      throw errorDeEsquemaCon('5662');
+    });
+    const esperas: number[] = [];
+    const logger = makeLogger();
+    const blindado = crearActBlindado({
+      actuar,
+      logger,
+      esperar: async (ms) => void esperas.push(ms),
+    });
+
+    await expect(blindado.ejecutar('click en Enviar')).rejects.toThrow(FalloDeEsquemaDelMotorError);
+
+    // Dos intentos y nada mas: el primero fija el identificador, el segundo lo repite y corta.
+    expect(actuar).toHaveBeenCalledTimes(2);
+    expect(esperas).toEqual([ESPERA_ENTRE_REINTENTOS_ESQUEMA_MS]);
+    expect(blindado.corto()).toBe(true);
+    // El identificador entra al diagnostico: es un numero del arbol, no contenido de la pagina.
+    expect(blindado.corte()?.message).toContain('5662');
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('MISMO identificador'), {
+      elementId: '5662',
+    });
+  });
+
+  it('solo se reintenta mientras el elementId CAMBIA entre intentos', async () => {
+    const ids = ['5662', '7001', '9100'];
+    const actuar = vi.fn(async () => {
+      throw errorDeEsquemaCon(ids[actuar.mock.calls.length - 1] ?? 'ultimo');
+    });
+    const blindado = crearActBlindado({ actuar, logger: makeLogger(), esperar: async () => {} });
+
+    const salida = await blindado.ejecutar('click en Enviar');
+
+    // Identificadores distintos cada vez: se agota el presupuesto de reintentos como antes.
+    expect(actuar).toHaveBeenCalledTimes(1 + MAX_REINTENTOS_ESQUEMA);
+    expect(salida.success).toBe(false);
+    expect(blindado.corto()).toBe(false);
+  });
+
+  it('el mismo elementId en DOS llamadas de tool distintas tambien corta', async () => {
+    const actuar = vi.fn(async () => {
+      throw errorDeEsquemaCon('5662');
+    });
+    // El primer intento de la primera llamada fija el id; el segundo ya lo repite.
+    const blindado = crearActBlindado({ actuar, logger: makeLogger(), esperar: async () => {} });
+    await expect(blindado.ejecutar('click en Enviar')).rejects.toThrow(FalloDeEsquemaDelMotorError);
+    expect(actuar).toHaveBeenCalledTimes(2);
+  });
+
+  it('un act exitoso olvida el ultimo identificador rechazado', async () => {
+    let falla = true;
+    const actuar = vi.fn(async () => {
+      if (falla) throw errorDeEsquemaCon('5662');
+      return { success: true, actions: [{ selector: 'xpath=//button' }] };
+    });
+    const blindado = crearActBlindado({ actuar, logger: makeLogger(), esperar: async () => {} });
+
+    falla = false;
+    await blindado.ejecutar('click en Redactar');
+    falla = true;
+    // Con el identificador olvidado, este primer fallo NO cuenta como repeticion: se reintenta.
+    await expect(blindado.ejecutar('click en Enviar')).rejects.toThrow(FalloDeEsquemaDelMotorError);
+    expect(actuar).toHaveBeenCalledTimes(3);
+  });
+});
+
+/**
+ * CAMBIO 4: la trayectoria de una corrida CANCELADA. La accion entra a la traza ANTES de tocar el
+ * navegador y el registro se completa al terminar. Registrarla despues perdia toda accion que
+ * estuviera en vuelo (o entre reintentos) cuando llegaba la cancelacion, que es por lo que una tarea
+ * cancelada quedaba con cero pasos pese al arreglo anterior.
+ */
+describe('crearActBlindado y la traza de una corrida cancelada', () => {
+  it('una accion EN VUELO ya esta registrada antes de que el navegador responda', async () => {
+    const acciones: AccionCrudaDeMotor[] = [];
+    const blindado = crearActBlindado({
+      // Nunca resuelve: imita la llamada que sigue en vuelo cuando el job deja de estar running.
+      actuar: () => new Promise(() => {}),
+      logger: makeLogger(),
+      registrarAccion: (accion) => void acciones.push(accion),
+    });
+
+    void blindado.ejecutar('click en Enviar');
+    await Promise.resolve();
+
+    expect(acciones).toHaveLength(1);
+    expect(acciones[0]).toMatchObject({ type: 'act', action: 'click en Enviar', success: false });
+  });
+
+  it('una accion cancelada ENTRE reintentos de esquema tampoco se pierde', async () => {
+    const acciones: AccionCrudaDeMotor[] = [];
+    let liberar: () => void = () => {};
+    const enEspera = new Promise<void>((resolver) => {
+      liberar = resolver;
+    });
+    const blindado = crearActBlindado({
+      actuar: async () => {
+        throw errorDeEsquema();
+      },
+      logger: makeLogger(),
+      // La corrida se cancela mientras el blindaje espera para reintentar.
+      esperar: async () => enEspera,
+      registrarAccion: (accion) => void acciones.push(accion),
+    });
+
+    void blindado.ejecutar('click en Enviar');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(acciones).toHaveLength(1);
+    expect(acciones[0]).toMatchObject({ type: 'act', action: 'click en Enviar', success: false });
+    liberar();
+  });
+
+  it('un fallo que no es de esquema deja UN solo registro, no dos', async () => {
+    const acciones: AccionCrudaDeMotor[] = [];
+    const blindado = crearActBlindado({
+      actuar: async () => {
+        throw new Error('el elemento ya no existe');
+      },
+      logger: makeLogger(),
+      registrarAccion: (accion) => void acciones.push(accion),
+    });
+
+    await expect(blindado.ejecutar('click en Enviar')).resolves.toMatchObject({ success: false });
+    expect(acciones).toHaveLength(1);
   });
 });
 
@@ -289,7 +467,7 @@ describe('esFalloDeEsquemaDelMotor', () => {
 });
 
 describe('construirOpcionesDeEjecucion', () => {
-  it('SIN observador no se pasa onEvidence (TAREA_WEB_OBSERVADOR_PASOS apagado: cero CDP extra)', () => {
+  it('sin observador NI registro no se pasa onEvidence (TAREA_WEB_OBSERVADOR_PASOS apagado)', () => {
     const opciones = construirOpcionesDeEjecucion({
       objetivo: 'abre el ultimo correo',
       maxPasos: 120,
@@ -298,6 +476,53 @@ describe('construirOpcionesDeEjecucion', () => {
     expect(opciones.callbacks).toBeUndefined();
     expect(opciones.toolTimeout).toBe(90_000);
     expect(opciones.maxSteps).toBe(120);
+  });
+
+  /**
+   * CAMBIO 4. La traza del motor solo llega cuando `execute()` DEVUELVE; una corrida cancelada
+   * (o cortada por deadline o por esquema) lanza y no devuelve nada. Sin este registro en vivo, las
+   * tools que no son `act` desaparecian de la trayectoria y una tarea cancelada antes de su primer
+   * `act` quedaba con cero pasos.
+   */
+  it('registra EN VIVO las tools que no son act, sin necesidad del observador', async () => {
+    const acciones: AccionCrudaDeMotor[] = [];
+    const opciones = construirOpcionesDeEjecucion({
+      objetivo: 'abre el ultimo correo',
+      maxPasos: 120,
+      toolTimeoutMs: 90_000,
+      registrarAccion: (accion) => void acciones.push(accion),
+    });
+    expect(opciones.callbacks?.onEvidence).toBeDefined();
+
+    await opciones.callbacks?.onEvidence?.({
+      type: 'step_finished',
+      actionName: 'goto',
+      actionArgs: { url: 'https://app.ejemplo.com/', describe: 'ir a la bandeja' },
+      reasoning: 'hay que abrir la bandeja',
+      toolOutput: { ok: true, result: {} },
+    });
+
+    expect(acciones).toEqual([{ type: 'goto', success: true, describe: 'ir a la bandeja' }]);
+  });
+
+  it('NO registra `act` por evidencia: el blindaje ya la registro antes de tocar el navegador', async () => {
+    const acciones: AccionCrudaDeMotor[] = [];
+    const opciones = construirOpcionesDeEjecucion({
+      objetivo: 'abre el ultimo correo',
+      maxPasos: 120,
+      toolTimeoutMs: 90_000,
+      registrarAccion: (accion) => void acciones.push(accion),
+    });
+
+    await opciones.callbacks?.onEvidence?.({
+      type: 'step_finished',
+      actionName: 'act',
+      actionArgs: { action: 'click en Enviar' },
+      reasoning: '',
+      toolOutput: { ok: true, result: {} },
+    });
+
+    expect(acciones).toEqual([]);
   });
 
   it('CON observador se pasa onEvidence y cada step_finished llega al observador', async () => {
@@ -354,5 +579,36 @@ describe('construirOpcionesDeEjecucion', () => {
         executeOptions: { excludeTools: [...TOOLS_RETIRADAS_CON_GUARDIA] },
       }),
     ).not.toThrow();
+  });
+});
+
+describe('accionCrudaDeEvidencia', () => {
+  it('copia por WHITELIST solo los campos de texto: nada de contenido de la pagina', () => {
+    const accion = accionCrudaDeEvidencia({
+      actionName: 'extract',
+      actionArgs: {
+        instruction: 'lee el asunto',
+        schema: { type: 'object', properties: { asunto: { type: 'string' } } },
+        selector: 'xpath=//div[@id="cuerpo"]',
+      },
+      toolOutput: { ok: true },
+    });
+
+    expect(accion).toEqual({ type: 'extract', success: true, instruction: 'lee el asunto' });
+  });
+
+  it('un paso por coordenadas conserva lo que la traza del motor tambien lleva', () => {
+    const accion = accionCrudaDeEvidencia({
+      actionName: 'type',
+      actionArgs: { describe: 'el campo Para', text: 'juan@ejemplo.com', coordinates: [10, 20] },
+      toolOutput: { ok: false },
+    });
+
+    expect(accion).toEqual({
+      type: 'type',
+      success: false,
+      describe: 'el campo Para',
+      text: 'juan@ejemplo.com',
+    });
   });
 });
