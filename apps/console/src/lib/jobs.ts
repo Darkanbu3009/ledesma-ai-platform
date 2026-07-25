@@ -45,6 +45,46 @@ export const JOB_PAGE_SIZE = 20;
 /** Intervalo de auto-refresh cuando hay ejecuciones en vuelo (ms). */
 export const JOBS_REFETCH_MS = 10_000;
 
+/**
+ * Umbral del AVISO de tarea lenta (ms): una ejecucion en curso que supera este tiempo muestra un
+ * aviso destacado con el boton de terminarla. Es informativo: la decision de terminar una tarea que
+ * sigue avanzando es SIEMPRE del usuario; el sistema jamas la termina por su cuenta en este caso.
+ */
+export const AVISO_TAREA_LENTA_MS = 180_000;
+
+/**
+ * Prefijos ESTABLES de lastError con los que el backend distingue como termino un job 'failed' (sin
+ * estado nuevo en la base): terminado por el usuario desde la consola, o terminado por el sistema
+ * al dejar de responder. La UI los detecta para etiquetar Cancelada / Detenida y para reemplazar el
+ * texto tecnico del error por uno legible.
+ */
+export const CANCELADO_POR_USUARIO_PREFIX = 'CANCELADO_POR_USUARIO:';
+export const SISTEMA_DETUVO_TAREA_PREFIX = 'SISTEMA_DETUVO_TAREA:';
+
+/** true si el job fallo porque su dueno lo termino desde la consola (etiqueta Cancelada). */
+export function esJobCancelado(job: Pick<JobActivity, 'status' | 'lastError'>): boolean {
+  return job.status === 'failed' && (job.lastError?.startsWith(CANCELADO_POR_USUARIO_PREFIX) ?? false);
+}
+
+/** true si el sistema termino el job porque dejo de responder (etiqueta Detenida). */
+export function esJobDetenido(job: Pick<JobActivity, 'status' | 'lastError'>): boolean {
+  return job.status === 'failed' && (job.lastError?.startsWith(SISTEMA_DETUVO_TAREA_PREFIX) ?? false);
+}
+
+/**
+ * Milisegundos que lleva EN EJECUCION un job 'running' (contra el reloj `ahora`). null si no esta
+ * en ejecucion o no tiene startedAt usable. Pura para testear el umbral del aviso sin relojes.
+ */
+export function msEnEjecucion(
+  job: Pick<JobActivity, 'status' | 'startedAt'>,
+  ahora: number,
+): number | null {
+  if (job.status !== 'running' || job.startedAt === null) return null;
+  const inicio = new Date(job.startedAt).getTime();
+  if (Number.isNaN(inicio)) return null;
+  return Math.max(0, ahora - inicio);
+}
+
 /** Filtro de estado en la UI. 'all' = todos (sin filtro en la query). */
 export type JobStatusFilter = JobStatus | 'all';
 

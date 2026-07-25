@@ -86,6 +86,7 @@ function makeDeps(overrides: Partial<JobRunnerDeps> = {}): JobRunnerDeps {
       markCompleted: vi.fn(async () => {}),
       markFailed: vi.fn(async () => {}),
       markPendingRetry: vi.fn(async () => {}),
+      latirJob: vi.fn(async () => 'running' as const),
       reapOrphanedJobs: vi.fn(async () => []),
     },
     getProfileTier: vi.fn(async () => 'autonomous' as const),

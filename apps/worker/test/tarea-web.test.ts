@@ -618,6 +618,16 @@ describe('detectarVerboBloqueado (D2a / D4)', () => {
     expect(detectarVerboBloqueado('confirma el pedido pendiente')).toBe('confirmar pedido');
   });
 
+  it('cubre como escribe un usuario real el verbo enviar: prefijo re- y "mandar"', () => {
+    // Regresion: estas cuatro formas NO matcheaban y son exactamente la accion del job de produccion
+    // (enviar un correo). Un falso negativo aqui pierde la accion en silencio (D3).
+    expect(detectarVerboBloqueado('manda el correo al proveedor')).toBe('enviar');
+    expect(detectarVerboBloqueado('mandale el reporte a contabilidad')).toBe('enviar');
+    expect(detectarVerboBloqueado('reenvia el mensaje de ayer')).toBe('enviar');
+    expect(detectarVerboBloqueado('reenvíalo a mi jefe')).toBe('enviar');
+    expect(detectarVerboBloqueado('resend the invite')).toBe('send');
+  });
+
   it('detecta los equivalentes en ingles', () => {
     expect(detectarVerboBloqueado('send the email to John')).toBe('send');
     expect(detectarVerboBloqueado('delete the old drafts')).toBe('delete');
@@ -707,6 +717,31 @@ describe('checkpoint determinista (D2b): DONE sin marcador sobre un objetivo con
     const deps = makeDeps({ motor });
     await procesarTareaWeb(deps, makeJobConObjetivo(OBJETIVO_BLOQUEADO));
     expect(motor.ejecutar).toHaveBeenCalledTimes(1);
+  });
+
+  it('job CANCELADO por el usuario a mitad de tarea: NO se crea checkpoint determinista', async () => {
+    // Interaccion con la cancelacion cooperativa (control.signal): si el dueno termino la tarea desde
+    // la consola, el job ya es 'failed' y pedirle que apruebe lo que acaba de cancelar seria absurdo
+    // (la fila quedaria pendiente hasta el barrido: marcarJobPausado no puede pausar un 'failed').
+    const motor = makeMotor({ exito: false, completado: true, mensaje: 'campos llenos, sin enviar' });
+    const deps = makeDeps({ motor });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      procesarTareaWeb(deps, makeJobConObjetivo(OBJETIVO_BLOQUEADO), { signal: controller.signal }),
+    ).rejects.toThrow(PermanentExecutionError);
+    expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
+    expect(deps.marcarJobPausado).not.toHaveBeenCalled();
+  });
+
+  it('sin cancelacion, el mismo caso SI crea el checkpoint (el guard no lo desactiva de mas)', async () => {
+    const motor = makeMotor({ exito: false, completado: true, mensaje: 'campos llenos, sin enviar' });
+    const deps = makeDeps({ motor });
+    const controller = new AbortController();
+    await expect(
+      procesarTareaWeb(deps, makeJobConObjetivo(OBJETIVO_BLOQUEADO), { signal: controller.signal }),
+    ).resolves.toBe('pausada');
+    expect(deps.aprobaciones.crear).toHaveBeenCalledTimes(1);
   });
 
   it('el marcador del modelo sigue teniendo prioridad: su detalle (mas rico) llega al checkpoint', async () => {

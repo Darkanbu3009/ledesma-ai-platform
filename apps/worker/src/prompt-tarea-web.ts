@@ -66,7 +66,11 @@ function verboAr(raiz: string, raizE: string = raiz): RegExp {
 }
 
 export const VERBOS_ACCION_BLOQUEADA: readonly VerboBloqueado[] = [
-  { verbo: 'enviar', idioma: 'es', patron: verboAr('envi') },
+  // El verbo canonico es "enviar", pero el patron cubre como lo escribe un usuario real: el prefijo
+  // re- ("reenvia el mensaje") y "mandar", sinonimo coloquial dominante en espanol ("manda el
+  // correo"). Sin esas dos formas, el caso exacto del job de produccion (enviar un correo) se
+  // perdia en silencio segun como estuviera redactado el objetivo: el falso negativo inaceptable.
+  { verbo: 'enviar', idioma: 'es', patron: verboAr('(?:re)?(?:envi|mand)') },
   // "publique" cambia c->qu.
   { verbo: 'publicar', idioma: 'es', patron: verboAr('public', 'publiqu') },
   { verbo: 'borrar', idioma: 'es', patron: verboAr('borr') },
@@ -91,7 +95,8 @@ export const VERBOS_ACCION_BLOQUEADA: readonly VerboBloqueado[] = [
     idioma: 'es',
     patron: /^(?=[\s\S]*\bconfirm\w*)(?=[\s\S]*\bpedidos?\b)/,
   },
-  { verbo: 'send', idioma: 'en', patron: /\bsend(?:s|ing)?\b|\bsent\b/ },
+  // Igual que "enviar": el prefijo re- ("resend the invite") es la misma accion.
+  { verbo: 'send', idioma: 'en', patron: /\b(?:re)?send(?:s|ing)?\b|\b(?:re)?sent\b/ },
   { verbo: 'publish', idioma: 'en', patron: /\bpublish(?:es|ed|ing)?\b/ },
   { verbo: 'delete', idioma: 'en', patron: /\bdelet(?:e|es|ed|ing)\b/ },
   { verbo: 'remove', idioma: 'en', patron: /\bremov(?:e|es|ed|ing)\b/ },

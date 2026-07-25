@@ -190,4 +190,32 @@ describe('barrerAprobacionesVencidas', () => {
     });
     await expect(barrerAprobacionesVencidas(deps, new Date())).resolves.toBeUndefined();
   });
+
+  it('cierra la sesion de una tarea CANCELADA desde la consola (marca reclamada por el repositorio)', async () => {
+    const deps = makeBarrido({
+      aprobaciones: makeAprobacionesRepo({
+        reclamarCanceladasParaCerrarSesion: vi.fn(async () => [
+          makeAprobacion({ estado: 'rechazada', sesionExternaId: 'ses-cancelada' }),
+        ]),
+      }),
+    });
+    await barrerAprobacionesVencidas(deps, new Date());
+    expect(deps.cerrarSesion).toHaveBeenCalledWith('ses-cancelada');
+    // No es una expiracion: ni intervencion nueva ni cierre de job (la cancelacion ya hizo ambos).
+    expect(deps.aprobaciones.registrarIntervencion).not.toHaveBeenCalled();
+    expect(deps.marcarJobFallido).not.toHaveBeenCalled();
+  });
+
+  it('un fallo al cerrar la sesion de una cancelada se loguea y no rompe el barrido', async () => {
+    const deps = makeBarrido({
+      aprobaciones: makeAprobacionesRepo({
+        reclamarCanceladasParaCerrarSesion: vi.fn(async () => [makeAprobacion({ estado: 'rechazada' })]),
+      }),
+      cerrarSesion: vi.fn(async () => {
+        throw new Error('sesion ya liberada');
+      }),
+    });
+    await expect(barrerAprobacionesVencidas(deps, new Date())).resolves.toBeUndefined();
+    expect(deps.logger.warn).toHaveBeenCalled();
+  });
 });

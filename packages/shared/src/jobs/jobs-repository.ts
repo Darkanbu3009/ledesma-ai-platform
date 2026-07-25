@@ -22,6 +22,42 @@ import { TAREA_WEB_JOB_KIND } from './tarea-web-payload.js';
  */
 export type Sql = postgres.Sql;
 
+/**
+ * Intervalo del LATIDO de un job en ejecucion (ms): mientras un job esta 'running', el worker que lo
+ * posee refresca updated_at cada este intervalo. Es la senal de vida que consume el reaper: un
+ * 'running' sin latido por mas de REAP_SIN_LATIDO_MULTIPLO intervalos esta detenido con certeza.
+ */
+export const HEARTBEAT_INTERVAL_MS = 30_000;
+
+/**
+ * Cuantos intervalos de latido perdidos declaran DETENIDO a un job 'running' (3 x 30s = 90s). Mas de
+ * uno para tolerar una escritura de latido fallida (best-effort) sin matar un job vivo.
+ */
+export const REAP_SIN_LATIDO_MULTIPLO = 3;
+
+/**
+ * Prefijo ESTABLE de last_error de un job terminado por su dueno desde la consola (no hay estado
+ * nuevo ni migracion: cancelar usa el 'failed' existente). La consola detecta este prefijo y muestra
+ * la etiqueta "Cancelada" en vez de "Fallida".
+ */
+export const CANCELADO_POR_USUARIO_PREFIX = 'CANCELADO_POR_USUARIO: ';
+
+/** Prefijo ESTABLE de last_error de un job detenido por el reaper de latido (etiqueta "Detenida"). */
+export const SISTEMA_DETUVO_TAREA_PREFIX = 'SISTEMA_DETUVO_TAREA: ';
+
+/** last_error exacto que escribe el reaper al recoger un job de sitio o tarea_web detenido. */
+export const SISTEMA_DETUVO_TAREA_ERROR =
+  `${SISTEMA_DETUVO_TAREA_PREFIX}la tarea dejo de responder y el sistema la termino automaticamente`;
+
+/** last_error exacto que escribe la cancelacion desde la consola. */
+export const CANCELADO_POR_USUARIO_ERROR = `${CANCELADO_POR_USUARIO_PREFIX}terminada por el usuario`;
+
+/** Desenlace de cancelarPorUsuario: cancelado (con el estado que tenia), conflicto o inexistente. */
+export type ResultadoCancelacion =
+  | { resultado: 'cancelado'; estadoPrevio: JobStatus }
+  | { resultado: 'conflicto' }
+  | { resultado: 'no_encontrado' };
+
 /** Fila cruda de la tabla `jobs` (snake_case). */
 interface JobRow {
   id: string;
@@ -418,9 +454,14 @@ export class JobsRepository {
    *
    * NO cuentan como fallo permanente para la barrera:
    *  - jobs 'pausado' (esperando aprobacion) ni 'completed': el WHERE exige status='failed';
-   *  - jobs cancelados por el usuario o detenidos por el sistema (last_error con prefijo
-   *    CANCELADO_POR_USUARIO / SISTEMA_DETUVO_TAREA, del PR de control de tareas detenidas): ahi el
-   *    usuario ya tomo una decision explicita y reintentar es legitimo.
+   *  - jobs CANCELADOS por el usuario (cancelarPorUsuario) o DETENIDOS por el reaper de latido: ahi
+   *    el usuario ya tomo una decision explicita (o ya sabe que la tarea murio) y reintentar es
+   *    legitimo. La deteccion usa los MISMOS prefijos que escriben esos dos caminos
+   *    (CANCELADO_POR_USUARIO_PREFIX / SISTEMA_DETUVO_TAREA_PREFIX), no literales propios.
+   *
+   * `starts_with` y no LIKE a proposito: los prefijos contienen guiones bajos, que en un patron LIKE
+   * son comodines de un caracter y volverian la EXENCION mas permisiva de lo escrito (y una exencion
+   * de mas es justo lo que dejaria pasar un relanzamiento). starts_with compara texto literal.
    * La ventana la define el llamador (VENTANA_ANTI_RELANZAMIENTO_MS en sitio-tools.ts).
    */
   async existeFalloPermanenteReciente(
@@ -440,8 +481,8 @@ export class JobsRepository {
         and (
           last_error is null
           or (
-            last_error not like 'CANCELADO_POR_USUARIO:%'
-            and last_error not like 'SISTEMA_DETUVO_TAREA:%'
+            not starts_with(last_error, ${CANCELADO_POR_USUARIO_PREFIX})
+            and not starts_with(last_error, ${SISTEMA_DETUVO_TAREA_PREFIX})
           )
         )
       limit 1
@@ -450,67 +491,133 @@ export class JobsRepository {
   }
 
   /**
-   * REAPER de jobs HUERFANOS: recupera los jobs 'running' que quedaron ATASCADOS porque el worker murio
-   * entre el claim y el cierre (crash / OOM / kill -9, o el watchdog forzando exit(0) con el drain
-   * colgado). Cierra H3 y H4 del informe 06: sin esto, un 'running' nunca sale de ese estado (el claim
-   * solo mira 'pending' y la retencion solo borra terminales), quedando invisible para siempre.
-   *
-   * QUE toca (y que JAMAS toca): SOLO jobs 'running' cuyo `started_at` sea mas viejo que un MARGEN AMPLIO,
-   * calibrado por TIPO de job para SUPERAR SIEMPRE el maximo wall-clock legitimo:
-   *   - job SIMPLE: una sola corrida acotada a runTimeoutMs -> margen `simpleThresholdMs` (varias veces
-   *     runTimeoutMs).
-   *   - job de RECETA (payload.kind = 'recipe'): hasta MAX_RECIPE_STEPS pasos, cada uno con su propio
-   *     deadline runTimeoutMs -> margen `recipeThresholdMs` (> MAX_RECIPE_STEPS * runTimeoutMs).
-   *   - job de TAREA WEB (payload.kind = 'tarea_web'): una corrida acotada a su PROPIO deadline
-   *     (TAREA_WEB_TIMEOUT_SECONDS) -> margen `tareaWebThresholdMs` (varias veces ese deadline).
-   * El discriminador se lee del propio payload (`payload->>'kind'`, el mismo criterio que listByOwner),
-   * sin traer el payload a memoria. Un job dentro de su margen (posiblemente vivo) NUNCA se toca: un
-   * margen mal calibrado mataria jobs vivos, por eso es holgado.
-   *
-   * COMO cierra el job recuperado (respeta attempts/MAX_ATTEMPTS, que el claim ya incremento):
-   *   - attempts < maxAttempts -> vuelve a 'pending' (scheduled_for=null: elegible ya) para re-ejecutarse.
-   *   - attempts >= maxAttempts -> 'failed' con finished_at, sin re-ejecutar (ya agoto su presupuesto).
-   * En ambos casos deja constancia en last_error de que fue una RECUPERACION de estado huerfano.
-   *
-   * ATOMICIDAD / CONCURRENCIA: es UN solo UPDATE ... WHERE status='running'. Postgres toma el lock de
-   * fila; dos reapers concurrentes (o un reaper y otro worker) no la recuperan dos veces: el segundo ve
-   * la fila con status ya cambiado y su WHERE la excluye. No re-ejecuta el motor ni toca el claim.
-   * Devuelve las filas recuperadas (id + estado destino + attempts) para que el worker lo registre.
+   * LATIDO de un job en ejecucion: refresca updated_at SOLO si el job sigue 'running' (un 'pausado'
+   * esperando aprobacion NO late a proposito) y devuelve el status ACTUAL del job. Es la doble senal
+   * del worker: (a) mantiene el job fuera del reaper de latido mientras corre, y (b) relee el estado
+   * en cada latido, asi una cancelacion desde la consola ('failed' por cancelarPorUsuario) se detecta
+   * en el siguiente intervalo y el ejecutor aborta sin escribir encima del estado nuevo.
    */
-  async reapOrphanedJobs(params: {
-    simpleThresholdMs: number;
-    recipeThresholdMs: number;
-    tareaWebThresholdMs: number;
-    maxAttempts: number;
-  }): Promise<ReapedJob[]> {
-    const { simpleThresholdMs, recipeThresholdMs, tareaWebThresholdMs, maxAttempts } = params;
-    const pendingMessage =
-      'recuperado de estado huerfano: el worker murio entre el claim y el cierre; devuelto a pending para reintento';
-    const failedMessage =
-      'recuperado de estado huerfano: el worker murio entre el claim y el cierre; intentos agotados, marcado failed';
-    const rows = await this.sql<Array<{ id: string; status: string; attempts: number }>>`
-      update jobs set
-        status = case when attempts >= ${maxAttempts} then 'failed' else 'pending' end,
-        last_error = case when attempts >= ${maxAttempts} then ${failedMessage} else ${pendingMessage} end,
-        started_at = null,
-        finished_at = case when attempts >= ${maxAttempts} then now() else null end,
-        scheduled_for = null,
-        updated_at = now()
-      where status = 'running'
-        and started_at is not null
-        and started_at < now() - case
-          when payload->>'kind' = ${RECIPE_JOB_KIND}
-            then make_interval(secs => ${recipeThresholdMs / 1000})
-          when payload->>'kind' = ${TAREA_WEB_JOB_KIND}
-            then make_interval(secs => ${tareaWebThresholdMs / 1000})
-          else make_interval(secs => ${simpleThresholdMs / 1000})
-        end
-      returning id, status, attempts
+  async latirJob(id: string): Promise<JobStatus | null> {
+    const updated = await this.sql<Array<{ id: string }>>`
+      update jobs set updated_at = now()
+      where id = ${id} and status = 'running'
+      returning id
     `;
-    return rows.map((row) => ({
-      id: row.id,
-      status: row.status as JobStatus,
-      attempts: Number(row.attempts ?? 0),
-    }));
+    if (updated.length > 0) return 'running';
+    const rows = await this.sql<Array<{ status: string }>>`
+      select status from jobs where id = ${id}
+    `;
+    const row = rows[0];
+    return row ? (row.status as JobStatus) : null;
+  }
+
+  /**
+   * CANCELACION por el DUENO desde la consola: cierra un job propio en 'pending' | 'running' |
+   * 'pausado' como 'failed' con el last_error prefijado CANCELADO_POR_USUARIO (sin estado nuevo ni
+   * migracion; la consola muestra "Cancelada" por el prefijo). ATOMICO: el CTE lockea la fila solo si
+   * sigue cancelable y el UPDATE aplica sobre ese lock, asi un doble click o una carrera con el
+   * cierre del worker afectan 0 filas -> 'conflicto' (los cierres del worker tienen su propio CAS
+   * sobre 'running' y tampoco pisan este 'failed'). Acotado por owner_id (el sub del token, jamas el
+   * cliente): un job ajeno responde 'no_encontrado', nunca se toca ni se revela.
+   * Devuelve el estado previo para que la ruta cierre la aprobacion asociada si estaba 'pausado'.
+   */
+  async cancelarPorUsuario(id: string, ownerId: string): Promise<ResultadoCancelacion> {
+    const rows = await this.sql<Array<{ estado_previo: string }>>`
+      with previo as (
+        select id, status from jobs
+        where id = ${id} and owner_id = ${ownerId}
+          and status in ('pending', 'running', 'pausado')
+        for update
+      )
+      update jobs set
+        status = 'failed',
+        last_error = ${CANCELADO_POR_USUARIO_ERROR},
+        finished_at = now(),
+        updated_at = now()
+      from previo
+      where jobs.id = previo.id
+      returning previo.status as estado_previo
+    `;
+    const row = rows[0];
+    if (row) return { resultado: 'cancelado', estadoPrevio: row.estado_previo as JobStatus };
+    const existe = await this.sql<Array<{ id: string }>>`
+      select id from jobs where id = ${id} and owner_id = ${ownerId}
+    `;
+    return existe.length > 0 ? { resultado: 'conflicto' } : { resultado: 'no_encontrado' };
+  }
+
+  /**
+   * REAPER POR LATIDO: recoge los jobs 'running' cuyo updated_at es mas viejo que `staleMs`
+   * (3 x HEARTBEAT_INTERVAL_MS). Con el latido del worker (latirJob cada 30s), un 'running' sin
+   * latido por 90s esta DETENIDO con certeza (worker muerto o colgado sin event loop), sea cual sea
+   * su tipo: este umbral REEMPLAZA a los margenes por started_at (que esperaban multiplos del
+   * deadline de cada tipo). Un job 'pausado' (checkpoint de aprobacion, que puede esperar minutos
+   * sin latir) queda FUERA: el WHERE solo mira 'running'.
+   *
+   * RECLAMO en dos pasos, seguro con N workers (D2): (1) SELECT de candidatos leyendo status y
+   * updated_at (::text para conservar los microsegundos que Date perderia), (2) UPDATE atomico POR
+   * FILA cuyo WHERE verifica que status y updated_at NO cambiaron desde la lectura. Si el job late o
+   * lo cierra otro actor entre medio, el CAS afecta 0 filas y no se toca.
+   *
+   * DESTINO por tipo:
+   *   - sitio / tarea_web: SIEMPRE 'failed' con SISTEMA_DETUVO_TAREA_ERROR. JAMAS a 'pending':
+   *     reencolar re-ejecutaria acciones sobre la cuenta real del usuario (D3).
+   *   - resto (simple / receta): comportamiento de siempre -> 'pending' si attempts < maxAttempts
+   *     (elegible ya), 'failed' definitivo si los agoto.
+   */
+  async reapOrphanedJobs(params: { staleMs: number; maxAttempts: number }): Promise<ReapedJob[]> {
+    const { staleMs, maxAttempts } = params;
+    const pendingMessage =
+      'recuperado de estado detenido: el job dejo de latir; devuelto a pending para reintento';
+    const failedMessage =
+      'recuperado de estado detenido: el job dejo de latir; intentos agotados, marcado failed';
+    const candidatos = await this.sql<
+      Array<{ id: string; updated_at_txt: string; payload_kind: string | null; attempts: number }>
+    >`
+      select id, updated_at::text as updated_at_txt, payload->>'kind' as payload_kind, attempts
+      from jobs
+      where status = 'running'
+        and updated_at < now() - make_interval(secs => ${staleMs / 1000})
+    `;
+    const reaped: ReapedJob[] = [];
+    for (const candidato of candidatos) {
+      const attempts = Number(candidato.attempts ?? 0);
+      const kind = candidato.payload_kind ?? '';
+      const nuncaReencolar =
+        kind === TAREA_WEB_JOB_KIND || (SITIO_JOB_KINDS as readonly string[]).includes(kind);
+      const aFailed = nuncaReencolar || attempts >= maxAttempts;
+      const lastError = nuncaReencolar
+        ? SISTEMA_DETUVO_TAREA_ERROR
+        : aFailed
+          ? failedMessage
+          : pendingMessage;
+      const rows = aFailed
+        ? await this.sql<Array<{ id: string; status: string; attempts: number }>>`
+            update jobs set
+              status = 'failed',
+              last_error = ${lastError},
+              finished_at = now(),
+              updated_at = now()
+            where id = ${candidato.id} and status = 'running'
+              and updated_at = ${candidato.updated_at_txt}::timestamptz
+            returning id, status, attempts
+          `
+        : await this.sql<Array<{ id: string; status: string; attempts: number }>>`
+            update jobs set
+              status = 'pending',
+              last_error = ${lastError},
+              started_at = null,
+              scheduled_for = null,
+              updated_at = now()
+            where id = ${candidato.id} and status = 'running'
+              and updated_at = ${candidato.updated_at_txt}::timestamptz
+            returning id, status, attempts
+          `;
+      const row = rows[0];
+      if (row) {
+        reaped.push({ id: row.id, status: row.status as JobStatus, attempts: Number(row.attempts ?? 0) });
+      }
+    }
+    return reaped;
   }
 }

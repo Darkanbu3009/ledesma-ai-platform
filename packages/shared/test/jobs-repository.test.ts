@@ -1,5 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { JobsRepository, type Sql } from '../src/jobs/jobs-repository.js';
+import {
+  CANCELADO_POR_USUARIO_ERROR,
+  CANCELADO_POR_USUARIO_PREFIX,
+  JobsRepository,
+  SISTEMA_DETUVO_TAREA_ERROR,
+  SISTEMA_DETUVO_TAREA_PREFIX,
+  type Sql,
+} from '../src/jobs/jobs-repository.js';
 
 function makeRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -38,6 +45,32 @@ function sqlValues(sql: Sql): unknown[] {
   const calls = (sql as unknown as { mock: { calls: Array<[readonly string[], ...unknown[]]> } }).mock.calls;
   const [, ...values] = (calls[0] ?? [[]]) as [readonly string[], ...unknown[]];
   return values;
+}
+
+/** Mock del tagged template `sql` que devuelve un resultado DISTINTO por llamada, en orden. */
+function makeSqlSequence(results: unknown[][]): Sql {
+  let llamada = 0;
+  const fn = vi.fn(async () => results[llamada++] ?? []) as unknown as Sql;
+  (fn as unknown as { json: (v: unknown) => unknown }).json = (v: unknown) => v;
+  return fn;
+}
+
+/** Texto del template SQL de la llamada `n` al mock, con <param> en cada hueco. */
+function sqlTextOf(sql: Sql, n: number): string {
+  const calls = (sql as unknown as { mock: { calls: Array<[readonly string[], ...unknown[]]> } }).mock.calls;
+  return (calls[n]?.[0] ?? []).join('<param>');
+}
+
+/** Valores (parametros) pasados al template SQL de la llamada `n`. */
+function sqlValuesOf(sql: Sql, n: number): unknown[] {
+  const calls = (sql as unknown as { mock: { calls: Array<[readonly string[], ...unknown[]]> } }).mock.calls;
+  const [, ...values] = (calls[n] ?? [[]]) as [readonly string[], ...unknown[]];
+  return values;
+}
+
+/** Cantidad de llamadas al mock sql. */
+function llamadas(sql: Sql): number {
+  return (sql as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
 }
 
 describe('JobsRepository', () => {
@@ -264,76 +297,139 @@ describe('JobsRepository', () => {
     });
   });
 
-  describe('reapOrphanedJobs (recuperacion de jobs huerfanos)', () => {
-    it('SQL: solo toca running con started_at VIEJO, umbral POR TIPO (payload->>kind), con returning explicito', async () => {
+  describe('reapOrphanedJobs (reaper por latido)', () => {
+    const STALE_MS = 90_000;
+
+    it('SQL: los candidatos son SOLO running cuyo updated_at (el latido) es mas viejo que el umbral', async () => {
       const sql = makeSqlReturning([]);
-      await new JobsRepository(sql).reapOrphanedJobs({
-        simpleThresholdMs: 1_800_000,
-        recipeThresholdMs: 45_000_000,
-        tareaWebThresholdMs: 4_500_000,
-        maxAttempts: 3,
-      });
+      const reaped = await new JobsRepository(sql).reapOrphanedJobs({ staleMs: STALE_MS, maxAttempts: 3 });
       const texto = sqlText(sql).toLowerCase();
-      expect(texto).toContain('update jobs set');
       expect(texto).toContain("where status = 'running'");
-      expect(texto).toContain('started_at is not null');
-      // Solo huerfanos: started_at mas viejo que now() menos el margen.
-      expect(texto).toContain('started_at < now() -');
-      // Umbral distinto para receta vs simple, discriminado por el payload sin traerlo entero.
-      expect(texto).toContain("payload->>'kind'");
+      expect(texto).toContain('updated_at < now() -');
       expect(texto).toContain('make_interval');
-      expect(texto).toContain('returning id');
-      expect(texto).not.toContain('returning *');
-      // Umbrales viajan en SEGUNDOS (make_interval secs); y maxAttempts para la decision pending/failed.
-      const values = sqlValues(sql);
-      expect(values).toContain(45_000); // recipe: 45_000_000 ms / 1000
-      expect(values).toContain(1_800); // simple: 1_800_000 ms / 1000
-      expect(values).toContain(3); // maxAttempts
-    });
-
-    it('SQL: decide pending vs failed por attempts, limpia started_at y solo el failed pone finished_at', async () => {
-      const sql = makeSqlReturning([]);
-      await new JobsRepository(sql).reapOrphanedJobs({
-        simpleThresholdMs: 1000,
-        recipeThresholdMs: 2000,
-        tareaWebThresholdMs: 3000,
-        maxAttempts: 3,
-      });
-      const texto = sqlText(sql).toLowerCase();
-      expect(texto).toContain('attempts >= ');
-      expect(texto).toContain("then 'failed'");
-      expect(texto).toContain("else 'pending'");
-      expect(texto).toContain('started_at = null');
-      expect(texto).toContain('finished_at = case when attempts >=');
-      // Deja constancia de la recuperacion en last_error.
-      expect(sqlValues(sql).some((v) => typeof v === 'string' && v.includes('huerfano'))).toBe(true);
-    });
-
-    it('mapea las filas recuperadas a { id, status, attempts }', async () => {
-      const sql = makeSqlReturning([
-        { id: 'huerfano-a-pending', status: 'pending', attempts: 1 },
-        { id: 'huerfano-a-failed', status: 'failed', attempts: 3 },
-      ]);
-      const reaped = await new JobsRepository(sql).reapOrphanedJobs({
-        simpleThresholdMs: 1000,
-        recipeThresholdMs: 2000,
-        tareaWebThresholdMs: 3000,
-        maxAttempts: 3,
-      });
-      expect(reaped).toEqual([
-        { id: 'huerfano-a-pending', status: 'pending', attempts: 1 },
-        { id: 'huerfano-a-failed', status: 'failed', attempts: 3 },
-      ]);
-    });
-
-    it('sin huerfanos (0 filas afectadas) -> devuelve []', async () => {
-      const reaped = await new JobsRepository(makeSqlReturning([])).reapOrphanedJobs({
-        simpleThresholdMs: 1000,
-        recipeThresholdMs: 2000,
-        tareaWebThresholdMs: 3000,
-        maxAttempts: 3,
-      });
+      expect(texto).not.toContain('pausado');
+      // El umbral viaja en SEGUNDOS (make_interval secs).
+      expect(sqlValues(sql)).toContain(90);
       expect(reaped).toEqual([]);
+    });
+
+    it('un tarea_web detenido va DIRECTO a failed con SISTEMA_DETUVO_TAREA, con CAS de status y updated_at (D2/D3)', async () => {
+      const sql = makeSqlSequence([
+        [{ id: 'job-web', updated_at_txt: '2026-07-24 22:54:00.123456+00', payload_kind: 'tarea_web', attempts: 1 }],
+        [{ id: 'job-web', status: 'failed', attempts: 1 }],
+      ]);
+      const reaped = await new JobsRepository(sql).reapOrphanedJobs({ staleMs: STALE_MS, maxAttempts: 3 });
+      expect(reaped).toEqual([{ id: 'job-web', status: 'failed', attempts: 1 }]);
+      const texto = sqlTextOf(sql, 1).toLowerCase();
+      expect(texto).toContain("status = 'failed'");
+      // CAS: el UPDATE verifica que status y updated_at no cambiaron desde la lectura.
+      expect(texto).toContain("status = 'running'");
+      expect(texto).toContain('updated_at = ');
+      expect(texto).toContain('::timestamptz');
+      expect(texto).not.toContain("'pending'");
+      const values = sqlValuesOf(sql, 1);
+      expect(values.some((v) => typeof v === 'string' && v.startsWith('SISTEMA_DETUVO_TAREA: '))).toBe(true);
+      expect(values).toContain('2026-07-24 22:54:00.123456+00');
+    });
+
+    it('un job de sitio detenido tampoco se reencola: failed directo aunque le queden intentos', async () => {
+      const sql = makeSqlSequence([
+        [{ id: 'job-sitio', updated_at_txt: '2026-07-24 22:54:00+00', payload_kind: 'conectar_sitio', attempts: 1 }],
+        [{ id: 'job-sitio', status: 'failed', attempts: 1 }],
+      ]);
+      const reaped = await new JobsRepository(sql).reapOrphanedJobs({ staleMs: STALE_MS, maxAttempts: 3 });
+      expect(reaped).toEqual([{ id: 'job-sitio', status: 'failed', attempts: 1 }]);
+      expect(sqlTextOf(sql, 1)).toContain("status = 'failed'");
+    });
+
+    it('un job simple detenido conserva el comportamiento de siempre: pending si le quedan intentos, failed si no', async () => {
+      const sql = makeSqlSequence([
+        [
+          { id: 'job-a-pending', updated_at_txt: '2026-07-24 22:54:00+00', payload_kind: null, attempts: 1 },
+          { id: 'job-a-failed', updated_at_txt: '2026-07-24 22:55:00+00', payload_kind: null, attempts: 3 },
+        ],
+        [{ id: 'job-a-pending', status: 'pending', attempts: 1 }],
+        [{ id: 'job-a-failed', status: 'failed', attempts: 3 }],
+      ]);
+      const reaped = await new JobsRepository(sql).reapOrphanedJobs({ staleMs: STALE_MS, maxAttempts: 3 });
+      expect(reaped).toEqual([
+        { id: 'job-a-pending', status: 'pending', attempts: 1 },
+        { id: 'job-a-failed', status: 'failed', attempts: 3 },
+      ]);
+      const pendingSql = sqlTextOf(sql, 1).toLowerCase();
+      expect(pendingSql).toContain("status = 'pending'");
+      expect(pendingSql).toContain('started_at = null');
+      const failedSql = sqlTextOf(sql, 2).toLowerCase();
+      expect(failedSql).toContain("status = 'failed'");
+      expect(failedSql).toContain('finished_at = now()');
+    });
+
+    it('si el CAS afecta 0 filas (el job latio o lo cerro otro actor entre medio), NO se reporta recogido', async () => {
+      const sql = makeSqlSequence([
+        [{ id: 'job-vivo', updated_at_txt: '2026-07-24 22:54:00+00', payload_kind: 'tarea_web', attempts: 1 }],
+        [],
+      ]);
+      const reaped = await new JobsRepository(sql).reapOrphanedJobs({ staleMs: STALE_MS, maxAttempts: 3 });
+      expect(reaped).toEqual([]);
+    });
+  });
+
+  describe('latirJob (latido del job en ejecucion)', () => {
+    it("refresca updated_at SOLO sobre 'running' y devuelve 'running' si el latido aplico", async () => {
+      const sql = makeSqlSequence([[{ id: 'job-1' }]]);
+      const status = await new JobsRepository(sql).latirJob('job-1');
+      expect(status).toBe('running');
+      const texto = sqlTextOf(sql, 0).toLowerCase();
+      expect(texto).toContain('update jobs set updated_at = now()');
+      expect(texto).toContain("status = 'running'");
+      // Con el latido aplicado no hace falta releer el estado.
+      expect(llamadas(sql)).toBe(1);
+    });
+
+    it('si el job ya no esta running, relee y devuelve el estado actual (cancelacion cooperativa)', async () => {
+      const sql = makeSqlSequence([[], [{ status: 'failed' }]]);
+      const status = await new JobsRepository(sql).latirJob('job-1');
+      expect(status).toBe('failed');
+    });
+
+    it('un job inexistente devuelve null', async () => {
+      const sql = makeSqlSequence([[], []]);
+      const status = await new JobsRepository(sql).latirJob('job-x');
+      expect(status).toBeNull();
+    });
+  });
+
+  describe('cancelarPorUsuario (terminar desde la consola)', () => {
+    it("cancela un job propio cancelable: failed + CANCELADO_POR_USUARIO, acotado por owner y estados", async () => {
+      const sql = makeSqlSequence([[{ estado_previo: 'running' }]]);
+      const resultado = await new JobsRepository(sql).cancelarPorUsuario('job-1', 'user-1');
+      expect(resultado).toEqual({ resultado: 'cancelado', estadoPrevio: 'running' });
+      const texto = sqlTextOf(sql, 0).toLowerCase();
+      expect(texto).toContain("owner_id = ");
+      expect(texto).toContain("status in ('pending', 'running', 'pausado')");
+      expect(texto).toContain("status = 'failed'");
+      expect(texto).toContain('finished_at = now()');
+      const values = sqlValuesOf(sql, 0);
+      expect(values).toContain('user-1');
+      expect(values.some((v) => typeof v === 'string' && v.startsWith('CANCELADO_POR_USUARIO: '))).toBe(true);
+    });
+
+    it('devuelve el estado previo pausado (la ruta cierra la aprobacion asociada con el)', async () => {
+      const sql = makeSqlSequence([[{ estado_previo: 'pausado' }]]);
+      const resultado = await new JobsRepository(sql).cancelarPorUsuario('job-1', 'user-1');
+      expect(resultado).toEqual({ resultado: 'cancelado', estadoPrevio: 'pausado' });
+    });
+
+    it('un job ya terminado responde conflicto, sin efectos', async () => {
+      const sql = makeSqlSequence([[], [{ id: 'job-1' }]]);
+      const resultado = await new JobsRepository(sql).cancelarPorUsuario('job-1', 'user-1');
+      expect(resultado).toEqual({ resultado: 'conflicto' });
+    });
+
+    it('un job ajeno o inexistente responde no_encontrado (jamas se toca ni se revela)', async () => {
+      const sql = makeSqlSequence([[], []]);
+      const resultado = await new JobsRepository(sql).cancelarPorUsuario('job-1', 'user-ajeno');
+      expect(resultado).toEqual({ resultado: 'no_encontrado' });
     });
   });
 
@@ -513,7 +609,14 @@ describe('JobsRepository: existeFalloPermanenteReciente (barrera anti relanzamie
     expect(texto).toContain("payload->>'kind' = <param>");
     expect(texto).toContain("payload->>'connectionId' = <param>");
     expect(texto).toContain('finished_at > now() - make_interval');
-    expect(sqlValues(sql)).toEqual(['user-1', 'tarea_web', 'con-1', 120]);
+    expect(sqlValues(sql)).toEqual([
+      'user-1',
+      'tarea_web',
+      'con-1',
+      120,
+      CANCELADO_POR_USUARIO_PREFIX,
+      SISTEMA_DETUVO_TAREA_PREFIX,
+    ]);
   });
 
   it('false sin filas (sin fallo reciente): la tarea se puede encolar', async () => {
@@ -523,16 +626,25 @@ describe('JobsRepository: existeFalloPermanenteReciente (barrera anti relanzamie
   });
 
   it('EXCLUYE cancelaciones del usuario y detenciones del sistema: el usuario ya decidio (test 5)', async () => {
-    // La exencion vive en el WHERE (not like sobre los prefijos del PR de control de tareas
-    // detenidas): un job cancelado o detenido NO activa la barrera aunque este failed y reciente.
+    // La exencion compara contra los MISMOS prefijos que escriben cancelarPorUsuario y el reaper de
+    // latido: un job cancelado o detenido NO activa la barrera aunque este failed y reciente.
     const sql = makeSqlReturning([]);
     await new JobsRepository(sql).existeFalloPermanenteReciente('user-1', 'con-1', 120_000);
     const texto = sqlText(sql);
-    expect(texto).toContain("last_error not like 'CANCELADO_POR_USUARIO:%'");
-    expect(texto).toContain("last_error not like 'SISTEMA_DETUVO_TAREA:%'");
+    // starts_with y no LIKE: los prefijos traen guiones bajos, comodines en LIKE, que ampliarian la
+    // exencion mas alla de lo escrito (y una exencion de mas deja pasar un relanzamiento).
+    expect(texto).toContain('not starts_with(last_error, <param>)');
+    expect(texto).not.toContain('like');
     // Un last_error null (fila vieja sin detalle) SI cuenta como fallo permanente: ante la duda,
     // la barrera bloquea (el costo de un falso positivo es esperar la ventana, no perder datos).
     expect(texto).toContain('last_error is null');
+  });
+
+  it('los prefijos de la exencion son los MISMOS que escriben cancelacion y reaper (no literales)', () => {
+    // Si alguien cambia el texto de un prefijo, la exencion lo sigue: son la misma constante que usan
+    // CANCELADO_POR_USUARIO_ERROR y SISTEMA_DETUVO_TAREA_ERROR, los valores que llegan a last_error.
+    expect(CANCELADO_POR_USUARIO_ERROR.startsWith(CANCELADO_POR_USUARIO_PREFIX)).toBe(true);
+    expect(SISTEMA_DETUVO_TAREA_ERROR.startsWith(SISTEMA_DETUVO_TAREA_PREFIX)).toBe(true);
   });
 });
 
@@ -616,7 +728,7 @@ describe('JobsRepository (7.1e: checkpoints de aprobacion, estado pausado)', () 
     });
   });
 
-  describe('claim y reaper NO tocan un job pausado', () => {
+  describe('claim, reaper y latido NO tocan un job pausado', () => {
     it("claimNextJob solo toma 'pending' y reapOrphanedJobs solo recupera 'running'", async () => {
       const sqlClaim = makeSqlReturning([]);
       await new JobsRepository(sqlClaim).claimNextJob();
@@ -624,14 +736,22 @@ describe('JobsRepository (7.1e: checkpoints de aprobacion, estado pausado)', () 
       expect(sqlText(sqlClaim)).not.toContain('pausado');
 
       const sqlReap = makeSqlReturning([]);
-      await new JobsRepository(sqlReap).reapOrphanedJobs({
-        simpleThresholdMs: 1000,
-        recipeThresholdMs: 2000,
-        tareaWebThresholdMs: 3000,
-        maxAttempts: 3,
-      });
+      await new JobsRepository(sqlReap).reapOrphanedJobs({ staleMs: 90_000, maxAttempts: 3 });
       expect(sqlText(sqlReap)).toContain("where status = 'running'");
       expect(sqlText(sqlReap)).not.toContain('pausado');
+    });
+
+    it('un pausado sin latir 20 minutos NO es candidato del reaper (el WHERE lo excluye) y su latido no escribe', async () => {
+      // Candidatos del reaper: el WHERE exige status='running'; un 'pausado' viejo jamas entra.
+      const sqlReap = makeSqlReturning([]);
+      await new JobsRepository(sqlReap).reapOrphanedJobs({ staleMs: 90_000, maxAttempts: 3 });
+      expect(sqlText(sqlReap)).toContain("where status = 'running'");
+
+      // latirJob sobre un job pausado: el UPDATE (CAS running) afecta 0 filas y se relee el estado.
+      const sqlLatido = makeSqlSequence([[], [{ status: 'pausado' }]]);
+      const status = await new JobsRepository(sqlLatido).latirJob('job-pausado');
+      expect(status).toBe('pausado');
+      expect(sqlTextOf(sqlLatido, 0)).toContain("status = 'running'");
     });
   });
 });

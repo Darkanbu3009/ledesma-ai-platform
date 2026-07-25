@@ -62,6 +62,17 @@ import type { Logger } from './logger.js';
  *  'pausado' esperando la decision humana; NO se marca completado). */
 export type ResultadoTareaWeb = 'completada' | 'pausada';
 
+/**
+ * CONTROL EXTERNO de la corrida (cancelacion cooperativa, CAMBIO 3 + D4): lo cablea execution.ts.
+ * `signal` aborta el motor a mitad de tarea cuando el job dejo de ser 'running' (cancelado desde la
+ * consola); `alCambiarSesion` publica la sesion de navegador ACTIVA (null al cerrarla) para que el
+ * corte duro externo pueda cerrarla si el abort no detiene al motor a mitad de un paso.
+ */
+export interface ControlDeTareaWeb {
+  signal?: AbortSignal | undefined;
+  alCambiarSesion?: ((sesionExternaId: string | null) => void) | undefined;
+}
+
 /** Sesion de navegador abierta para una tarea: referencias minimas (nunca credenciales). */
 export interface SesionDeTareaAbierta {
   sesionExternaId: string;
@@ -460,6 +471,7 @@ async function pausarEnCheckpoint(
 export async function procesarTareaWeb(
   deps: TareaWebDeps | undefined,
   job: Job,
+  control?: ControlDeTareaWeb,
 ): Promise<ResultadoTareaWeb> {
   if (!deps) {
     throw new PermanentExecutionError(
@@ -510,7 +522,7 @@ export async function procesarTareaWeb(
   //      y sigue el camino de siempre.
   const aprobacion = await deps.aprobaciones.obtenerVigentePorJob(job.id, job.ownerId);
   if (aprobacion !== null && aprobacion.estado !== 'expirada') {
-    return reanudarTrasDecision(deps, job, sitio, objetivo, credential, contexto, aprobacion);
+    return reanudarTrasDecision(deps, job, sitio, objetivo, credential, contexto, aprobacion, control);
   }
 
   // 2.7. DETECCION DETERMINISTA (D2a): si el objetivo contiene un verbo de accion bloqueada, el job
@@ -535,6 +547,7 @@ export async function procesarTareaWeb(
     proxyRef: sitio.proxyRef,
     proxyCountry: sitio.proxyCountry,
   });
+  control?.alCambiarSesion?.(sesion.sesionExternaId);
   deps.logger.info('tarea web: sesion abierta con el pais pineado', {
     jobId: job.id,
     connectionId: sitio.id,
@@ -584,6 +597,7 @@ export async function procesarTareaWeb(
       sesion.sesionExternaId,
       credential.apiKey,
       { objetivo, systemPrompt: construirSystemPromptTareaWeb() },
+      control?.signal,
       verboBloqueado,
     );
 
@@ -637,6 +651,9 @@ export async function procesarTareaWeb(
     if (!mantenerSesionViva) {
       await cerrarSesionBestEffort(deps, sesion.sesionExternaId);
     }
+    // La sesion dejo de ser responsabilidad de esta corrida: cerrada aqui, o (pausada) del
+    // checkpoint y su barrido. El corte duro externo ya no debe tocarla.
+    control?.alCambiarSesion?.(null);
   }
 }
 
@@ -706,6 +723,7 @@ async function ejecutarMotorConRegistro(
   sesionExternaId: string,
   apiKey: string,
   prompt: { objetivo: string; systemPrompt: string },
+  senalExterna?: AbortSignal,
   // D2(b): verbo de accion bloqueada detectado en el objetivo (D2a), o null. Solo la corrida
   // INICIAL lo pasa; la reanudacion no (el humano ya decidio sobre este objetivo).
   verboBloqueado: string | null = null,
@@ -713,7 +731,7 @@ async function ejecutarMotorConRegistro(
   const iniciadaEn = new Date();
   let resultado: ResultadoMotor;
   try {
-    resultado = await ejecutarMotor(deps, sesionExternaId, apiKey, prompt);
+    resultado = await ejecutarMotor(deps, sesionExternaId, apiKey, prompt, senalExterna);
   } catch (error) {
     await guardarTrayectoriaBestEffort(deps, job, sitio, objetivo, 'fallida', iniciadaEn, {
       acciones: [],
@@ -728,7 +746,18 @@ async function ejecutarMotorConRegistro(
   // 'requiere_aprobacion' para que el flujo de siempre cree el checkpoint con el ultimo screenshot
   // disponible y PAUSE el job (nunca failed). Un falso positivo es una aprobacion de mas (D3);
   // esta via JAMAS ejecuta la accion: solo crea el checkpoint.
-  if (verboBloqueado !== null && resultado.completado && desenlace.tipo === 'ok') {
+  //
+  // EXCEPCION: si la senal externa ya aborto, el job dejo de ser 'running' porque su dueno lo
+  // TERMINO desde la consola (cancelacion cooperativa). Ahi no hay duda que resolver a favor del
+  // checkpoint: el usuario ya decidio, pedirle que apruebe lo que acaba de cancelar seria absurdo y
+  // la fila quedaria pendiente hasta que el barrido de vencidas la expire (el CAS de marcarJobPausado
+  // no puede pausar un job ya 'failed'). Mismo criterio que la exencion de la barrera del BUG A.
+  if (
+    verboBloqueado !== null &&
+    resultado.completado &&
+    desenlace.tipo === 'ok' &&
+    senalExterna?.aborted !== true
+  ) {
     deps.logger.warn(
       'tarea web: el agente termino con DONE sin checkpoint sobre un objetivo con accion bloqueada; se crea el checkpoint determinista (D2b)',
       { jobId: job.id, connectionId: sitio.id, verbo: verboBloqueado },
@@ -748,15 +777,23 @@ async function ejecutarMotorConRegistro(
   return { resultado, desenlace };
 }
 
-/** Corre el motor con el deadline de pared del worker (mismo patron AbortController de 7.1d). */
+/**
+ * Corre el motor con el deadline de pared del worker (mismo patron AbortController de 7.1d). La
+ * senal EXTERNA (cancelacion cooperativa) se encadena al mismo controller: cualquiera de las dos
+ * (deadline o cancelacion) aborta la corrida del motor a mitad de tarea.
+ */
 async function ejecutarMotor(
   deps: TareaWebDeps,
   sesionExternaId: string,
   apiKey: string,
   prompt: { objetivo: string; systemPrompt: string },
+  senalExterna?: AbortSignal,
 ): Promise<ResultadoMotor> {
   const controller = new AbortController();
   let expiroDeadline = false;
+  const alAbortarExterno = (): void => controller.abort();
+  if (senalExterna?.aborted) controller.abort();
+  else senalExterna?.addEventListener('abort', alAbortarExterno, { once: true });
   const timer = setTimeout(() => {
     expiroDeadline = true;
     controller.abort();
@@ -786,6 +823,7 @@ async function ejecutarMotor(
     throw new PermanentExecutionError(`la navegacion fallo: ${describir(error)}`);
   } finally {
     clearTimeout(timer);
+    senalExterna?.removeEventListener('abort', alAbortarExterno);
   }
 }
 
@@ -809,6 +847,7 @@ async function reanudarTrasDecision(
   credential: DecryptedProviderCredential,
   contexto: string,
   aprobacion: AprobacionWeb,
+  control?: ControlDeTareaWeb,
 ): Promise<ResultadoTareaWeb> {
   const sesionExternaId = aprobacion.sesionExternaId;
 
@@ -829,6 +868,7 @@ async function reanudarTrasDecision(
     );
   }
 
+  control?.alCambiarSesion?.(sesionExternaId);
   let mantenerSesionViva = false;
   try {
     if (aprobacion.estado === 'rechazada' && aprobacion.instruccionRechazo === null) {
@@ -883,6 +923,7 @@ async function reanudarTrasDecision(
       sesionExternaId,
       credential.apiKey,
       prompt,
+      control?.signal,
     );
 
     if (desenlace.tipo === 'sesion_caducada') {
@@ -939,5 +980,6 @@ async function reanudarTrasDecision(
     if (!mantenerSesionViva) {
       await cerrarSesionBestEffort(deps, sesionExternaId);
     }
+    control?.alCambiarSesion?.(null);
   }
 }

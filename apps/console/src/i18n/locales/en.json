@@ -1901,5 +1901,20 @@
       "fallo": "We could not record your decision. Please try again.",
       "cerrarAria": "Close the approval (it stays pending)"
     }
-  }
+  },
+  "avisoTareaLenta": {
+    "titulo": "This task is taking longer than usual",
+    "detalle": "It has been running for {{minutos}} minutes. You can wait or end it.",
+    "boton": "End task"
+  },
+  "confirmarTerminar": {
+    "titulo": "End this task",
+    "detalle": "The task will stop where it is. Anything it already did on the site is not undone.",
+    "confirmar": "Yes, end it",
+    "cancelar": "Keep waiting",
+    "error": "We could not end the task. Refresh and try again."
+  },
+  "estadoCancelada": "Canceled",
+  "estadoDetenida": "Stopped",
+  "detenidaPorSistema": "The system ended this task because it stopped responding."
 }

@@ -2,16 +2,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import type { JobActivity } from '../src/lib/jobs';
 
-// La tarjeta importa TrayectoriaDetalle (que arrastra queries/api/supabase); este test solo ejercita
-// el bloque de error, asi que se stubbea el detalle para no requerir env de Supabase.
-vi.mock('../src/components/activity/TrayectoriaDetalle', () => ({
-  TrayectoriaDetalle: () => null,
+// Mismo aislamiento que terminar-tarea.dom.test.tsx: se mockean los hooks con red para renderizar la
+// tarjeta sin QueryClient ni env de Supabase.
+vi.mock('../src/lib/queries', () => ({
+  useTrayectoriasDeJob: () => ({ data: [], isLoading: false, isError: false }),
+}));
+vi.mock('../src/lib/mutations', () => ({
+  useTerminarJob: () => ({ isPending: false, isError: false, mutate: vi.fn() }),
 }));
 
 import i18n from '../src/i18n';
 import { JobActivityCard } from '../src/components/activity/JobActivityCard';
-import type { JobActivity } from '../src/lib/jobs';
 
 const ERROR_TECNICO =
   'PermanentExecutionError: el agente termino con DONE sin cumplir el objetivo (consumio 15 de 120 pasos)';
@@ -70,5 +73,36 @@ describe('JobActivityCard: error amable con detalle tecnico colapsable (BUG C)',
     render(<JobActivityCard job={makeJob({ status: 'completed' })} agentName={null} />);
     expect(screen.queryByText('La tarea no se pudo completar.')).not.toBeInTheDocument();
     expect(screen.queryByText(ERROR_TECNICO)).not.toBeInTheDocument();
+  });
+
+  // Convivencia con las etiquetas Cancelada / Detenida: cada desenlace de 'failed' conserva SU texto.
+  it('un job CANCELADO por el usuario no muestra el texto amable ni el detalle tecnico', () => {
+    render(
+      <JobActivityCard
+        job={makeJob({ lastError: 'CANCELADO_POR_USUARIO: terminada por el usuario' })}
+        agentName={null}
+      />,
+    );
+    expect(screen.queryByText('La tarea no se pudo completar.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Detalle tecnico/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/CANCELADO_POR_USUARIO/)).not.toBeInTheDocument();
+  });
+
+  it('un job DETENIDO por el sistema conserva su texto legible, sin detalle tecnico ni prefijo crudo', () => {
+    render(
+      <JobActivityCard
+        job={{
+          ...makeJob(),
+          lastError: 'SISTEMA_DETUVO_TAREA: la tarea dejo de responder y el sistema la termino automaticamente',
+        }}
+        agentName={null}
+      />,
+    );
+    expect(
+      screen.getByText('El sistema termino esta tarea porque dejo de responder.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('La tarea no se pudo completar.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Detalle tecnico/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/SISTEMA_DETUVO_TAREA/)).not.toBeInTheDocument();
   });
 });

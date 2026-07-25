@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AlertCircle,
@@ -10,17 +10,50 @@ import {
   ListTree,
   Loader2,
   MessageSquare,
+  XCircle,
 } from 'lucide-react';
 import { formatRunAt } from '../../lib/schedule';
-import { jobStatusLabel, jobTypeLabel, type JobActivity, type JobStatus } from '../../lib/jobs';
+import {
+  AVISO_TAREA_LENTA_MS,
+  esJobCancelado,
+  esJobDetenido,
+  isJobInFlight,
+  jobStatusLabel,
+  jobTypeLabel,
+  msEnEjecucion,
+  type JobActivity,
+  type JobStatus,
+} from '../../lib/jobs';
+import { useTerminarJob } from '../../lib/mutations';
+import { TerminarTareaDialog } from './TerminarTareaDialog';
 import { TrayectoriaDetalle } from './TrayectoriaDetalle';
+
+/**
+ * RELOJ para el aviso de tarea lenta: avanza en cubetas de 10 s (el mismo ritmo que el auto-refresh
+ * del historial con tareas en curso). useSyncExternalStore permite leer la hora sin llamar una
+ * funcion impura durante el render y sin setState en efectos: el snapshot es estable dentro de cada
+ * cubeta, asi que solo re-renderiza cuando la cubeta cambia.
+ */
+const RELOJ_TICK_MS = 10_000;
+function suscribirReloj(onTick: () => void): () => void {
+  const timer = setInterval(onTick, RELOJ_TICK_MS);
+  return () => clearInterval(timer);
+}
+function leerReloj(): number {
+  return Math.floor(Date.now() / RELOJ_TICK_MS) * RELOJ_TICK_MS;
+}
 
 /**
  * Pill de estado de una ejecucion. Colores por estado: completada = verde (ok), fallida = rojo
  * (destructivo, mismo tono que las acciones de borrado), pendiente/en curso = neutro. "En curso" ademas
- * lleva un spinner sutil para comunicar que sigue corriendo.
+ * lleva un spinner sutil para comunicar que sigue corriendo. Dos casos especiales sobre 'failed', que
+ * se distinguen por el prefijo estable de lastError: Cancelada (el usuario la termino a proposito:
+ * tono neutro, no el rojo destructivo) y Detenida (el sistema la termino al dejar de responder).
  */
-function StatusBadge({ status }: { status: JobStatus }) {
+function StatusBadge({ job }: { job: JobActivity }) {
+  const { t } = useTranslation();
+  const cancelada = esJobCancelado(job);
+  const detenida = esJobDetenido(job);
   const tone: Record<JobStatus, string> = {
     completed: 'border-ok/30 bg-ok/10 text-ok',
     failed: 'border-[rgba(192,73,43,0.3)] bg-[rgba(192,73,43,0.08)] text-[#C0492B]',
@@ -28,15 +61,20 @@ function StatusBadge({ status }: { status: JobStatus }) {
     running: 'border-line bg-line-soft text-muted',
     pausado: 'border-brasa-line bg-brasa-soft text-brasa',
   };
+  const etiqueta = cancelada
+    ? t('estadoCancelada')
+    : detenida
+      ? t('estadoDetenida')
+      : jobStatusLabel(job.status);
   return (
     <span
       className={[
         'inline-flex flex-none items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
-        tone[status],
+        cancelada ? 'border-line bg-line-soft text-muted' : tone[job.status],
       ].join(' ')}
     >
-      {status === 'running' && <Loader2 className="h-3 w-3 animate-spin" />}
-      {jobStatusLabel(status)}
+      {job.status === 'running' && <Loader2 className="h-3 w-3 animate-spin" />}
+      {etiqueta}
     </span>
   );
 }
@@ -52,8 +90,22 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
   // TRAYECTORIA (Fase F, V030): solo las tareas web tienen pasos que abrir. Estado local derivado
   // del click (sin useEffect); el detalle se monta recien al expandir y ahi corre su query.
   const [pasosAbiertos, setPasosAbiertos] = useState(false);
-  // Un fallo se muestra con el texto amable; el last_error crudo queda detras de "Detalle tecnico".
+  // Un fallo tecnico se muestra con el texto amable; el last_error crudo queda detras de
+  // "Detalle tecnico" (una cancelacion o una detencion tienen su propio texto y no lo usan).
   const [detalleAbierto, setDetalleAbierto] = useState(false);
+  // TERMINAR TAREA: confirmacion explicita antes de disparar la mutacion (estado derivado del
+  // click, sin useEffect). Disponible mientras la tarea siga en vuelo (pending/running/pausado).
+  const [confirmandoTerminar, setConfirmandoTerminar] = useState(false);
+  const terminar = useTerminarJob();
+  const terminable = isJobInFlight(job.status);
+  const cancelada = esJobCancelado(job);
+  const detenida = esJobDetenido(job);
+  // AVISO de tarea lenta: en curso por encima del umbral. El reloj por cubetas mantiene fresco el
+  // tiempo mostrado aunque el refetch tarde.
+  const ahora = useSyncExternalStore(suscribirReloj, leerReloj);
+  const msCorriendo = msEnEjecucion(job, ahora);
+  const tareaLenta = msCorriendo !== null && msCorriendo >= AVISO_TAREA_LENTA_MS;
+  const minutosCorriendo = msCorriendo !== null ? Math.floor(msCorriendo / 60_000) : 0;
   const TypeIcon =
     job.type === 'recipe'
       ? ChefHat
@@ -105,34 +157,72 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
               </span>
             </div>
 
-            {job.status === 'failed' && job.lastError && (
+            {job.status === 'failed' && !cancelada && (detenida || job.lastError) && (
               <div className="mt-2.5 rounded-lg border border-[rgba(192,73,43,0.25)] bg-[rgba(192,73,43,0.05)] px-2.5 py-1.5 text-[12px] text-[#C0492B]">
                 <div className="flex items-start gap-1.5">
                   <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-none" />
-                  <span>{t('actividad.errorAmable.generico')}</span>
+                  {/* Tres desenlaces distintos sobre 'failed': Cancelada no muestra caja (fue una
+                      decision del usuario, no un fallo); Detenida trae su propio texto legible en
+                      lugar del prefijo tecnico; cualquier otro fallo muestra el texto amable y deja
+                      el error crudo detras de "Detalle tecnico". */}
+                  <span className="whitespace-pre-wrap break-words">
+                    {detenida ? t('detenidaPorSistema') : t('actividad.errorAmable.generico')}
+                  </span>
                 </div>
+                {!detenida && job.lastError && (
+                  <>
+                    <button
+                      type="button"
+                      aria-expanded={detalleAbierto}
+                      onClick={() => setDetalleAbierto((abierto) => !abierto)}
+                      className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold underline-offset-2 hover:underline"
+                    >
+                      {t('actividad.errorAmable.detalleTecnico')}
+                      <ChevronDown
+                        className={['h-3 w-3 transition-transform', detalleAbierto ? 'rotate-180' : ''].join(' ')}
+                      />
+                    </button>
+                    {detalleAbierto && (
+                      <p className="mt-1 whitespace-pre-wrap break-words text-[11px] opacity-80">
+                        {job.lastError}
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {tareaLenta && (
+              <div className="mt-2.5 rounded-lg border border-brasa-line bg-brasa-soft px-3 py-2.5">
+                <p className="text-[13px] font-semibold text-brasa">{t('avisoTareaLenta.titulo')}</p>
+                <p className="mt-0.5 text-[12px] text-muted">
+                  {t('avisoTareaLenta.detalle', { minutos: minutosCorriendo })}
+                </p>
                 <button
                   type="button"
-                  aria-expanded={detalleAbierto}
-                  onClick={() => setDetalleAbierto((abierto) => !abierto)}
-                  className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold underline-offset-2 hover:underline"
+                  onClick={() => setConfirmandoTerminar(true)}
+                  className="mt-2 rounded-[10px] bg-brasa px-3 py-1.5 text-[12px] font-semibold text-white transition hover:bg-brasa-hover"
                 >
-                  {t('actividad.errorAmable.detalleTecnico')}
-                  <ChevronDown
-                    className={['h-3 w-3 transition-transform', detalleAbierto ? 'rotate-180' : ''].join(' ')}
-                  />
+                  {t('avisoTareaLenta.boton')}
                 </button>
-                {detalleAbierto && (
-                  <p className="mt-1 whitespace-pre-wrap break-words text-[11px] opacity-80">
-                    {job.lastError}
-                  </p>
-                )}
               </div>
             )}
           </div>
         </div>
 
-        <StatusBadge status={job.status} />
+        <div className="flex flex-none flex-col items-start gap-2 sm:items-end">
+          <StatusBadge job={job} />
+          {terminable && (
+            <button
+              type="button"
+              onClick={() => setConfirmandoTerminar(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-line-soft px-2.5 py-1 text-[12px] font-semibold text-muted transition hover:border-brasa-line hover:text-brasa"
+            >
+              <XCircle className="h-3.5 w-3.5" />
+              {t('avisoTareaLenta.boton')}
+            </button>
+          )}
+        </div>
       </div>
 
       {job.type === 'tarea_web' && (
@@ -155,6 +245,15 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
             </div>
           )}
         </div>
+      )}
+
+      {confirmandoTerminar && (
+        <TerminarTareaDialog
+          busy={terminar.isPending}
+          {...(terminar.isError ? { error: t('confirmarTerminar.error') } : {})}
+          onConfirm={() => terminar.mutate(job.id, { onSuccess: () => setConfirmandoTerminar(false) })}
+          onCancel={() => setConfirmandoTerminar(false)}
+        />
       )}
     </div>
   );

@@ -122,6 +122,7 @@ function makeDeps(overrides: Partial<JobRunnerDeps> = {}): JobRunnerDeps {
       markCompleted: vi.fn(async () => {}),
       markFailed: vi.fn(async () => {}),
       markPendingRetry: vi.fn(async () => {}),
+      latirJob: vi.fn(async () => 'running' as const),
       reapOrphanedJobs: vi.fn(async () => []),
     },
     getProfileTier: vi.fn(async () => 'autonomous' as const),
@@ -191,5 +192,36 @@ describe('processClaimedJob con jobs de tarea web', () => {
     await processClaimedJob(deps, makeJob(PAYLOAD));
     expect(deps.jobs.markFailed).toHaveBeenCalled();
     expect(tareaWeb.motor.ejecutar).not.toHaveBeenCalled();
+  });
+
+  it('CANCELACION a mitad de tarea: aborta el motor, CIERRA la sesion (corte duro + finally) y no escribe el cierre', async () => {
+    vi.useFakeTimers();
+    // Motor que cuelga hasta que llega el abort de la cancelacion (Stagehand con signal).
+    const tareaWeb = makeTareaWebDeps({
+      motor: {
+        ejecutar: vi.fn(async ({ signal }: { signal?: AbortSignal }) => {
+          await new Promise<void>((resolve) => {
+            if (!signal || signal.aborted) return resolve();
+            signal.addEventListener('abort', () => resolve(), { once: true });
+          });
+          throw new Error('AbortError: navegacion abortada');
+        }),
+      },
+    });
+    const deps = makeDeps({ tareaWeb });
+    // El primer latido encuentra el job cancelado desde la consola ('failed').
+    (deps.jobs.latirJob as ReturnType<typeof vi.fn>).mockResolvedValue('failed');
+
+    const corrida = processClaimedJob(deps, makeJob(PAYLOAD));
+    await vi.advanceTimersByTimeAsync(30_000);
+    await corrida;
+
+    // La sesion NO queda viva: la cierran el corte duro y/o el finally del handler (best-effort,
+    // el doble cierre es inocuo). Y no se escribe ningun cierre encima del 'failed' de la cancelacion.
+    expect(tareaWeb.navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
+    expect(deps.jobs.markCompleted).not.toHaveBeenCalled();
+    expect(deps.jobs.markFailed).not.toHaveBeenCalled();
+    expect(deps.jobs.markPendingRetry).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 });
