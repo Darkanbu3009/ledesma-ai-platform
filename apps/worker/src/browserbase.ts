@@ -1,9 +1,25 @@
 import Browserbase from '@browserbasehq/sdk';
+import type { EstrategiaLocalizacion } from '@ledesma-platform/shared';
 import { ClienteCdp } from './cdp.js';
 import { SalidaDeRedNoDisponibleError } from './sitios.js';
 import type { NavegadorRemoto, SesionDeLoginAbierta } from './sitios.js';
 import type { NavegadorParaTarea, SesionDeTareaAbierta } from './tarea-web.js';
 import type { CampoDeLaPagina } from './verificacion.js';
+import type {
+  InstruccionDePaso,
+  NavegadorDeterminista,
+  ResultadoPasoDeterminista,
+} from './ejecutor-receta.js';
+import {
+  EXPRESION_VACIAR_CAMPO_ENFOCADO,
+  expresionLeerEstrategias,
+  expresionResolverElemento,
+  leerElementoResuelto,
+  parsearCombinacionDeTeclas,
+  sanearEstrategias,
+  type PuntoDeLaPagina,
+  type ReferenciaDeElemento,
+} from './localizacion.js';
 
 /**
  * ADAPTADOR real del puerto NavegadorRemoto (sitios.ts) sobre Browserbase (@browserbasehq/sdk
@@ -84,6 +100,15 @@ const MAX_TEXTO_VISIBLE_CHARS = 4000;
 /** Nombre del mundo aislado donde corre la lectura de la verificacion (ver evaluarEnLaPagina). */
 const MUNDO_DE_VERIFICACION = 'ledesma-verificacion';
 
+/**
+ * Espera tras una accion determinista (ms) para que el sitio reaccione (render, XHR, navegacion)
+ * antes del paso siguiente. Corta a proposito: la receta repite un flujo que ya funciono, no explora.
+ */
+const PAUSA_TRAS_ACCION_MS = 400;
+
+/** Tope de espera de la carga tras una navegacion de receta. Vencido, se sigue igual (best-effort). */
+const ESPERA_DE_CARGA_MS = 10_000;
+
 const EXPRESION_TEXTO_BODY =
   `(() => (document.body ? String(document.body.innerText || '').slice(0, ${MAX_TEXTO_VISIBLE_CHARS}) : ''))()`;
 
@@ -150,6 +175,101 @@ const EXPRESION_LEER_CAMPOS = String.raw`(() => {
   return JSON.stringify(salida);
 })()`;
 
+/** Pausa acotada (los pasos de una receta necesitan dejar respirar al sitio entre acciones). */
+function pausar(ms: number): Promise<void> {
+  return ms <= 0 ? Promise.resolve() : new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * MANDO minimo sobre una pagina ya adherida por CDP: evaluar en el MUNDO AISLADO, disparar entrada
+ * REAL (Input.*) y navegar. Existe para que un paso de receta gaste UNA conexion CDP en vez de una
+ * por primitiva, y para que toda la ejecucion determinista comparta un solo lugar donde se decide
+ * como se toca la pagina.
+ *
+ * POR QUE ENTRADA REAL Y NO `element.click()`: un sitio puede distinguir un evento sintetico de uno
+ * del usuario (isTrusted) y muchos formularios reales no reaccionan al sintetico. Input.* genera los
+ * mismos eventos que una persona, que es lo que hace que repetir el flujo aprendido funcione.
+ *
+ * POR QUE MUNDO AISLADO: identico motivo que la verificacion (ver evaluarEnLaPagina). El JavaScript
+ * del sitio no puede parchear lo que la resolucion del elemento ve, asi que no puede hacer que la
+ * receta actue sobre un boton distinto del que aprendio.
+ */
+class PaginaCdp {
+  constructor(
+    private readonly cdp: ClienteCdp,
+    private readonly sessionId: string,
+  ) {}
+
+  /** Evalua una expresion en un mundo aislado nuevo y devuelve su valor si es texto. */
+  async evaluar(expresion: string): Promise<string | null> {
+    const { frameTree } = await this.cdp.enviar<{ frameTree: { frame: { id: string } } }>(
+      'Page.getFrameTree',
+      {},
+      this.sessionId,
+    );
+    const { executionContextId } = await this.cdp.enviar<{ executionContextId: number }>(
+      'Page.createIsolatedWorld',
+      { frameId: frameTree.frame.id, worldName: MUNDO_DE_VERIFICACION },
+      this.sessionId,
+    );
+    const evaluado = await this.cdp.enviar<{ result?: { value?: unknown } }>(
+      'Runtime.evaluate',
+      { expression: expresion, returnByValue: true, contextId: executionContextId },
+      this.sessionId,
+    );
+    const valor = evaluado.result?.value;
+    return typeof valor === 'string' ? valor : null;
+  }
+
+  /** Click REAL (mover, presionar, soltar) en el punto dado. */
+  async click(punto: PuntoDeLaPagina): Promise<void> {
+    const base = { x: punto.x, y: punto.y, button: 'left', clickCount: 1 };
+    await this.cdp.enviar('Input.dispatchMouseEvent', { ...base, type: 'mouseMoved' }, this.sessionId);
+    await this.cdp.enviar('Input.dispatchMouseEvent', { ...base, type: 'mousePressed' }, this.sessionId);
+    await this.cdp.enviar('Input.dispatchMouseEvent', { ...base, type: 'mouseReleased' }, this.sessionId);
+  }
+
+  /** Pulsacion REAL de una tecla (down + up), con sus modificadores. */
+  async pulsar(pulsacion: {
+    key: string;
+    windowsVirtualKeyCode: number;
+    modifiers: number;
+    text: string | null;
+  }): Promise<void> {
+    const base = {
+      key: pulsacion.key,
+      windowsVirtualKeyCode: pulsacion.windowsVirtualKeyCode,
+      nativeVirtualKeyCode: pulsacion.windowsVirtualKeyCode,
+      modifiers: pulsacion.modifiers,
+      ...(pulsacion.text !== null ? { text: pulsacion.text } : {}),
+    };
+    await this.cdp.enviar('Input.dispatchKeyEvent', { ...base, type: 'keyDown' }, this.sessionId);
+    await this.cdp.enviar('Input.dispatchKeyEvent', { ...base, type: 'keyUp' }, this.sessionId);
+  }
+
+  /** Inserta texto en el elemento enfocado como lo haria el teclado (dispara los eventos de input). */
+  async insertarTexto(texto: string): Promise<void> {
+    await this.cdp.enviar('Input.insertText', { text: texto }, this.sessionId);
+  }
+
+  /**
+   * Navega y espera la carga. La espera es BEST-EFFORT: vencida, se sigue igual (una pagina que
+   * nunca dispara load no debe colgar la receta; el paso siguiente fallara en localizar y escalara).
+   */
+  async navegar(url: string): Promise<void> {
+    const carga = this.cdp.esperarEvento('Page.loadEventFired', this.sessionId).catch(() => undefined);
+    const navegacion = await this.cdp.enviar<{ errorText?: string }>(
+      'Page.navigate',
+      { url },
+      this.sessionId,
+    );
+    if (navegacion.errorText) {
+      throw new Error(`el navegador no pudo abrir la pagina: ${navegacion.errorText}`);
+    }
+    await Promise.race([carga, pausar(ESPERA_DE_CARGA_MS)]);
+  }
+}
+
 /** Salida de red observada por el echo: IP (informativa) y pais (criterio de pinning). */
 interface SalidaEcho {
   egressIp: string | null;
@@ -194,7 +314,9 @@ interface TargetInfo {
   url: string;
 }
 
-export class NavegadorBrowserbase implements NavegadorRemoto, NavegadorParaTarea {
+export class NavegadorBrowserbase
+  implements NavegadorRemoto, NavegadorParaTarea, NavegadorDeterminista
+{
   private readonly bb: Browserbase;
 
   constructor(private readonly config: BrowserbaseConfig) {
@@ -528,6 +650,19 @@ export class NavegadorBrowserbase implements NavegadorRemoto, NavegadorParaTarea
    * decide; en la verificacion, no poder leer NUNCA autoriza a ejecutar.
    */
   private async evaluarEnLaPagina(sesionExternaId: string, expresion: string): Promise<string | null> {
+    return this.conPaginaCdp(sesionExternaId, (pagina) => pagina.evaluar(expresion));
+  }
+
+  /**
+   * Abre UNA conexion CDP contra la sesion, se adhiere a la pagina y le entrega a `fn` un pequeno
+   * mando (evaluar en el mundo aislado, disparar entrada real, navegar). Existe para que un paso de
+   * receta (resolver el elemento, actuar y releer sus estrategias) gaste UNA sola conexion en vez de
+   * una por primitiva.
+   */
+  private async conPaginaCdp<T>(
+    sesionExternaId: string,
+    fn: (pagina: PaginaCdp) => Promise<T>,
+  ): Promise<T> {
     const session = await this.bb.sessions.retrieve(sesionExternaId);
     if (!session.connectUrl) {
       throw new Error('la sesion de navegador no expone un connect URL (ya no esta corriendo)');
@@ -535,26 +670,94 @@ export class NavegadorBrowserbase implements NavegadorRemoto, NavegadorParaTarea
     const cdp = await ClienteCdp.conectar(session.connectUrl);
     try {
       const sessionId = await this.attachPaginaInicial(cdp);
-      const { frameTree } = await cdp.enviar<{ frameTree: { frame: { id: string } } }>(
-        'Page.getFrameTree',
-        {},
-        sessionId,
-      );
-      const { executionContextId } = await cdp.enviar<{ executionContextId: number }>(
-        'Page.createIsolatedWorld',
-        { frameId: frameTree.frame.id, worldName: MUNDO_DE_VERIFICACION },
-        sessionId,
-      );
-      const evaluado = await cdp.enviar<{ result?: { value?: unknown } }>(
-        'Runtime.evaluate',
-        { expression: expresion, returnByValue: true, contextId: executionContextId },
-        sessionId,
-      );
-      const valor = evaluado.result?.value;
-      return typeof valor === 'string' ? valor : null;
+      return await fn(new PaginaCdp(cdp, sessionId));
     } finally {
       cdp.cerrar();
     }
+  }
+
+  /**
+   * LEE del DOM las formas estables de volver a encontrar un elemento (CAMBIO 1). Solo lectura, en
+   * el mundo aislado. Best-effort: si el elemento ya no esta (un click que navego), devuelve lista
+   * vacia y ese paso simplemente no se podra promover a receta.
+   */
+  async leerEstrategiasDeElemento(
+    sesionExternaId: string,
+    referencia: ReferenciaDeElemento,
+  ): Promise<EstrategiaLocalizacion[]> {
+    const crudo = await this.evaluarEnLaPagina(
+      sesionExternaId,
+      expresionLeerEstrategias(referencia),
+    );
+    return crudo === null || crudo === '' ? [] : sanearEstrategias(crudo);
+  }
+
+  /**
+   * EJECUTA UN PASO de una receta con primitivas de bajo nivel, SIN modelo (CAMBIO 4). Resuelve el
+   * elemento probando las estrategias en orden, actua con eventos de entrada REALES (los mismos que
+   * genera una persona: un sitio que exige eventos confiables funciona igual) y devuelve las
+   * estrategias que el elemento tiene ahora, para la auto reparacion.
+   *
+   * Nunca lanza por un paso que no resolvio: eso es un desenlace normal ('no_localizado') que el
+   * ejecutor convierte en escalada. Solo un fallo de la propia sesion se propaga.
+   */
+  async ejecutarPasoDeterminista(
+    sesionExternaId: string,
+    instruccion: InstruccionDePaso,
+  ): Promise<ResultadoPasoDeterminista> {
+    if (instruccion.accion === 'esperar') {
+      await pausar(Math.min(instruccion.esperaMs ?? 0, ESPERA_DE_CARGA_MS));
+      return { estado: 'ok', estrategias: [], detalle: null };
+    }
+    return this.conPaginaCdp(sesionExternaId, async (pagina) => {
+      if (instruccion.accion === 'navegar') {
+        if (instruccion.url === null) {
+          return { estado: 'fallo', estrategias: [], detalle: 'navegacion sin url' } as const;
+        }
+        await pagina.navegar(instruccion.url);
+        return { estado: 'ok', estrategias: [], detalle: null } as const;
+      }
+
+      const crudo = await pagina.evaluar(expresionResolverElemento(instruccion.estrategias));
+      const elemento = crudo === null || crudo === '' ? null : leerElementoResuelto(crudo);
+      if (elemento === null) {
+        return {
+          estado: 'no_localizado',
+          estrategias: [],
+          detalle: 'ninguna estrategia resolvio el elemento',
+        } as const;
+      }
+
+      if (instruccion.accion === 'click') {
+        await pagina.click(elemento);
+        await pausar(PAUSA_TRAS_ACCION_MS);
+        return { estado: 'ok', estrategias: elemento.estrategias, detalle: null } as const;
+      }
+
+      if (instruccion.accion === 'escribir') {
+        if (instruccion.texto === null) {
+          return { estado: 'fallo', estrategias: [], detalle: 'escritura sin texto' } as const;
+        }
+        // Click para enfocar, seleccionar lo que hubiera y sustituirlo: un campo prellenado por el
+        // sitio no debe quedar concatenado con el valor nuevo.
+        await pagina.click(elemento);
+        await pagina.evaluar(EXPRESION_VACIAR_CAMPO_ENFOCADO);
+        await pagina.pulsar({ key: 'Delete', windowsVirtualKeyCode: 46, modifiers: 0, text: null });
+        await pagina.insertarTexto(instruccion.texto);
+        await pausar(PAUSA_TRAS_ACCION_MS);
+        return { estado: 'ok', estrategias: elemento.estrategias, detalle: null } as const;
+      }
+
+      const pulsacion =
+        instruccion.teclas === null ? null : parsearCombinacionDeTeclas(instruccion.teclas);
+      if (pulsacion === null) {
+        return { estado: 'fallo', estrategias: [], detalle: 'combinacion de teclas no admitida' } as const;
+      }
+      await pagina.click(elemento);
+      await pagina.pulsar(pulsacion);
+      await pausar(PAUSA_TRAS_ACCION_MS);
+      return { estado: 'ok', estrategias: elemento.estrategias, detalle: null } as const;
+    });
   }
 
   /** Attach (flatten) al primer tab de la sesion y Page.enable; devuelve el sessionId page-level. */
