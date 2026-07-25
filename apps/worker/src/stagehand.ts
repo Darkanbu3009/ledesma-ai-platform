@@ -1,6 +1,10 @@
-import { Stagehand } from '@browserbasehq/stagehand';
-import type { V3Options } from '@browserbasehq/stagehand';
+import { Stagehand, tool } from '@browserbasehq/stagehand';
+import type { AgentExecuteOptions, V3Options } from '@browserbasehq/stagehand';
+import { z } from 'zod';
+import { FalloDeEsquemaDelMotorError } from './errores.js';
+import type { Logger } from './logger.js';
 import type { EscaladorDePaso, ResultadoEscalada } from './ejecutor-receta.js';
+import type { AccionCrudaDeMotor } from './trayectoria.js';
 import type { MotorDeTareaWeb, PasoObservado, ResultadoMotor } from './tarea-web.js';
 
 /**
@@ -26,6 +30,12 @@ import type { MotorDeTareaWeb, PasoObservado, ResultadoMotor } from './tarea-web
  *  - `callbacks.onEvidence`: Stagehand emite `step_finished` justo DESPUES de empujar las acciones
  *    de esa tool a la traza (v3AgentHandler). Es el gancho con el que el handler observa cada paso
  *    mientras corre y lee del DOM las estrategias de localizacion que la traza no trae (CAMBIO 1).
+ *    Se pasa SOLO cuando el handler cableo un observador (TAREA_WEB_OBSERVADOR_PASOS): apagado, la
+ *    corrida no abre ni una conexion CDP extra.
+ *  - `tools: { act }`: la tool `act` va BLINDADA (ver crearActBlindado). Stagehand fusiona las tools
+ *    recibidas DESPUES de su toolset nativo, asi que una con el mismo nombre lo reemplaza.
+ *  - `toolTimeout`: techo por llamada de tool (TAREA_WEB_TOOL_TIMEOUT_SECONDS). Sin el, Stagehand
+ *    aplica su default de 45 s y el worker no tiene forma de ajustarlo por despliegue.
  */
 /**
  * Opciones del constructor de Stagehand. Exportada SOLO para que los tests validen esta
@@ -61,6 +71,232 @@ export function construirOpcionesStagehand(params: {
     experimental: true,
     disablePino: true,
     verbose: 0,
+  };
+}
+
+/**
+ * BLINDAJE ANTE EL FALLO DE ESQUEMA DEL MOTOR (CAMBIO 2 y 3). Causa raiz, auditada en 3.6.0:
+ * `formatTreeLine` (understudy/a11y/snapshot/treeFormatUtils.js) rotula cada linea del arbol de
+ * accesibilidad con `node.encodedId ?? node.nodeId`; cuando `encodedId` queda undefined, el modelo
+ * ve `[8246]` en vez de `[0-8246]`, lo copia tal cual y el esquema de `act` (lib/inference.js, que
+ * exige `/^\d+-\d+$/` en `elementId`) rechaza la respuesta con NoObjectGeneratedError. El motor
+ * devuelve ese fallo a la tool y el agente vuelve a intentar lo mismo, sin espera y sin cota: en
+ * produccion (25 jul 2026) giro casi 4 minutos sin registrar un solo paso.
+ *
+ * Es INTERMITENTE por naturaleza (depende de que rama del arbol se renderice), asi que la
+ * mitigacion principal es el REINTENTO INMEDIATO de la misma llamada; el corte por fallos
+ * consecutivos existe para que, cuando el sitio este en un estado que lo reproduce siempre, la
+ * corrida termine con un diagnostico veraz en vez de consumir el deadline entero.
+ */
+/** Reintentos de la MISMA llamada de act ante un rechazo de esquema, antes de darla por fallida. */
+export const MAX_REINTENTOS_ESQUEMA = 2;
+/** Espera entre reintentos: el fallo es intermitente, un respiro corto basta. */
+export const ESPERA_ENTRE_REINTENTOS_ESQUEMA_MS = 1000;
+/** Fallos de esquema CONSECUTIVOS (ya agotados los reintentos) que cortan la corrida. */
+export const MAX_FALLOS_ESQUEMA_CONSECUTIVOS = 3;
+
+/** Nombres de error que el AI SDK y Stagehand usan para un rechazo de esquema de la salida. */
+const NOMBRES_DE_FALLO_DE_ESQUEMA = [
+  'NoObjectGeneratedError',
+  'TypeValidationError',
+  'ZodSchemaValidationError',
+  'ZodError',
+];
+
+/** Marcas del mensaje, para las envolturas que pierden el nombre del error original. */
+const MARCAS_DE_FALLO_DE_ESQUEMA = [
+  'no object generated',
+  'did not match schema',
+  'response did not match',
+  'schema validation',
+];
+
+/**
+ * Reconoce un RECHAZO DE ESQUEMA del motor (NoObjectGeneratedError y la validacion de tipo que lo
+ * acompana), mirando tambien la cadena de `cause`: el AI SDK envuelve el error de validacion dentro
+ * del error de generacion. Acotado en profundidad para no recorrer una cadena circular.
+ */
+export function esFalloDeEsquemaDelMotor(error: unknown, profundidad = 0): boolean {
+  if (typeof error !== 'object' || error === null || profundidad > 3) return false;
+  const { name, message, cause } = error as { name?: unknown; message?: unknown; cause?: unknown };
+  const nombre = typeof name === 'string' ? name : '';
+  if (NOMBRES_DE_FALLO_DE_ESQUEMA.some((conocido) => nombre.includes(conocido))) return true;
+  const texto = typeof message === 'string' ? message.toLowerCase() : '';
+  if (MARCAS_DE_FALLO_DE_ESQUEMA.some((marca) => texto.includes(marca))) return true;
+  return esFalloDeEsquemaDelMotor(cause, profundidad + 1);
+}
+
+/** Salida de la tool `act` hacia el modelo, con la MISMA forma que la nativa de Stagehand. */
+export interface SalidaDeActBlindado {
+  success: boolean;
+  action?: string;
+  error?: string;
+  playwrightArguments?: unknown;
+}
+
+/** Lo minimo que el blindaje necesita de `stagehand.act` (los tests pasan una funcion propia). */
+interface ResultadoDeActCrudo {
+  success?: boolean;
+  actionDescription?: string;
+  actions?: unknown[];
+}
+
+export interface ActBlindado {
+  /** Ejecuta UNA accion con reintento ante rechazo de esquema. Lanza al alcanzar el corte. */
+  ejecutar(accion: string): Promise<SalidaDeActBlindado>;
+  /** true si la corrida se corto por fallos de esquema consecutivos (CAMBIO 3). */
+  corto(): boolean;
+}
+
+/** Espera real entre reintentos; los tests inyectan la suya para no dormir. */
+function esperarMs(ms: number): Promise<void> {
+  return new Promise((resolver) => setTimeout(resolver, ms));
+}
+
+function mensajeDeError(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : 'error desconocido';
+}
+
+/**
+ * Envuelve la llamada de act del agente (CAMBIO 2 y 3). Modulo puro sobre una funcion `actuar`: se
+ * testea sin navegador y sin modelo.
+ *
+ *  - Rechazo de esquema: hasta MAX_REINTENTOS_ESQUEMA reintentos con ESPERA_ENTRE_REINTENTOS_ESQUEMA_MS
+ *    entre ellos, cada uno logueado en warn como fallo del MOTOR (no del objetivo del usuario).
+ *    Agotados, la llamada se devuelve al modelo como fallo de la tool, igual que la act nativa.
+ *  - MAX_FALLOS_ESQUEMA_CONSECUTIVOS de esos fallos seguidos: LANZA. Lanzar desde la tool corta el
+ *    bucle del agente en el acto; el adaptador convierte el corte en FalloDeEsquemaDelMotorError.
+ *  - Un act exitoso reinicia el contador.
+ *  - Cualquier OTRO fallo (elemento inexistente, timeout) se devuelve al modelo tal como hace la act
+ *    nativa y NO cuenta para el corte: no es un fallo del motor.
+ *
+ * Cada intento (exitoso o no) se reporta por `registrarAccion` para que la trayectoria conserve lo
+ * que paso aunque el motor termine lanzando (CAMBIO 7).
+ */
+export function crearActBlindado(params: {
+  actuar: (accion: string) => Promise<ResultadoDeActCrudo>;
+  logger: Logger;
+  registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined;
+  esperar?: ((ms: number) => Promise<void>) | undefined;
+}): ActBlindado {
+  const esperar = params.esperar ?? esperarMs;
+  let fallosConsecutivos = 0;
+  let corto = false;
+
+  const registrar = (exito: boolean, accion: string, argumentos?: unknown): void => {
+    params.registrarAccion?.({
+      type: 'act',
+      action: accion,
+      success: exito,
+      ...(argumentos !== undefined ? { playwrightArguments: argumentos } : {}),
+    });
+  };
+
+  return {
+    corto: () => corto,
+    ejecutar: async (accion: string): Promise<SalidaDeActBlindado> => {
+      for (let intento = 0; ; intento++) {
+        try {
+          const resultado = await params.actuar(accion);
+          fallosConsecutivos = 0;
+          const exito = resultado.success ?? true;
+          const primera = resultado.actions?.[0];
+          registrar(exito, accion, primera);
+          return {
+            success: exito,
+            action: resultado.actionDescription ?? accion,
+            ...(primera !== undefined ? { playwrightArguments: primera } : {}),
+          };
+        } catch (error) {
+          if (!esFalloDeEsquemaDelMotor(error)) {
+            registrar(false, accion);
+            return { success: false, error: mensajeDeError(error) };
+          }
+          if (intento < MAX_REINTENTOS_ESQUEMA) {
+            // Sin el texto de la accion ni el del error: pueden arrastrar contenido de la pagina.
+            params.logger.warn(
+              'tarea web: fallo de esquema del motor de navegacion al resolver una accion; se reintenta',
+              { intento: intento + 1, reintentos: MAX_REINTENTOS_ESQUEMA },
+            );
+            await esperar(ESPERA_ENTRE_REINTENTOS_ESQUEMA_MS);
+            continue;
+          }
+          fallosConsecutivos += 1;
+          registrar(false, accion);
+          if (fallosConsecutivos >= MAX_FALLOS_ESQUEMA_CONSECUTIVOS) {
+            corto = true;
+            throw new FalloDeEsquemaDelMotorError(fallosConsecutivos);
+          }
+          return {
+            success: false,
+            error:
+              'el motor no pudo resolver un elemento valido para esa accion; describe otro elemento ' +
+              'o usa otra herramienta',
+          };
+        }
+      }
+    },
+  };
+}
+
+/** Descripcion de la tool `act`, calcada de la nativa para no cambiar el prompt que ve el modelo. */
+const DESCRIPCION_ACT =
+  'Perform an action on the page (click, type). Provide a short, specific phrase that mentions the element type.';
+
+/** Tool `act` BLINDADA que reemplaza a la nativa en el toolset del agente (mismo nombre y forma). */
+function herramientaActBlindada(blindado: ActBlindado): NonNullable<
+  Parameters<Stagehand['agent']>[0]
+>['tools'] {
+  return {
+    act: tool({
+      description: DESCRIPCION_ACT,
+      inputSchema: z.object({
+        action: z
+          .string()
+          .describe(
+            'Describe what to click or type, e.g. "click the Login button" or "type "John" into the first name input"',
+          ),
+      }),
+      execute: async ({ action }): Promise<SalidaDeActBlindado> => blindado.ejecutar(action),
+    }),
+  };
+}
+
+/**
+ * Opciones de `agent.execute()`. Exportada para poder fijar en un test lo que NO lleva: sin
+ * observador NO se pasa `callbacks.onEvidence` (CAMBIO 5), y con el, Stagehand no captura nada extra
+ * por su cuenta. `toolTimeout` (CAMBIO 4) acota CADA llamada de tool del agente: sin el, una tool
+ * colgada se come el deadline de pared entero.
+ */
+export function construirOpcionesDeEjecucion(params: {
+  objetivo: string;
+  maxPasos: number;
+  toolTimeoutMs: number;
+  signal?: AbortSignal | undefined;
+  observador?: ((paso: PasoObservado) => Promise<void>) | undefined;
+}): AgentExecuteOptions {
+  const observador = params.observador;
+  return {
+    instruction: params.objetivo,
+    maxSteps: params.maxPasos,
+    toolTimeout: params.toolTimeoutMs,
+    ...(params.signal !== undefined ? { signal: params.signal } : {}),
+    ...(observador !== undefined
+      ? {
+          callbacks: {
+            // Best-effort SIEMPRE: la observacion enriquece la traza; si falla, la tarea sigue
+            // igual y esa corrida simplemente no se podra promover a receta.
+            onEvidence: async (evento): Promise<void> => {
+              if (evento.type !== 'step_finished') return;
+              try {
+                for (const paso of pasosObservadosDeEvidencia(evento)) await observador(paso);
+              } catch {
+                // una observacion fallida jamas cambia el desenlace de la tarea
+              }
+            },
+          },
+        }
+      : {}),
   };
 }
 
@@ -123,7 +359,16 @@ export function pasosObservadosDeEvidencia(evento: {
 }
 
 export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
-  constructor(private readonly config: { apiKey: string; projectId: string; model: string }) {}
+  constructor(
+    private readonly config: {
+      apiKey: string;
+      projectId: string;
+      model: string;
+      /** Techo por llamada de tool del agente (TAREA_WEB_TOOL_TIMEOUT_SECONDS * 1000). */
+      toolTimeoutMs: number;
+      logger: Logger;
+    },
+  ) {}
 
   async ejecutar(params: {
     sesionExternaId: string;
@@ -134,6 +379,7 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
     maxPasos: number;
     signal?: AbortSignal;
     observador?: ((paso: PasoObservado) => Promise<void>) | undefined;
+    registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined;
   }): Promise<ResultadoMotor> {
     const stagehand = new Stagehand(
       construirOpcionesStagehand({
@@ -146,29 +392,34 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
     );
     await stagehand.init();
     try {
-      const agente = stagehand.agent({ systemPrompt: params.systemPrompt });
-      const observador = params.observador;
-      const resultado = await agente.execute({
-        instruction: params.objetivo,
-        maxSteps: params.maxPasos,
-        ...(params.signal !== undefined ? { signal: params.signal } : {}),
-        ...(observador !== undefined
-          ? {
-              callbacks: {
-                // Best-effort SIEMPRE: la observacion enriquece la traza; si falla, la tarea sigue
-                // igual y esa corrida simplemente no se podra promover a receta.
-                onEvidence: async (evento) => {
-                  if (evento.type !== 'step_finished') return;
-                  try {
-                    for (const paso of pasosObservadosDeEvidencia(evento)) await observador(paso);
-                  } catch {
-                    // una observacion fallida jamas cambia el desenlace de la tarea
-                  }
-                },
-              },
-            }
-          : {}),
+      // La tool `act` del agente va BLINDADA (CAMBIO 2 y 3): misma forma que la nativa, con
+      // reintento ante rechazo de esquema y corte por fallos consecutivos. Se pasa por `tools`, que
+      // el handler de Stagehand fusiona DESPUES del toolset nativo y por tanto reemplaza a `act`.
+      const blindado = crearActBlindado({
+        actuar: (accion) => stagehand.act(accion, { timeout: this.config.toolTimeoutMs }),
+        logger: this.config.logger,
+        registrarAccion: params.registrarAccion,
       });
+      const agente = stagehand.agent({
+        systemPrompt: params.systemPrompt,
+        tools: herramientaActBlindada(blindado),
+      });
+      const resultado = await agente.execute(
+        construirOpcionesDeEjecucion({
+          objetivo: params.objetivo,
+          maxPasos: params.maxPasos,
+          toolTimeoutMs: this.config.toolTimeoutMs,
+          signal: params.signal,
+          observador: params.observador,
+        }),
+      );
+      // El corte por fallos de esquema (CAMBIO 3) no puede viajar como excepcion desde la tool: el
+      // handler de Stagehand atrapa cualquier error del bucle y lo devuelve como resultado fallido.
+      // El bucle YA se corto (lanzar desde la tool lo detiene); aca se convierte en el error
+      // especifico, distinto del limite de pasos y de un error del usuario.
+      if (blindado.corto()) {
+        throw new FalloDeEsquemaDelMotorError(MAX_FALLOS_ESQUEMA_CONSECUTIVOS);
+      }
       // AgentResult (v3, types/public/agent.d.ts:64-89) ya trae la TRAZA estructurada: `actions`
       // (una por tool ejecutada, con playwrightArguments.selector en 'act'/'fillForm') y `usage`
       // (tokens). Se devuelven CRUDAS: la censura y la persistencia son del handler (trayectoria.ts),
@@ -218,11 +469,16 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
     );
     await stagehand.init();
     try {
-      const resultado = await stagehand.act(params.instruccion);
-      const primera = resultado.actions?.[0];
+      // Misma envoltura que la del agente (CAMBIO 2): un rechazo de esquema es intermitente y aca
+      // tambien se reintenta. El corte por fallos consecutivos no aplica: es UNA sola llamada.
+      const blindado = crearActBlindado({
+        actuar: (accion) => stagehand.act(accion, { timeout: this.config.toolTimeoutMs }),
+        logger: this.config.logger,
+      });
+      const resultado = await blindado.ejecutar(params.instruccion);
       return {
-        ok: resultado.success === true,
-        selector: selectorDeAction(primera),
+        ok: resultado.success,
+        selector: selectorDeAction(resultado.playwrightArguments),
         // act() no reporta usage; los tokens de una escalada se contabilizan como no reportados y la
         // comparacion de ahorro usa el numero de escaladas, que si es exacto.
         tokensIn: null,

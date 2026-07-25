@@ -18,9 +18,9 @@ import {
   construirSystemPromptTareaWeb,
   detectarVerboBloqueado,
 } from '../src/prompt-tarea-web.js';
-import type { TrayectoriaNueva } from '../src/trayectoria.js';
+import type { AccionCrudaDeMotor, TrayectoriaNueva } from '../src/trayectoria.js';
 import { SalidaDeRedNoDisponibleError } from '../src/sitios.js';
-import { PermanentExecutionError } from '../src/errores.js';
+import { FalloDeEsquemaDelMotorError, PermanentExecutionError } from '../src/errores.js';
 import type { Logger } from '../src/logger.js';
 
 const VAULT_SECRET = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
@@ -627,6 +627,37 @@ describe('registro de trayectorias (Fase F, V030)', () => {
     });
     await expect(procesarTareaWeb(deps, makeJob())).resolves.toBe('completada');
     expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it('el motor LANZA: la trayectoria conserva las acciones acumuladas durante la corrida', async () => {
+    const trayectorias = makeTrayectorias();
+    // Motor que ejecuta dos acciones (una fallida) y despues lanza, como el corte por fallo de
+    // esquema o el deadline de pared: nunca llega a devolver su traza.
+    const motor: MotorDeTareaWeb = {
+      ejecutar: vi.fn(
+        async (params: { registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined }) => {
+          params.registrarAccion?.({
+            type: 'act',
+            action: 'click en Redactar',
+            success: true,
+            playwrightArguments: { selector: 'xpath=//button[1]', method: 'click', arguments: [] },
+          });
+          params.registrarAccion?.({ type: 'act', action: 'click en Enviar', success: false });
+          throw new FalloDeEsquemaDelMotorError(3);
+        },
+      ),
+    } as unknown as MotorDeTareaWeb;
+
+    await expect(procesarTareaWeb(makeDeps({ motor, trayectorias }), makeJob())).rejects.toThrow(
+      /motor de navegacion fallo al resolver/,
+    );
+
+    const guardada = guardadaEn(trayectorias);
+    expect(guardada).toMatchObject({ estado: 'fallida' });
+    expect(guardada.pasos).toHaveLength(2);
+    expect(guardada.pasos[0]).toMatchObject({ idx: 0, selector: 'xpath=//button[1]', exito: true });
+    // El intento fallido queda registrado como paso con exito false.
+    expect(guardada.pasos[1]).toMatchObject({ idx: 1, exito: false });
   });
 
   it('sin registrador cableado (deploy sin V030): la tarea corre igual, sin trayectoria', async () => {

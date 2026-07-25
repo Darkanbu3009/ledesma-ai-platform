@@ -84,6 +84,49 @@ describe('parseEnv (worker): presupuesto de la tarea web (TAREA_WEB_MAX_STEPS / 
   });
 });
 
+describe('parseEnv (worker): blindaje de la tarea web (tool timeout y observador de pasos)', () => {
+  it('defaults: 90 s por llamada de tool y observador APAGADO', () => {
+    const env = parseEnv(VALID as NodeJS.ProcessEnv);
+    expect(env.TAREA_WEB_TOOL_TIMEOUT_SECONDS).toBe(90);
+    expect(env.TAREA_WEB_OBSERVADOR_PASOS).toBe(false);
+  });
+
+  it('acepta los bordes del rango del tool timeout (30..300 s)', () => {
+    expect(
+      parseEnv({ ...VALID, TAREA_WEB_TOOL_TIMEOUT_SECONDS: '30' } as NodeJS.ProcessEnv)
+        .TAREA_WEB_TOOL_TIMEOUT_SECONDS,
+    ).toBe(30);
+    expect(
+      parseEnv({ ...VALID, TAREA_WEB_TOOL_TIMEOUT_SECONDS: '300' } as NodeJS.ProcessEnv)
+        .TAREA_WEB_TOOL_TIMEOUT_SECONDS,
+    ).toBe(300);
+  });
+
+  it('RECHAZA un tool timeout fuera de rango o mal formado', () => {
+    for (const valor of ['29', '301', '0', '-5', 'abc']) {
+      expect(() =>
+        parseEnv({ ...VALID, TAREA_WEB_TOOL_TIMEOUT_SECONDS: valor } as NodeJS.ProcessEnv),
+      ).toThrow(/Environment validation failed/);
+    }
+  });
+
+  it('el observador solo se enciende con "true"; cualquier otro valor falla al arrancar', () => {
+    expect(
+      parseEnv({ ...VALID, TAREA_WEB_OBSERVADOR_PASOS: 'true' } as NodeJS.ProcessEnv)
+        .TAREA_WEB_OBSERVADOR_PASOS,
+    ).toBe(true);
+    expect(
+      parseEnv({ ...VALID, TAREA_WEB_OBSERVADOR_PASOS: 'false' } as NodeJS.ProcessEnv)
+        .TAREA_WEB_OBSERVADOR_PASOS,
+    ).toBe(false);
+    for (const valor of ['1', 'si', 'TRUE', '']) {
+      expect(() =>
+        parseEnv({ ...VALID, TAREA_WEB_OBSERVADOR_PASOS: valor } as NodeJS.ProcessEnv),
+      ).toThrow(/Environment validation failed/);
+    }
+  });
+});
+
 describe('parseEnv (worker): TAREA_WEB_MODEL, 7.1d)', () => {
   it('default: Claude Sonnet en formato proveedor/modelo', () => {
     const env = parseEnv(VALID as NodeJS.ProcessEnv);

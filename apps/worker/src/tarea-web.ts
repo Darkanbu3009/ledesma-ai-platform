@@ -6,7 +6,7 @@ import type { Job } from '@ledesma-platform/shared';
 import type { SitioConectado } from '@ledesma-platform/backend/sitios';
 import type { AprobacionWeb } from '@ledesma-platform/backend/aprobaciones';
 import type { DecryptedProviderCredential } from '@ledesma-platform/backend/execution';
-import { PermanentExecutionError } from './errores.js';
+import { FalloDeEsquemaDelMotorError, PermanentExecutionError } from './errores.js';
 import { SalidaDeRedNoDisponibleError, expiracionDeContexto } from './sitios.js';
 import {
   clasificarDesenlace,
@@ -191,8 +191,15 @@ export interface MotorDeTareaWeb {
      * OBSERVADOR de pasos (Fase F paso 2, CAMBIO 1): el motor lo invoca por cada accion que ejecuta,
      * en el mismo orden en que la empuja a su traza. El handler lo usa para leer del DOM las
      * estrategias de localizacion que la traza no trae. Best-effort: su fallo no cambia nada.
+     * Ausente cuando TAREA_WEB_OBSERVADOR_PASOS esta apagado (default): cero lecturas extra del DOM.
      */
     observador?: ((paso: PasoObservado) => Promise<void>) | undefined;
+    /**
+     * REGISTRO EN VIVO de cada accion que el motor ejecuta, en crudo. Existe para que la trayectoria
+     * conserve lo que paso cuando el motor LANZA (abort, deadline o corte por esquema) y por tanto
+     * no llega a devolver su traza. Sincrono y sin efectos: solo acumula en memoria.
+     */
+    registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined;
   }): Promise<ResultadoMotor>;
 }
 
@@ -301,6 +308,13 @@ export interface TareaWebDeps {
   recetas?: RepositorioRecetasParaWorker | undefined;
   determinista?: NavegadorDeterminista | undefined;
   escalador?: EscaladorDePaso | undefined;
+  /**
+   * OBSERVADOR DE PASOS (TAREA_WEB_OBSERVADOR_PASOS): apagado por defecto. Encendido, cada paso del
+   * motor abre una conexion CDP para leer del DOM las estrategias de localizacion del elemento
+   * (recetas mas ricas, corrida mas cara y mas fragil). Apagado, la tarea corre igual y las recetas
+   * se promueven solo con lo que la traza del motor ya trae.
+   */
+  observadorPasos?: boolean | undefined;
   /** Notifica por correo la aprobacion pendiente/expirada (best-effort). OPCIONAL. */
   notificadorAprobaciones?: NotificadorAprobaciones | undefined;
   /** Secreto de la boveda: descifra el contexto (7.1a) y re-cifra el actualizado. */
@@ -656,8 +670,6 @@ async function verificarYEjecutar(
     apiKey: string;
     /** Traza acumulada del job: esta corrida la completa y, si sale bien, se promueve a receta. */
     pasosDelJob: PasoCensurado[];
-    /** false cuando una receta ya avanzo la pagina: la traza no describe la tarea desde el principio. */
-    promovible: boolean;
     control?: ControlDeTareaWeb;
   },
 ): Promise<ResultadoTareaWeb> {
@@ -751,16 +763,14 @@ async function verificarYEjecutar(
   // PROMOCION AUTOMATICA (CAMBIO 3) con la traza COMPLETA del job: la corrida que preparo la pagina
   // MAS el paso de verificacion MAS la que ejecuto la accion. Asi la receta aprende donde hay que
   // volver a comparar antes de ejecutar (D7).
-  if (opciones.promovible) {
-    await promoverRecetaBestEffort(
-      deps,
-      job,
-      sitio,
-      objetivo,
-      opciones.pasosDelJob,
-      opciones.verboBloqueado,
-    );
-  }
+  await promoverRecetaBestEffort(
+    deps,
+    job,
+    sitio,
+    objetivo,
+    opciones.pasosDelJob,
+    opciones.verboBloqueado,
+  );
   await deps.guardarResultado(job.id, {
     estado: 'ok',
     resumen: desenlace.resumen,
@@ -818,12 +828,65 @@ type DesenlaceDelCaminoPorReceta =
   /** La receta completo la tarea: el job se cierra aqui. */
   | { tipo: 'completada' }
   /**
-   * La receta no sirve (o se agoto): se sigue con el motor en la MISMA sesion. `pagina Avanzada`
-   * dice si la receta llego a tocar la pagina antes de rendirse: en ese caso la corrida del motor
-   * que la termine arranca a mitad de camino y NO se puede promover (seria una receta que empieza
-   * por el medio).
+   * La receta no sirve (o se agoto): se sigue con el motor en la MISMA sesion. `paginaTocada` dice
+   * si la receta llego a actuar sobre la pagina antes de rendirse; en ese caso el llamador la
+   * DEVUELVE a la URL de inicio antes de arrancar el motor (el motor jamas recibe una pagina a
+   * medio camino) o corta la tarea si no lo consigue.
    */
-  | { tipo: 'seguir_con_motor'; paginaAvanzada: boolean };
+  | { tipo: 'seguir_con_motor'; paginaTocada: boolean };
+
+/**
+ * DEVUELVE la pagina a la URL de inicio de la tarea despues de que la ejecucion por receta la
+ * tocara y se rindiera (CAMBIO 6). Entregarle al motor una pagina a medio camino es peor que no
+ * usar la receta: el motor razona sobre un estado que no pidio y puede repetir o completar a medias
+ * una accion ya hecha. Si la renavegacion NO se puede hacer, se ABORTA con un error propio en vez
+ * de continuar: es la unica forma de garantizar que el motor arranca desde un estado conocido.
+ */
+async function renavegarAInicio(
+  deps: TareaWebDeps,
+  job: Job,
+  sitio: SitioConectado,
+  sesionExternaId: string,
+  url: string,
+): Promise<void> {
+  const mensajeDeCorte =
+    'lo aprendido de este sitio se agoto a mitad de camino y la pagina no se pudo devolver a su ' +
+    'estado inicial; la tarea NO continua sobre una pagina a medio camino. Vuelve a pedirla';
+  const determinista = deps.determinista;
+  if (!determinista) throw new PermanentExecutionError(mensajeDeCorte);
+  let estado: 'ok' | 'no_localizado' | 'fallo';
+  try {
+    const resultado = await determinista.ejecutarPasoDeterminista(sesionExternaId, {
+      accion: 'navegar',
+      estrategias: [],
+      texto: null,
+      teclas: null,
+      url,
+      esperaMs: null,
+    });
+    estado = resultado.estado;
+  } catch (error) {
+    deps.logger.error('tarea web: fallo al devolver la pagina a su estado inicial tras la receta', {
+      jobId: job.id,
+      connectionId: sitio.id,
+      err: describir(error),
+    });
+    throw new PermanentExecutionError(mensajeDeCorte);
+  }
+  if (estado !== 'ok') {
+    deps.logger.error('tarea web: la pagina no volvio a su estado inicial tras la receta', {
+      jobId: job.id,
+      connectionId: sitio.id,
+      estado,
+    });
+    throw new PermanentExecutionError(mensajeDeCorte);
+  }
+  deps.logger.info('tarea web: pagina devuelta a su estado inicial antes de arrancar el motor', {
+    jobId: job.id,
+    connectionId: sitio.id,
+    dominio: sitio.dominio,
+  });
+}
 
 /**
  * EJECUTA la tarea con la receta (CAMBIO 4). Registra su propia trayectoria, aplica la verificacion
@@ -852,7 +915,7 @@ async function ejecutarPorReceta(
   const determinista = deps.determinista;
   const escalador = deps.escalador;
   if (!recetas || !determinista || !escalador) {
-    return { tipo: 'seguir_con_motor', paginaAvanzada: false };
+    return { tipo: 'seguir_con_motor', paginaTocada: false };
   }
 
   const iniciadaEn = new Date();
@@ -921,7 +984,7 @@ async function ejecutarPorReceta(
       escalados: resultado.escalados,
       pasosEjecutados: resultado.pasosEjecutados,
     });
-    return { tipo: 'seguir_con_motor', paginaAvanzada: resultado.pasosEjecutados > 0 };
+    return { tipo: 'seguir_con_motor', paginaTocada: resultado.pasosEjecutados > 0 };
   }
 
   await refrescarContextoBestEffort(deps, sitio, job.ownerId, sesionExternaId, opciones.contexto);
@@ -1167,11 +1230,10 @@ export async function procesarTareaWeb(
 
     // 5.5. CAMINO POR RECETA (CAMBIO 5): si este owner ya hizo esta misma tarea con exito en este
     //      dominio, se repite lo aprendido SIN llamar al modelo. Si la receta se agota (el sitio
-    //      cambio demasiado, D6), se sigue con el motor en LA MISMA sesion, sin reabrir nada.
+    //      cambio demasiado, D6), se sigue con el motor en LA MISMA sesion, sin reabrir nada, pero
+    //      NUNCA sobre la pagina que la receta dejo a medio camino: se renavega a la URL de inicio
+    //      antes de arrancar el motor, y si eso no se puede, la tarea se corta.
     const receta = await buscarRecetaAplicable(deps, job, sitio, objetivo, verboBloqueado);
-    // Si la receta avanzo la pagina y despues se rindio, la corrida del motor que la termine arranca
-    // por la mitad: sirve para completar la tarea, NO para volver a aprenderla.
-    let promovible = true;
     if (receta !== null) {
       const porReceta = await ejecutarPorReceta(
         deps,
@@ -1189,7 +1251,9 @@ export async function procesarTareaWeb(
         },
       );
       if (porReceta.tipo === 'completada') return 'completada';
-      promovible = !porReceta.paginaAvanzada;
+      if (porReceta.paginaTocada) {
+        await renavegarAInicio(deps, job, sitio, sesion.sesionExternaId, urlInicial);
+      }
     }
 
     // 6. Ejecutar el objetivo con el motor de navegacion, bajo el deadline de pared del worker y el
@@ -1227,7 +1291,6 @@ export async function procesarTareaWeb(
         contexto,
         apiKey: credential.apiKey,
         pasosDelJob,
-        promovible,
         ...(control !== undefined ? { control } : {}),
       });
     }
@@ -1242,9 +1305,9 @@ export async function procesarTareaWeb(
     //    el resultado al agente via jobs.resultado (V026).
     await refrescarContextoBestEffort(deps, sitio, job.ownerId, sesion.sesionExternaId, contexto);
     // PROMOCION AUTOMATICA (CAMBIO 3): lo que acaba de funcionar queda aprendido para la proxima.
-    if (promovible) {
-      await promoverRecetaBestEffort(deps, job, sitio, objetivo, pasosDelJob, verboBloqueado);
-    }
+    // La corrida del motor siempre arranca desde la pagina de inicio (una receta que se rindio a
+    // medias renavega antes), asi que su traza describe la tarea entera y es promovible.
+    await promoverRecetaBestEffort(deps, job, sitio, objetivo, pasosDelJob, verboBloqueado);
     await deps.guardarResultado(job.id, { estado: 'ok', resumen: desenlace.resumen, via: 'modelo' });
     deps.logger.info('tarea web completada dentro de la sesion del sitio', {
       jobId: job.id,
@@ -1329,9 +1392,10 @@ async function guardarTrayectoriaBestEffort(
 
 /**
  * Corre el motor y REGISTRA la trayectoria de la ejecucion (exitosa, fallida o pausada) antes de
- * devolver el desenlace. Si el motor LANZA (p.ej. el deadline de pared aborto la navegacion), la
- * trayectoria fallida queda igual, sin pasos (el motor no devolvio la traza), como constancia para
- * depurar; el error se re-propaga intacto.
+ * devolver el desenlace. Si el motor LANZA (deadline de pared, cancelacion o corte por fallo de
+ * esquema del motor), la trayectoria fallida se guarda con las acciones que el motor alcanzo a
+ * ejecutar -- acumuladas EN VIVO, porque un motor que lanza no devuelve su traza -- y los intentos
+ * fallidos quedan con exito false. El error se re-propaga intacto.
  */
 async function ejecutarMotorConRegistro(
   deps: TareaWebDeps,
@@ -1356,9 +1420,19 @@ async function ejecutarMotorConRegistro(
   // localizacion que la traza del motor no trae. Best-effort de punta a punta.
   const observaciones: ObservacionDePaso[] = [];
   const observador = crearObservadorDePasos(deps, sesionExternaId, observaciones);
+  // Traza EN VIVO de la corrida: es la unica que queda si el motor lanza (CAMBIO 7).
+  const accionesEnVivo: AccionCrudaDeMotor[] = [];
   let resultado: ResultadoMotor;
   try {
-    resultado = await ejecutarMotor(deps, sesionExternaId, apiKey, prompt, senalExterna, observador);
+    resultado = await ejecutarMotor(
+      deps,
+      sesionExternaId,
+      apiKey,
+      prompt,
+      senalExterna,
+      observador,
+      (accion) => accionesEnVivo.push(accion),
+    );
   } catch (error) {
     await guardarTrayectoriaBestEffort(
       deps,
@@ -1367,7 +1441,7 @@ async function ejecutarMotorConRegistro(
       objetivo,
       'fallida',
       iniciadaEn,
-      { acciones: [], tokensIn: null, tokensOut: null },
+      { acciones: accionesEnVivo, tokensIn: null, tokensOut: null },
       pasosPrevios,
       observaciones,
     );
@@ -1424,7 +1498,9 @@ async function ejecutarMotorConRegistro(
 /**
  * OBSERVADOR de pasos (CAMBIO 1). Por cada accion que el motor ejecuta, le pide al navegador las
  * estrategias de localizacion del elemento que toco y las acumula EN ORDEN. Devuelve undefined si el
- * camino determinista no esta cableado: sin el, no hay nada que observar ni receta que promover.
+ * camino determinista no esta cableado (sin el, no hay nada que observar ni receta que promover) o
+ * si el observador esta APAGADO (TAREA_WEB_OBSERVADOR_PASOS, default false): cada observacion abre
+ * una conexion CDP nueva durante la corrida y eso solo se paga cuando el despliegue lo pide.
  *
  * BEST-EFFORT en los dos sentidos:
  *  - Un fallo de lectura acumula una observacion VACIA, para no desalinear el orden con las acciones.
@@ -1437,7 +1513,7 @@ function crearObservadorDePasos(
   observaciones: ObservacionDePaso[],
 ): ((paso: PasoObservado) => Promise<void>) | undefined {
   const determinista = deps.determinista;
-  if (!determinista || !deps.recetas) return undefined;
+  if (!determinista || !deps.recetas || deps.observadorPasos !== true) return undefined;
   return async (paso: PasoObservado): Promise<void> => {
     const referencia =
       paso.selector !== null
@@ -1479,6 +1555,7 @@ async function ejecutarMotor(
   prompt: { objetivo: string; systemPrompt: string },
   senalExterna?: AbortSignal,
   observador?: ((paso: PasoObservado) => Promise<void>) | undefined,
+  registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined,
 ): Promise<ResultadoMotor> {
   const controller = new AbortController();
   let expiroDeadline = false;
@@ -1499,12 +1576,24 @@ async function ejecutarMotor(
       maxPasos: deps.maxPasos,
       signal: controller.signal,
       observador,
+      registrarAccion,
     });
   } catch (error) {
     // Fallo del motor con la sesion ya abierta: PERMANENTE (no se re-ejecuta una navegacion a
     // medias sobre la cuenta real). El mensaje va sanitizado: nunca el objetivo ni contenido. Si el
     // que corto fue el deadline de pared, el mensaje lo dice con los segundos configurados
     // (diagnostico interno); cualquier otro fallo conserva el mensaje sanitizado de siempre.
+    //
+    // CORTE POR FALLO DE ESQUEMA DEL MOTOR (CAMBIO 3): causa PROPIA del motor de navegacion, ni
+    // limite de pasos ni error del usuario. Se nombra como tal para que el diagnostico no mande al
+    // usuario a reformular un objetivo que estaba bien.
+    if (error instanceof FalloDeEsquemaDelMotorError) {
+      throw new PermanentExecutionError(
+        `el motor de navegacion fallo al resolver las acciones de la pagina (${error.message}); ` +
+          'la tarea se corto para no seguir reintentando lo mismo. No es un problema del objetivo: ' +
+          'vuelve a pedirla mas tarde',
+      );
+    }
     if (expiroDeadline) {
       throw new PermanentExecutionError(
         `la tarea no se pudo completar dentro del deadline de pared configurado ` +

@@ -119,6 +119,10 @@ function main(): void {
       apiKey: config.BROWSERBASE_API_KEY,
       projectId: config.BROWSERBASE_PROJECT_ID,
       model: config.TAREA_WEB_MODEL,
+      // Techo por llamada de tool del agente: sin el, Stagehand aplica su default de 45 s y el
+      // despliegue no tiene forma de ajustarlo.
+      toolTimeoutMs: config.TAREA_WEB_TOOL_TIMEOUT_SECONDS * 1000,
+      logger,
     });
     // TAREA WEB (7.1d): navegacion por IA dentro de la sesion activa de un sitio conectado. Misma
     // compuerta de config que los jobs de sitios; el motor (Stagehand) corre con la credencial del
@@ -140,6 +144,9 @@ function main(): void {
       recetas: recetasRepo,
       determinista: navegador,
       escalador: motorStagehand,
+      // Observador de pasos APAGADO por defecto (TAREA_WEB_OBSERVADOR_PASOS): encendido abre una
+      // conexion CDP por paso durante la corrida.
+      observadorPasos: config.TAREA_WEB_OBSERVADOR_PASOS,
       notificadorAprobaciones,
       vaultSecret: config.VAULT_SECRET,
       model: config.TAREA_WEB_MODEL,

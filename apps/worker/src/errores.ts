@@ -25,6 +25,24 @@ export class RunTimeoutError extends Error {
 }
 
 /**
+ * El MOTOR DE NAVEGACION rechazo por ESQUEMA la salida del modelo tantas veces seguidas que la
+ * corrida se corta. NO es limite de pasos ni error del usuario: es un fallo del propio motor
+ * (Stagehand renderiza el arbol de accesibilidad con un id sin prefijo cuando `encodedId` queda
+ * undefined, el modelo lo copia tal cual y el esquema de `act`, que exige `numero-numero`, lo
+ * rechaza). Se distingue del resto para que el diagnostico no culpe al objetivo del usuario y para
+ * que la corrida no gire minutos reintentando lo mismo.
+ */
+export class FalloDeEsquemaDelMotorError extends Error {
+  constructor(fallosConsecutivos: number) {
+    super(
+      `el motor de navegacion rechazo por esquema la salida del modelo ${fallosConsecutivos} veces ` +
+        'seguidas (fallo conocido e intermitente del motor, no del objetivo)',
+    );
+    this.name = 'FalloDeEsquemaDelMotorError';
+  }
+}
+
+/**
  * El worker se esta apagando (SIGTERM/SIGINT) y aborto el run en curso. NO es culpa del job: se devuelve
  * a 'pending' para que se re-reclame, sin marcarlo failed aunque haya agotado intentos.
  */

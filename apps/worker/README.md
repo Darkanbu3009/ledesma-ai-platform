@@ -101,5 +101,43 @@ Este proceso **no se despliega** aun; solo debe compilar y poder correrse localm
 | `RUN_MAX_TOKENS` | no | `1000000` | Cap de tokens acumulados del run. |
 | `TAREA_WEB_MAX_STEPS` | no | `120` | Cap de pasos del agente de navegacion por tarea web (10..300). |
 | `TAREA_WEB_TIMEOUT_SECONDS` | no | `1500` | Deadline de pared SOLO de los jobs `tarea_web` (60..2580). |
+| `TAREA_WEB_TOOL_TIMEOUT_SECONDS` | no | `90` | Techo por LLAMADA de tool del agente de navegacion (30..300). |
+| `TAREA_WEB_OBSERVADOR_PASOS` | no | `false` | Observador de pasos: `true` o `false` (ver abajo). |
 | `WORKER_POLL_INTERVAL_MS` | no | `5000` | Cada cuanto consulta la cola. |
 | `LOG_LEVEL` | no | `info` | Nivel de log. |
+
+### Blindaje de la tarea web (fallo de esquema del motor)
+
+El motor de navegacion (Stagehand 3.6.0) tiene un fallo propio e INTERMITENTE: al renderizar el
+arbol de accesibilidad rotula cada linea con `encodedId ?? nodeId`
+(`understudy/a11y/snapshot/treeFormatUtils.js`), asi que cuando `encodedId` queda `undefined` el
+modelo ve `[8246]` en vez de `[0-8246]`, lo copia tal cual y el esquema de `act`
+(`lib/inference.js`, que exige `numero-numero` en `elementId`) rechaza la respuesta con
+`NoObjectGeneratedError`. El agente reintentaba lo mismo sin espera y sin cota: en produccion giro
+casi 4 minutos sin registrar un solo paso. El worker lo blinda en tres capas:
+
+- **Reintento inmediato** de la MISMA llamada de `act`, hasta 2 veces con 1 segundo entre intentos
+  (el fallo es intermitente, asi que este reintento es la mitigacion principal). Cada reintento se
+  loguea en `warn` como fallo del motor.
+- **Corte por 3 fallos de esquema consecutivos** (ya agotados los reintentos): la tarea termina con
+  un error propio que dice que fallo el MOTOR, distinto del limite de pasos y de un error del
+  usuario. Un `act` exitoso reinicia el contador.
+- **`toolTimeout`** (`TAREA_WEB_TOOL_TIMEOUT_SECONDS`): techo por llamada de tool. Sin el, Stagehand
+  aplica su default de 45 s y el despliegue no puede ajustarlo.
+
+La trayectoria de la corrida se persiste con las acciones acumuladas EN VIVO aunque el motor lance
+(corte por esquema, deadline de pared o cancelacion); los intentos fallidos quedan como pasos con
+`exito: false`.
+
+### Observador de pasos (`TAREA_WEB_OBSERVADOR_PASOS`)
+
+Encendido, el handler lee del DOM las estrategias de localizacion de cada elemento que el motor toca
+mientras la tarea corre, y esas estrategias son lo que hace promovible una corrida a receta. El
+costo es una conexion CDP NUEVA por paso durante la corrida.
+
+**Apagado (default): las recetas NO capturan estrategias enriquecidas durante la corrida.** En la
+practica eso significa que una corrida del motor no se promueve a receta (sin estrategias no hay
+paso re-ejecutable que guardar). Lo demas no cambia: las recetas YA aprendidas se siguen ejecutando
+de forma determinista, se reparan y se jubilan igual, y la trayectoria se sigue registrando. Se
+enciende (`TAREA_WEB_OBSERVADOR_PASOS=true`) en los despliegues donde interese volver a aprender
+recetas nuevas.

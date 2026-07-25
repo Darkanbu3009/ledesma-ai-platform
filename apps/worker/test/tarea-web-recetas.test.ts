@@ -209,6 +209,9 @@ function makeDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
     recetas: makeRecetas(),
     determinista: makeDeterminista(),
     escalador: makeEscalador(),
+    // El observador de pasos esta APAGADO por defecto en produccion (TAREA_WEB_OBSERVADOR_PASOS);
+    // estos tests miden la promocion, que necesita las estrategias que el observador lee del DOM.
+    observadorPasos: true,
     vaultSecret: 'a'.repeat(64),
     model: 'anthropic/claude-opus-4-5',
     maxPasos: 40,
@@ -271,6 +274,21 @@ describe('promocion automatica al terminar con exito (CAMBIO 3, D4)', () => {
     expect(input.pasos[0]?.estrategias).toEqual([...ESTRATEGIAS]);
     // El resultado del job declara por donde corrio, para poder medir el ahorro.
     expect(deps.guardarResultado).toHaveBeenCalledWith('job-1', expect.objectContaining({ via: 'modelo' }));
+  });
+
+  it('con TAREA_WEB_OBSERVADOR_PASOS apagado NO se pasa observador al motor (cero CDP por paso)', async () => {
+    const motor = makeMotor();
+    const determinista = makeDeterminista();
+    // Sin `observadorPasos` (el default de produccion): el observador ni siquiera se construye.
+    const deps = makeDeps({ motor, determinista, observadorPasos: false });
+
+    await procesarTareaWeb(deps, makeJob('abre el ultimo correo'));
+
+    const params = (motor.ejecutar as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+      observador?: unknown;
+    };
+    expect(params.observador).toBeUndefined();
+    expect(determinista.leerEstrategiasDeElemento).not.toHaveBeenCalled();
   });
 
   it('una tarea que FALLA no genera receta', async () => {
@@ -511,19 +529,45 @@ describe('la receta NO puede saltarse la verificacion ni la politica (D7)', () =
   });
 });
 
-describe('una receta que se rinde a mitad no contamina lo aprendido', () => {
-  it('si la receta ya avanzo la pagina, la corrida del motor que la termina NO se promueve', async () => {
+describe('una receta que se rinde a mitad no contamina la sesion del motor (CAMBIO 6)', () => {
+  it('si la receta ya toco la pagina, el motor NO la recibe a medio camino: se renavega al inicio', async () => {
     const recetas = makeRecetas(makeReceta([pasoClick(0), pasoClick(1), pasoClick(2)]));
     const motor = makeMotor();
     // El primer paso corre; el segundo y el tercero no localizan -> se supera el umbral de D6.
-    const deps = makeDeps({ recetas, motor, determinista: makeDeterminista([1, 2]) });
+    const determinista = makeDeterminista([1, 2]);
+    const deps = makeDeps({ recetas, motor, determinista });
 
     await procesarTareaWeb(deps, makeJob('abre el ultimo correo'));
 
+    // La ULTIMA primitiva antes del motor es una navegacion a la URL de inicio de la tarea.
+    const llamadas = determinista.ejecutarPasoDeterminista.mock.calls;
+    const ultima = llamadas[llamadas.length - 1]?.[1] as InstruccionDePaso;
+    expect(ultima).toMatchObject({ accion: 'navegar', url: `https://${DOMINIO}/` });
     expect(motor.ejecutar).toHaveBeenCalledTimes(1);
-    // Promover aqui crearia una receta que empieza por la mitad: no se promueve.
-    expect(recetas.promover).not.toHaveBeenCalled();
+    // Con la pagina de vuelta en su estado inicial, la corrida del motor describe la tarea entera y
+    // vuelve a ser promovible.
+    expect(recetas.promover).toHaveBeenCalledTimes(1);
     expect(recetas.marcarObsoleta).toHaveBeenCalledWith('rec-1', 'user-1');
+  });
+
+  it('si la pagina no se puede devolver a su estado inicial, la tarea se corta sin llamar al motor', async () => {
+    const recetas = makeRecetas(makeReceta([pasoClick(0), pasoClick(1), pasoClick(2)]));
+    const motor = makeMotor();
+    // Los pasos 1 y 2 no localizan (la receta se rinde) y la renavegacion posterior (indice 3) falla.
+    const determinista: NavegadorDeterminista = {
+      ejecutarPasoDeterminista: vi.fn(async (_sesion: string, instruccion: InstruccionDePaso) =>
+        instruccion.accion === 'navegar'
+          ? { estado: 'fallo' as const, estrategias: [], detalle: null }
+          : { estado: 'no_localizado' as const, estrategias: [], detalle: null },
+      ),
+      leerEstrategiasDeElemento: vi.fn(async () => [...ESTRATEGIAS]),
+    };
+
+    await expect(
+      procesarTareaWeb(makeDeps({ recetas, motor, determinista }), makeJob('abre el ultimo correo')),
+    ).rejects.toThrow(/estado inicial/);
+
+    expect(motor.ejecutar).not.toHaveBeenCalled();
   });
 
   it('una receta que se rinde tras tocar la pagina se JUBILA aunque no llegue al umbral de D6', async () => {
