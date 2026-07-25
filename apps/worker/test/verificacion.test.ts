@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { POLITICA_EJECUCION_DEFAULT, parsearDetencion } from '@ledesma-platform/shared';
 import { extraerParametrosDeclarados } from '../src/parametros-objetivo.js';
 import {
+  accionSurtioEfecto,
   construirPasoDeVerificacion,
   dominioExcluido,
   mensajeDeDetencion,
+  mensajeDeIncompleto,
   verificarAccion,
   type CampoDeLaPagina,
   type EstadoDeLaPagina,
@@ -96,13 +98,17 @@ describe('destinatario declarado (D2)', () => {
     expect(veredicto.tipo).toBe('ejecutar');
   });
 
-  it('sin ningun campo de destinatario legible: NO ejecuta (no se ejecuta a ciegas)', () => {
+  it('sin ningun campo de destinatario legible: NO ejecuta (todavia falta escribirlo)', () => {
     const veredicto = verificar({
       objetivo: OBJETIVO,
       verbo: 'enviar',
       pagina: pagina([{ contexto: 'textarea cuerpo', valor: 'ahi va el resumen' }]),
     });
-    expect(motivo(veredicto)).toBe('noCoincide');
+    // El dato no esta en la pagina: la accion NO pasa, pero la tarea puede seguir para que el agente
+    // termine de llenar el formulario (CAMBIO 1). Lo que jamas ocurre es ejecutar.
+    expect(veredicto.tipo).toBe('incompleto');
+    if (veredicto.tipo !== 'incompleto') throw new Error('inalcanzable');
+    expect(veredicto.faltantes).toEqual(['destinatario']);
   });
 
   it('objetivo de envio SIN destinatario declarado: NO ejecuta y pide el dato', () => {
@@ -176,7 +182,7 @@ describe('producto y cantidad declarados (D2)', () => {
       verbo: 'comprar',
       pagina: pagina([], 'Resumen del carrito: Plan Empresarial'),
     });
-    expect(motivo(veredicto)).toBe('noCoincide');
+    expect(veredicto.tipo).toBe('incompleto');
   });
 
   it('cantidad distinta a la declarada: NO ejecuta', () => {
@@ -186,6 +192,109 @@ describe('producto y cantidad declarados (D2)', () => {
       pagina: pagina([{ contexto: 'input number cantidad', valor: '7' }], 'Plan Basico'),
     });
     expect(motivo(veredicto)).toBe('noCoincide');
+  });
+});
+
+/**
+ * CAMBIO 1: el caso EXACTO de produccion. El objetivo declara destinatario, asunto y cuerpo; el
+ * agente propone una accion con pinta de envio cuando solo el destinatario esta escrito. Antes la
+ * verificacion se daba por superada comparando UN parametro y la accion se iba al navegador con el
+ * correo a medio redactar.
+ */
+describe('todos los parametros declarados o ninguna accion (CAMBIO 1)', () => {
+  const OBJETIVO =
+    'envia a juan@ejemplo.com un correo con asunto "Reporte de agosto" y cuerpo "Adjunto el reporte"';
+  const DESTINATARIO = { contexto: 'input email para', valor: 'juan@ejemplo.com' };
+  const ASUNTO = { contexto: 'input asunto', valor: 'Reporte de agosto' };
+  const CUERPO = { contexto: 'div contenteditable cuerpo del mensaje', valor: 'Adjunto el reporte' };
+
+  it('con 1 de 3 parametros en el DOM la verificacion NO se supera', () => {
+    const veredicto = verificar({
+      objetivo: OBJETIVO,
+      verbo: 'enviar',
+      pagina: pagina([DESTINATARIO]),
+    });
+    expect(veredicto.tipo).toBe('incompleto');
+    if (veredicto.tipo !== 'incompleto') throw new Error('inalcanzable');
+    expect(veredicto.faltantes).toEqual(['asunto', 'cuerpo']);
+    // Se compararon los TRES parametros declarados; lo que falla es que dos no estan en la pagina.
+    expect(veredicto.comparaciones).toHaveLength(3);
+  });
+
+  it('con 2 de 3 tampoco: falta uno y con eso basta', () => {
+    const veredicto = verificar({
+      objetivo: OBJETIVO,
+      verbo: 'enviar',
+      pagina: pagina([DESTINATARIO, ASUNTO]),
+    });
+    expect(veredicto.tipo).toBe('incompleto');
+  });
+
+  it('con los 3 presentes y coincidentes: EJECUTAR', () => {
+    const veredicto = verificar({
+      objetivo: OBJETIVO,
+      verbo: 'enviar',
+      pagina: pagina([DESTINATARIO, ASUNTO, CUERPO]),
+    });
+    expect(veredicto.tipo).toBe('ejecutar');
+    expect(veredicto.comparaciones.every((c) => c.coincide)).toBe(true);
+  });
+
+  it('el cuerpo tolera lo que el sitio agrega despues (una firma no cambia lo pedido)', () => {
+    const veredicto = verificar({
+      objetivo: OBJETIVO,
+      verbo: 'enviar',
+      pagina: pagina([
+        DESTINATARIO,
+        ASUNTO,
+        { ...CUERPO, valor: 'Adjunto el reporte\n--\nEnviado desde mi telefono' },
+      ]),
+    });
+    expect(veredicto.tipo).toBe('ejecutar');
+  });
+
+  it('un destinatario SUSTITUIDO detiene la tarea, no la deja seguir', () => {
+    // La distincion que importa: un dato que falta se puede terminar de escribir; un dato CAMBIADO
+    // es otra accion distinta de la pedida y ahi la tarea termina.
+    const veredicto = verificar({
+      objetivo: OBJETIVO,
+      verbo: 'enviar',
+      pagina: pagina([{ ...DESTINATARIO, valor: 'otro@atacante.com' }, ASUNTO, CUERPO]),
+    });
+    expect(motivo(veredicto)).toBe('noCoincide');
+  });
+});
+
+/** CAMBIO 4: la accion irreversible se da por hecha leyendo el DOM, jamas por lo que diga el modelo. */
+describe('accionSurtioEfecto', () => {
+  const parametros = extraerParametrosDeclarados('envia el resumen a juan@ejemplo.com');
+  const antes = pagina([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]);
+
+  it('la ventana de redaccion se cerro: confirmada', () => {
+    expect(accionSurtioEfecto({ parametros, antes, despues: pagina([]) })).toBe(true);
+  });
+
+  it('el sitio muestra su confirmacion: confirmada aunque el formulario siga', () => {
+    expect(
+      accionSurtioEfecto({ parametros, antes, despues: pagina(antes.campos, 'Mensaje enviado. Deshacer') }),
+    ).toBe(true);
+  });
+
+  it('la pagina sigue igual: NO confirmada (nunca se da por hecha una accion sin rastro)', () => {
+    expect(accionSurtioEfecto({ parametros, antes, despues: antes })).toBe(false);
+  });
+
+  it('sin parametros que comparar, la pagina tiene que haber cambiado', () => {
+    const sinParametros = extraerParametrosDeclarados('borra el archivo viejo del panel');
+    const vacia = pagina([], 'panel de archivos');
+    expect(accionSurtioEfecto({ parametros: sinParametros, antes: vacia, despues: vacia })).toBe(false);
+    expect(
+      accionSurtioEfecto({
+        parametros: sinParametros,
+        antes: vacia,
+        despues: pagina([], 'panel de archivos (vacio)'),
+      }),
+    ).toBe(true);
   });
 });
 
@@ -304,11 +413,25 @@ describe('constancia y mensajes', () => {
     const veredicto = verificar({
       objetivo: 'paga con la "4111 1111 1111 1111" del titular',
       verbo: 'comprar',
-      pagina: pagina([], 'otro contenido'),
+      // El numero SI esta en la pagina: la comparacion coincide y llega al paso de la trayectoria.
+      pagina: pagina([], 'pagando con 4111 1111 1111 1111'),
     });
     const paso = construirPasoDeVerificacion(veredicto);
     expect(JSON.stringify(paso)).not.toContain('4111');
-    expect(mensajeDeDetencion(veredicto as Extract<Veredicto, { tipo: 'detener' }>)).not.toContain('4111');
+  });
+
+  it('el mensaje de una verificacion incompleta nombra los datos, nunca sus valores', () => {
+    const veredicto = verificar({
+      objetivo: 'paga con la "4111 1111 1111 1111" del titular',
+      verbo: 'comprar',
+      pagina: pagina([], 'otro contenido'),
+    });
+    expect(veredicto.tipo).toBe('incompleto');
+    const mensaje = mensajeDeIncompleto(veredicto as Extract<Veredicto, { tipo: 'incompleto' }>);
+    expect(mensaje).toContain('producto');
+    expect(mensaje).not.toContain('4111');
+    // No es una detencion: no lleva el prefijo con el que la consola cierra una tarea detenida.
+    expect(mensaje).not.toContain('DETENIDA_VERIFICACION');
   });
 
   it('el mensaje de detencion es interpretable por la consola', () => {

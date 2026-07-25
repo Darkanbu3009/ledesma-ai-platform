@@ -668,9 +668,19 @@ export async function processClaimedJob(
       buildRunRecord(job, attribution, usage, 'completed', stopReason, null, startedAt),
     );
   } catch (error) {
+    // LA CORRIDA YA TERMINO: se detiene el latido ANTES de escribir el cierre. El latido existe para
+    // detectar que un job dejo de estar 'running' MIENTRAS corre (una cancelacion desde la consola);
+    // si sigue vivo mientras handleFailure escribe 'failed', lee el estado que acabamos de escribir
+    // NOSOTROS y lo trata como una cancelacion externa: aborta la corrida y cierra la sesion de
+    // navegador de una tarea que ya no existe. Eso fue lo que convirtio un bloqueo de la guardia (un
+    // desenlace normal del sistema) en una corrida abortada a mitad de camino. Detenerlo aqui corta
+    // ese encadenamiento: el estado que este bloque escribe no puede cancelarse a si mismo.
+    detenerLatido();
     // CANCELACION (CAMBIO 3): el estado nuevo ('failed' + CANCELADO_POR_USUARIO, o el que haya
     // puesto otro actor) YA esta escrito por quien cancelo; aqui la corrida solo se termina, SIN
-    // escribir ningun cierre encima (los mark* igual tienen CAS sobre 'running', doble red).
+    // escribir ningun cierre encima (los mark* igual tienen CAS sobre 'running', doble red). La
+    // senal ya esta marcada cuando el error llega hasta aca, asi que detener el latido arriba no
+    // puede ocultar una cancelacion real.
     if (cancelacion.signal.aborted) {
       logger.info('corrida abortada: el job fue cancelado mientras corria; no se escribe el cierre', {
         jobId: job.id,

@@ -70,6 +70,12 @@ export function firmaDeObjetivo(objetivo: string): string {
   if (parametros.cantidad !== null) {
     sustituciones.push({ texto: String(parametros.cantidad), marcador: marcador('cantidad') });
   }
+  if (parametros.asunto !== null) {
+    sustituciones.push({ texto: parametros.asunto, marcador: marcador('asunto') });
+  }
+  if (parametros.cuerpo !== null) {
+    sustituciones.push({ texto: parametros.cuerpo, marcador: marcador('cuerpo') });
+  }
 
   let firma = normalizarTexto(objetivo);
   for (const { texto, marcador: reemplazo } of [...sustituciones].sort(
@@ -96,7 +102,7 @@ export function firmaDeObjetivo(objetivo: string): string {
  */
 export type ValoresDeParametros = Partial<Record<MarcadorParametro, string>>;
 
-/** Los cuatro parametros declarados, como texto listo para teclear. */
+/** Los parametros declarados, como texto listo para teclear. */
 export function valoresDeParametros(parametros: ParametrosDeclarados): ValoresDeParametros {
   const valores: ValoresDeParametros = {};
   // Un solo destinatario es el caso que una receta sabe repetir: con varios, cada uno va a un campo
@@ -106,6 +112,8 @@ export function valoresDeParametros(parametros: ParametrosDeclarados): ValoresDe
   if (parametros.monto !== null) valores.monto = parametros.monto.texto;
   if (parametros.producto !== null) valores.producto = parametros.producto;
   if (parametros.cantidad !== null) valores.cantidad = String(parametros.cantidad);
+  if (parametros.asunto !== null) valores.asunto = parametros.asunto;
+  if (parametros.cuerpo !== null) valores.cuerpo = parametros.cuerpo;
   return valores;
 }
 
@@ -194,7 +202,14 @@ function esCensurado(texto: string): boolean {
 function marcadorDelValor(valor: string, valores: ValoresDeParametros): MarcadorParametro | null {
   const normalizado = normalizarTexto(valor);
   if (normalizado === '') return null;
-  for (const parametro of ['destinatario', 'monto', 'producto', 'cantidad'] as const) {
+  for (const parametro of [
+    'destinatario',
+    'monto',
+    'producto',
+    'cantidad',
+    'asunto',
+    'cuerpo',
+  ] as const) {
     const declarado = valores[parametro];
     if (declarado !== undefined && normalizarTexto(declarado) === normalizado) return parametro;
   }

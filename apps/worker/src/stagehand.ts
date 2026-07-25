@@ -1,7 +1,11 @@
 import { Stagehand, tool } from '@browserbasehq/stagehand';
 import type { AgentExecuteOptions, V3Options } from '@browserbasehq/stagehand';
 import { z } from 'zod';
-import { AccionBloqueadaError, FalloDeEsquemaDelMotorError } from './errores.js';
+import {
+  AccionBloqueadaError,
+  AccionSinConfirmarError,
+  FalloDeEsquemaDelMotorError,
+} from './errores.js';
 import type { Logger } from './logger.js';
 import type { EscaladorDePaso, ResultadoEscalada } from './ejecutor-receta.js';
 import type { AccionCrudaDeMotor } from './trayectoria.js';
@@ -223,6 +227,12 @@ export interface ActBlindado {
   corte(): FalloDeEsquemaDelMotorError | null;
   /** Mensaje de la detencion si la GUARDIA bloqueo una accion; null si nunca bloqueo. */
   bloqueo(): string | null;
+  /**
+   * Mensaje del cierre si una accion irreversible se ejecuto y NO se pudo confirmar su efecto
+   * (CAMBIO 4); null si no ocurrio. Viaja por el mismo camino que el bloqueo: la excepcion que sale
+   * de la tool la atrapa el handler de Stagehand, asi que el adaptador la reconstruye al terminar.
+   */
+  sinConfirmar(): string | null;
 }
 
 /** Espera real entre reintentos; los tests inyectan la suya para no dormir. */
@@ -274,6 +284,7 @@ export function crearActBlindado(params: {
   let fallosConsecutivos = 0;
   let corte: FalloDeEsquemaDelMotorError | null = null;
   let bloqueo: string | null = null;
+  let sinConfirmar: string | null = null;
   /** Ultimo elementId que el motor rechazo; se compara con el del intento siguiente. */
   let elementIdRechazado: string | null = null;
 
@@ -285,10 +296,73 @@ export function crearActBlindado(params: {
     return registro;
   };
 
+  /** La llamada al navegador con su reintento por rechazo de esquema. Lanza al alcanzar el corte. */
+  const actuarConReintentos = async (
+    accion: string,
+    registro: AccionCrudaDeMotor,
+  ): Promise<SalidaDeActBlindado> => {
+    for (let intento = 0; ; intento++) {
+      try {
+        const resultado = await params.actuar(accion);
+        fallosConsecutivos = 0;
+        elementIdRechazado = null;
+        const exito = resultado.success ?? true;
+        const primera = resultado.actions?.[0];
+        registro.success = exito;
+        if (primera !== undefined) registro.playwrightArguments = primera;
+        return {
+          success: exito,
+          action: resultado.actionDescription ?? accion,
+          ...(primera !== undefined ? { playwrightArguments: primera } : {}),
+        };
+      } catch (error) {
+        if (!esFalloDeEsquemaDelMotor(error)) {
+          return { success: false, error: mensajeDeError(error) };
+        }
+        // REPETICION DETERMINISTA: el motor rechazo el MISMO identificador dos veces seguidas. El
+        // arbol que lo produce no cambia solo, asi que reintentar es tiempo de navegador tirado.
+        const elementId = elementIdDeFalloDeEsquema(error);
+        const repetido = elementId !== null && elementId === elementIdRechazado;
+        elementIdRechazado = elementId;
+        if (repetido) {
+          fallosConsecutivos += 1;
+          // El identificador es un numero del arbol de accesibilidad: no arrastra contenido.
+          params.logger.warn(
+            'tarea web: el motor de navegacion rechazo dos veces el MISMO identificador de elemento; se corta',
+            { elementId },
+          );
+          corte = new FalloDeEsquemaDelMotorError(fallosConsecutivos, elementId);
+          throw corte;
+        }
+        if (intento < MAX_REINTENTOS_ESQUEMA) {
+          // Sin el texto de la accion ni el del error: pueden arrastrar contenido de la pagina.
+          params.logger.warn(
+            'tarea web: fallo de esquema del motor de navegacion al resolver una accion; se reintenta',
+            { intento: intento + 1, reintentos: MAX_REINTENTOS_ESQUEMA },
+          );
+          await esperar(ESPERA_ENTRE_REINTENTOS_ESQUEMA_MS);
+          continue;
+        }
+        fallosConsecutivos += 1;
+        if (fallosConsecutivos >= MAX_FALLOS_ESQUEMA_CONSECUTIVOS) {
+          corte = new FalloDeEsquemaDelMotorError(fallosConsecutivos);
+          throw corte;
+        }
+        return {
+          success: false,
+          error:
+            'el motor no pudo resolver un elemento valido para esa accion; describe otro elemento ' +
+            'o usa otra herramienta',
+        };
+      }
+    }
+  };
+
   return {
     corto: () => corte !== null,
     corte: () => corte,
     bloqueo: () => bloqueo,
+    sinConfirmar: () => sinConfirmar,
     ejecutar: async (accion: string): Promise<SalidaDeActBlindado> => {
       // La accion NO se registra en la traza: no llego al navegador. La constancia de por que se
       // bloqueo es el paso de verificacion que deja la propia guardia.
@@ -297,62 +371,25 @@ export function crearActBlindado(params: {
         bloqueo = veredicto.mensaje;
         throw new AccionBloqueadaError(veredicto.mensaje);
       }
+      // INCOMPLETO (CAMBIO 1): la accion no pasa al navegador, pero la corrida NO se corta. El
+      // motivo vuelve al modelo como fallo de la tool para que termine de llenar los campos y la
+      // reintente; a diferencia del bloqueo, aqui el sistema no detuvo la tarea, solo esta accion.
+      if (veredicto?.tipo === 'incompleto') {
+        return { success: false, error: veredicto.mensaje };
+      }
       const registro = registrarInicio(accion);
-      for (let intento = 0; ; intento++) {
-        try {
-          const resultado = await params.actuar(accion);
-          fallosConsecutivos = 0;
-          elementIdRechazado = null;
-          const exito = resultado.success ?? true;
-          const primera = resultado.actions?.[0];
-          registro.success = exito;
-          if (primera !== undefined) registro.playwrightArguments = primera;
-          return {
-            success: exito,
-            action: resultado.actionDescription ?? accion,
-            ...(primera !== undefined ? { playwrightArguments: primera } : {}),
-          };
-        } catch (error) {
-          if (!esFalloDeEsquemaDelMotor(error)) {
-            return { success: false, error: mensajeDeError(error) };
-          }
-          // REPETICION DETERMINISTA: el motor rechazo el MISMO identificador dos veces seguidas. El
-          // arbol que lo produce no cambia solo, asi que reintentar es tiempo de navegador tirado.
-          const elementId = elementIdDeFalloDeEsquema(error);
-          const repetido = elementId !== null && elementId === elementIdRechazado;
-          elementIdRechazado = elementId;
-          if (repetido) {
-            fallosConsecutivos += 1;
-            // El identificador es un numero del arbol de accesibilidad: no arrastra contenido.
-            params.logger.warn(
-              'tarea web: el motor de navegacion rechazo dos veces el MISMO identificador de elemento; se corta',
-              { elementId },
-            );
-            corte = new FalloDeEsquemaDelMotorError(fallosConsecutivos, elementId);
-            throw corte;
-          }
-          if (intento < MAX_REINTENTOS_ESQUEMA) {
-            // Sin el texto de la accion ni el del error: pueden arrastrar contenido de la pagina.
-            params.logger.warn(
-              'tarea web: fallo de esquema del motor de navegacion al resolver una accion; se reintenta',
-              { intento: intento + 1, reintentos: MAX_REINTENTOS_ESQUEMA },
-            );
-            await esperar(ESPERA_ENTRE_REINTENTOS_ESQUEMA_MS);
-            continue;
-          }
-          fallosConsecutivos += 1;
-          if (fallosConsecutivos >= MAX_FALLOS_ESQUEMA_CONSECUTIVOS) {
-            corte = new FalloDeEsquemaDelMotorError(fallosConsecutivos);
-            throw corte;
-          }
-          return {
-            success: false,
-            error:
-              'el motor no pudo resolver un elemento valido para esa accion; describe otro elemento ' +
-              'o usa otra herramienta',
-          };
+      const salida = await actuarConReintentos(accion, registro);
+      // CONFIRMACION (CAMBIO 4): tras EJECUTAR una accion irreversible se relee el DOM para ver que
+      // surtio efecto. Corre haya salido bien o mal la llamada: lo que decide es la pagina, no lo
+      // que reporte la tool. Sin confirmacion la tarea termina aqui y NO se reintenta.
+      if (veredicto?.tipo === 'permitir' && veredicto.confirmar === true && params.guardia) {
+        const confirmacion = await params.guardia.confirmar();
+        if (!confirmacion.confirmada) {
+          sinConfirmar = confirmacion.mensaje;
+          throw new AccionSinConfirmarError(confirmacion.mensaje);
         }
       }
+      return salida;
     },
   };
 }
@@ -601,6 +638,13 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
       const bloqueo = blindado.bloqueo();
       if (bloqueo !== null) {
         throw new AccionBloqueadaError(bloqueo);
+      }
+      // ACCION SIN CONFIRMAR (CAMBIO 4): se ejecuto y el sitio no mostro que surtiera efecto. Va
+      // antes del corte por esquema por el mismo motivo que el bloqueo: es un desenlace del sistema
+      // sobre una accion real, no un fallo del motor, y su mensaje es el que tiene que llegar.
+      const sinConfirmar = blindado.sinConfirmar();
+      if (sinConfirmar !== null) {
+        throw new AccionSinConfirmarError(sinConfirmar);
       }
       // El error EXACTO del corte (racha de fallos o repeticion determinista del mismo elementId):
       // reconstruirlo aca perderia el identificador que hace veraz el diagnostico.

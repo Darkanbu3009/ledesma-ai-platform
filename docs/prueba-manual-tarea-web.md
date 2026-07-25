@@ -50,6 +50,21 @@ del usuario en un sitio ya conectado (7.1c), por el proxy pineado y SIN re-login
   los datos coinciden: `resultado.estado = 'ok'` y una sola corrida del motor. Si el agente
   terminara sin intentar la accion, el job falla con "nunca llego a la verificacion previa" (nunca
   se reporta como exito).
+- Pedir un envio con TODOS los datos declarados
+  (`envia a X un correo con asunto "..." y cuerpo "..."`) y seguir los logs: mientras el redactor
+  este a medias aparece `la verificacion previa NO se supera todavia` con `parametrosComparados` y
+  `parametrosDeclarados` (los dos numeros, siempre), la accion NO llega al navegador y la tarea
+  SIGUE. Cuando los tres datos estan escritos, aparece `verificacion determinista superada` con
+  `parametrosComparados = parametrosDeclarados` y despues
+  `la accion irreversible surtio efecto en la pagina (confirmada)`.
+- Si el sitio no cierra el redactor ni muestra confirmacion tras el clic, el job termina con
+  "la accion se intento pero no se pudo confirmar" y NUNCA se reintenta sola: hay que revisar el
+  sitio antes de volver a pedirla.
+- Un job DETENIDO por la verificacion cierra ordenado: ademas del `last_error`
+  `DETENIDA_VERIFICACION: {...}`, `select resultado from jobs where id = '<job_id>'` trae
+  `{"estado":"detenida", ...}` y la trayectoria (V030) conserva TODOS los pasos de la corrida mas el
+  paso de verificacion. En los logs NO debe aparecer
+  `el job dejo de estar running a mitad de la corrida` para ese job.
 
 ## Resultado esperado (resumen)
 

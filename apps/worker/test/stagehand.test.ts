@@ -13,9 +13,13 @@ import {
   MAX_REINTENTOS_ESQUEMA,
   TOOLS_RETIRADAS_CON_GUARDIA,
 } from '../src/stagehand.js';
-import { AccionBloqueadaError, FalloDeEsquemaDelMotorError } from '../src/errores.js';
+import {
+  AccionBloqueadaError,
+  AccionSinConfirmarError,
+  FalloDeEsquemaDelMotorError,
+} from '../src/errores.js';
 import type { AccionCrudaDeMotor } from '../src/trayectoria.js';
-import type { GuardiaDeAccion } from '../src/tarea-web.js';
+import type { GuardiaDeAccion, ResultadoDeConfirmacion } from '../src/tarea-web.js';
 import type { Logger } from '../src/logger.js';
 
 /**
@@ -368,6 +372,22 @@ describe('crearActBlindado con GUARDIA', () => {
         revisadas.push(accion);
         return { tipo: 'bloquear', mensaje };
       },
+      confirmar: async () => ({ confirmada: true }),
+    };
+  }
+
+  /** Guardia que deja pasar todo. `confirmar` decide si la accion ejecutada se da por buena. */
+  function guardiaQuePermite(
+    revisadas: string[],
+    confirmacion: ResultadoDeConfirmacion = { confirmada: true },
+    opciones: { confirmar?: boolean } = {},
+  ): GuardiaDeAccion {
+    return {
+      revisar: async (accion) => {
+        revisadas.push(accion);
+        return opciones.confirmar === true ? { tipo: 'permitir', confirmar: true } : { tipo: 'permitir' };
+      },
+      confirmar: async () => confirmacion,
     };
   }
 
@@ -395,12 +415,7 @@ describe('crearActBlindado con GUARDIA', () => {
   it('una guardia que permite deja pasar la accion y no registra bloqueo', async () => {
     const actuar = vi.fn(async () => ({ success: true }));
     const revisadas: string[] = [];
-    const guardia: GuardiaDeAccion = {
-      revisar: async (accion) => {
-        revisadas.push(accion);
-        return { tipo: 'permitir' };
-      },
-    };
+    const guardia = guardiaQuePermite(revisadas);
     const blindado = crearActBlindado({ actuar, logger: makeLogger(), guardia });
 
     const salida = await blindado.ejecutar('escribe el destinatario');
@@ -429,12 +444,7 @@ describe('crearActBlindado con GUARDIA', () => {
       return { success: true };
     });
     const revisadas: string[] = [];
-    const guardia: GuardiaDeAccion = {
-      revisar: async (accion) => {
-        revisadas.push(accion);
-        return { tipo: 'permitir' };
-      },
-    };
+    const guardia = guardiaQuePermite(revisadas);
     const blindado = crearActBlindado({
       actuar,
       logger: makeLogger(),
@@ -448,6 +458,69 @@ describe('crearActBlindado con GUARDIA', () => {
     // reintento repite una accion que nunca llego a ejecutarse.
     expect(actuar).toHaveBeenCalledTimes(2);
     expect(revisadas).toEqual(['click en Enviar']);
+  });
+
+  /**
+   * CAMBIO 1: un veredicto 'incompleto' no es un bloqueo. La accion no llega al navegador, pero la
+   * corrida NO se corta: el motivo vuelve al modelo para que termine de llenar el formulario.
+   */
+  it('un veredicto incompleto no toca el navegador, no lanza y no queda como bloqueo', async () => {
+    const actuar = vi.fn(async () => ({ success: true }));
+    const acciones: AccionCrudaDeMotor[] = [];
+    const guardia: GuardiaDeAccion = {
+      revisar: async () => ({ tipo: 'incompleto', mensaje: 'faltan datos por escribir (asunto)' }),
+      confirmar: async () => ({ confirmada: true }),
+    };
+    const blindado = crearActBlindado({
+      actuar,
+      logger: makeLogger(),
+      guardia,
+      registrarAccion: (accion) => acciones.push(accion),
+    });
+
+    const salida = await blindado.ejecutar('haz clic en Enviar');
+
+    expect(salida).toMatchObject({ success: false, error: 'faltan datos por escribir (asunto)' });
+    expect(actuar).not.toHaveBeenCalled();
+    expect(acciones).toEqual([]);
+    // Ni bloqueo ni corte: la tarea sigue viva.
+    expect(blindado.bloqueo()).toBeNull();
+    expect(blindado.corto()).toBe(false);
+  });
+
+  /** CAMBIO 4: una accion irreversible se confirma en el DOM DESPUES de ejecutarla. */
+  it('la accion permitida que exige confirmacion se confirma despues de tocar el navegador', async () => {
+    const orden: string[] = [];
+    const actuar = vi.fn(async () => {
+      orden.push('actuar');
+      return { success: true };
+    });
+    const guardia: GuardiaDeAccion = {
+      revisar: async () => ({ tipo: 'permitir', confirmar: true }),
+      confirmar: async () => {
+        orden.push('confirmar');
+        return { confirmada: true };
+      },
+    };
+    const blindado = crearActBlindado({ actuar, logger: makeLogger(), guardia });
+
+    await expect(blindado.ejecutar('haz clic en Enviar')).resolves.toMatchObject({ success: true });
+    expect(orden).toEqual(['actuar', 'confirmar']);
+    expect(blindado.sinConfirmar()).toBeNull();
+  });
+
+  it('sin confirmacion, la corrida se corta y la accion NO se repite', async () => {
+    const actuar = vi.fn(async () => ({ success: true }));
+    const guardia: GuardiaDeAccion = {
+      revisar: async () => ({ tipo: 'permitir', confirmar: true }),
+      confirmar: async () => ({ confirmada: false, mensaje: 'no se pudo confirmar' }),
+    };
+    const blindado = crearActBlindado({ actuar, logger: makeLogger(), guardia });
+
+    await expect(blindado.ejecutar('haz clic en Enviar')).rejects.toThrow(AccionSinConfirmarError);
+    // La accion se ejecuto UNA sola vez: lanzar corta el bucle del agente antes de que pueda repetirla.
+    expect(actuar).toHaveBeenCalledTimes(1);
+    expect(blindado.sinConfirmar()).toBe('no se pudo confirmar');
   });
 });
 

@@ -10,7 +10,7 @@ import type {
   RepositorioSitiosParaTarea,
   TareaWebDeps,
 } from '../src/tarea-web.js';
-import { AccionBloqueadaError } from '../src/errores.js';
+import { AccionBloqueadaError, AccionSinConfirmarError } from '../src/errores.js';
 import type { CampoDeLaPagina, RepositorioPoliticasParaWorker } from '../src/verificacion.js';
 import { makeAprobacionesRepo } from './aprobaciones-fakes.js';
 import type { Logger } from '../src/logger.js';
@@ -89,7 +89,28 @@ function makeRepo(sitio: SitioConectado): RepositorioSitiosParaTarea {
   };
 }
 
-function makeNavegador(campos: CampoDeLaPagina[], texto = ''): NavegadorParaTarea {
+/**
+ * Pagina MUTABLE que comparten el navegador fake y el motor fake: una accion irreversible la cambia
+ * (el redactor se cierra) y eso es lo que el worker relee para confirmar que surtio efecto.
+ */
+interface PaginaFake {
+  campos: CampoDeLaPagina[];
+  texto: string;
+}
+
+function makePagina(campos: CampoDeLaPagina[] = [], texto = ''): PaginaFake {
+  return { campos, texto };
+}
+
+function makeNavegadorDePagina(pagina: PaginaFake): NavegadorParaTarea {
+  return makeNavegador(pagina.campos, pagina.texto, pagina);
+}
+
+function makeNavegador(
+  campos: CampoDeLaPagina[],
+  texto = '',
+  pagina: PaginaFake = { campos, texto },
+): NavegadorParaTarea {
   return {
     abrirSesionParaTarea: vi.fn(async () => ({
       sesionExternaId: 'ses-1',
@@ -101,8 +122,8 @@ function makeNavegador(campos: CampoDeLaPagina[], texto = ''): NavegadorParaTare
     extraerContexto: vi.fn(async () => CONTEXTO_PLANO),
     estadoDeSesion: vi.fn(async () => 'viva' as const),
     capturarPantalla: vi.fn(async () => 'cGxhY2Vob2xkZXI='),
-    leerCamposDeLaPagina: vi.fn(async () => campos),
-    leerTextoVisible: vi.fn(async () => texto),
+    leerCamposDeLaPagina: vi.fn(async () => pagina.campos),
+    leerTextoVisible: vi.fn(async () => pagina.texto),
     observarSalida: vi.fn(async () => ({ egressIp: '203.0.113.7', egressCountry: 'MX' })),
     cerrarSesion: vi.fn(async () => {}),
   };
@@ -112,24 +133,47 @@ function makeNavegador(campos: CampoDeLaPagina[], texto = ''): NavegadorParaTare
 const ACCIONES_HASTA_ENVIAR = ['escribe el destinatario', 'haz clic en el boton Enviar'];
 
 /**
- * Motor FAKE que se comporta como el real: le pregunta a la GUARDIA por cada accion ANTES de
- * ejecutarla y, si la bloquea, lanza AccionBloqueadaError (lo mismo que hace el adaptador de
- * Stagehand cuando la tool `act` se corta). `ejecutadas` deja ver que llego de verdad al navegador.
+ * Motor FAKE que se comporta como el real, con el MISMO protocolo que el adaptador de Stagehand
+ * (crearActBlindado): le pregunta a la GUARDIA por cada accion ANTES de ejecutarla; un bloqueo lanza
+ * AccionBloqueadaError; un veredicto 'incompleto' NO ejecuta la accion pero deja seguir la corrida
+ * (CAMBIO 1); y una accion permitida que exige confirmacion se confirma tras tocar la pagina
+ * (CAMBIO 4). `ejecutadas` deja ver que llego de verdad al navegador y `rechazadas` que no paso.
+ *
+ * `pagina` es el estado que la accion irreversible consuma: al ejecutarse se vacia y aparece el
+ * aviso del sitio, que es como se ve un envio hecho.
  */
 function makeMotor(
   acciones: string[] = ACCIONES_HASTA_ENVIAR,
   mensajeFinal = 'accion ejecutada',
-): MotorDeTareaWeb & { ejecutadas: string[] } {
+  pagina?: PaginaFake,
+  /** Efecto sobre la pagina de una accion INTERMEDIA que si llega al navegador (escribir un campo). */
+  efectos: Record<string, () => void> = {},
+): MotorDeTareaWeb & { ejecutadas: string[]; rechazadas: string[] } {
   const ejecutadas: string[] = [];
+  const rechazadas: string[] = [];
   return {
     ejecutadas,
+    rechazadas,
     ejecutar: vi.fn(async (params: { guardia?: GuardiaDeAccion | undefined }) => {
       for (const accion of acciones) {
         const veredicto = await params.guardia?.revisar(accion);
         if (veredicto?.tipo === 'bloquear') {
           throw new AccionBloqueadaError(veredicto.mensaje);
         }
+        if (veredicto?.tipo === 'incompleto') {
+          rechazadas.push(accion);
+          continue;
+        }
         ejecutadas.push(accion);
+        efectos[accion]?.();
+        if (veredicto?.tipo === 'permitir' && veredicto.confirmar === true && params.guardia) {
+          if (pagina) {
+            pagina.campos = [];
+            pagina.texto = 'Mensaje enviado. Deshacer';
+          }
+          const confirmacion = await params.guardia.confirmar();
+          if (!confirmacion.confirmada) throw new AccionSinConfirmarError(confirmacion.mensaje);
+        }
       }
       return {
         exito: true,
@@ -162,8 +206,26 @@ function makeDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
       baseUrl: null,
     })),
     guardarResultado: vi.fn(async () => {}),
+    // Los tests no duermen entre relecturas de la confirmacion (CAMBIO 4).
+    esperar: async () => {},
     logger: makeLogger(),
     ...overrides,
+  };
+}
+
+/**
+ * El trio de fakes del caso normal: una pagina con el destinatario que el objetivo declara, el
+ * navegador que la lee y el motor que la consuma al ejecutar la accion (el redactor se cierra).
+ */
+function conDestinatario(
+  acciones: string[] = ACCIONES_HASTA_ENVIAR,
+  correo = 'juan@ejemplo.com',
+): { pagina: PaginaFake; navegador: NavegadorParaTarea; motor: ReturnType<typeof makeMotor> } {
+  const pagina = makePagina([{ contexto: 'input email para', valor: correo }]);
+  return {
+    pagina,
+    navegador: makeNavegadorDePagina(pagina),
+    motor: makeMotor(acciones, 'accion ejecutada', pagina),
   };
 }
 
@@ -181,8 +243,7 @@ describe('objetivo con destinatario declarado', () => {
   const OBJETIVO = 'envia el resumen mensual a juan@ejemplo.com';
 
   it('DOM COINCIDENTE: la accion final LLEGA al navegador, sin preguntar nada (test 2)', async () => {
-    const navegador = makeNavegador([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]);
-    const motor = makeMotor();
+    const { navegador, motor } = conDestinatario();
     const deps = makeDeps({ navegador, motor });
     await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
     // UNA sola corrida del motor: el agente completa el objetivo entero, clic de Enviar incluido.
@@ -197,13 +258,13 @@ describe('objetivo con destinatario declarado', () => {
   });
 
   it('la verificacion corre JUSTO ANTES de la accion, no antes de preparar la pagina', async () => {
-    const navegador = makeNavegador([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]);
-    const motor = makeMotor();
+    const { navegador, motor } = conDestinatario();
     const deps = makeDeps({ navegador, motor });
     await procesarTareaWeb(deps, makeJob(OBJETIVO));
-    // El DOM se lee UNA vez: solo la accion final ("Enviar") dispara la comparacion; escribir el
-    // destinatario es un paso intermedio y pasa sin leer nada.
-    expect(navegador.leerCamposDeLaPagina).toHaveBeenCalledTimes(1);
+    // El DOM se lee DOS veces y ninguna de mas: la comparacion previa a la accion final ("Enviar") y
+    // la confirmacion de que surtio efecto. Escribir el destinatario es un paso intermedio y pasa sin
+    // leer nada.
+    expect(navegador.leerCamposDeLaPagina).toHaveBeenCalledTimes(2);
   });
 
   it('DOM DISTINTO: la accion NO llega al navegador y se reportan ambos valores (test 3)', async () => {
@@ -235,6 +296,70 @@ describe('objetivo con destinatario declarado', () => {
     expect(motor.ejecutadas).toEqual([]);
     // Y la pagina solo se leyo una vez: no hubo una segunda comparacion que pudiera salir distinta.
     expect(navegador.leerCamposDeLaPagina).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * EL CASO DE PRODUCCION, de punta a punta (25 jul 2026). El agente describe un paso intermedio con
+ * el verbo del objetivo ("escribe el asunto del correo a enviar") cuando solo el destinatario esta
+ * en pantalla. Antes: la verificacion comparaba UN parametro, se daba por superada, la accion se iba
+ * al navegador y consumia el unico cupo de accion irreversible de la corrida; cuando el agente
+ * terminaba de redactar e intentaba enviar de verdad, el guarda bloqueaba el envio legitimo.
+ */
+describe('verificacion prematura y guarda de segunda accion (CAMBIOS 1 y 2)', () => {
+  const OBJETIVO =
+    'envia a juan@ejemplo.com un correo con asunto "Reporte de agosto" y cuerpo "Adjunto el reporte"';
+  const DESTINATARIO = { contexto: 'input email para', valor: 'juan@ejemplo.com' };
+  const ASUNTO = { contexto: 'input asunto', valor: 'Reporte de agosto' };
+  const CUERPO = { contexto: 'div contenteditable cuerpo del mensaje', valor: 'Adjunto el reporte' };
+  const INTERMEDIA = 'escribe el asunto del correo a enviar';
+  const ENVIAR = 'haz clic en el boton Enviar';
+
+  it('con 1 de 3 parametros en el DOM la accion NO pasa al navegador y la tarea continua', async () => {
+    const pagina = makePagina([DESTINATARIO]);
+    const motor = makeMotor([INTERMEDIA, 'lee la bandeja'], 'segui trabajando', pagina);
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina) });
+
+    // La tarea no se cae por la verificacion incompleta: sigue y el agente ejecuta el paso siguiente.
+    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).rejects.toThrow(
+      /nunca encontro en la pagina todos los datos.*asunto, cuerpo/s,
+    );
+    expect(motor.rechazadas).toEqual([INTERMEDIA]);
+    expect(motor.ejecutadas).toEqual(['lee la bandeja']);
+    // UNA sola corrida del motor: la verificacion incompleta no corta el bucle del agente.
+    expect(motor.ejecutar).toHaveBeenCalledTimes(1);
+  });
+
+  it('una accion ejecutada SIN confirmar no reabre el cupo: no hay segundo envio', async () => {
+    // Revision adversarial: el contador de acciones irreversibles solo cuenta las EJECUTADAS, y el
+    // cupo se consume al dejarlas pasar. Que la confirmacion falle no puede devolver el cupo.
+    const pagina = makePagina([DESTINATARIO, ASUNTO, CUERPO]);
+    // Sin `pagina` en el motor, la pagina no cambia: la accion no se puede confirmar.
+    const motor = makeMotor([ENVIAR, 'haz clic en Enviar otra vez'], 'enviado');
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina) });
+
+    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).rejects.toThrow(
+      /se intento pero no se pudo confirmar/,
+    );
+    // La accion salio UNA vez al navegador y la corrida se corto ahi: la segunda nunca se propuso.
+    expect(motor.ejecutadas).toEqual([ENVIAR]);
+  });
+
+  it('el intento incompleto NO consume el cupo: al completarse los datos, el envio pasa', async () => {
+    // Es el arreglo del caso de produccion: el mismo agente, en la misma corrida, primero propone la
+    // accion con el formulario a medias (no pasa) y despues la propone con todo escrito (pasa).
+    const pagina = makePagina([DESTINATARIO]);
+    const motor = makeMotor([INTERMEDIA, 'escribe el asunto y el cuerpo', ENVIAR], 'enviado', pagina, {
+      'escribe el asunto y el cuerpo': () => {
+        pagina.campos = [DESTINATARIO, ASUNTO, CUERPO];
+      },
+    });
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina) });
+
+    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
+    expect(motor.rechazadas).toEqual([INTERMEDIA]);
+    expect(motor.ejecutadas).toEqual(['escribe el asunto y el cuerpo', ENVIAR]);
+    expect(deps.guardarResultado).toHaveBeenCalledWith('job-1', expect.objectContaining({ estado: 'ok' }));
   });
 });
 
@@ -309,10 +434,8 @@ describe('politica de ejecucion del usuario', () => {
 
   it('SIN fila de politica: se usan los defaults y NO se crea la fila (test 7)', async () => {
     const obtenerPorOwner = vi.fn(async () => null);
-    const deps = makeDeps({
-      navegador: makeNavegador([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]),
-      politicas: { obtenerPorOwner },
-    });
+    const { navegador, motor } = conDestinatario();
+    const deps = makeDeps({ navegador, motor, politicas: { obtenerPorOwner } });
     // Default: ejecutar acciones irreversibles = true. Sin monto en juego, la accion se ejecuta.
     await expect(
       procesarTareaWeb(deps, makeJob('envia el resumen a juan@ejemplo.com')),
@@ -348,9 +471,8 @@ describe('politica de ejecucion del usuario', () => {
   });
 
   it('sin repositorio cableado (deploy sin V034): defaults, la tarea corre igual', async () => {
-    const deps = makeDeps({
-      navegador: makeNavegador([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]),
-    });
+    const { navegador, motor } = conDestinatario();
+    const deps = makeDeps({ navegador, motor });
     await expect(
       procesarTareaWeb(deps, makeJob('envia el resumen a juan@ejemplo.com')),
     ).resolves.toBe('completada');
@@ -389,15 +511,19 @@ describe('lectura del DOM', () => {
   });
 
   it('una SEGUNDA accion irreversible en la misma corrida no encadena otra verificacion', async () => {
-    // La primera se verifica y se ejecuta; la segunda se bloquea sin volver a comparar (seria un
-    // bucle sin cota sobre la cuenta real del usuario, y es lo que impide enviar dos veces).
-    const navegador = makeNavegador([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]);
-    const motor = makeMotor(['haz clic en Enviar', 'haz clic en Enviar otra vez']);
+    // La primera se verifica, se ejecuta y se confirma; la segunda se bloquea sin volver a comparar
+    // (seria un bucle sin cota sobre la cuenta real del usuario, y es lo que impide enviar dos veces).
+    const { navegador, motor } = conDestinatario([
+      'haz clic en Enviar',
+      'haz clic en Enviar otra vez',
+    ]);
     const deps = makeDeps({ motor, navegador });
     const detencion = await detencionDe(deps, makeJob('envia el resumen a juan@ejemplo.com'));
     expect(detencion?.motivo).toBe('otraAccion');
     expect(motor.ejecutadas).toEqual(['haz clic en Enviar']);
-    expect(navegador.leerCamposDeLaPagina).toHaveBeenCalledTimes(1);
+    // Dos lecturas: la comparacion previa y la confirmacion. La segunda accion se corta ANTES de
+    // volver a comparar nada.
+    expect(navegador.leerCamposDeLaPagina).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -439,8 +565,7 @@ describe('DONE prematuro: el agente se detuvo por su cuenta (CAMBIO 3)', () => {
   });
 
   it('si el agente ejecuto la accion verificada, NO se reporta como DONE prematuro', async () => {
-    const navegador = makeNavegador([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]);
-    const motor = makeMotor();
+    const { navegador, motor } = conDestinatario();
     const deps = makeDeps({ motor, navegador });
     await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
   });

@@ -1,7 +1,7 @@
 /**
  * EXTRACCION DE PARAMETROS DECLARADOS en el objetivo del usuario (CAMBIO 2). Dado el objetivo en
  * lenguaje natural, saca los datos CONCRETOS que la accion va a comprometer: a quien se le envia,
- * cuanto dinero, que producto, que cantidad.
+ * cuanto dinero, que producto, que cantidad, con que asunto y con que cuerpo.
  *
  * POR QUE ES CODIGO Y NO EL MODELO (D4): el modelo ya demostro en produccion que no es una fuente
  * confiable sobre lo que hizo (relanzo una tarea por su cuenta y reporto causas inexistentes). Si el
@@ -34,6 +34,10 @@ export interface ParametrosDeclarados {
   /** Nombre de producto entre comillas. */
   producto: string | null;
   cantidad: number | null;
+  /** Asunto de un mensaje, entre comillas y precedido de la palabra que lo nombra. */
+  asunto: string | null;
+  /** Cuerpo de un mensaje, entre comillas y precedido de la palabra que lo nombra. */
+  cuerpo: string | null;
 }
 
 /**
@@ -153,8 +157,42 @@ export function extraerMontos(texto: string): MontoDeclarado[] {
   return montos;
 }
 
-/** Nombre de producto ENTRE COMILLAS (rectas o tipograficas). Las simples no cuentan: son apostrofes. */
-const PATRON_PRODUCTO = /"([^"\n]{1,120})"|[“]([^”\n]{1,120})[”]|«([^»\n]{1,120})»/g;
+/** Texto ENTRE COMILLAS (rectas o tipograficas). Las simples no cuentan: son apostrofes. */
+const ENTRECOMILLADO = String.raw`"([^"\n]{1,120})"|[“]([^”\n]{1,120})[”]|«([^»\n]{1,120})»`;
+
+/** Nombre de producto entrecomillado, sin rotulo que lo preceda. */
+const PATRON_PRODUCTO = new RegExp(ENTRECOMILLADO, 'g');
+
+/**
+ * Texto entrecomillado precedido del ROTULO que dice QUE es ("con el asunto \"X\"", "mensaje: \"Y\"",
+ * "cuerpo que diga \"Z\""). Exigir el rotulo Y las comillas es lo que mantiene la extraccion
+ * determinista: sin las dos cosas, el dato queda NO DECLARADO y no se compara nada inventado.
+ */
+function patronRotulado(rotulos: string): RegExp {
+  return new RegExp(
+    String.raw`\b(?:${rotulos})\b\s*(?:que\s+)?(?:diga|dice|sea|es|of|de|del)?\s*[:=]?\s*(?:${ENTRECOMILLADO})`,
+    'gi',
+  );
+}
+
+/**
+ * ASUNTO de un mensaje. "titulo" queda FUERA a proposito: en un objetivo de compra ("el libro con
+ * titulo X") nombra al producto, y robarselo al parametro `producto` cambiaria contra que se compara.
+ */
+const PATRON_ASUNTO = patronRotulado('asunto|subject');
+
+/** CUERPO de un mensaje (lo que se escribe dentro, no el asunto). */
+const PATRON_CUERPO = patronRotulado('cuerpo|mensaje|texto|contenido|body|message|content');
+
+/** Los textos entrecomillados que un patron rotulado captura, en orden de aparicion. */
+function entrecomilladosRotulados(objetivo: string, patron: RegExp): string[] {
+  const valores: string[] = [];
+  for (const match of objetivo.matchAll(patron)) {
+    const valor = match[1] ?? match[2] ?? match[3];
+    if (valor !== undefined && valor.trim() !== '') valores.push(valor.trim());
+  }
+  return valores;
+}
 
 /**
  * CANTIDAD explicita: exige una palabra que la nombre ("cantidad 3", "3 unidades", "qty: 2"). Un
@@ -184,10 +222,22 @@ export function extraerParametrosDeclarados(objetivo: string): ParametrosDeclara
   // accion): no declarado. Varias menciones del MISMO monto si cuentan como uno.
   const monto = unicoValor(extraerMontos(objetivo), (m) => `${m.valor}|${m.moneda ?? ''}`);
 
+  // ASUNTO y CUERPO se extraen ANTES que el producto y se RESERVAN: un texto que el objetivo ya
+  // rotulo como asunto no puede ademas contarse como el nombre de un producto (seria el mismo dato
+  // comparado dos veces y con criterios distintos). La reserva vale aunque el rotulo aparezca varias
+  // veces con valores distintos: ahi el dato es ambiguo, queda NO declarado, y tampoco es un producto.
+  const asuntos = entrecomilladosRotulados(objetivo, PATRON_ASUNTO);
+  const cuerpos = entrecomilladosRotulados(objetivo, PATRON_CUERPO);
+  const asunto = unicoValor(asuntos, (a) => normalizarTexto(a));
+  const cuerpo = unicoValor(cuerpos, (c) => normalizarTexto(c));
+  const reservados = new Set([...asuntos, ...cuerpos].map((t) => normalizarTexto(t)));
+
   const entrecomillados: string[] = [];
   for (const match of objetivo.matchAll(PATRON_PRODUCTO)) {
     const valor = match[1] ?? match[2] ?? match[3];
-    if (valor !== undefined && valor.trim() !== '') entrecomillados.push(valor.trim());
+    if (valor === undefined || valor.trim() === '') continue;
+    if (reservados.has(normalizarTexto(valor.trim()))) continue;
+    entrecomillados.push(valor.trim());
   }
   const producto = unicoValor(entrecomillados, (p) => normalizarTexto(p));
 
@@ -208,5 +258,21 @@ export function extraerParametrosDeclarados(objetivo: string): ParametrosDeclara
   }
   const cantidad = unicoValor(cantidades, (c) => String(c));
 
-  return { destinatarios, monto, producto, cantidad };
+  return { destinatarios, monto, producto, cantidad, asunto, cuerpo };
+}
+
+/**
+ * CUANTOS parametros DECLARA el objetivo (CAMBIO 1). Es el numero contra el que la verificacion mide
+ * si comparo TODO lo que el usuario pidio: superarla con menos comparaciones que parametros
+ * declarados fue exactamente lo que dejo pasar una accion con el formulario a medio llenar.
+ */
+export function contarParametrosDeclarados(parametros: ParametrosDeclarados): number {
+  return [
+    parametros.destinatarios.length > 0,
+    parametros.monto !== null,
+    parametros.producto !== null,
+    parametros.cantidad !== null,
+    parametros.asunto !== null,
+    parametros.cuerpo !== null,
+  ].filter(Boolean).length;
 }
