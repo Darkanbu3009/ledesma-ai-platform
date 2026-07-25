@@ -11,6 +11,7 @@ import { SalidaDeRedNoDisponibleError, expiracionDeContexto } from './sitios.js'
 import {
   clasificarDesenlace,
   construirSystemPromptTareaWeb,
+  detectarVerboBloqueado,
   type DesenlaceTareaWeb,
 } from './prompt-tarea-web.js';
 import {
@@ -22,7 +23,7 @@ import {
   type RepositorioAprobacionesParaWorker,
 } from './aprobaciones.js';
 import type { SubidorDeScreenshots } from './storage.js';
-import { censurarObjetivo } from './censura.js';
+import { censurarObjetivo, censurarTexto } from './censura.js';
 import {
   extraerPasosCensurados,
   type AccionCrudaDeMotor,
@@ -144,6 +145,12 @@ export interface MotorDeTareaWeb {
  */
 export interface ResultadoMotor {
   exito: boolean;
+  /**
+   * El agente CERRO su loop con DONE (AgentResult.completed), haya cumplido o no el objetivo. Es la
+   * distincion que exito solo no da: exito=false con completado=true es "termino sin cumplir el
+   * objetivo"; exito=false con completado=false es "el loop se corto" (limite de pasos u otro corte).
+   */
+  completado: boolean;
   mensaje: string;
   /** Acciones ejecutadas, en orden. Vacia si el motor no llego a ejecutar ninguna. */
   acciones: AccionCrudaDeMotor[];
@@ -218,6 +225,68 @@ const MENSAJE_RECONECTAR =
 function describir(error: unknown): string {
   if (error instanceof Error) return `${error.name}: ${error.message}`;
   return 'error desconocido';
+}
+
+/** Tope del mensaje final del agente dentro de un error de diagnostico (evita last_error sin cota). */
+const MAX_MENSAJE_AGENTE_CHARS = 300;
+
+function truncar(texto: string, max: number): string {
+  return texto.length <= max ? texto : `${texto.slice(0, max)}...`;
+}
+
+/**
+ * Mensaje VERAZ de un motor que termino con exito=false (BUG C). Diagnostico interno (sin i18n):
+ *  - "limite de pasos" SOLO cuando los pasos consumidos alcanzaron el limite configurado, con ambos
+ *    numeros (el mensaje viejo lo afirmaba siempre, incluso con 15 de 120 pasos consumidos);
+ *  - DONE sin cumplir el objetivo: lo dice, con el mensaje final del agente (censurado y acotado);
+ *  - cualquier otro corte: mensaje propio, tambien con ambos numeros.
+ * Los pasos consumidos se leen de la traza (una accion por tool ejecutada, AgentResult.actions).
+ */
+export function describirFalloDelMotor(
+  resultado: Pick<ResultadoMotor, 'completado' | 'mensaje' | 'acciones'>,
+  maxPasos: number,
+  sujeto: string = 'la tarea',
+): string {
+  const pasos = resultado.acciones.length;
+  const sinReintento =
+    'no se reintenta automaticamente para no repetir acciones sobre la cuenta del usuario';
+  if (!resultado.completado && pasos >= maxPasos) {
+    return (
+      `${sujeto} agoto el limite de pasos configurado (consumio ${pasos} de ${maxPasos} pasos); ` +
+      sinReintento
+    );
+  }
+  // El mensaje final del agente puede arrastrar contenido de pagina: pasa por la censura de texto y
+  // se acota antes de entrar al last_error.
+  const mensajeFinal = censurarTexto(resultado.mensaje).replace(/\s+/g, ' ').trim();
+  const detalle =
+    mensajeFinal === ''
+      ? ''
+      : `; mensaje final del agente: ${truncar(mensajeFinal, MAX_MENSAJE_AGENTE_CHARS)}`;
+  if (resultado.completado) {
+    return (
+      `el agente termino con DONE sin cumplir el objetivo de ${sujeto} ` +
+      `(consumio ${pasos} de ${maxPasos} pasos)${detalle}; ${sinReintento}`
+    );
+  }
+  return (
+    `${sujeto} se detuvo sin exito antes de agotar el limite de pasos ` +
+    `(consumio ${pasos} de ${maxPasos} pasos)${detalle}; ${sinReintento}`
+  );
+}
+
+/**
+ * Detalle SINTETICO del checkpoint creado por la via determinista (D2b): el agente termino con DONE
+ * sin emitir el marcador, pero el objetivo contiene un verbo de accion bloqueada. La descripcion
+ * dice que la accion quedo pendiente porque requiere aprobacion e incluye el objetivo original
+ * (censurado: una credencial o tarjeta dictada en el objetivo jamas llega a la descripcion).
+ */
+function construirDetalleAprobacionEsperada(verbo: string, objetivo: string): string {
+  const objetivoCensurado = censurarObjetivo(objetivo).replace(/\s+/g, ' ').trim();
+  return (
+    `accion pendiente de aprobacion humana: el objetivo incluye la accion bloqueada "${verbo}" ` +
+    `y el agente termino sin ejecutarla ni crear el checkpoint. Objetivo original: ${objetivoCensurado}`
+  );
 }
 
 /**
@@ -444,6 +513,20 @@ export async function procesarTareaWeb(
     return reanudarTrasDecision(deps, job, sitio, objetivo, credential, contexto, aprobacion);
   }
 
+  // 2.7. DETECCION DETERMINISTA (D2a): si el objetivo contiene un verbo de accion bloqueada, el job
+  //      queda marcado internamente como "requiere aprobacion esperada". El marcador del modelo dejo
+  //      de ser la unica via (D1): si el agente termina con DONE sin haber generado checkpoint, la
+  //      via (b) crea el checkpoint de todos modos (ver ejecutarMotorConRegistro). Solo aplica a la
+  //      corrida INICIAL: en una reanudacion el humano ya decidio sobre este objetivo.
+  const verboBloqueado = detectarVerboBloqueado(objetivo);
+  if (verboBloqueado !== null) {
+    deps.logger.info('tarea web: el objetivo contiene una accion bloqueada; se espera un checkpoint', {
+      jobId: job.id,
+      connectionId: sitio.id,
+      verbo: verboBloqueado,
+    });
+  }
+
   // 3. Abrir la sesion RECONECTANDO el contexto guardado y FORZANDO el proxy pineado con la
   //    geolocalizacion del PAIS pineado. El adaptador lanza SalidaDeRedNoDisponibleError
   //    (permanente) si el pin no es reconstruible.
@@ -501,6 +584,7 @@ export async function procesarTareaWeb(
       sesion.sesionExternaId,
       credential.apiKey,
       { objetivo, systemPrompt: construirSystemPromptTareaWeb() },
+      verboBloqueado,
     );
 
     if (desenlace.tipo === 'sesion_caducada') {
@@ -534,10 +618,9 @@ export async function procesarTareaWeb(
     }
 
     if (!resultado.exito) {
-      throw new PermanentExecutionError(
-        `la tarea no se pudo completar dentro del limite de pasos configurado (${deps.maxPasos} ` +
-          'pasos); no se reintenta automaticamente para no repetir acciones sobre la cuenta del usuario',
-      );
+      // BUG C: mensaje VERAZ por causa (limite real de pasos / DONE sin cumplir / otro corte),
+      // siempre con los pasos consumidos y el limite configurado.
+      throw new PermanentExecutionError(describirFalloDelMotor(resultado, deps.maxPasos));
     }
 
     // 8. Exito: guardar el contexto ACTUALIZADO (re-cifrado) + refrescar ultimo_uso_en, y devolver
@@ -623,6 +706,9 @@ async function ejecutarMotorConRegistro(
   sesionExternaId: string,
   apiKey: string,
   prompt: { objetivo: string; systemPrompt: string },
+  // D2(b): verbo de accion bloqueada detectado en el objetivo (D2a), o null. Solo la corrida
+  // INICIAL lo pasa; la reanudacion no (el humano ya decidio sobre este objetivo).
+  verboBloqueado: string | null = null,
 ): Promise<{ resultado: ResultadoMotor; desenlace: DesenlaceTareaWeb }> {
   const iniciadaEn = new Date();
   let resultado: ResultadoMotor;
@@ -636,7 +722,22 @@ async function ejecutarMotorConRegistro(
     });
     throw error;
   }
-  const desenlace = clasificarDesenlace(resultado.mensaje);
+  let desenlace = clasificarDesenlace(resultado.mensaje);
+  // D2(b): el objetivo pedia una accion bloqueada y el agente TERMINO con DONE sin emitir el
+  // marcador (ni el de sesion caducada). Falso negativo del modelo (D1): se FUERZA el desenlace
+  // 'requiere_aprobacion' para que el flujo de siempre cree el checkpoint con el ultimo screenshot
+  // disponible y PAUSE el job (nunca failed). Un falso positivo es una aprobacion de mas (D3);
+  // esta via JAMAS ejecuta la accion: solo crea el checkpoint.
+  if (verboBloqueado !== null && resultado.completado && desenlace.tipo === 'ok') {
+    deps.logger.warn(
+      'tarea web: el agente termino con DONE sin checkpoint sobre un objetivo con accion bloqueada; se crea el checkpoint determinista (D2b)',
+      { jobId: job.id, connectionId: sitio.id, verbo: verboBloqueado },
+    );
+    desenlace = {
+      tipo: 'requiere_aprobacion',
+      detalle: construirDetalleAprobacionEsperada(verboBloqueado, objetivo),
+    };
+  }
   const estado: EstadoTrayectoria =
     desenlace.tipo === 'requiere_aprobacion'
       ? 'pausada'
@@ -815,10 +916,9 @@ async function reanudarTrasDecision(
     }
 
     if (!resultado.exito) {
+      // BUG C: mismo mensaje veraz por causa que en la corrida inicial (diagnostico interno).
       throw new PermanentExecutionError(
-        `la tarea reanudada no se pudo completar dentro del limite de pasos configurado ` +
-          `(${deps.maxPasos} pasos); no se reintenta automaticamente para no repetir acciones ` +
-          'sobre la cuenta del usuario',
+        describirFalloDelMotor(resultado, deps.maxPasos, 'la tarea reanudada'),
       );
     }
 

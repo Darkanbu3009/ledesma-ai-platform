@@ -89,6 +89,7 @@ function makeTareaWebDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
     motor: {
       ejecutar: vi.fn(async () => ({
         exito: true,
+        completado: true,
         mensaje: 'listo',
         acciones: [],
         tokensIn: null,
@@ -158,6 +159,7 @@ describe('processClaimedJob con jobs de tarea web', () => {
       motor: {
         ejecutar: vi.fn(async () => ({
           exito: false,
+          completado: false,
           mensaje: `${MARCADOR_SESION_CADUCADA}: login`,
           acciones: [],
           tokensIn: null,
