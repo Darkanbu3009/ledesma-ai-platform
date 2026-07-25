@@ -553,10 +553,16 @@ describe('JobsRepository', () => {
         createdAt: '2026-06-30T00:00:00.000Z',
         startedAt: '2026-06-30T00:01:00.000Z',
         finishedAt: '2026-06-30T00:02:00.000Z',
+        // Escalares derivados del resultado (Fase F paso 2): false salvo en una tarea web que
+        // corrio con lo aprendido de una vez anterior.
+        conLoAprendido: false,
+        ajustadaSola: false,
       });
-      // Explicito: el resumen no filtra datos sensibles ni redundantes.
+      // Explicito: el resumen no filtra datos sensibles ni redundantes. `resultado` entero jamas
+      // sale del repositorio: solo los dos booleanos derivados de arriba.
       expect(job).not.toHaveProperty('payload');
       expect(job).not.toHaveProperty('ownerId');
+      expect(job).not.toHaveProperty('resultado');
     });
   });
 

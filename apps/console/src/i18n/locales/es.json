@@ -1949,6 +1949,11 @@
       "sitioInvalido": "Revisa los sitios: escribe solo el dominio, como banco.com."
     }
   },
+  "receta": {
+    "etiqueta": "Tarea aprendida",
+    "detalle": "Esta tarea se ejecuto con lo aprendido de una vez anterior, sin volver a analizar el sitio.",
+    "reparada": "El sitio cambio y la tarea se ajusto sola."
+  },
   "avisoTareaLenta": {
     "titulo": "Esta tarea esta tardando mas de lo normal",
     "detalle": "Lleva {{minutos}} minutos en ejecucion. Puedes esperar o terminarla.",

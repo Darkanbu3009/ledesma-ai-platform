@@ -77,6 +77,14 @@ export interface JobSummary {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+  /**
+   * La tarea web se ejecuto con lo APRENDIDO de una vez anterior, sin volver a analizar el sitio
+   * (Fase F paso 2). Es un escalar derivado de jobs.resultado, no el resultado: el listado sigue sin
+   * exponerlo. false en todo lo demas.
+   */
+  conLoAprendido: boolean;
+  /** Ademas, el sitio habia cambiado y la tarea se ajusto sola durante esa ejecucion. */
+  ajustadaSola: boolean;
 }
 
 /**
