@@ -95,6 +95,7 @@ export class MotorStagehand implements MotorDeTareaWeb {
       // este adaptador no decide que se guarda.
       return {
         exito: resultado.success && resultado.completed,
+        completado: resultado.completed,
         mensaje: resultado.message,
         acciones: resultado.actions ?? [],
         tokensIn: resultado.usage?.input_tokens ?? null,

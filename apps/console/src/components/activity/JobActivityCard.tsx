@@ -90,6 +90,9 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
   // TRAYECTORIA (Fase F, V030): solo las tareas web tienen pasos que abrir. Estado local derivado
   // del click (sin useEffect); el detalle se monta recien al expandir y ahi corre su query.
   const [pasosAbiertos, setPasosAbiertos] = useState(false);
+  // Un fallo tecnico se muestra con el texto amable; el last_error crudo queda detras de
+  // "Detalle tecnico" (una cancelacion o una detencion tienen su propio texto y no lo usan).
+  const [detalleAbierto, setDetalleAbierto] = useState(false);
   // TERMINAR TAREA: confirmacion explicita antes de disparar la mutacion (estado derivado del
   // click, sin useEffect). Disponible mientras la tarea siga en vuelo (pending/running/pausado).
   const [confirmandoTerminar, setConfirmandoTerminar] = useState(false);
@@ -155,13 +158,37 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
             </div>
 
             {job.status === 'failed' && !cancelada && (detenida || job.lastError) && (
-              <div className="mt-2.5 flex items-start gap-1.5 rounded-lg border border-[rgba(192,73,43,0.25)] bg-[rgba(192,73,43,0.05)] px-2.5 py-1.5 text-[12px] text-[#C0492B]">
-                <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-none" />
-                {/* Detenida: texto legible en lugar del prefijo tecnico del error. Cancelada no
-                    muestra caja de error: fue una decision del usuario, no un fallo. */}
-                <span className="whitespace-pre-wrap break-words">
-                  {detenida ? t('detenidaPorSistema') : job.lastError}
-                </span>
+              <div className="mt-2.5 rounded-lg border border-[rgba(192,73,43,0.25)] bg-[rgba(192,73,43,0.05)] px-2.5 py-1.5 text-[12px] text-[#C0492B]">
+                <div className="flex items-start gap-1.5">
+                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-none" />
+                  {/* Tres desenlaces distintos sobre 'failed': Cancelada no muestra caja (fue una
+                      decision del usuario, no un fallo); Detenida trae su propio texto legible en
+                      lugar del prefijo tecnico; cualquier otro fallo muestra el texto amable y deja
+                      el error crudo detras de "Detalle tecnico". */}
+                  <span className="whitespace-pre-wrap break-words">
+                    {detenida ? t('detenidaPorSistema') : t('actividad.errorAmable.generico')}
+                  </span>
+                </div>
+                {!detenida && job.lastError && (
+                  <>
+                    <button
+                      type="button"
+                      aria-expanded={detalleAbierto}
+                      onClick={() => setDetalleAbierto((abierto) => !abierto)}
+                      className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold underline-offset-2 hover:underline"
+                    >
+                      {t('actividad.errorAmable.detalleTecnico')}
+                      <ChevronDown
+                        className={['h-3 w-3 transition-transform', detalleAbierto ? 'rotate-180' : ''].join(' ')}
+                      />
+                    </button>
+                    {detalleAbierto && (
+                      <p className="mt-1 whitespace-pre-wrap break-words text-[11px] opacity-80">
+                        {job.lastError}
+                      </p>
+                    )}
+                  </>
+                )}
               </div>
             )}
 

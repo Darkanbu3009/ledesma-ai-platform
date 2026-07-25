@@ -1,5 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { JobsRepository, type Sql } from '../src/jobs/jobs-repository.js';
+import {
+  CANCELADO_POR_USUARIO_ERROR,
+  CANCELADO_POR_USUARIO_PREFIX,
+  JobsRepository,
+  SISTEMA_DETUVO_TAREA_ERROR,
+  SISTEMA_DETUVO_TAREA_PREFIX,
+  type Sql,
+} from '../src/jobs/jobs-repository.js';
 
 function makeRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -589,6 +596,55 @@ describe('JobsRepository', () => {
       const job = await new JobsRepository(sql).getSummaryForOwner('job-1', 'user-2');
       expect(job).toBeNull();
     });
+  });
+});
+
+describe('JobsRepository: existeFalloPermanenteReciente (barrera anti relanzamiento, BUG A)', () => {
+  it('true si hay un job failed reciente de tarea web sobre el mismo owner+conexion', async () => {
+    const sql = makeSqlReturning([{ id: 'job-1' }]);
+    const hay = await new JobsRepository(sql).existeFalloPermanenteReciente('user-1', 'con-1', 120_000);
+    expect(hay).toBe(true);
+    const texto = sqlText(sql);
+    expect(texto).toContain("status = 'failed'");
+    expect(texto).toContain("payload->>'kind' = <param>");
+    expect(texto).toContain("payload->>'connectionId' = <param>");
+    expect(texto).toContain('finished_at > now() - make_interval');
+    expect(sqlValues(sql)).toEqual([
+      'user-1',
+      'tarea_web',
+      'con-1',
+      120,
+      CANCELADO_POR_USUARIO_PREFIX,
+      SISTEMA_DETUVO_TAREA_PREFIX,
+    ]);
+  });
+
+  it('false sin filas (sin fallo reciente): la tarea se puede encolar', async () => {
+    const sql = makeSqlReturning([]);
+    const hay = await new JobsRepository(sql).existeFalloPermanenteReciente('user-1', 'con-1', 120_000);
+    expect(hay).toBe(false);
+  });
+
+  it('EXCLUYE cancelaciones del usuario y detenciones del sistema: el usuario ya decidio (test 5)', async () => {
+    // La exencion compara contra los MISMOS prefijos que escriben cancelarPorUsuario y el reaper de
+    // latido: un job cancelado o detenido NO activa la barrera aunque este failed y reciente.
+    const sql = makeSqlReturning([]);
+    await new JobsRepository(sql).existeFalloPermanenteReciente('user-1', 'con-1', 120_000);
+    const texto = sqlText(sql);
+    // starts_with y no LIKE: los prefijos traen guiones bajos, comodines en LIKE, que ampliarian la
+    // exencion mas alla de lo escrito (y una exencion de mas deja pasar un relanzamiento).
+    expect(texto).toContain('not starts_with(last_error, <param>)');
+    expect(texto).not.toContain('like');
+    // Un last_error null (fila vieja sin detalle) SI cuenta como fallo permanente: ante la duda,
+    // la barrera bloquea (el costo de un falso positivo es esperar la ventana, no perder datos).
+    expect(texto).toContain('last_error is null');
+  });
+
+  it('los prefijos de la exencion son los MISMOS que escriben cancelacion y reaper (no literales)', () => {
+    // Si alguien cambia el texto de un prefijo, la exencion lo sigue: son la misma constante que usan
+    // CANCELADO_POR_USUARIO_ERROR y SISTEMA_DETUVO_TAREA_ERROR, los valores que llegan a last_error.
+    expect(CANCELADO_POR_USUARIO_ERROR.startsWith(CANCELADO_POR_USUARIO_PREFIX)).toBe(true);
+    expect(SISTEMA_DETUVO_TAREA_ERROR.startsWith(SISTEMA_DETUVO_TAREA_PREFIX)).toBe(true);
   });
 });
 

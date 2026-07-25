@@ -445,6 +445,52 @@ export class JobsRepository {
   }
 
   /**
+   * BARRERA ANTI RELANZAMIENTO (BUG A): ¿existe un job de TAREA WEB del owner sobre ESTA conexion
+   * que haya terminado en FALLO PERMANENTE hace poco? La usa el ejecutor de las tools de sitios del
+   * backend para RECHAZAR platform_ejecutar_tarea_en_sitio: tras un fallo permanente, el modelo del
+   * agente NO puede reencolar la misma tarea por su cuenta (en produccion genero un segundo borrador
+   * duplicado en Gmail); se requiere una decision del usuario. La barrera es SERVER-SIDE a proposito
+   * (D5): instruir al modelo por prompt no cuenta como solucion.
+   *
+   * NO cuentan como fallo permanente para la barrera:
+   *  - jobs 'pausado' (esperando aprobacion) ni 'completed': el WHERE exige status='failed';
+   *  - jobs CANCELADOS por el usuario (cancelarPorUsuario) o DETENIDOS por el reaper de latido: ahi
+   *    el usuario ya tomo una decision explicita (o ya sabe que la tarea murio) y reintentar es
+   *    legitimo. La deteccion usa los MISMOS prefijos que escriben esos dos caminos
+   *    (CANCELADO_POR_USUARIO_PREFIX / SISTEMA_DETUVO_TAREA_PREFIX), no literales propios.
+   *
+   * `starts_with` y no LIKE a proposito: los prefijos contienen guiones bajos, que en un patron LIKE
+   * son comodines de un caracter y volverian la EXENCION mas permisiva de lo escrito (y una exencion
+   * de mas es justo lo que dejaria pasar un relanzamiento). starts_with compara texto literal.
+   * La ventana la define el llamador (VENTANA_ANTI_RELANZAMIENTO_MS en sitio-tools.ts).
+   */
+  async existeFalloPermanenteReciente(
+    ownerId: string,
+    connectionId: string,
+    ventanaMs: number,
+  ): Promise<boolean> {
+    const rows = await this.sql<Array<{ id: string }>>`
+      select id
+      from jobs
+      where owner_id = ${ownerId}
+        and status = 'failed'
+        and payload->>'kind' = ${TAREA_WEB_JOB_KIND}
+        and payload->>'connectionId' = ${connectionId}
+        and finished_at is not null
+        and finished_at > now() - make_interval(secs => ${ventanaMs / 1000})
+        and (
+          last_error is null
+          or (
+            not starts_with(last_error, ${CANCELADO_POR_USUARIO_PREFIX})
+            and not starts_with(last_error, ${SISTEMA_DETUVO_TAREA_PREFIX})
+          )
+        )
+      limit 1
+    `;
+    return rows.length > 0;
+  }
+
+  /**
    * LATIDO de un job en ejecucion: refresca updated_at SOLO si el job sigue 'running' (un 'pausado'
    * esperando aprobacion NO late a proposito) y devuelve el status ACTUAL del job. Es la doble senal
    * del worker: (a) mantiene el job fuera del reaper de latido mientras corre, y (b) relee el estado

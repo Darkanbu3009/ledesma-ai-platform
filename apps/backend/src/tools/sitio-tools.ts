@@ -116,11 +116,27 @@ export interface SitioToolsContext {
   credentialId: string;
 }
 
+/**
+ * VENTANA de la barrera anti relanzamiento (BUG A): si un job de tarea web del mismo owner y la
+ * misma conexion termino en FALLO PERMANENTE dentro de esta ventana, encolar otra tarea se RECHAZA.
+ * Es una barrera SERVER-SIDE y no negociable (D5): un modelo que reintenta por su cuenta tras un
+ * fallo permanente puede duplicar efectos sobre la cuenta real del usuario (en produccion genero un
+ * segundo borrador en Gmail). Corta a proposito: bloquea el relanzamiento reflejo del mismo run,
+ * no una decision humana posterior.
+ */
+export const VENTANA_ANTI_RELANZAMIENTO_MS = 120_000;
+
 /** Puertos minimos a la base que el ejecutor necesita (faciles de mockear en tests). */
 export interface SitioToolsDeps {
   jobs: {
     createJob(input: CreateJobInput): Promise<Job>;
     obtenerJobDeOwner(id: string, ownerId: string): Promise<JobConsulta | null>;
+    /** Barrera anti relanzamiento (BUG A): fallo permanente reciente sobre owner+conexion. */
+    existeFalloPermanenteReciente(
+      ownerId: string,
+      connectionId: string,
+      ventanaMs: number,
+    ): Promise<boolean>;
   };
   sitios: {
     obtenerPorId(id: string, ownerId: string): Promise<SitioConectado | null>;
@@ -225,6 +241,25 @@ export function createSitioToolsExecutor(
     const sitio = await deps.sitios.obtenerPorId(connectionId, ctx.ownerId);
     if (!sitio || sitio.estado !== 'activo') {
       return { content: MENSAJE_RECONECTAR, isError: true };
+    }
+    // BARRERA ANTI RELANZAMIENTO (BUG A, server-side): tras un fallo PERMANENTE reciente sobre esta
+    // conexion, el modelo no puede reencolar por su cuenta (repetir una navegacion a medias duplica
+    // efectos sobre la cuenta real). No aplica a jobs pausados por aprobacion, completados, ni
+    // terminados por cancelacion del usuario o del sistema (el repositorio excluye esos casos).
+    const falloReciente = await deps.jobs.existeFalloPermanenteReciente(
+      ctx.ownerId,
+      connectionId,
+      VENTANA_ANTI_RELANZAMIENTO_MS,
+    );
+    if (falloReciente) {
+      return {
+        content:
+          'La tarea anterior en este sitio fallo de forma permanente hace menos de ' +
+          `${Math.round(VENTANA_ANTI_RELANZAMIENTO_MS / 60_000)} minutos. NO vuelvas a encolarla ` +
+          'por tu cuenta: se requiere una decision explicita del usuario antes de reintentar. ' +
+          'Informale al usuario que fallo y que el puede pedirla de nuevo si lo desea.',
+        isError: true,
+      };
     }
     const job = await deps.jobs.createJob({
       agentId: ctx.agentId,

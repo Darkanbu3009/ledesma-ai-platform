@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Job } from '@ledesma-platform/shared';
 import type { SitioConectado } from '@ledesma-platform/backend/sitios';
-import { procesarTareaWeb } from '../src/tarea-web.js';
+import { describirFalloDelMotor, procesarTareaWeb } from '../src/tarea-web.js';
 import type {
   MotorDeTareaWeb,
   NavegadorParaTarea,
@@ -13,8 +13,10 @@ import { makeAprobacionesRepo } from './aprobaciones-fakes.js';
 import {
   MARCADOR_REQUIERE_APROBACION,
   MARCADOR_SESION_CADUCADA,
+  VERBOS_ACCION_BLOQUEADA,
   clasificarDesenlace,
   construirSystemPromptTareaWeb,
+  detectarVerboBloqueado,
 } from '../src/prompt-tarea-web.js';
 import type { TrayectoriaNueva } from '../src/trayectoria.js';
 import { SalidaDeRedNoDisponibleError } from '../src/sitios.js';
@@ -105,10 +107,18 @@ function makeNavegador(overrides: Partial<NavegadorParaTarea> = {}): NavegadorPa
   };
 }
 
-function makeMotor(resultado: { exito: boolean; mensaje: string }): MotorDeTareaWeb {
+function makeMotor(resultado: { exito: boolean; mensaje: string; completado?: boolean }): MotorDeTareaWeb {
   // El motor real (Stagehand) ademas devuelve la traza (acciones/tokens); los tests que no la
-  // ejercitan usan una traza vacia.
-  return { ejecutar: vi.fn(async () => ({ ...resultado, acciones: [], tokensIn: null, tokensOut: null })) };
+  // ejercitan usan una traza vacia. completado default: exito (un motor exitoso siempre cerro DONE).
+  return {
+    ejecutar: vi.fn(async () => ({
+      ...resultado,
+      completado: resultado.completado ?? resultado.exito,
+      acciones: [],
+      tokensIn: null,
+      tokensOut: null,
+    })),
+  };
 }
 
 function makeDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
@@ -397,10 +407,11 @@ describe('procesarTareaWeb', () => {
 
 describe('registro de trayectorias (Fase F, V030)', () => {
   /** Motor con traza: dos acciones reales (goto + act con fill censurable) y usage. */
-  function makeMotorConTraza(resultado: { exito: boolean; mensaje: string }): MotorDeTareaWeb {
+  function makeMotorConTraza(resultado: { exito: boolean; mensaje: string; completado?: boolean }): MotorDeTareaWeb {
     return {
       ejecutar: vi.fn(async () => ({
         ...resultado,
+        completado: resultado.completado ?? resultado.exito,
         acciones: [
           { type: 'goto', instruction: 'https://app.ejemplo.com/', pageUrl: 'https://app.ejemplo.com/' },
           {
@@ -593,6 +604,209 @@ describe('defensa anti-injection (separacion instruccion vs contenido)', () => {
       'job-1',
       expect.objectContaining({ estado: 'ok' }),
     );
+  });
+});
+
+describe('detectarVerboBloqueado (D2a / D4)', () => {
+  it('detecta verbos bloqueados en espanol, con acentos, conjugaciones y cliticos', () => {
+    expect(detectarVerboBloqueado('envia el correo a Juan')).toBe('enviar');
+    expect(detectarVerboBloqueado('Envíale el resumen a mi jefe')).toBe('enviar');
+    expect(detectarVerboBloqueado('paga la factura de julio')).toBe('pagar');
+    expect(detectarVerboBloqueado('haz una transferencia de 500 USD')).toBe('transferir');
+    expect(detectarVerboBloqueado('publícalo en el blog')).toBe('publicar');
+    expect(detectarVerboBloqueado('cancela mi suscripción del plan pro')).toBe('cancelar suscripcion');
+    expect(detectarVerboBloqueado('confirma el pedido pendiente')).toBe('confirmar pedido');
+  });
+
+  it('cubre como escribe un usuario real el verbo enviar: prefijo re- y "mandar"', () => {
+    // Regresion: estas cuatro formas NO matcheaban y son exactamente la accion del job de produccion
+    // (enviar un correo). Un falso negativo aqui pierde la accion en silencio (D3).
+    expect(detectarVerboBloqueado('manda el correo al proveedor')).toBe('enviar');
+    expect(detectarVerboBloqueado('mandale el reporte a contabilidad')).toBe('enviar');
+    expect(detectarVerboBloqueado('reenvia el mensaje de ayer')).toBe('enviar');
+    expect(detectarVerboBloqueado('reenvíalo a mi jefe')).toBe('enviar');
+    expect(detectarVerboBloqueado('resend the invite')).toBe('send');
+  });
+
+  it('detecta los equivalentes en ingles', () => {
+    expect(detectarVerboBloqueado('send the email to John')).toBe('send');
+    expect(detectarVerboBloqueado('delete the old drafts')).toBe('delete');
+    expect(detectarVerboBloqueado('go to checkout and stop there')).toBe('checkout');
+    expect(detectarVerboBloqueado('buy the basic plan')).toBe('buy');
+  });
+
+  it('NO se dispara con palabras vecinas benignas (pagina, borrador, cancelar sin suscripcion)', () => {
+    expect(detectarVerboBloqueado('dime que dice mi panel de agentes')).toBeNull();
+    expect(detectarVerboBloqueado('ve a la página de facturas y dime el total')).toBeNull();
+    expect(detectarVerboBloqueado('lee el borrador y dime que falta')).toBeNull();
+    expect(detectarVerboBloqueado('cancela la reunión de mañana')).toBeNull();
+  });
+
+  it('las frases de excepcion en ingles no cuentan como accion (in order to, sign in)', () => {
+    expect(detectarVerboBloqueado('search the reviews in order to summarize them')).toBeNull();
+    expect(detectarVerboBloqueado('sign in to the dashboard and read the balance')).toBeNull();
+    expect(detectarVerboBloqueado('sign the contract on the last page')).toBe('sign');
+  });
+
+  it('D4: cada verbo canonico de la lista aparece en el system prompt (no pueden divergir)', () => {
+    const prompt = construirSystemPromptTareaWeb();
+    for (const { verbo } of VERBOS_ACCION_BLOQUEADA) {
+      expect(prompt).toContain(verbo);
+    }
+  });
+});
+
+describe('checkpoint determinista (D2b): DONE sin marcador sobre un objetivo con accion bloqueada', () => {
+  const OBJETIVO_BLOQUEADO = 'redacta y envia el correo con el resumen a juan@ejemplo.com';
+
+  function makeJobConObjetivo(objetivo: string): Job {
+    return makeJob({ payload: { kind: 'tarea_web', connectionId: CONNECTION_ID, objetivo } });
+  }
+
+  it('agente DONE sin exito y sin marcador: job PAUSADO con checkpoint, nunca failed (test 2)', async () => {
+    // El caso de produccion: lleno los campos, nunca envio, termino DONE sin emitir el marcador.
+    const motor = makeMotor({
+      exito: false,
+      completado: true,
+      mensaje: 'Llene los campos Para, Asunto y Cuerpo del correo.',
+    });
+    const navegador = makeNavegador();
+    const deps = makeDeps({ motor, navegador });
+    await expect(procesarTareaWeb(deps, makeJobConObjetivo(OBJETIVO_BLOQUEADO))).resolves.toBe('pausada');
+    expect(deps.aprobaciones.crear).toHaveBeenCalledTimes(1);
+    const crearInput = (deps.aprobaciones.crear as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+      descripcion: string;
+    };
+    // La descripcion dice que quedo pendiente por requerir aprobacion e incluye el objetivo original.
+    expect(crearInput.descripcion).toContain('aprobacion');
+    expect(crearInput.descripcion).toContain('envia el correo con el resumen');
+    expect(deps.marcarJobPausado).toHaveBeenCalledWith('job-1');
+    expect(deps.guardarResultado).toHaveBeenCalledWith(
+      'job-1',
+      expect.objectContaining({ estado: 'esperando_aprobacion' }),
+    );
+    // La sesion queda VIVA para que el screenshot y la eventual aprobacion operen sobre la pagina real.
+    expect(navegador.cerrarSesion).not.toHaveBeenCalled();
+  });
+
+  it('agente DONE que AFIRMA exito sin marcador: tambien se crea el checkpoint (D3: ante la duda)', async () => {
+    const motor = makeMotor({ exito: true, completado: true, mensaje: 'listo, correo enviado' });
+    const deps = makeDeps({ motor });
+    await expect(procesarTareaWeb(deps, makeJobConObjetivo(OBJETIVO_BLOQUEADO))).resolves.toBe('pausada');
+    expect(deps.aprobaciones.crear).toHaveBeenCalledTimes(1);
+    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+  });
+
+  it('objetivo SIN verbo bloqueado que termina DONE: NO crea checkpoint espurio (test 3)', async () => {
+    const deps = makeDeps();
+    await expect(procesarTareaWeb(deps, makeJob())).resolves.toBe('completada');
+    expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
+  });
+
+  it('loop cortado SIN DONE (completado=false): no hay checkpoint determinista, fallo veraz', async () => {
+    const motor = makeMotor({ exito: false, completado: false, mensaje: 'me quede sin pasos' });
+    const deps = makeDeps({ motor });
+    await expect(procesarTareaWeb(deps, makeJobConObjetivo(OBJETIVO_BLOQUEADO))).rejects.toThrow(
+      PermanentExecutionError,
+    );
+    expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
+  });
+
+  it('la deteccion JAMAS ejecuta la accion: el motor corre UNA sola vez y solo se crea el checkpoint', async () => {
+    const motor = makeMotor({ exito: false, completado: true, mensaje: 'campos llenos, sin enviar' });
+    const deps = makeDeps({ motor });
+    await procesarTareaWeb(deps, makeJobConObjetivo(OBJETIVO_BLOQUEADO));
+    expect(motor.ejecutar).toHaveBeenCalledTimes(1);
+  });
+
+  it('job CANCELADO por el usuario a mitad de tarea: NO se crea checkpoint determinista', async () => {
+    // Interaccion con la cancelacion cooperativa (control.signal): si el dueno termino la tarea desde
+    // la consola, el job ya es 'failed' y pedirle que apruebe lo que acaba de cancelar seria absurdo
+    // (la fila quedaria pendiente hasta el barrido: marcarJobPausado no puede pausar un 'failed').
+    const motor = makeMotor({ exito: false, completado: true, mensaje: 'campos llenos, sin enviar' });
+    const deps = makeDeps({ motor });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      procesarTareaWeb(deps, makeJobConObjetivo(OBJETIVO_BLOQUEADO), { signal: controller.signal }),
+    ).rejects.toThrow(PermanentExecutionError);
+    expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
+    expect(deps.marcarJobPausado).not.toHaveBeenCalled();
+  });
+
+  it('sin cancelacion, el mismo caso SI crea el checkpoint (el guard no lo desactiva de mas)', async () => {
+    const motor = makeMotor({ exito: false, completado: true, mensaje: 'campos llenos, sin enviar' });
+    const deps = makeDeps({ motor });
+    const controller = new AbortController();
+    await expect(
+      procesarTareaWeb(deps, makeJobConObjetivo(OBJETIVO_BLOQUEADO), { signal: controller.signal }),
+    ).resolves.toBe('pausada');
+    expect(deps.aprobaciones.crear).toHaveBeenCalledTimes(1);
+  });
+
+  it('el marcador del modelo sigue teniendo prioridad: su detalle (mas rico) llega al checkpoint', async () => {
+    const motor = makeMotor({
+      exito: false,
+      completado: true,
+      mensaje: `${MARCADOR_REQUIERE_APROBACION}: irreversible: enviar el correo a juan@ejemplo.com`,
+    });
+    const deps = makeDeps({ motor });
+    await expect(procesarTareaWeb(deps, makeJobConObjetivo(OBJETIVO_BLOQUEADO))).resolves.toBe('pausada');
+    const crearInput = (deps.aprobaciones.crear as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+      descripcion: string;
+      accionTipo: string;
+    };
+    expect(crearInput.descripcion).toBe('enviar el correo a juan@ejemplo.com');
+    expect(crearInput.accionTipo).toBe('irreversible');
+  });
+});
+
+describe('describirFalloDelMotor (BUG C): mensajes veraces por causa', () => {
+  const accion = () => ({ type: 'act' });
+
+  it('el mensaje de limite SOLO aparece cuando los pasos consumidos alcanzan el limite (test 6)', () => {
+    const agotado = describirFalloDelMotor(
+      { completado: false, mensaje: '', acciones: Array.from({ length: 120 }, accion) },
+      120,
+    );
+    expect(agotado).toContain('agoto el limite de pasos configurado');
+    expect(agotado).toContain('120 de 120 pasos');
+
+    const cortado = describirFalloDelMotor(
+      { completado: false, mensaje: 'se corto', acciones: Array.from({ length: 15 }, accion) },
+      120,
+    );
+    expect(cortado).not.toContain('agoto el limite');
+    expect(cortado).toContain('15 de 120 pasos');
+  });
+
+  it('DONE sin cumplir el objetivo: lo dice e incluye el mensaje final del agente', () => {
+    const mensaje = describirFalloDelMotor(
+      {
+        completado: true,
+        mensaje: 'Llene los campos pero requiere aprobacion para enviar.',
+        acciones: Array.from({ length: 15 }, accion),
+      },
+      120,
+    );
+    expect(mensaje).toContain('termino con DONE sin cumplir el objetivo');
+    expect(mensaje).toContain('15 de 120 pasos');
+    expect(mensaje).toContain('Llene los campos pero requiere aprobacion para enviar.');
+    expect(mensaje).not.toContain('limite de pasos configurado');
+  });
+
+  it('el mensaje final del agente se censura y se acota antes de entrar al error', () => {
+    const mensaje = describirFalloDelMotor(
+      {
+        completado: true,
+        mensaje: `la tarjeta 4111 1111 1111 1111 no paso. ${'x'.repeat(500)}`,
+        acciones: [],
+      },
+      120,
+    );
+    expect(mensaje).not.toContain('4111');
+    expect(mensaje).toContain('[CENSURADO]');
+    expect(mensaje.length).toBeLessThan(600);
   });
 });
 
