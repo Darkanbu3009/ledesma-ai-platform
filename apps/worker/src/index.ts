@@ -12,6 +12,7 @@ import { DataSubjectRequestRepository, SitiosConectadosRepository } from '@ledes
 import { AprobacionesWebRepository } from '@ledesma-platform/backend/aprobaciones';
 import { PoliticasEjecucionRepository } from '@ledesma-platform/backend/politicas';
 import { TrayectoriasWebRepository } from '@ledesma-platform/backend/trayectorias';
+import { RecetasWebRepository } from '@ledesma-platform/backend/recetas-web';
 import { crearNotificadorAprobaciones, type BarridoAprobacionesDeps } from './aprobaciones.js';
 import { crearSubidorDeScreenshots } from './storage.js';
 import { parseEnv, type WorkerEnv } from './env.js';
@@ -109,16 +110,23 @@ function main(): void {
     // TRAYECTORIAS (Fase F, V030): el registro censurado de cada ejecucion del motor, escrito con el
     // MISMO repositorio que leen los endpoints del backend. El handler lo usa best-effort.
     const trayectoriasRepo = new TrayectoriasWebRepository(sql);
+    // RECETAS DE TAREA WEB (Fase F paso 2, V035): NO es la tabla `recipes` de V013 (cadenas de
+    // instrucciones para un agente conversacional), sino lo aprendido de una navegacion que salio
+    // bien. El MISMO adaptador de Stagehand hace de motor (corrida completa) y de escalador (una
+    // accion puntual cuando un paso de la receta no encuentra su elemento).
+    const recetasRepo = new RecetasWebRepository(sql);
+    const motorStagehand = new MotorStagehand({
+      apiKey: config.BROWSERBASE_API_KEY,
+      projectId: config.BROWSERBASE_PROJECT_ID,
+      model: config.TAREA_WEB_MODEL,
+    });
     // TAREA WEB (7.1d): navegacion por IA dentro de la sesion activa de un sitio conectado. Misma
     // compuerta de config que los jobs de sitios; el motor (Stagehand) corre con la credencial del
     // OWNER (boveda) y el modelo de TAREA_WEB_MODEL (Haiku prohibido, validado en env.ts).
     tareaWeb = {
       repo: sitiosRepo,
       navegador,
-      motor: new MotorStagehand({
-        apiKey: config.BROWSERBASE_API_KEY,
-        projectId: config.BROWSERBASE_PROJECT_ID,
-      }),
+      motor: motorStagehand,
       aprobaciones: aprobacionesRepo,
       // POLITICA DE EJECUCION (V034): el MISMO repositorio que escribe la consola. La lee al inicio
       // de cada tarea web; si la lectura falla, la accion irreversible se detiene (falla cerrada).
@@ -127,6 +135,11 @@ function main(): void {
       marcarJobPausado: (jobId) => jobs.marcarPausado(jobId),
       subidorScreenshots,
       trayectorias: { guardar: async (trayectoria) => void (await trayectoriasRepo.crear(trayectoria)) },
+      // Las tres piezas del camino determinista van juntas: repositorio de lo aprendido, primitivas
+      // de bajo nivel del navegador y escalada de un paso suelto al motor.
+      recetas: recetasRepo,
+      determinista: navegador,
+      escalador: motorStagehand,
       notificadorAprobaciones,
       vaultSecret: config.VAULT_SECRET,
       model: config.TAREA_WEB_MODEL,
