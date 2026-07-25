@@ -8,6 +8,7 @@ import {
   SITIO_TOOL_LISTAR,
   SITIO_TOOL_NAMES,
   SITIO_TOOL_REVISAR,
+  VENTANA_ANTI_RELANZAMIENTO_MS,
 } from '../src/tools/sitio-tools.js';
 import type { SitioToolsDeps } from '../src/tools/sitio-tools.js';
 import type { SitioConectado } from '../src/sitios/sitios-conectados-repository.js';
@@ -64,11 +65,13 @@ function makeDeps(overrides: {
   sitio?: SitioConectado | null;
   consulta?: JobConsulta | null;
   listado?: SitioConectado[];
+  falloReciente?: boolean;
 } = {}): SitioToolsDeps {
   return {
     jobs: {
       createJob: vi.fn(async () => makeJobRow()),
       obtenerJobDeOwner: vi.fn(async () => overrides.consulta ?? null),
+      existeFalloPermanenteReciente: vi.fn(async () => overrides.falloReciente ?? false),
     },
     sitios: {
       obtenerPorId: vi.fn(async () => (overrides.sitio === undefined ? makeSitio() : overrides.sitio)),
@@ -167,6 +170,30 @@ describe('platform_ejecutar_tarea_en_sitio', () => {
     const res = await exec(call(SITIO_TOOL_EJECUTAR, { connection_id: CONNECTION_ID, objetivo: 'x' }));
     expect(res.isError).toBe(true);
     expect(res.content).not.toContain('db caida secreta');
+  });
+
+  it('BARRERA anti relanzamiento: fallo permanente reciente -> rechaza SIN encolar y pide decision del usuario (test 4)', async () => {
+    const deps = makeDeps({ falloReciente: true });
+    const exec = createSitioToolsExecutor(CTX, deps);
+    const res = await exec(call(SITIO_TOOL_EJECUTAR, { connection_id: CONNECTION_ID, objetivo: 'lee mi panel' }));
+    expect(res.isError).toBe(true);
+    expect(res.content).toMatch(/fallo de forma permanente/);
+    expect(res.content).toMatch(/decision explicita del usuario/);
+    expect(deps.jobs.createJob).not.toHaveBeenCalled();
+    // La consulta va acotada por la tenancy del LLAMADOR y con la ventana fija.
+    expect(deps.jobs.existeFalloPermanenteReciente).toHaveBeenCalledWith(
+      'user-1',
+      CONNECTION_ID,
+      VENTANA_ANTI_RELANZAMIENTO_MS,
+    );
+  });
+
+  it('sin fallo permanente reciente la tarea se encola igual que siempre', async () => {
+    const deps = makeDeps({ falloReciente: false });
+    const exec = createSitioToolsExecutor(CTX, deps);
+    const res = await exec(call(SITIO_TOOL_EJECUTAR, { connection_id: CONNECTION_ID, objetivo: 'lee mi panel' }));
+    expect(res.isError).toBe(false);
+    expect(deps.jobs.createJob).toHaveBeenCalledTimes(1);
   });
 });
 

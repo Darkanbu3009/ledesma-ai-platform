@@ -503,6 +503,39 @@ describe('JobsRepository', () => {
   });
 });
 
+describe('JobsRepository: existeFalloPermanenteReciente (barrera anti relanzamiento, BUG A)', () => {
+  it('true si hay un job failed reciente de tarea web sobre el mismo owner+conexion', async () => {
+    const sql = makeSqlReturning([{ id: 'job-1' }]);
+    const hay = await new JobsRepository(sql).existeFalloPermanenteReciente('user-1', 'con-1', 120_000);
+    expect(hay).toBe(true);
+    const texto = sqlText(sql);
+    expect(texto).toContain("status = 'failed'");
+    expect(texto).toContain("payload->>'kind' = <param>");
+    expect(texto).toContain("payload->>'connectionId' = <param>");
+    expect(texto).toContain('finished_at > now() - make_interval');
+    expect(sqlValues(sql)).toEqual(['user-1', 'tarea_web', 'con-1', 120]);
+  });
+
+  it('false sin filas (sin fallo reciente): la tarea se puede encolar', async () => {
+    const sql = makeSqlReturning([]);
+    const hay = await new JobsRepository(sql).existeFalloPermanenteReciente('user-1', 'con-1', 120_000);
+    expect(hay).toBe(false);
+  });
+
+  it('EXCLUYE cancelaciones del usuario y detenciones del sistema: el usuario ya decidio (test 5)', async () => {
+    // La exencion vive en el WHERE (not like sobre los prefijos del PR de control de tareas
+    // detenidas): un job cancelado o detenido NO activa la barrera aunque este failed y reciente.
+    const sql = makeSqlReturning([]);
+    await new JobsRepository(sql).existeFalloPermanenteReciente('user-1', 'con-1', 120_000);
+    const texto = sqlText(sql);
+    expect(texto).toContain("last_error not like 'CANCELADO_POR_USUARIO:%'");
+    expect(texto).toContain("last_error not like 'SISTEMA_DETUVO_TAREA:%'");
+    // Un last_error null (fila vieja sin detalle) SI cuenta como fallo permanente: ante la duda,
+    // la barrera bloquea (el costo de un falso positivo es esperar la ventana, no perder datos).
+    expect(texto).toContain('last_error is null');
+  });
+});
+
 describe('JobsRepository (7.1d: resultado de jobs)', () => {
   describe('guardarResultado', () => {
     it('escribe jobs.resultado como json SOLO sobre un job running', async () => {

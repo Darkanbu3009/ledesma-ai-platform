@@ -409,6 +409,47 @@ export class JobsRepository {
   }
 
   /**
+   * BARRERA ANTI RELANZAMIENTO (BUG A): ¿existe un job de TAREA WEB del owner sobre ESTA conexion
+   * que haya terminado en FALLO PERMANENTE hace poco? La usa el ejecutor de las tools de sitios del
+   * backend para RECHAZAR platform_ejecutar_tarea_en_sitio: tras un fallo permanente, el modelo del
+   * agente NO puede reencolar la misma tarea por su cuenta (en produccion genero un segundo borrador
+   * duplicado en Gmail); se requiere una decision del usuario. La barrera es SERVER-SIDE a proposito
+   * (D5): instruir al modelo por prompt no cuenta como solucion.
+   *
+   * NO cuentan como fallo permanente para la barrera:
+   *  - jobs 'pausado' (esperando aprobacion) ni 'completed': el WHERE exige status='failed';
+   *  - jobs cancelados por el usuario o detenidos por el sistema (last_error con prefijo
+   *    CANCELADO_POR_USUARIO / SISTEMA_DETUVO_TAREA, del PR de control de tareas detenidas): ahi el
+   *    usuario ya tomo una decision explicita y reintentar es legitimo.
+   * La ventana la define el llamador (VENTANA_ANTI_RELANZAMIENTO_MS en sitio-tools.ts).
+   */
+  async existeFalloPermanenteReciente(
+    ownerId: string,
+    connectionId: string,
+    ventanaMs: number,
+  ): Promise<boolean> {
+    const rows = await this.sql<Array<{ id: string }>>`
+      select id
+      from jobs
+      where owner_id = ${ownerId}
+        and status = 'failed'
+        and payload->>'kind' = ${TAREA_WEB_JOB_KIND}
+        and payload->>'connectionId' = ${connectionId}
+        and finished_at is not null
+        and finished_at > now() - make_interval(secs => ${ventanaMs / 1000})
+        and (
+          last_error is null
+          or (
+            last_error not like 'CANCELADO_POR_USUARIO:%'
+            and last_error not like 'SISTEMA_DETUVO_TAREA:%'
+          )
+        )
+      limit 1
+    `;
+    return rows.length > 0;
+  }
+
+  /**
    * REAPER de jobs HUERFANOS: recupera los jobs 'running' que quedaron ATASCADOS porque el worker murio
    * entre el claim y el cierre (crash / OOM / kill -9, o el watchdog forzando exit(0) con el drain
    * colgado). Cierra H3 y H4 del informe 06: sin esto, un 'running' nunca sale de ese estado (el claim
