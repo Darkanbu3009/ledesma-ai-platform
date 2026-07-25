@@ -52,6 +52,8 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
   // TRAYECTORIA (Fase F, V030): solo las tareas web tienen pasos que abrir. Estado local derivado
   // del click (sin useEffect); el detalle se monta recien al expandir y ahi corre su query.
   const [pasosAbiertos, setPasosAbiertos] = useState(false);
+  // Un fallo se muestra con el texto amable; el last_error crudo queda detras de "Detalle tecnico".
+  const [detalleAbierto, setDetalleAbierto] = useState(false);
   const TypeIcon =
     job.type === 'recipe'
       ? ChefHat
@@ -104,9 +106,27 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
             </div>
 
             {job.status === 'failed' && job.lastError && (
-              <div className="mt-2.5 flex items-start gap-1.5 rounded-lg border border-[rgba(192,73,43,0.25)] bg-[rgba(192,73,43,0.05)] px-2.5 py-1.5 text-[12px] text-[#C0492B]">
-                <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-none" />
-                <span className="whitespace-pre-wrap break-words">{job.lastError}</span>
+              <div className="mt-2.5 rounded-lg border border-[rgba(192,73,43,0.25)] bg-[rgba(192,73,43,0.05)] px-2.5 py-1.5 text-[12px] text-[#C0492B]">
+                <div className="flex items-start gap-1.5">
+                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-none" />
+                  <span>{t('actividad.errorAmable.generico')}</span>
+                </div>
+                <button
+                  type="button"
+                  aria-expanded={detalleAbierto}
+                  onClick={() => setDetalleAbierto((abierto) => !abierto)}
+                  className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold underline-offset-2 hover:underline"
+                >
+                  {t('actividad.errorAmable.detalleTecnico')}
+                  <ChevronDown
+                    className={['h-3 w-3 transition-transform', detalleAbierto ? 'rotate-180' : ''].join(' ')}
+                  />
+                </button>
+                {detalleAbierto && (
+                  <p className="mt-1 whitespace-pre-wrap break-words text-[11px] opacity-80">
+                    {job.lastError}
+                  </p>
+                )}
               </div>
             )}
           </div>

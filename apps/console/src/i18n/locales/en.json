@@ -1683,6 +1683,10 @@
     "actualizando": "Refreshing",
     "errorCargar": "We couldn't load your activity",
     "cargarMas": "Load more",
+    "errorAmable": {
+      "generico": "The task could not be completed.",
+      "detalleTecnico": "Technical detail"
+    },
     "vacioFiltrado": {
       "titulo": "No runs with this status",
       "descripcion": "Try another status or remove the filter to see the full history."

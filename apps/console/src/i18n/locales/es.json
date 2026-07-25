@@ -1683,6 +1683,10 @@
     "actualizando": "Actualizando",
     "errorCargar": "No pudimos cargar tu actividad",
     "cargarMas": "Cargar mas",
+    "errorAmable": {
+      "generico": "La tarea no se pudo completar.",
+      "detalleTecnico": "Detalle tecnico"
+    },
     "vacioFiltrado": {
       "titulo": "Sin ejecuciones con este estado",
       "descripcion": "Prueba con otro estado o quita el filtro para ver todo el historial."
