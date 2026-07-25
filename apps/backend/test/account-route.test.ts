@@ -35,7 +35,8 @@ function makeResult(authUser: DeleteAccountResult['authUser']): DeleteAccountRes
   const data: AccountDataDeletionResult = {
     agents: 2, agentRuns: 5, jobs: 3, scheduledTasks: 1, triggers: 0, recipes: 0, processingRecords: 1,
     providerCredentials: 1, consents: 1, dataSubjectRequests: 0, upgradeRequests: 0, sitiosConectados: 0,
-    trayectoriasWeb: 0, sitiosConectadosContextosExternos: [], adminActionsAnonymized: 0,
+    trayectoriasWeb: 0,
+      recetasWeb: 0, sitiosConectadosContextosExternos: [], adminActionsAnonymized: 0,
     subscriptions: 1, usageCounters: 1, profiles: 1, organization: 'deleted',
   };
   return { data, authUser };

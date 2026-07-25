@@ -1,0 +1,193 @@
+import type { PasoDeReceta, Sql } from '@ledesma-platform/shared';
+import { parsearPasosDeReceta } from '@ledesma-platform/shared';
+
+/**
+ * Acceso a datos de las RECETAS DE TAREA WEB (tabla `recetas_web`, V035, Fase F paso 2): el
+ * procedimiento aprendido de una trayectoria exitosa que se vuelve a ejecutar SIN llamar al modelo.
+ * Recibe el cliente sql por inyeccion (testeable), mismo patron que TrayectoriasWebRepository.
+ *
+ * ESTE REPOSITORIO NO TOCA `recipes` (V013). Ver la cabecera de la migracion: son dos cosas distintas
+ * con nombres distintos a proposito.
+ *
+ * Invariantes garantizados a nivel de query:
+ *  - TODA lectura y TODA escritura van acotadas por owner_id (RLS es la segunda capa). No existe un
+ *    metodo que lea o escriba la receta de otro dueno.
+ *  - `buscarActiva` NO devuelve nunca los pasos crudos del jsonb: los pasa por
+ *    `parsearPasosDeReceta` y devuelve null si no validan. Una receta manipulada en la base no llega
+ *    al ejecutor: la tarea corre por el camino normal, que es el estado seguro.
+ *  - `promover` es ATOMICO: marcar obsoleta la activa anterior y crear la nueva ocurren en la misma
+ *    transaccion, para que el unique parcial de V035 nunca vea dos activas de la misma firma.
+ */
+
+export type EstadoReceta = 'activa' | 'obsoleta';
+
+/** Una receta tal como la usa el worker: cabecera + pasos YA VALIDADOS. */
+export interface RecetaWeb {
+  id: string;
+  ownerId: string;
+  dominio: string;
+  firmaObjetivo: string;
+  version: number;
+  estado: EstadoReceta;
+  pasos: PasoDeReceta[];
+  creadaDesdeTrayectoria: string | null;
+  ejecucionesExitosas: number;
+  ejecucionesFallidas: number;
+  ultimaEjecucionEn: string | null;
+  creadaEn: string;
+  actualizadaEn: string;
+}
+
+/** Lo que hace falta para promover una trayectoria exitosa a receta activa. */
+export interface NuevaRecetaWeb {
+  ownerId: string;
+  dominio: string;
+  firmaObjetivo: string;
+  pasos: PasoDeReceta[];
+  creadaDesdeTrayectoria: string | null;
+}
+
+interface RecetaRow {
+  id: string;
+  owner_id: string;
+  dominio: string;
+  firma_objetivo: string;
+  version: number;
+  estado: string;
+  pasos: unknown;
+  creada_desde_trayectoria: string | null;
+  ejecuciones_exitosas: number;
+  ejecuciones_fallidas: number;
+  ultima_ejecucion_en: Date | string | null;
+  creada_en: Date | string;
+  actualizada_en: Date | string;
+}
+
+/** ISO 8601 tolerante (mismo criterio que TrayectoriasWebRepository). */
+function toIso(value: Date | string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+const EPOCH_ISO = new Date(0).toISOString();
+
+/**
+ * Convierte la fila a receta VALIDANDO los pasos. Devuelve null si el jsonb no valida: el llamador
+ * trata la receta como inexistente y la tarea corre por el camino normal (falla cerrada).
+ */
+function rowToReceta(row: RecetaRow): RecetaWeb | null {
+  const pasos = parsearPasosDeReceta(row.pasos);
+  if (pasos === null) return null;
+  return {
+    id: row.id,
+    ownerId: row.owner_id,
+    dominio: row.dominio,
+    firmaObjetivo: row.firma_objetivo,
+    version: Number(row.version ?? 1),
+    estado: row.estado === 'obsoleta' ? 'obsoleta' : 'activa',
+    pasos,
+    creadaDesdeTrayectoria: row.creada_desde_trayectoria,
+    ejecucionesExitosas: Number(row.ejecuciones_exitosas ?? 0),
+    ejecucionesFallidas: Number(row.ejecuciones_fallidas ?? 0),
+    ultimaEjecucionEn: toIso(row.ultima_ejecucion_en),
+    creadaEn: toIso(row.creada_en) ?? EPOCH_ISO,
+    actualizadaEn: toIso(row.actualizada_en) ?? EPOCH_ISO,
+  };
+}
+
+export class RecetasWebRepository {
+  constructor(private readonly sql: Sql) {}
+
+  /**
+   * La receta ACTIVA de un owner para un dominio y una firma de objetivo, o null si no hay ninguna o
+   * si sus pasos no validan. Es la consulta que decide el camino de ejecucion de cada tarea web.
+   */
+  async buscarActiva(
+    ownerId: string,
+    dominio: string,
+    firmaObjetivo: string,
+  ): Promise<RecetaWeb | null> {
+    const rows = await this.sql<RecetaRow[]>`
+      select id, owner_id, dominio, firma_objetivo, version, estado, pasos,
+        creada_desde_trayectoria, ejecuciones_exitosas, ejecuciones_fallidas, ultima_ejecucion_en,
+        creada_en, actualizada_en
+      from recetas_web
+      where owner_id = ${ownerId} and dominio = ${dominio} and firma_objetivo = ${firmaObjetivo}
+        and estado = 'activa'
+    `;
+    const row = rows[0];
+    return row ? rowToReceta(row) : null;
+  }
+
+  /**
+   * PROMUEVE una trayectoria exitosa a receta activa (D4). Si ya habia una activa para esa firma, la
+   * marca 'obsoleta' y crea la nueva con `version` incrementada: la historia de lo que el sitio
+   * rompio se conserva y el unique parcial de V035 nunca ve dos activas a la vez.
+   *
+   * Todo dentro de UNA transaccion: sin ella, un fallo entre el update y el insert dejaria al owner
+   * sin receta activa para una firma que si tenia uno.
+   */
+  async promover(input: NuevaRecetaWeb): Promise<RecetaWeb | null> {
+    const row = await this.sql.begin(async (tx) => {
+      const anteriores = await tx<Array<{ version: number }>>`
+        update recetas_web set estado = 'obsoleta', actualizada_en = now()
+        where owner_id = ${input.ownerId} and dominio = ${input.dominio}
+          and firma_objetivo = ${input.firmaObjetivo} and estado = 'activa'
+        returning version
+      `;
+      const version = Number(anteriores[0]?.version ?? 0) + 1;
+      const creadas = await tx<RecetaRow[]>`
+        insert into recetas_web
+          (owner_id, dominio, firma_objetivo, version, estado, pasos, creada_desde_trayectoria)
+        values
+          (${input.ownerId}, ${input.dominio}, ${input.firmaObjetivo}, ${version}, 'activa',
+           ${tx.json(input.pasos as unknown as Parameters<Sql['json']>[0])},
+           ${input.creadaDesdeTrayectoria})
+        returning id, owner_id, dominio, firma_objetivo, version, estado, pasos,
+          creada_desde_trayectoria, ejecuciones_exitosas, ejecuciones_fallidas, ultima_ejecucion_en,
+          creada_en, actualizada_en
+      `;
+      return creadas[0] ?? null;
+    });
+    return row ? rowToReceta(row as RecetaRow) : null;
+  }
+
+  /**
+   * Marca una receta como OBSOLETA (D6: mas de la mitad de sus pasos hubo que escalarlos al motor).
+   * Acotada por owner. Idempotente: marcar dos veces la misma receta no es un error.
+   */
+  async marcarObsoleta(id: string, ownerId: string): Promise<void> {
+    await this.sql`
+      update recetas_web set estado = 'obsoleta', actualizada_en = now()
+      where id = ${id} and owner_id = ${ownerId}
+    `;
+  }
+
+  /**
+   * REEMPLAZA los pasos de una receta activa tras la AUTO REPARACION de un selector (D5), subiendo
+   * `version`. Acotada por owner y por estado 'activa': una receta que quedo obsoleta a mitad de la
+   * corrida no se repara (ya no se va a usar).
+   */
+  async reemplazarPasos(id: string, ownerId: string, pasos: PasoDeReceta[]): Promise<void> {
+    await this.sql`
+      update recetas_web set
+        pasos = ${this.sql.json(pasos as unknown as Parameters<Sql['json']>[0])},
+        version = version + 1,
+        actualizada_en = now()
+      where id = ${id} and owner_id = ${ownerId} and estado = 'activa'
+    `;
+  }
+
+  /** Contabiliza una ejecucion por receta (para poder medir el ahorro y detectar recetas muertas). */
+  async registrarEjecucion(id: string, ownerId: string, exitosa: boolean): Promise<void> {
+    await this.sql`
+      update recetas_web set
+        ejecuciones_exitosas = ejecuciones_exitosas + ${exitosa ? 1 : 0},
+        ejecuciones_fallidas = ejecuciones_fallidas + ${exitosa ? 0 : 1},
+        ultima_ejecucion_en = now(),
+        actualizada_en = now()
+      where id = ${id} and owner_id = ${ownerId}
+    `;
+  }
+}

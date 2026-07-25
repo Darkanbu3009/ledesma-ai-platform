@@ -23,6 +23,10 @@
     "./trayectorias": {
       "types": "./dist/trayectorias/index.d.ts",
       "import": "./dist/trayectorias/index.js"
+    },
+    "./recetas-web": {
+      "types": "./dist/recetas-web/index.d.ts",
+      "import": "./dist/recetas-web/index.js"
     }
   },
   "scripts": {
