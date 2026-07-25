@@ -46,6 +46,7 @@ export function makeAprobacionesRepo(
     obtenerVigentePorJob: vi.fn(async () => null),
     listarPendientesVencidas: vi.fn(async () => []),
     expirar: vi.fn(async () => true),
+    reclamarCanceladasParaCerrarSesion: vi.fn(async () => []),
     registrarIntervencion: vi.fn(async () => {}),
     ...overrides,
   };

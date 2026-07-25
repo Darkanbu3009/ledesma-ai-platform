@@ -341,6 +341,8 @@ export interface RepositorioAprobacionesParaWorker {
   obtenerVigentePorJob(jobId: string, ownerId: string): Promise<AprobacionWeb | null>;
   listarPendientesVencidas(ahora: Date): Promise<AprobacionWeb[]>;
   expirar(id: string): Promise<boolean>;
+  /** Reclama (CAS de la marca de cancelacion) las aprobaciones canceladas con sesion por cerrar. */
+  reclamarCanceladasParaCerrarSesion(): Promise<AprobacionWeb[]>;
   registrarIntervencion(input: {
     ownerId: string;
     aprobacionId: string;
@@ -430,6 +432,45 @@ export async function barrerAprobacionesVencidas(
         aprobacionId: aprobacion.id,
         err: error instanceof Error ? error.message : 'desconocido',
       });
+    }
+  }
+
+  await cerrarSesionesDeTareasCanceladas(deps);
+}
+
+/**
+ * SESIONES de tareas CANCELADAS desde la consola (CAMBIO 5): al cancelar un job 'pausado', el
+ * backend cierra su aprobacion como 'rechazada' con una MARCA de cancelacion, pero no puede cerrar
+ * la sesion de navegador (no tiene cliente del proveedor). Este barrido RECLAMA esa marca (UPDATE
+ * atomico en el repositorio: cada sesion se procesa UNA vez aunque haya varios workers) y cierra la
+ * sesion que el checkpoint mantuvo viva. Cierre best-effort: si falla, el timeout de la sesion en el
+ * proveedor es la red de seguridad (misma politica que el barrido de expiradas).
+ */
+async function cerrarSesionesDeTareasCanceladas(deps: BarridoAprobacionesDeps): Promise<void> {
+  let canceladas: AprobacionWeb[];
+  try {
+    canceladas = await deps.aprobaciones.reclamarCanceladasParaCerrarSesion();
+  } catch (error) {
+    deps.logger.error('barrido de aprobaciones: fallo al reclamar canceladas (se reintenta en el proximo ciclo)', {
+      err: error instanceof Error ? error.message : 'desconocido',
+    });
+    return;
+  }
+  for (const aprobacion of canceladas) {
+    try {
+      await deps.cerrarSesion(aprobacion.sesionExternaId);
+      deps.logger.info('tarea cancelada por el usuario: sesion de navegador del checkpoint cerrada', {
+        aprobacionId: aprobacion.id,
+        jobId: aprobacion.jobId,
+      });
+    } catch (error) {
+      deps.logger.warn(
+        'barrido de aprobaciones: no se pudo cerrar la sesion de una tarea cancelada (el timeout del proveedor es la red de seguridad)',
+        {
+          aprobacionId: aprobacion.id,
+          err: error instanceof Error ? error.message : 'desconocido',
+        },
+      );
     }
   }
 }

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import {
+  HEARTBEAT_INTERVAL_MS,
+  REAP_SIN_LATIDO_MULTIPLO,
   isRecipeJobPayload,
   isSitioJobPayload,
   isTareaWebJobPayload,
@@ -9,6 +11,7 @@ import {
 import type {
   AgentEvent,
   Job,
+  JobStatus,
   NormalizedMessage,
   ReapedJob,
   RecipeStepPayload,
@@ -46,49 +49,14 @@ export const MAX_ATTEMPTS = 3;
 const RETRY_BACKOFF_BASE_MS = 5_000;
 
 /**
- * Cap de pasos de una receta. ESPEJO de MAX_STEPS del backend (apps/backend/src/routes/recipes.ts):
- * un job de receta legitimo corre a lo sumo este numero de pasos, cada uno con su PROPIO deadline de
- * pared (runTimeoutMs). Por eso el peor caso de wall-clock legitimo de una receta es
- * MAX_RECIPE_STEPS * runTimeoutMs; el margen del reaper para recetas DEBE superarlo para no tocar JAMAS
- * un job vivo. Se define local (como los defaults de env.ts) para no acoplar el build del worker al del
- * backend; si el backend sube su cap, subir este valor (o el margen no bastaria para una receta al maximo).
+ * Umbral del REAPER POR LATIDO (ms): un job 'running' cuyo updated_at (el latido, ver iniciarLatido)
+ * es mas viejo que esto esta DETENIDO con certeza, sea cual sea su tipo: mientras el worker que lo
+ * posee este vivo, late cada HEARTBEAT_INTERVAL_MS. 3 intervalos (90s) toleran una escritura de
+ * latido fallida (best-effort) sin declarar muerto a un job vivo. REEMPLAZA a los margenes por tipo
+ * derivados de started_at: el latido cubre TODA corrida reclamada (se arranca en processClaimedJob,
+ * antes de ejecutar nada), asi que no queda ninguna ruta sin latido que necesite el umbral viejo.
  */
-export const MAX_RECIPE_STEPS = 50;
-
-/**
- * Multiplicador del MARGEN del reaper para jobs SIMPLES, sobre su peor caso de wall-clock legitimo
- * (~runTimeoutMs, una sola corrida). 3x es amplio -> el reaper jamas toca un job simple vivo, pero
- * recupera un huerfano simple en pocas decenas de minutos (con runTimeoutMs=600s: ~30 min).
- */
-const SIMPLE_REAP_MULTIPLIER = 3;
-
-/**
- * Multiplicador del MARGEN del reaper para jobs de RECETA, sobre su peor caso de wall-clock legitimo
- * (MAX_RECIPE_STEPS * runTimeoutMs). 1.5x es amplio -> el reaper jamas toca una receta viva, ni siquiera
- * la de 50 pasos con cada paso al limite del deadline, sin esperar de mas para recuperar un huerfano.
- */
-const RECIPE_REAP_MULTIPLIER = 1.5;
-
-/**
- * Umbrales (ms) del reaper de huerfanos POR TIPO de job, derivados del deadline de pared de cada tipo:
- * runTimeoutMs para simple/receta y tareaWebTimeoutMs (TAREA_WEB_TIMEOUT_SECONDS) para tarea_web, que
- * tiene su PROPIO deadline y podria configurarse por encima del umbral simple si compartieran margen.
- * Un job 'running' cuyo started_at sea mas viejo que su umbral es, con CERTEZA, un huerfano de un worker
- * muerto: el margen supera el maximo wall-clock legitimo de cada tipo, asi que nunca corresponde a un job
- * realmente en ejecucion. Exportada para testear la calibracion (la propiedad critica: "jamas toca vivos").
- */
-export function reapThresholdsMs(
-  runTimeoutMs: number,
-  tareaWebTimeoutMs: number,
-): { simpleMs: number; recipeMs: number; tareaWebMs: number } {
-  return {
-    simpleMs: runTimeoutMs * SIMPLE_REAP_MULTIPLIER,
-    recipeMs: MAX_RECIPE_STEPS * runTimeoutMs * RECIPE_REAP_MULTIPLIER,
-    // Una tarea web corre a lo sumo ~1 deadline por corrida (la reanudacion tras un checkpoint
-    // re-reclama el job y resetea started_at), asi que el mismo multiplicador de simple alcanza.
-    tareaWebMs: tareaWebTimeoutMs * SIMPLE_REAP_MULTIPLIER,
-  };
-}
+export const REAP_STALE_MS = REAP_SIN_LATIDO_MULTIPLO * HEARTBEAT_INTERVAL_MS;
 
 /**
  * Intentos de la ESCRITURA de cierre exitoso (markCompleted) ante un fallo TRANSITORIO de la DB, ANTES
@@ -121,13 +89,10 @@ export interface JobQueue {
   markCompleted(id: string): Promise<void>;
   markFailed(id: string, error: string): Promise<void>;
   markPendingRetry(id: string, error: string, scheduledFor?: Date | string | null): Promise<void>;
-  /** Recupera jobs 'running' huerfanos (started_at muy viejo) a 'pending'/'failed'. Lo usa el loop del worker. */
-  reapOrphanedJobs(params: {
-    simpleThresholdMs: number;
-    recipeThresholdMs: number;
-    tareaWebThresholdMs: number;
-    maxAttempts: number;
-  }): Promise<ReapedJob[]>;
+  /** Latido: refresca updated_at si el job sigue 'running' y devuelve su status actual (o null). */
+  latirJob(id: string): Promise<JobStatus | null>;
+  /** Recupera jobs 'running' detenidos (sin latido por mas de staleMs). Lo usa el loop del worker. */
+  reapOrphanedJobs(params: { staleMs: number; maxAttempts: number }): Promise<ReapedJob[]>;
 }
 
 /** Cortes y parametros del motor que el worker aplica al ejecutar un job. */
@@ -446,6 +411,78 @@ async function recordRunBestEffort(deps: JobRunnerDeps, run: AgentRunRecord): Pr
 }
 
 /**
+ * LATIDO del job en ejecucion (CAMBIO 1 + CAMBIO 3): mientras el job esta 'running', refresca
+ * updated_at cada HEARTBEAT_INTERVAL_MS y RELEE su status en la misma pasada. Best-effort: un fallo
+ * de escritura se loguea y se reintenta al siguiente intervalo; JAMAS se aborta el job por un fallo
+ * de latido. Si el status dejo de ser 'running':
+ *  - 'pausado' (checkpoint de aprobacion): el latido se detiene en silencio (un pausado NO late; lo
+ *    protege su propio TTL de aprobacion, no el reaper).
+ *  - cualquier otro (tipicamente 'failed' por cancelarPorUsuario desde la consola): se invoca
+ *    alCancelar para abortar la corrida SIN escribir el cierre encima del estado nuevo.
+ * Devuelve la funcion que detiene el latido; llamarla SIEMPRE al terminar la corrida.
+ */
+function iniciarLatido(deps: JobRunnerDeps, jobId: string, alCancelar: () => void): () => void {
+  let detenido = false;
+  let enVuelo = false;
+  const timer = setInterval(() => {
+    if (enVuelo) return; // un latido lento no se encima con el siguiente
+    enVuelo = true;
+    void (async () => {
+      try {
+        const status = await deps.jobs.latirJob(jobId);
+        if (detenido || status === 'running') return;
+        detenido = true;
+        clearInterval(timer);
+        if (status === 'pausado') return;
+        deps.logger.warn('el job dejo de estar running a mitad de la corrida; se aborta sin escribir el cierre', {
+          jobId,
+          status,
+        });
+        alCancelar();
+      } catch (error) {
+        deps.logger.warn('no se pudo escribir el latido del job (se reintenta en el proximo intervalo)', {
+          jobId,
+          err: describeError(error),
+        });
+      } finally {
+        enVuelo = false;
+      }
+    })();
+  }, HEARTBEAT_INTERVAL_MS);
+  return () => {
+    detenido = true;
+    clearInterval(timer);
+  };
+}
+
+/**
+ * Une el APAGADO del worker y la CANCELACION del job en UNA senal para el motor (cualquiera aborta
+ * la corrida). Devuelve tambien la limpieza de listeners: la senal de apagado vive lo que el proceso
+ * y acumularia un listener por job procesado si no se removiera al cerrar cada corrida.
+ */
+function combinarSenales(
+  apagado: AbortSignal | undefined,
+  cancelacion: AbortSignal,
+): { senal: AbortSignal; limpiar: () => void } {
+  if (!apagado) return { senal: cancelacion, limpiar: () => {} };
+  const controller = new AbortController();
+  if (apagado.aborted || cancelacion.aborted) {
+    controller.abort();
+    return { senal: controller.signal, limpiar: () => {} };
+  }
+  const abortar = (): void => controller.abort();
+  apagado.addEventListener('abort', abortar, { once: true });
+  cancelacion.addEventListener('abort', abortar, { once: true });
+  return {
+    senal: controller.signal,
+    limpiar: () => {
+      apagado.removeEventListener('abort', abortar);
+      cancelacion.removeEventListener('abort', abortar);
+    },
+  };
+}
+
+/**
  * Ejecuta UN job ya reclamado (claimNextJob ya lo puso 'running' e incremento attempts) de punta a
  * punta y lo CIERRA en la cola segun el desenlace:
  *  - gate por tier: si el owner no es 'autonomous' -> fallo PERMANENTE -> 'failed' directo (sin gastar
@@ -474,6 +511,28 @@ export async function processClaimedJob(
   const usage: MutableTokenUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
   let attribution: { agentId: string; providerId: string; model: string } | null = null;
   let stopReason: string | null = null;
+  // CANCELACION COOPERATIVA (CAMBIO 3): toda la corrida late (iniciarLatido) y, si el status del job
+  // deja de ser 'running' (cancelado desde la consola, o re-transicionado por otro actor), se aborta
+  // via este controller. El corte llega al motor por la senal combinada (simple/receta) o por el
+  // signal propio de la tarea web; el catch de abajo detecta la cancelacion y NO escribe el cierre.
+  const cancelacion = new AbortController();
+  // Sesion de navegador ACTIVA de la corrida de tarea web (si la hay). Es la referencia del CORTE
+  // DURO (D4): si el abort no detiene al motor a mitad de un paso, cerrar la sesion de Browserbase
+  // si lo hace, y ademas garantiza que no quede una sesion viva sin job que la respalde.
+  const sesionEnCurso: { id: string | null } = { id: null };
+  const detenerLatido = iniciarLatido(deps, job.id, () => {
+    cancelacion.abort();
+    const sesionId = sesionEnCurso.id;
+    if (sesionId !== null && deps.tareaWeb) {
+      void deps.tareaWeb.navegador.cerrarSesion(sesionId).catch((error: unknown) => {
+        logger.warn('no se pudo cerrar la sesion de navegador en el corte duro (se ignora, best-effort)', {
+          jobId: job.id,
+          err: describeError(error),
+        });
+      });
+    }
+  });
+  const { senal, limpiar } = combinarSenales(shutdownSignal, cancelacion.signal);
   try {
     // 1. GATE POR TIER (server-side, antes de gastar nada): la ejecucion autonoma es premium. La
     //    capacidad se deriva del modulo central de planes (tierAllowsAutonomy): un owner cuyo plan no
@@ -504,7 +563,15 @@ export async function processClaimedJob(
     //      posteriores a abrir la sesion son PERMANENTES (no se re-ejecuta una navegacion a medias
     //      sobre la cuenta real del usuario), asi que handleFailure no los reintenta.
     if (isTareaWebJobPayload(job.payload)) {
-      const resultado = await procesarTareaWeb(deps.tareaWeb, job);
+      // Solo la senal de CANCELACION (no la de apagado) llega al motor de la tarea web: un apagado
+      // del worker conserva su semantica actual (no aborta una navegacion a medias sobre la cuenta
+      // real; el latido/reaper la recogen). alCambiarSesion mantiene la referencia del corte duro.
+      const resultado = await procesarTareaWeb(deps.tareaWeb, job, {
+        signal: cancelacion.signal,
+        alCambiarSesion: (sesionExternaId) => {
+          sesionEnCurso.id = sesionExternaId;
+        },
+      });
       if (resultado === 'pausada') {
         // Checkpoint de aprobacion humana (7.1e): el handler YA dejo el job 'pausado' (y la sesion
         // de navegador VIVA). No se marca completado: el job vuelve a 'pending' cuando el humano
@@ -555,7 +622,7 @@ export async function processClaimedJob(
     if (isRecipeJobPayload(job.payload)) {
       // La receta acumula el usage de TODOS sus pasos en `usage` (un run por job, no por paso) y devuelve
       // el stopReason del ultimo paso; su cierre (markCompleted) ya ocurrio dentro de runRecipeJob.
-      stopReason = await runRecipeJob(deps, job, agent, credential, usage, shutdownSignal);
+      stopReason = await runRecipeJob(deps, job, agent, credential, usage, senal);
       // TELEMETRIA (best-effort): UN agent_run por job de receta con el usage AGREGADO de los N pasos.
       await recordRunBestEffort(
         deps,
@@ -582,7 +649,7 @@ export async function processClaimedJob(
     });
 
     // 8. Ejecutar con el deadline de pared propio del worker.
-    const result = await runAgentWithDeadline(deps, input, executeTool, shutdownSignal);
+    const result = await runAgentWithDeadline(deps, input, executeTool, senal);
     stopReason = result.stopReason;
     // Captura los 4 cubos de tokens (cache incluido) del resultado -- el camino sincrono ya los tiene.
     addUsage(usage, result.usage);
@@ -601,6 +668,15 @@ export async function processClaimedJob(
       buildRunRecord(job, attribution, usage, 'completed', stopReason, null, startedAt),
     );
   } catch (error) {
+    // CANCELACION (CAMBIO 3): el estado nuevo ('failed' + CANCELADO_POR_USUARIO, o el que haya
+    // puesto otro actor) YA esta escrito por quien cancelo; aqui la corrida solo se termina, SIN
+    // escribir ningun cierre encima (los mark* igual tienen CAS sobre 'running', doble red).
+    if (cancelacion.signal.aborted) {
+      logger.info('corrida abortada: el job fue cancelado mientras corria; no se escribe el cierre', {
+        jobId: job.id,
+      });
+      return;
+    }
     await handleFailure(deps, job, error);
     // TELEMETRIA (best-effort): la ejecucion FALLIDA tambien consumio tokens (los ya acumulados: 0 en un
     // fallo simple sin stop, o la suma de los pasos ya corridos en una receta). Solo se registra si hubo
@@ -614,6 +690,9 @@ export async function processClaimedJob(
         buildRunRecord(job, attribution, usage, status, stopReason, errorCode, startedAt),
       );
     }
+  } finally {
+    detenerLatido();
+    limpiar();
   }
 }
 

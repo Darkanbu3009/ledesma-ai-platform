@@ -9,9 +9,8 @@ import type {
 import {
   processClaimedJob,
   claimAndProcessOne,
-  reapThresholdsMs,
+  REAP_STALE_MS,
   MAX_ATTEMPTS,
-  MAX_RECIPE_STEPS,
   type JobRunnerDeps,
 } from '../src/execution.js';
 import type { Logger } from '../src/logger.js';
@@ -113,6 +112,7 @@ function makeDeps(overrides: Partial<JobRunnerDeps> = {}): JobRunnerDeps {
       markCompleted: vi.fn(async () => {}),
       markFailed: vi.fn(async () => {}),
       markPendingRetry: vi.fn(async () => {}),
+      latirJob: vi.fn(async () => 'running' as const),
       reapOrphanedJobs: vi.fn(async () => []),
     },
     getProfileTier: vi.fn(async () => 'autonomous' as const),
@@ -355,36 +355,87 @@ describe('notificacion de fallo definitivo (hook en handleFailure)', () => {
   });
 });
 
-describe('reapThresholdsMs (calibracion del margen del reaper)', () => {
-  it('deriva umbrales por tipo (simple = 3x, receta = MAX_RECIPE_STEPS * 1.5x, tarea_web = 3x su deadline)', () => {
-    const { simpleMs, recipeMs, tareaWebMs } = reapThresholdsMs(600_000, 1_500_000);
-    expect(simpleMs).toBe(600_000 * 3);
-    expect(recipeMs).toBe(MAX_RECIPE_STEPS * 600_000 * 1.5);
-    expect(tareaWebMs).toBe(1_500_000 * 3);
+describe('latido del job en ejecucion y cancelacion cooperativa (CAMBIOS 1 y 3)', () => {
+  it('PROPIEDAD CRITICA del umbral: un job que late cada 30s JAMAS supera los 90s sin latido', () => {
+    expect(REAP_STALE_MS).toBe(90_000);
   });
 
-  it('PROPIEDAD CRITICA: el margen SUPERA el maximo wall-clock legitimo de cada tipo (jamas toca vivos)', () => {
-    const runTimeoutMs = 600_000;
-    // El deadline de tarea_web al MAXIMO configurable (2580 s, el techo de env.ts): incluso ahi el
-    // margen debe superar el wall-clock legitimo de una corrida de tarea web.
-    const tareaWebTimeoutMs = 2_580_000;
-    const { simpleMs, recipeMs, tareaWebMs } = reapThresholdsMs(runTimeoutMs, tareaWebTimeoutMs);
-    // Un job simple corre a lo sumo ~1 runTimeoutMs; el margen lo supera con holgura.
-    expect(simpleMs).toBeGreaterThan(runTimeoutMs);
-    // Una receta corre a lo sumo MAX_RECIPE_STEPS pasos, cada uno hasta runTimeoutMs; el margen lo supera.
-    expect(recipeMs).toBeGreaterThan(MAX_RECIPE_STEPS * runTimeoutMs);
-    // Y el margen de receta es mucho mayor que el de simple (una receta vive legitimamente mucho mas).
-    expect(recipeMs).toBeGreaterThan(simpleMs);
-    // Una tarea web corre a lo sumo ~1 deadline propio por corrida; el margen lo supera con holgura.
-    expect(tareaWebMs).toBeGreaterThan(tareaWebTimeoutMs);
+  it('mientras el job corre, late cada 30s; al terminar, el latido se detiene', async () => {
+    vi.useFakeTimers();
+    const deps = makeDeps({ runAgent: vi.fn((input: AgentRunInput) => hangingRun(input)) });
+    const job = makeJob();
+
+    const corrida = processClaimedJob(deps, job);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(deps.jobs.latirJob).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(deps.jobs.latirJob).toHaveBeenCalledTimes(2);
+
+    // El deadline de pared corta la corrida colgada; despues del cierre no se late mas.
+    await vi.advanceTimersByTimeAsync(600_000);
+    await corrida;
+    const latidosAlCerrar = (deps.jobs.latirJob as ReturnType<typeof vi.fn>).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(deps.jobs.latirJob).toHaveBeenCalledTimes(latidosAlCerrar);
   });
 
-  it('escala proporcional con cada deadline (subir el deadline sube el margen)', () => {
-    const a = reapThresholdsMs(600_000, 1_500_000);
-    const b = reapThresholdsMs(1_200_000, 3_000_000);
-    expect(b.simpleMs).toBe(a.simpleMs * 2);
-    expect(b.recipeMs).toBe(a.recipeMs * 2);
-    expect(b.tareaWebMs).toBe(a.tareaWebMs * 2);
+  it('un fallo del latido NO aborta el job: se loguea y la corrida termina normal', async () => {
+    vi.useFakeTimers();
+    const deps = makeDeps();
+    (deps.jobs.latirJob as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('blip de red'));
+    // runAgent que termina OK recien despues de un latido fallido.
+    deps.runAgent = vi.fn(() =>
+      (async function* (): AsyncIterable<AgentEvent> {
+        await new Promise((r) => setTimeout(r, 35_000));
+        yield { type: 'stop', reason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } };
+      })(),
+    );
+    const corrida = processClaimedJob(deps, makeJob());
+    await vi.advanceTimersByTimeAsync(40_000);
+    await corrida;
+    expect(deps.jobs.markCompleted).toHaveBeenCalledWith('job-1');
+    expect(deps.jobs.markFailed).not.toHaveBeenCalled();
+  });
+
+  it('cancelado desde la consola (el status deja de ser running): aborta al siguiente latido y NO escribe el cierre', async () => {
+    vi.useFakeTimers();
+    const deps = makeDeps({ runAgent: vi.fn((input: AgentRunInput) => hangingRun(input)) });
+    // El primer latido ya encuentra el job 'failed' (cancelarPorUsuario lo cerro desde la consola).
+    (deps.jobs.latirJob as ReturnType<typeof vi.fn>).mockResolvedValue('failed');
+    const job = makeJob();
+
+    const corrida = processClaimedJob(deps, job);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await corrida;
+
+    // La corrida se aborto (el run colgado resolvio via el signal) y NO se escribio ningun cierre
+    // encima del 'failed' que dejo la cancelacion.
+    expect(deps.jobs.markCompleted).not.toHaveBeenCalled();
+    expect(deps.jobs.markFailed).not.toHaveBeenCalled();
+    expect(deps.jobs.markPendingRetry).not.toHaveBeenCalled();
+    expect(deps.notifyJobFailure).not.toHaveBeenCalled();
+  });
+
+  it('un job que pasa a pausado detiene el latido SIN abortar la corrida', async () => {
+    vi.useFakeTimers();
+    const deps = makeDeps();
+    (deps.jobs.latirJob as ReturnType<typeof vi.fn>).mockResolvedValue('pausado');
+    let aborted = false;
+    deps.runAgent = vi.fn((input: AgentRunInput) =>
+      (async function* (): AsyncIterable<AgentEvent> {
+        input.signal?.addEventListener('abort', () => {
+          aborted = true;
+        });
+        await new Promise((r) => setTimeout(r, 40_000));
+        yield { type: 'stop', reason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } };
+      })(),
+    );
+    const corrida = processClaimedJob(deps, makeJob());
+    await vi.advanceTimersByTimeAsync(70_000);
+    await corrida;
+    expect(aborted).toBe(false);
+    expect(deps.jobs.latirJob).toHaveBeenCalledTimes(1); // tras ver 'pausado' no late mas
+    expect(deps.jobs.markCompleted).toHaveBeenCalled();
   });
 });
 
