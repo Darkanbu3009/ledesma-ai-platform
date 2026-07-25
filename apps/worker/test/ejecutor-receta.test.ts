@@ -284,3 +284,38 @@ describe('cancelacion cooperativa', () => {
     expect(navegador.ejecutarPasoDeterminista).not.toHaveBeenCalled();
   });
 });
+
+describe('robustez: un fallo del navegador no tumba la tarea', () => {
+  it('si el navegador LANZA, el paso escala en vez de propagar la excepcion', async () => {
+    const navegador: NavegadorDeterminista = {
+      ejecutarPasoDeterminista: vi.fn(async () => {
+        throw new Error('el WebSocket CDP se cerro con comandos en vuelo');
+      }),
+      leerEstrategiasDeElemento: vi.fn(async () => NUEVAS),
+    };
+    const escalador = makeEscalador();
+    const resultado = await ejecutarReceta(
+      [pasoReceta(), pasoReceta({ idx: 1 }), pasoReceta({ idx: 2 }), pasoReceta({ idx: 3 })],
+      SIN_PARAMETROS,
+      makeDeps({ navegador, escalador }),
+    );
+    // No lanza: escala el paso y sigue. La tarea nunca falla por un blip de la sesion.
+    expect(escalador.ejecutarPasoConModelo).toHaveBeenCalled();
+    expect(resultado.desenlace.tipo).not.toBe('detenida');
+  });
+
+  it('si la ESCALADA lanza, tampoco propaga: la receta se abandona y la termina el motor', async () => {
+    const { navegador } = makeNavegador([0]);
+    const escalador: EscaladorDePaso = {
+      ejecutarPasoConModelo: vi.fn(async () => {
+        throw new Error('el modelo no respondio');
+      }),
+    };
+    const resultado = await ejecutarReceta(
+      [pasoReceta(), pasoReceta({ idx: 1 })],
+      SIN_PARAMETROS,
+      makeDeps({ navegador, escalador }),
+    );
+    expect(resultado.desenlace.tipo).toBe('abandonada');
+  });
+});

@@ -350,10 +350,19 @@ export async function ejecutarReceta(
       };
     }
 
-    const resultado = await deps.navegador.ejecutarPasoDeterminista(
-      deps.sesionExternaId,
-      instruccion,
-    );
+    // Un fallo INESPERADO del navegador (la sesion se cayo, la evaluacion excedio su timeout en una
+    // pagina enorme) se trata como "no localizado", no como una excepcion: la corrida escala ese paso
+    // y, si tampoco sale, abandona la receta y la termina el motor. Dejar propagar aqui convertiria
+    // un blip de CDP en una tarea fallida cuando el camino de siempre habria funcionado.
+    const resultado = await deps.navegador
+      .ejecutarPasoDeterminista(deps.sesionExternaId, instruccion)
+      .catch(
+        (): ResultadoPasoDeterminista => ({
+          estado: 'fallo',
+          estrategias: [],
+          detalle: 'el navegador no pudo ejecutar el paso',
+        }),
+      );
 
     pasosEjecutados++;
     if (resultado.estado === 'ok') {
