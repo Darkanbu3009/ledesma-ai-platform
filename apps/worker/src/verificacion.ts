@@ -415,6 +415,8 @@ export function construirPasoDeVerificacion(veredicto: Veredicto): PasoCensurado
     },
     selector: null,
     valorCensurado: null,
+    // La verificacion no toca ningun elemento: no hay nada que volver a localizar.
+    estrategias: [],
     url: null,
     exito: veredicto.tipo === 'ejecutar',
   };
