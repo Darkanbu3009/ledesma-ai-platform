@@ -10,6 +10,7 @@ import {
 } from '@ledesma-platform/backend/execution';
 import { DataSubjectRequestRepository, SitiosConectadosRepository } from '@ledesma-platform/backend/sitios';
 import { AprobacionesWebRepository } from '@ledesma-platform/backend/aprobaciones';
+import { PoliticasEjecucionRepository } from '@ledesma-platform/backend/politicas';
 import { TrayectoriasWebRepository } from '@ledesma-platform/backend/trayectorias';
 import { crearNotificadorAprobaciones, type BarridoAprobacionesDeps } from './aprobaciones.js';
 import { crearSubidorDeScreenshots } from './storage.js';
@@ -119,6 +120,9 @@ function main(): void {
         projectId: config.BROWSERBASE_PROJECT_ID,
       }),
       aprobaciones: aprobacionesRepo,
+      // POLITICA DE EJECUCION (V034): el MISMO repositorio que escribe la consola. La lee al inicio
+      // de cada tarea web; si la lectura falla, la accion irreversible se detiene (falla cerrada).
+      politicas: new PoliticasEjecucionRepository(sql),
       aprobacionTtlMs: config.APROBACION_TTL_MINUTOS * 60 * 1000,
       marcarJobPausado: (jobId) => jobs.marcarPausado(jobId),
       subidorScreenshots,

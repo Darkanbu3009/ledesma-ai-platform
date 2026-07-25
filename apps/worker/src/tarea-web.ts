@@ -1,4 +1,4 @@
-import { parseTareaWebJobPayload } from '@ledesma-platform/shared';
+import { POLITICA_EJECUCION_DEFAULT, parseTareaWebJobPayload } from '@ledesma-platform/shared';
 import type { Job } from '@ledesma-platform/shared';
 // IMPORT DE TIPOS (type-only): igual que sitios.ts, el repositorio real (7.1a) y la boveda se
 // INYECTAN; este modulo no carga en runtime el backend ni el SDK de Stagehand. Los tests pasan
@@ -22,12 +22,25 @@ import {
   type NotificadorAprobaciones,
   type RepositorioAprobacionesParaWorker,
 } from './aprobaciones.js';
+import { extraerParametrosDeclarados } from './parametros-objetivo.js';
+import {
+  construirEjecucionVerificada,
+  construirPasoDeVerificacion,
+  mensajeDeDetencion,
+  verificarAccion,
+  type CampoDeLaPagina,
+  type EstadoDeLaPagina,
+  type PoliticaVigente,
+  type RepositorioPoliticasParaWorker,
+  type Veredicto,
+} from './verificacion.js';
 import type { SubidorDeScreenshots } from './storage.js';
 import { censurarObjetivo, censurarTexto } from './censura.js';
 import {
   extraerPasosCensurados,
   type AccionCrudaDeMotor,
   type EstadoTrayectoria,
+  type PasoCensurado,
   type RegistradorDeTrayectorias,
 } from './trayectoria.js';
 import type { Logger } from './logger.js';
@@ -47,11 +60,17 @@ import type { Logger } from './logger.js';
  *    dentro del mismo pais y eso es invisible para el sitio destino); lo que invalida una sesion es
  *    un salto de pais. JAMAS se degrada a otro pais. Para sitios de maxima seguridad (banca) se
  *    migrara en el futuro a proxies sticky dedicados (no en esta fase).
- *  - Una accion irreversible o financiera NO se ejecuta sin una aprobacion humana en estado
- *    'aprobada' (7.1e): al detectarla, el worker captura un screenshot, crea el checkpoint, PAUSA
- *    el job y MANTIENE VIVA la sesion (el estado del checkout se pierde si se reabre). El UNICO
- *    camino que la ejecuta es la reanudacion via construirReanudacionAprobada (aprobaciones.ts),
- *    que LANZA si la aprobacion no esta 'aprobada'. Sin excepciones por config, env ni plan.
+ *  - Una accion irreversible o financiera NO se ejecuta sin pasar antes por la VERIFICACION
+ *    DETERMINISTA (verificacion.ts): el sistema compara, fuera del alcance del modelo, los datos que
+ *    el usuario declaro en el objetivo contra los valores que hay en la pagina, y aplica la POLITICA
+ *    que el usuario configuro una sola vez (V034). Coinciden y la politica lo permite: se ejecuta sin
+ *    preguntar nada. No coinciden, falta un dato, o la politica lo impide: la tarea TERMINA sin
+ *    ejecutar, con un mensaje que dice que se pidio y que se encontro. Es comparacion mecanica, NO
+ *    aprobacion humana: el usuario final no es tecnico y no debe aprobar cada accion.
+ *  - La APROBACION HUMANA (7.1e) sigue existiendo intacta para el camino de reanudacion tras una
+ *    decision: construirReanudacionAprobada (aprobaciones.ts) sigue siendo el UNICO productor del
+ *    prompt que ejecuta una accion aprobada y sigue LANZANDO si la aprobacion no esta 'aprobada'.
+ *    Lo que cambio es que ya no se DISPARA un checkpoint por defecto en la corrida inicial.
  *  - Un fallo DESPUES de abrir la sesion es PERMANENTE a proposito: re-ejecutar una navegacion a
  *    medias sobre la cuenta real del usuario puede duplicar efectos.
  *  - El contexto descifrado existe SOLO en memoria entre el descifrado y la inyeccion; jamas se
@@ -117,6 +136,14 @@ export interface NavegadorParaTarea {
   estadoDeSesion(sesionExternaId: string): Promise<'viva' | 'muerta'>;
   /** Screenshot PNG (base64) de la pagina actual, sin tocarla (evidencia del checkpoint 7.1e). */
   capturarPantalla(sesionExternaId: string): Promise<string>;
+  /**
+   * LEE (sin tocar la pagina) los valores ACTUALES de los campos del formulario con el contexto que
+   * los identifica. Es el insumo de la VERIFICACION DETERMINISTA: lo que se compara contra el
+   * objetivo del usuario es lo que el agente tecleo o eligio.
+   */
+  leerCamposDeLaPagina(sesionExternaId: string): Promise<CampoDeLaPagina[]>;
+  /** LEE el texto visible de la pagina (o del elemento del selector), acotado y sin tocarla. */
+  leerTextoVisible(sesionExternaId: string, selector?: string): Promise<string>;
   /**
    * OBSERVA la salida de red actual (pais + IP) de la sesion viva en una PESTANA NUEVA (sin tocar
    * la pagina de la tarea). Pais null = no observable -> el handler aborta (no se puede verificar).
@@ -199,6 +226,13 @@ export interface TareaWebDeps {
   motor: MotorDeTareaWeb;
   /** Repositorio de checkpoints de aprobacion (V027): crear al pausar, leer la decision al reanudar. */
   aprobaciones: RepositorioAprobacionesParaWorker;
+  /**
+   * POLITICA DE EJECUCION del owner (V034): los tres ajustes que configuro UNA sola vez. OPCIONAL con
+   * el mismo criterio que `trayectorias`: sin la migracion aplicada el worker sigue corriendo y usa
+   * los defaults. Si esta cableado pero la lectura FALLA, la accion irreversible se detiene (jamas se
+   * asume permiso sobre una preferencia que no se pudo leer).
+   */
+  politicas?: RepositorioPoliticasParaWorker | undefined;
   /** Vida de una aprobacion pendiente, en ms (APROBACION_TTL_MINUTOS; default 15 min). */
   aprobacionTtlMs: number;
   /** Pausa el job en la cola ('running' -> 'pausado', JobsRepository.marcarPausado). */
@@ -463,6 +497,186 @@ async function pausarEnCheckpoint(
 }
 
 /**
+ * Lee la POLITICA DE EJECUCION del owner (D3, V034). Devuelve:
+ *  - los DEFAULTS si el repositorio no esta cableado (despliegue sin la migracion) o si el usuario
+ *    nunca configuro nada (sin fila; NO se crea la fila al leer),
+ *  - null si la lectura FALLO: la verificacion lo trata como "no se pudo confirmar tu preferencia" y
+ *    DETIENE la accion. Falla cerrada a proposito: asumir permiso sobre un dato que no se pudo leer
+ *    convertiria una caida de la base en una autorizacion silenciosa.
+ */
+async function leerPoliticaVigente(deps: TareaWebDeps, ownerId: string): Promise<PoliticaVigente | null> {
+  if (!deps.politicas) return POLITICA_EJECUCION_DEFAULT;
+  try {
+    return (await deps.politicas.obtenerPorOwner(ownerId)) ?? POLITICA_EJECUCION_DEFAULT;
+  } catch (error) {
+    deps.logger.error(
+      'tarea web: no se pudo leer la politica de ejecucion del usuario; las acciones irreversibles se detendran',
+      { ownerId, err: describir(error) },
+    );
+    return null;
+  }
+}
+
+/**
+ * Foto de SOLO LECTURA de la pagina justo antes de ejecutar: valores actuales de los campos y texto
+ * visible. null si no se pudo leer; sin foto NO se ejecuta (la verificacion lo trata como "no
+ * coincide" con nada encontrado, nunca como "seguro esta bien").
+ */
+async function leerEstadoDeLaPagina(
+  deps: TareaWebDeps,
+  job: Job,
+  sesionExternaId: string,
+): Promise<EstadoDeLaPagina | null> {
+  try {
+    const campos = await deps.navegador.leerCamposDeLaPagina(sesionExternaId);
+    const texto = await deps.navegador.leerTextoVisible(sesionExternaId);
+    return { campos, texto };
+  } catch (error) {
+    deps.logger.warn('tarea web: no se pudo leer el estado de la pagina para verificar la accion', {
+      jobId: job.id,
+      err: describir(error),
+    });
+    return null;
+  }
+}
+
+/** Detencion sin comparaciones, para los motivos que no nacen de comparar (contrato con la consola). */
+function detencionDirecta(motivo: 'otraAccion' | 'politicaNoDisponible'): Extract<Veredicto, { tipo: 'detener' }> {
+  return { tipo: 'detener', detencion: { motivo }, comparaciones: [] };
+}
+
+/**
+ * VERIFICACION DETERMINISTA y, si pasa, EJECUCION de la accion (CAMBIO 3 + 4, D1/D2/D5). Es lo que
+ * sustituye al checkpoint de aprobacion en la corrida INICIAL.
+ *
+ * 1. Extrae del OBJETIVO los parametros que el usuario declaro (codigo, no modelo: D4).
+ * 2. Lee del DOM los valores actuales (codigo, no modelo).
+ * 3. Aplica la politica del usuario y compara. El modelo no participa de ninguno de los tres pasos.
+ * 4. Si coincide: corre el motor UNA vez mas con un prompt construido SOLO con texto fijo y el
+ *    objetivo original, que autoriza esa accion. Si no coincide: la tarea TERMINA en 'failed' con el
+ *    mensaje de la detencion (D5: no queda pausada esperando a nadie; el usuario reformula y pide de
+ *    nuevo). En NINGUN caso la accion se ejecuta cuando la verificacion no paso.
+ *
+ * La corrida de ejecucion NO lleva la barrera D2b (verboBloqueado null): esa barrera existe para
+ * atrapar al agente que termina con DONE sin haber ejecutado ni reportado, y aca la ejecucion es
+ * justamente lo que se acaba de autorizar; aplicarla convertiria el exito en una detencion.
+ */
+async function verificarYEjecutar(
+  deps: TareaWebDeps,
+  job: Job,
+  sitio: SitioConectado,
+  objetivo: string,
+  sesionExternaId: string,
+  opciones: {
+    politica: PoliticaVigente | null;
+    verboBloqueado: string | null;
+    contexto: string;
+    apiKey: string;
+    control?: ControlDeTareaWeb;
+  },
+): Promise<ResultadoTareaWeb> {
+  // El dueno TERMINO la tarea desde la consola mientras el agente llegaba a la accion pendiente: no
+  // hay nada que verificar ni que ejecutar. Se corta ANTES de leer la pagina y, sobre todo, antes de
+  // la corrida que ejecutaria: ejecutar lo que el usuario acaba de cancelar seria lo peor que puede
+  // hacer este camino. Mismo criterio que la exencion de la barrera determinista (D2b).
+  if (opciones.control?.signal?.aborted === true) {
+    throw new PermanentExecutionError(
+      'la tarea se termino desde la consola antes de ejecutar la accion pendiente; no se ejecuto nada',
+    );
+  }
+
+  const iniciadaEn = new Date();
+  const veredicto: Veredicto =
+    opciones.politica === null
+      ? detencionDirecta('politicaNoDisponible')
+      : verificarAccion({
+          politica: opciones.politica,
+          dominio: sitio.dominio,
+          verbo: opciones.verboBloqueado,
+          parametros: extraerParametrosDeclarados(objetivo),
+          pagina: await leerEstadoDeLaPagina(deps, job, sesionExternaId),
+        });
+
+  // El resultado de la verificacion queda como UN PASO de la trayectoria (valores comparados +
+  // veredicto), ya censurado. Si se detiene, esa trayectoria es la unica constancia de la corrida.
+  const paso = construirPasoDeVerificacion(veredicto);
+
+  if (veredicto.tipo === 'detener') {
+    await guardarTrayectoriaBestEffort(
+      deps,
+      job,
+      sitio,
+      objetivo,
+      'fallida',
+      iniciadaEn,
+      { acciones: [], tokensIn: null, tokensOut: null },
+      [paso],
+    );
+    deps.logger.warn('tarea web DETENIDA antes de ejecutar la accion (verificacion determinista)', {
+      jobId: job.id,
+      connectionId: sitio.id,
+      dominio: sitio.dominio,
+      motivo: veredicto.detencion.motivo,
+    });
+    throw new PermanentExecutionError(mensajeDeDetencion(veredicto));
+  }
+
+  deps.logger.info('tarea web: verificacion determinista superada; se ejecuta la accion', {
+    jobId: job.id,
+    connectionId: sitio.id,
+    dominio: sitio.dominio,
+    parametrosComparados: veredicto.comparaciones.length,
+  });
+
+  const { resultado, desenlace } = await ejecutarMotorConRegistro(
+    deps,
+    job,
+    sitio,
+    objetivo,
+    sesionExternaId,
+    opciones.apiKey,
+    construirEjecucionVerificada(objetivo),
+    opciones.control?.signal,
+    null,
+    [paso],
+  );
+
+  if (desenlace.tipo === 'sesion_caducada') {
+    await marcarSitioBestEffort(deps, sitio, job.ownerId, 'caducado');
+    throw new PermanentExecutionError(
+      `la sesion del sitio ${sitio.dominio} caduco al ejecutar la accion verificada; ` +
+        'vuelve a conectarlo desde la consola para reanudar las tareas',
+    );
+  }
+
+  if (desenlace.tipo === 'requiere_aprobacion') {
+    // La corrida de ejecucion topo con OTRA accion irreversible. NO se encadena una verificacion
+    // nueva dentro de la misma corrida (seria un bucle sin cota sobre la cuenta real del usuario):
+    // la tarea termina y el usuario pide esa segunda accion por separado.
+    deps.logger.warn('tarea web: aparecio otra accion irreversible tras la verificada; se detiene', {
+      jobId: job.id,
+      connectionId: sitio.id,
+    });
+    throw new PermanentExecutionError(mensajeDeDetencion(detencionDirecta('otraAccion')));
+  }
+
+  if (!resultado.exito) {
+    throw new PermanentExecutionError(
+      describirFalloDelMotor(resultado, deps.maxPasos, 'la accion verificada'),
+    );
+  }
+
+  await refrescarContextoBestEffort(deps, sitio, job.ownerId, sesionExternaId, opciones.contexto);
+  await deps.guardarResultado(job.id, { estado: 'ok', resumen: desenlace.resumen, verificada: true });
+  deps.logger.info('tarea web completada: accion verificada y ejecutada', {
+    jobId: job.id,
+    connectionId: sitio.id,
+    dominio: sitio.dominio,
+  });
+  return 'completada';
+}
+
+/**
  * kind:'tarea_web': ejecuta el objetivo del usuario dentro de la sesion activa del sitio conectado.
  * Lanza en fallo (execution.ts decide el cierre). Devuelve 'completada' (el llamador marca
  * completed) o 'pausada' (el job ya quedo 'pausado' en un checkpoint; NO marcar completed).
@@ -532,12 +746,17 @@ export async function procesarTareaWeb(
   //      corrida INICIAL: en una reanudacion el humano ya decidio sobre este objetivo.
   const verboBloqueado = detectarVerboBloqueado(objetivo);
   if (verboBloqueado !== null) {
-    deps.logger.info('tarea web: el objetivo contiene una accion bloqueada; se espera un checkpoint', {
+    deps.logger.info('tarea web: el objetivo contiene una accion bloqueada; se verificara antes de ejecutar', {
       jobId: job.id,
       connectionId: sitio.id,
       verbo: verboBloqueado,
     });
   }
+
+  // 2.8. POLITICA DE EJECUCION del owner (D3): se lee UNA vez, al INICIO de la tarea, y no se
+  //      vuelve a preguntar nada durante la ejecucion. null = no se pudo leer -> la verificacion
+  //      detiene la accion (falla cerrada).
+  const politica = await leerPoliticaVigente(deps, job.ownerId);
 
   // 3. Abrir la sesion RECONECTANDO el contexto guardado y FORZANDO el proxy pineado con la
   //    geolocalizacion del PAIS pineado. El adaptador lanza SalidaDeRedNoDisponibleError
@@ -556,9 +775,10 @@ export async function procesarTareaWeb(
     egressIp: sesion.egressIp,
   });
 
-  // La sesion se cierra SIEMPRE salvo que la tarea quede PAUSADA en un checkpoint: ahi DEBE seguir
-  // viva (el estado del checkout se pierde si se reabre) y la cierran la decision o el barrido.
-  let mantenerSesionViva = false;
+  // La sesion de la corrida INICIAL se cierra SIEMPRE: la verificacion determinista resuelve en la
+  // misma corrida (ejecuta o detiene) y ya no queda nadie esperando para decidir sobre esta pagina.
+  // La sesion que SI sobrevive es la de un checkpoint de aprobacion humana, y esa la abre y la cierra
+  // el camino de reanudacion (reanudarTrasDecision).
   try {
     // 4. VERIFICAR el PAIS de salida ANTES de navegar: si el observado difiere del pineado (o no se
     //    pudo observar), se ABORTA sin ejecutar nada, el sitio queda 'error' (marcado para
@@ -610,25 +830,16 @@ export async function procesarTareaWeb(
     }
 
     if (desenlace.tipo === 'requiere_aprobacion') {
-      // Accion irreversible/financiera detectada y NO ejecutada: checkpoint de aprobacion (7.1e).
-      const pausa = await pausarEnCheckpoint(
-        deps,
-        job,
-        sitio,
-        sesion.sesionExternaId,
-        desenlace.detalle,
+      // Accion irreversible/financiera detectada y NO ejecutada: la VERIFICACION DETERMINISTA decide
+      // (D1/D2/D5). Ejecuta si todo coincide y la politica lo permite; si no, LANZA y el job termina
+      // en 'failed' con el mensaje de la detencion. Nunca queda pausado esperando una aprobacion.
+      return await verificarYEjecutar(deps, job, sitio, objetivo, sesion.sesionExternaId, {
+        politica,
+        verboBloqueado,
         contexto,
-      );
-      if (pausa === 'pausada') {
-        mantenerSesionViva = true;
-        return 'pausada';
-      }
-      // Fallback (no se pudo persistir el checkpoint): comportamiento 7.1d, bloquear y completar.
-      await deps.guardarResultado(job.id, {
-        estado: 'requiere_aprobacion',
-        detalle: desenlace.detalle,
+        apiKey: credential.apiKey,
+        ...(control !== undefined ? { control } : {}),
       });
-      return 'completada';
     }
 
     if (!resultado.exito) {
@@ -648,11 +859,8 @@ export async function procesarTareaWeb(
     });
     return 'completada';
   } finally {
-    if (!mantenerSesionViva) {
-      await cerrarSesionBestEffort(deps, sesion.sesionExternaId);
-    }
-    // La sesion dejo de ser responsabilidad de esta corrida: cerrada aqui, o (pausada) del
-    // checkpoint y su barrido. El corte duro externo ya no debe tocarla.
+    await cerrarSesionBestEffort(deps, sesion.sesionExternaId);
+    // La sesion dejo de ser responsabilidad de esta corrida. El corte duro externo ya no debe tocarla.
     control?.alCambiarSesion?.(null);
   }
 }
@@ -682,6 +890,8 @@ async function guardarTrayectoriaBestEffort(
   estado: EstadoTrayectoria,
   iniciadaEn: Date,
   resultado: Pick<ResultadoMotor, 'acciones' | 'tokensIn' | 'tokensOut'>,
+  /** Pasos SINTETICOS que van ANTES de los del motor (hoy: el resultado de la verificacion previa). */
+  pasosPrevios: PasoCensurado[] = [],
 ): Promise<void> {
   if (!deps.trayectorias) return;
   const terminadaEn = new Date();
@@ -698,7 +908,12 @@ async function guardarTrayectoriaBestEffort(
       duracionMs: Math.max(0, terminadaEn.getTime() - iniciadaEn.getTime()),
       tokensIn: resultado.tokensIn,
       tokensOut: resultado.tokensOut,
-      pasos: extraerPasosCensurados(resultado.acciones),
+      // Los pasos previos (verificacion) abren la traza y el idx se renumera para que el orden
+      // persistido sea el orden real de lo que paso.
+      pasos: [...pasosPrevios, ...extraerPasosCensurados(resultado.acciones)].map((paso, idx) => ({
+        ...paso,
+        idx,
+      })),
     });
   } catch (error) {
     deps.logger.warn('tarea web: no se pudo registrar la trayectoria (se ignora, best-effort)', {
@@ -725,19 +940,27 @@ async function ejecutarMotorConRegistro(
   prompt: { objetivo: string; systemPrompt: string },
   senalExterna?: AbortSignal,
   // D2(b): verbo de accion bloqueada detectado en el objetivo (D2a), o null. Solo la corrida
-  // INICIAL lo pasa; la reanudacion no (el humano ya decidio sobre este objetivo).
+  // INICIAL lo pasa; ni la reanudacion ni la corrida que ejecuta una accion ya VERIFICADA (el
+  // humano, o la verificacion determinista, ya decidieron sobre este objetivo).
   verboBloqueado: string | null = null,
+  // Pasos sinteticos que preceden a los del motor en la trayectoria (el paso de verificacion).
+  pasosPrevios: PasoCensurado[] = [],
 ): Promise<{ resultado: ResultadoMotor; desenlace: DesenlaceTareaWeb }> {
   const iniciadaEn = new Date();
   let resultado: ResultadoMotor;
   try {
     resultado = await ejecutarMotor(deps, sesionExternaId, apiKey, prompt, senalExterna);
   } catch (error) {
-    await guardarTrayectoriaBestEffort(deps, job, sitio, objetivo, 'fallida', iniciadaEn, {
-      acciones: [],
-      tokensIn: null,
-      tokensOut: null,
-    });
+    await guardarTrayectoriaBestEffort(
+      deps,
+      job,
+      sitio,
+      objetivo,
+      'fallida',
+      iniciadaEn,
+      { acciones: [], tokensIn: null, tokensOut: null },
+      pasosPrevios,
+    );
     throw error;
   }
   let desenlace = clasificarDesenlace(resultado.mensaje);
@@ -773,7 +996,16 @@ async function ejecutarMotorConRegistro(
       : desenlace.tipo === 'ok' && resultado.exito
         ? 'exitosa'
         : 'fallida';
-  await guardarTrayectoriaBestEffort(deps, job, sitio, objetivo, estado, iniciadaEn, resultado);
+  await guardarTrayectoriaBestEffort(
+    deps,
+    job,
+    sitio,
+    objetivo,
+    estado,
+    iniciadaEn,
+    resultado,
+    pasosPrevios,
+  );
   return { resultado, desenlace };
 }
 

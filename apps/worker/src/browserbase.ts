@@ -3,6 +3,7 @@ import { ClienteCdp } from './cdp.js';
 import { SalidaDeRedNoDisponibleError } from './sitios.js';
 import type { NavegadorRemoto, SesionDeLoginAbierta } from './sitios.js';
 import type { NavegadorParaTarea, SesionDeTareaAbierta } from './tarea-web.js';
+import type { CampoDeLaPagina } from './verificacion.js';
 
 /**
  * ADAPTADOR real del puerto NavegadorRemoto (sitios.ts) sobre Browserbase (@browserbasehq/sdk
@@ -76,6 +77,78 @@ export const LOGIN_VIEWPORT = { width: 1280, height: 720 } as const;
 
 const IP_REGEX = /^[0-9a-fA-F:.]{3,45}$/;
 const PAIS_REGEX = /^[A-Z]{2}$/;
+
+/** Tope del texto visible que se lee de una pagina (evidencia de apoyo, no un scrape). */
+const MAX_TEXTO_VISIBLE_CHARS = 4000;
+
+/** Nombre del mundo aislado donde corre la lectura de la verificacion (ver evaluarEnLaPagina). */
+const MUNDO_DE_VERIFICACION = 'ledesma-verificacion';
+
+const EXPRESION_TEXTO_BODY =
+  `(() => (document.body ? String(document.body.innerText || '').slice(0, ${MAX_TEXTO_VISIBLE_CHARS}) : ''))()`;
+
+/**
+ * Expresion de SOLO LECTURA que recolecta los campos del formulario con su valor ACTUAL y el
+ * contexto que los identifica. Va como String.raw para que las expresiones regulares de adentro
+ * lleguen intactas al navegador.
+ *
+ * Decisiones que importan para la seguridad de la verificacion:
+ *  - input[type=password] se OMITE entero: su valor no hace falta para verificar nada.
+ *  - los campos OCULTOS y los de tipo hidden SI se incluyen: un destinatario o un monto colado en un
+ *    campo invisible es precisamente lo que hay que detectar.
+ *  - contenteditable se incluye porque los redactores de correo modernos no usan <textarea>.
+ *  - todo va acotado (60 campos, 200 caracteres por valor y por contexto): la verificacion compara
+ *    datos concretos, no vuelca la pagina.
+ */
+const EXPRESION_LEER_CAMPOS = String.raw`(() => {
+  const MAX_CAMPOS = 60, MAX_VALOR = 200, MAX_CONTEXTO = 200;
+  const salida = [];
+  const nodos = document.querySelectorAll('input, textarea, select, [contenteditable="true"], [contenteditable=""]');
+  for (const nodo of nodos) {
+    if (salida.length >= MAX_CAMPOS) break;
+    const tag = (nodo.tagName || '').toLowerCase();
+    const tipo = (nodo.getAttribute('type') || '').toLowerCase();
+    if (tipo === 'password') continue;
+    let valor = '';
+    if (tag === 'select') {
+      const opcion = nodo.selectedOptions && nodo.selectedOptions[0];
+      valor = opcion ? (opcion.textContent || opcion.value || '') : (nodo.value || '');
+    } else if (tag === 'input' || tag === 'textarea') {
+      valor = (tipo === 'checkbox' || tipo === 'radio')
+        ? (nodo.checked ? (nodo.value || 'on') : '')
+        : (nodo.value || '');
+    } else {
+      valor = nodo.innerText || nodo.textContent || '';
+    }
+    valor = String(valor).trim();
+    if (valor === '') continue;
+    let etiqueta = '';
+    try {
+      const id = nodo.getAttribute('id');
+      if (id && window.CSS && window.CSS.escape) {
+        const asociada = document.querySelector('label[for="' + window.CSS.escape(id) + '"]');
+        if (asociada) etiqueta = asociada.innerText || asociada.textContent || '';
+      }
+      if (!etiqueta && nodo.closest) {
+        const contenedora = nodo.closest('label');
+        if (contenedora) etiqueta = contenedora.innerText || contenedora.textContent || '';
+      }
+    } catch (e) {
+      etiqueta = '';
+    }
+    const contexto = [
+      tag,
+      tipo,
+      nodo.getAttribute('name') || '',
+      nodo.getAttribute('id') || '',
+      nodo.getAttribute('placeholder') || '',
+      nodo.getAttribute('aria-label') || '',
+      etiqueta,
+    ].join(' ').replace(/\s+/g, ' ').trim();
+    salida.push({ contexto: contexto.slice(0, MAX_CONTEXTO), valor: valor.slice(0, MAX_VALOR) });
+  }
+  return JSON.stringify(salida);
+})()`;
 
 /** Salida de red observada por el echo: IP (informativa) y pais (criterio de pinning). */
 interface SalidaEcho {
@@ -391,6 +464,94 @@ export class NavegadorBrowserbase implements NavegadorRemoto, NavegadorParaTarea
         sessionId,
       );
       return evaluado.result?.value === true;
+    } finally {
+      cdp.cerrar();
+    }
+  }
+
+  /**
+   * LEE los valores ACTUALES de los campos del formulario de la pagina, con el contexto que los
+   * identifica (name, id, tipo, placeholder, aria-label y la etiqueta asociada). Es la lectura
+   * DETERMINISTA sobre la que se hace la verificacion previa a ejecutar una accion irreversible: lo
+   * que se compara contra el objetivo del usuario es lo que el agente TECLEO O ELIGIO, no lo que la
+   * pagina dice de si misma.
+   *
+   * Es de SOLO LECTURA (Runtime.evaluate sobre el DOM, sin tocar la pagina) y JAMAS lee un campo de
+   * contrasena: su valor no se necesita para verificar nada y no debe salir del navegador. Incluye
+   * los campos OCULTOS a proposito: un destinatario agregado en un input hidden es exactamente el
+   * caso que la verificacion tiene que atrapar.
+   */
+  async leerCamposDeLaPagina(sesionExternaId: string): Promise<CampoDeLaPagina[]> {
+    const crudo = await this.evaluarEnLaPagina(sesionExternaId, EXPRESION_LEER_CAMPOS);
+    if (crudo === null) return [];
+    try {
+      const parsed: unknown = JSON.parse(crudo);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.flatMap((item): CampoDeLaPagina[] => {
+        if (typeof item !== 'object' || item === null) return [];
+        const { contexto, valor } = item as { contexto?: unknown; valor?: unknown };
+        if (typeof contexto !== 'string' || typeof valor !== 'string') return [];
+        return [{ contexto, valor }];
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * LEE el TEXTO VISIBLE de la pagina (o del elemento que indique `selector`), acotado. Complementa
+   * la lectura de campos para los datos que un sitio muestra como texto y no como campo (el total de
+   * un checkout, el nombre del producto). Evidencia mas DEBIL que un valor de campo: lo escribe el
+   * sitio, asi que la verificacion solo lo usa como ultimo recurso.
+   */
+  async leerTextoVisible(sesionExternaId: string, selector?: string): Promise<string> {
+    const expresion =
+      selector === undefined
+        ? EXPRESION_TEXTO_BODY
+        : `(() => { const el = document.querySelector(${JSON.stringify(selector)}); ` +
+          `return el ? String(el.innerText || el.textContent || '').slice(0, ${MAX_TEXTO_VISIBLE_CHARS}) : ''; })()`;
+    return (await this.evaluarEnLaPagina(sesionExternaId, expresion)) ?? '';
+  }
+
+  /**
+   * Evalua una expresion de SOLO LECTURA sobre la pagina actual y devuelve su valor si es texto.
+   *
+   * MUNDO AISLADO (Page.createIsolatedWorld), no el mundo de la pagina: es lo que hace confiable a la
+   * verificacion determinista. En el mundo principal, el JavaScript del sitio (o el inyectado en el)
+   * puede redefinir lo que la lectura ve -- un getter sobre HTMLInputElement.prototype.value, un
+   * querySelectorAll propio, un JSON.stringify parcheado -- y devolver el valor que el usuario pidio
+   * mientras el formulario lleva otro. Un mundo aislado comparte el MISMO DOM pero tiene sus propios
+   * objetos globales y sus propios wrappers de los nodos, asi que ningun parche hecho por la pagina
+   * lo alcanza (es el mismo mecanismo con el que las extensiones leen paginas hostiles).
+   *
+   * Best-effort: cualquier fallo (sesion caida, evaluacion rechazada) devuelve null y el llamador
+   * decide; en la verificacion, no poder leer NUNCA autoriza a ejecutar.
+   */
+  private async evaluarEnLaPagina(sesionExternaId: string, expresion: string): Promise<string | null> {
+    const session = await this.bb.sessions.retrieve(sesionExternaId);
+    if (!session.connectUrl) {
+      throw new Error('la sesion de navegador no expone un connect URL (ya no esta corriendo)');
+    }
+    const cdp = await ClienteCdp.conectar(session.connectUrl);
+    try {
+      const sessionId = await this.attachPaginaInicial(cdp);
+      const { frameTree } = await cdp.enviar<{ frameTree: { frame: { id: string } } }>(
+        'Page.getFrameTree',
+        {},
+        sessionId,
+      );
+      const { executionContextId } = await cdp.enviar<{ executionContextId: number }>(
+        'Page.createIsolatedWorld',
+        { frameId: frameTree.frame.id, worldName: MUNDO_DE_VERIFICACION },
+        sessionId,
+      );
+      const evaluado = await cdp.enviar<{ result?: { value?: unknown } }>(
+        'Runtime.evaluate',
+        { expression: expresion, returnByValue: true, contextId: executionContextId },
+        sessionId,
+      );
+      const valor = evaluado.result?.value;
+      return typeof valor === 'string' ? valor : null;
     } finally {
       cdp.cerrar();
     }

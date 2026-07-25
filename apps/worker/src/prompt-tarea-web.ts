@@ -16,8 +16,10 @@
 export const MARCADOR_SESION_CADUCADA = 'SESION_CADUCADA';
 
 /**
- * Marcador con el que el agente REPORTA una accion irreversible o financiera SIN ejecutarla. El
- * checkpoint de aprobacion humana es 7.1e: en este PR esas acciones SOLO se bloquean y se informan.
+ * Marcador con el que el agente REPORTA una accion irreversible o financiera SIN ejecutarla. Al
+ * recibirlo, el worker corre la VERIFICACION DETERMINISTA (verificacion.ts): compara los datos que
+ * hay en la pagina contra lo que el usuario declaro en su objetivo y decide si se ejecuta. El
+ * marcador NO autoriza nada por si mismo; solo entrega el control al sistema.
  */
 export const MARCADOR_REQUIERE_APROBACION = 'REQUIERE_APROBACION';
 
@@ -172,7 +174,7 @@ export function construirSystemPromptTareaWeb(): string {
     `  INMEDIATO: no reintentes, no navegues alrededor, no vuelvas a cargar. Termina la tarea y que tu`,
     `  mensaje final empiece con ${MARCADOR_SESION_CADUCADA}: seguido de que pantalla viste.`,
     '',
-    'ACCIONES IRREVERSIBLES O FINANCIERAS (requieren aprobacion humana):',
+    'ACCIONES IRREVERSIBLES O FINANCIERAS (las verifica el sistema antes de ejecutarlas):',
     `- ANTES de cada accion, clasificala. Si implica ${verbosCanonicos('es')}`,
     `  (en ingles: ${verbosCanonicos('en')})`,
     '  o cualquier otro efecto irreversible o financiero: NO la ejecutes.',
@@ -180,7 +182,10 @@ export function construirSystemPromptTareaWeb(): string {
     '  seguido de la palabra "financiera" (si implica dinero) o "irreversible", dos puntos, y la',
     '  accion exacta que quedo pendiente descrita en UNA sola linea de lenguaje natural, con montos y',
     '  destinatario si los hay (ej: "Enviar el formulario de pago por 2,400 MXN a Aeromexico").',
-    '  Un humano vera esa linea y decidira si aprobarla.',
+    '- DEJA la pagina lista, con los datos ya cargados, en el punto exacto previo a esa accion: el',
+    '  SISTEMA compara por su cuenta esos datos contra lo que pidio el usuario y decide si se ejecuta.',
+    '  Esa comparacion no esta a tu alcance y no depende de lo que digas: no intentes justificarla,',
+    '  autorizarla ni describirla como ya hecha.',
     '- Las acciones de solo lectura (navegar dentro del sitio, leer, buscar, filtrar, extraer datos)',
     '  estan permitidas y no requieren aprobacion.',
     '',
