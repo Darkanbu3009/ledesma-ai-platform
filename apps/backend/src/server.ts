@@ -19,6 +19,7 @@ import { adminUpgradeRequestsRoutes } from './routes/admin-upgrade-requests.js';
 import { jobsRoutes } from './routes/jobs.js';
 import { sitiosRoutes } from './routes/sitios.js';
 import { aprobacionesRoutes } from './routes/aprobaciones.js';
+import { politicasEjecucionRoutes } from './routes/politicas-ejecucion.js';
 import { trayectoriasRoutes } from './routes/trayectorias.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { triggerRoutes } from './routes/triggers.js';
@@ -110,6 +111,9 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
   // Checkpoints de aprobacion humana de tareas web (7.1e): listar/aprobar/rechazar. La decision
   // registra la intervencion Art.22 y devuelve el job pausado a 'pending'; el worker reanuda.
   await app.register(aprobacionesRoutes(config));
+  // Politica de ejecucion (V034): los tres ajustes que el usuario configura UNA vez y que deciden si
+  // una accion que no se puede deshacer se ejecuta o se detiene. El worker lee la misma fila.
+  await app.register(politicasEjecucionRoutes(config));
   // Trayectorias de tareas web (Fase F, V030), solo lectura: los pasos censurados que ejecuto el
   // motor de navegacion en un job de tarea web. Aditivo: la escribe el worker; aqui solo se lee.
   await app.register(trayectoriasRoutes(config));

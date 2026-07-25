@@ -16,6 +16,10 @@
       "types": "./dist/aprobaciones/index.d.ts",
       "import": "./dist/aprobaciones/index.js"
     },
+    "./politicas": {
+      "types": "./dist/politicas/index.d.ts",
+      "import": "./dist/politicas/index.js"
+    },
     "./trayectorias": {
       "types": "./dist/trayectorias/index.d.ts",
       "import": "./dist/trayectorias/index.js"
