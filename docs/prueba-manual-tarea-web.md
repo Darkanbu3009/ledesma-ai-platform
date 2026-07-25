@@ -42,9 +42,14 @@ del usuario en un sitio ya conectado (7.1c), por el proxy pineado y SIN re-login
 
 - Marcar la fila `estado = 'caducado'` y repetir el pedido: la tool responde de inmediato "el sitio
   no esta conectado o la sesion caduco..." SIN encolar job (y sin crear sesion de navegador).
-- Pedir una tarea financiera ("transfiere/paga X"): el job completa con
-  `resultado.estado = 'requiere_aprobacion'` y NO ejecuta la accion (la ejecucion con aprobacion
-  humana es 7.1e).
+- Pedir una tarea financiera ("transfiere/paga X") cuyos datos NO coincidan con lo que hay en
+  pantalla (o cuyo monto supere el tope de la politica): el job termina `failed` con
+  `last_error` = `DETENIDA_VERIFICACION: {...}` y la accion NO llega al navegador. La verificacion
+  determinista corre dentro de la misma corrida, justo antes del clic.
+- Pedir una tarea con accion bloqueada ("envia el correo a X") y ver que el agente la EJECUTA cuando
+  los datos coinciden: `resultado.estado = 'ok'` y una sola corrida del motor. Si el agente
+  terminara sin intentar la accion, el job falla con "nunca llego a la verificacion previa" (nunca
+  se reporta como exito).
 
 ## Resultado esperado (resumen)
 

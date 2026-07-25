@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { POLITICA_EJECUCION_DEFAULT, parsearDetencion } from '@ledesma-platform/shared';
 import { extraerParametrosDeclarados } from '../src/parametros-objetivo.js';
 import {
-  construirEjecucionVerificada,
   construirPasoDeVerificacion,
   dominioExcluido,
   mensajeDeDetencion,
@@ -326,17 +325,5 @@ describe('constancia y mensajes', () => {
       pedido: 'juan@ejemplo.com',
       encontrado: 'otro@malicioso.com',
     });
-  });
-});
-
-describe('prompt de la corrida que ejecuta', () => {
-  it('se arma SOLO con texto fijo y el objetivo original del usuario', () => {
-    const prompt = construirEjecucionVerificada('envia el resumen a juan@ejemplo.com');
-    expect(prompt.objetivo).toContain('envia el resumen a juan@ejemplo.com');
-    expect(prompt.systemPrompt).toContain('VERIFICACION DEL SISTEMA COMPLETADA');
-    // Las reglas anti-injection del prompt base siguen presentes en la corrida que ejecuta.
-    expect(prompt.systemPrompt).toContain('CONTENIDO NO CONFIABLE');
-    // Y una segunda accion irreversible sigue estando prohibida.
-    expect(prompt.systemPrompt).toContain('NO ejecutes ninguna OTRA accion irreversible');
   });
 });

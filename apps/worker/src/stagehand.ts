@@ -1,11 +1,11 @@
 import { Stagehand, tool } from '@browserbasehq/stagehand';
 import type { AgentExecuteOptions, V3Options } from '@browserbasehq/stagehand';
 import { z } from 'zod';
-import { FalloDeEsquemaDelMotorError } from './errores.js';
+import { AccionBloqueadaError, FalloDeEsquemaDelMotorError } from './errores.js';
 import type { Logger } from './logger.js';
 import type { EscaladorDePaso, ResultadoEscalada } from './ejecutor-receta.js';
 import type { AccionCrudaDeMotor } from './trayectoria.js';
-import type { MotorDeTareaWeb, PasoObservado, ResultadoMotor } from './tarea-web.js';
+import type { GuardiaDeAccion, MotorDeTareaWeb, PasoObservado, ResultadoMotor } from './tarea-web.js';
 
 /**
  * ADAPTADOR real del puerto MotorDeTareaWeb (tarea-web.ts) sobre Stagehand v3
@@ -146,6 +146,8 @@ export interface ActBlindado {
   ejecutar(accion: string): Promise<SalidaDeActBlindado>;
   /** true si la corrida se corto por fallos de esquema consecutivos (CAMBIO 3). */
   corto(): boolean;
+  /** Mensaje de la detencion si la GUARDIA bloqueo una accion; null si nunca bloqueo. */
+  bloqueo(): string | null;
 }
 
 /** Espera real entre reintentos; los tests inyectan la suya para no dormir. */
@@ -172,16 +174,24 @@ function mensajeDeError(error: unknown): string {
  *
  * Cada intento (exitoso o no) se reporta por `registrarAccion` para que la trayectoria conserve lo
  * que paso aunque el motor termine lanzando (CAMBIO 7).
+ *
+ * GUARDIA (este PR): `guardia` es el UNICO punto del sistema en que codigo del worker ve una accion
+ * del agente ANTES de que llegue al navegador. Se consulta UNA vez por llamada (no por reintento de
+ * esquema: el reintento repite una accion que nunca llego a ejecutarse) y su veredicto es final. Si
+ * bloquea, se LANZA: devolverle el bloqueo al modelo como un fallo de tool lo dejaria libre para
+ * buscar otra ruta hacia la misma accion, que es justo lo que no puede pasar.
  */
 export function crearActBlindado(params: {
   actuar: (accion: string) => Promise<ResultadoDeActCrudo>;
   logger: Logger;
   registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined;
   esperar?: ((ms: number) => Promise<void>) | undefined;
+  guardia?: GuardiaDeAccion | undefined;
 }): ActBlindado {
   const esperar = params.esperar ?? esperarMs;
   let fallosConsecutivos = 0;
   let corto = false;
+  let bloqueo: string | null = null;
 
   const registrar = (exito: boolean, accion: string, argumentos?: unknown): void => {
     params.registrarAccion?.({
@@ -194,7 +204,15 @@ export function crearActBlindado(params: {
 
   return {
     corto: () => corto,
+    bloqueo: () => bloqueo,
     ejecutar: async (accion: string): Promise<SalidaDeActBlindado> => {
+      // La accion NO se registra en la traza: no llego al navegador. La constancia de por que se
+      // bloqueo es el paso de verificacion que deja la propia guardia.
+      const veredicto = await params.guardia?.revisar(accion);
+      if (veredicto?.tipo === 'bloquear') {
+        bloqueo = veredicto.mensaje;
+        throw new AccionBloqueadaError(veredicto.mensaje);
+      }
       for (let intento = 0; ; intento++) {
         try {
           const resultado = await params.actuar(accion);
@@ -263,6 +281,21 @@ function herramientaActBlindada(blindado: ActBlindado): NonNullable<
 }
 
 /**
+ * TOOLS QUE SE RETIRAN cuando la corrida lleva GUARDIA (revision adversarial). La guardia solo puede
+ * interponerse en `act`, que es la unica tool que este worker reemplaza; el resto del toolset nativo
+ * de Stagehand va directo al navegador. Dos de esas tools alcanzan la MISMA accion irreversible sin
+ * pasar por la comparacion:
+ *  - `keys`: manda pulsaciones a donde este el foco. Un "Control+Enter" envia el correo que la
+ *    guardia acaba de detener.
+ *  - `fillForm`: observa y actua sobre cada campo que le describan; su descripcion es texto libre,
+ *    asi que puede resolver un boton igual que un input.
+ * Retirarlas deja a `act` como unica via de interaccion en las tareas que piden una accion bloqueada.
+ * En el resto de las tareas (y en la reanudacion tras una decision humana) el toolset queda intacto:
+ * no hay accion que verificar y no tiene sentido pagar el costo en capacidad.
+ */
+export const TOOLS_RETIRADAS_CON_GUARDIA: readonly string[] = ['keys', 'fillForm'];
+
+/**
  * Opciones de `agent.execute()`. Exportada para poder fijar en un test lo que NO lleva: sin
  * observador NO se pasa `callbacks.onEvidence` (CAMBIO 5), y con el, Stagehand no captura nada extra
  * por su cuenta. `toolTimeout` (CAMBIO 4) acota CADA llamada de tool del agente: sin el, una tool
@@ -274,6 +307,8 @@ export function construirOpcionesDeEjecucion(params: {
   toolTimeoutMs: number;
   signal?: AbortSignal | undefined;
   observador?: ((paso: PasoObservado) => Promise<void>) | undefined;
+  /** La corrida lleva guardia: se retiran las tools que llegarian al navegador sin pasar por ella. */
+  conGuardia?: boolean | undefined;
 }): AgentExecuteOptions {
   const observador = params.observador;
   return {
@@ -281,6 +316,7 @@ export function construirOpcionesDeEjecucion(params: {
     maxSteps: params.maxPasos,
     toolTimeout: params.toolTimeoutMs,
     ...(params.signal !== undefined ? { signal: params.signal } : {}),
+    ...(params.conGuardia === true ? { excludeTools: [...TOOLS_RETIRADAS_CON_GUARDIA] } : {}),
     ...(observador !== undefined
       ? {
           callbacks: {
@@ -380,6 +416,7 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
     signal?: AbortSignal;
     observador?: ((paso: PasoObservado) => Promise<void>) | undefined;
     registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined;
+    guardia?: GuardiaDeAccion | undefined;
   }): Promise<ResultadoMotor> {
     const stagehand = new Stagehand(
       construirOpcionesStagehand({
@@ -399,6 +436,7 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
         actuar: (accion) => stagehand.act(accion, { timeout: this.config.toolTimeoutMs }),
         logger: this.config.logger,
         registrarAccion: params.registrarAccion,
+        guardia: params.guardia,
       });
       const agente = stagehand.agent({
         systemPrompt: params.systemPrompt,
@@ -411,12 +449,20 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
           toolTimeoutMs: this.config.toolTimeoutMs,
           signal: params.signal,
           observador: params.observador,
+          conGuardia: params.guardia !== undefined,
         }),
       );
-      // El corte por fallos de esquema (CAMBIO 3) no puede viajar como excepcion desde la tool: el
-      // handler de Stagehand atrapa cualquier error del bucle y lo devuelve como resultado fallido.
-      // El bucle YA se corto (lanzar desde la tool lo detiene); aca se convierte en el error
-      // especifico, distinto del limite de pasos y de un error del usuario.
+      // Ni el bloqueo de la guardia ni el corte por fallos de esquema pueden viajar como excepcion
+      // desde la tool: el handler de Stagehand atrapa cualquier error del bucle y lo devuelve como
+      // resultado fallido. El bucle YA se corto (lanzar desde la tool lo detiene); aca se convierten
+      // en el error especifico de cada caso.
+      //
+      // El BLOQUEO va primero: es un desenlace decidido por el sistema, no un fallo del motor, y su
+      // mensaje (la detencion ya serializada) es el que tiene que llegar al usuario.
+      const bloqueo = blindado.bloqueo();
+      if (bloqueo !== null) {
+        throw new AccionBloqueadaError(bloqueo);
+      }
       if (blindado.corto()) {
         throw new FalloDeEsquemaDelMotorError(MAX_FALLOS_ESQUEMA_CONSECUTIVOS);
       }

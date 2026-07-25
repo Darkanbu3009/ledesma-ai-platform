@@ -6,11 +6,16 @@ import type { Job } from '@ledesma-platform/shared';
 import type { SitioConectado } from '@ledesma-platform/backend/sitios';
 import type { AprobacionWeb } from '@ledesma-platform/backend/aprobaciones';
 import type { DecryptedProviderCredential } from '@ledesma-platform/backend/execution';
-import { FalloDeEsquemaDelMotorError, PermanentExecutionError } from './errores.js';
+import {
+  AccionBloqueadaError,
+  FalloDeEsquemaDelMotorError,
+  PermanentExecutionError,
+} from './errores.js';
 import { SalidaDeRedNoDisponibleError, expiracionDeContexto } from './sitios.js';
 import {
   clasificarDesenlace,
   construirSystemPromptTareaWeb,
+  detectarAccionQueExigeVerificacion,
   detectarVerboBloqueado,
   type DesenlaceTareaWeb,
 } from './prompt-tarea-web.js';
@@ -24,7 +29,6 @@ import {
 } from './aprobaciones.js';
 import { extraerParametrosDeclarados } from './parametros-objetivo.js';
 import {
-  construirEjecucionVerificada,
   construirPasoDeVerificacion,
   mensajeDeDetencion,
   verificarAccion,
@@ -82,6 +86,11 @@ import type { Logger } from './logger.js';
  *    preguntar nada. No coinciden, falta un dato, o la politica lo impide: la tarea TERMINA sin
  *    ejecutar, con un mensaje que dice que se pidio y que se encontro. Es comparacion mecanica, NO
  *    aprobacion humana: el usuario final no es tecnico y no debe aprobar cada accion.
+ *  - Esa verificacion corre INMEDIATAMENTE ANTES de la accion y NO depende de que el agente coopere:
+ *    la GUARDIA DE ACCION (crearGuardiaDeAccion) se interpone entre la tool `act` del agente y el
+ *    navegador, y es codigo del worker leyendo el DOM. Antes corria DESPUES de que el agente se
+ *    detuviera solo y lo reportara, asi que un agente que no se detenia (o que se detenia y no
+ *    reportaba) la salteaba entera. El agente ya no decide cuando se verifica ni si se ejecuta.
  *  - La APROBACION HUMANA (7.1e) sigue existiendo intacta para el camino de reanudacion tras una
  *    decision: construirReanudacionAprobada (aprobaciones.ts) sigue siendo el UNICO productor del
  *    prompt que ejecuta una accion aprobada y sigue LANZANDO si la aprobacion no esta 'aprobada'.
@@ -168,6 +177,24 @@ export interface NavegadorParaTarea {
   cerrarSesion(sesionExternaId: string): Promise<void>;
 }
 
+/** Que hace el worker con una accion que el agente propone: dejarla pasar o cortarla en seco. */
+export type VeredictoDeGuardia = { tipo: 'permitir' } | { tipo: 'bloquear'; mensaje: string };
+
+/**
+ * GUARDIA DE ACCION: el punto de INTERCEPCION entre el agente y el navegador. El adaptador del motor
+ * (stagehand.ts) la consulta con la descripcion de cada accion ANTES de ejecutarla; si el objetivo
+ * pide una accion bloqueada y esta es esa accion, el worker lee el DOM, compara contra lo que declaro
+ * el usuario y solo entonces la deja pasar.
+ *
+ * Es un PUERTO a proposito: el adaptador del motor no sabe que se compara ni con que; solo sabe que
+ * hay un veredicto y que un bloqueo se lanza. La implementacion (crearGuardiaDeAccion) vive en el
+ * handler, que es quien tiene la politica del usuario, el objetivo original y el navegador.
+ */
+export interface GuardiaDeAccion {
+  /** Veredicto sobre UNA accion propuesta, descrita en lenguaje natural por el agente. Nunca lanza. */
+  revisar(accion: string): Promise<VeredictoDeGuardia>;
+}
+
 /**
  * PUERTO hacia el motor de navegacion por IA (Stagehand). El adaptador real (stagehand.ts) es el
  * UNICO modulo del worker que importa Stagehand; los tests pasan fakes y nunca llaman al modelo.
@@ -200,6 +227,12 @@ export interface MotorDeTareaWeb {
      * no llega a devolver su traza. Sincrono y sin efectos: solo acumula en memoria.
      */
     registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined;
+    /**
+     * GUARDIA DE ACCION: se consulta ANTES de ejecutar cada accion del agente. Ausente en los caminos
+     * donde no hay nada que verificar (objetivo sin verbo bloqueado, reanudacion tras una decision
+     * humana que ya autorizo la accion, escalada de UN paso de receta).
+     */
+    guardia?: GuardiaDeAccion | undefined;
   }): Promise<ResultadoMotor>;
 }
 
@@ -391,16 +424,31 @@ export function describirFalloDelMotor(
 }
 
 /**
- * Detalle SINTETICO del checkpoint creado por la via determinista (D2b): el agente termino con DONE
- * sin emitir el marcador, pero el objetivo contiene un verbo de accion bloqueada. La descripcion
- * dice que la accion quedo pendiente porque requiere aprobacion e incluye el objetivo original
- * (censurado: una credencial o tarjeta dictada en el objetivo jamas llega a la descripcion).
+ * DONE PREMATURO (CAMBIO 3): el objetivo pedia una accion bloqueada y la tarea termino sin que esa
+ * accion pasara NUNCA por la guardia. No la ejecuto y tampoco la detuvo el sistema: el agente se paro
+ * solo. Es un fallo con causa PROPIA y mensaje propio a proposito.
+ *
+ * Por que importa: hasta este PR ese caso caia en el mensaje generico de describirFalloDelMotor ("el
+ * agente termino con DONE sin cumplir el objetivo"), indistinguible de un objetivo mal redactado o de
+ * un sitio que cambio. Con ese mensaje generico, dos dias de produccion mostraron 25 pasos correctos
+ * y un borrador sin enviar sin que nada dijera que la causa era una instruccion del prompt.
  */
-function construirDetalleAprobacionEsperada(verbo: string, objetivo: string): string {
-  const objetivoCensurado = censurarObjetivo(objetivo).replace(/\s+/g, ' ').trim();
+export function describirAccionNoVerificada(
+  verbo: string,
+  resultado: Pick<ResultadoMotor, 'mensaje' | 'acciones'>,
+  maxPasos: number,
+): string {
+  const mensajeFinal = censurarTexto(resultado.mensaje).replace(/\s+/g, ' ').trim();
+  const detalle =
+    mensajeFinal === ''
+      ? ''
+      : `; mensaje final del agente: ${truncar(mensajeFinal, MAX_MENSAJE_AGENTE_CHARS)}`;
   return (
-    `accion pendiente de aprobacion humana: el objetivo incluye la accion bloqueada "${verbo}" ` +
-    `y el agente termino sin ejecutarla ni crear el checkpoint. Objetivo original: ${objetivoCensurado}`
+    `el objetivo pedia una accion de tipo "${verbo}" y la tarea termino sin ejecutarla: el agente se ` +
+    'detuvo por su cuenta y esa accion nunca llego a la verificacion previa del sistema, asi que ' +
+    `tampoco fue el sistema quien la detuvo (consumio ${resultado.acciones.length} de ${maxPasos} ` +
+    `pasos)${detalle}; no se reintenta automaticamente para no repetir acciones sobre la cuenta del ` +
+    'usuario'
   );
 }
 
@@ -642,22 +690,52 @@ async function resolverVerificacion(
 }
 
 /**
- * VERIFICACION DETERMINISTA y, si pasa, EJECUCION de la accion (CAMBIO 3 + 4, D1/D2/D5). Es lo que
- * sustituye al checkpoint de aprobacion en la corrida INICIAL.
- *
- * 1. Extrae del OBJETIVO los parametros que el usuario declaro (codigo, no modelo: D4).
- * 2. Lee del DOM los valores actuales (codigo, no modelo).
- * 3. Aplica la politica del usuario y compara. El modelo no participa de ninguno de los tres pasos.
- * 4. Si coincide: corre el motor UNA vez mas con un prompt construido SOLO con texto fijo y el
- *    objetivo original, que autoriza esa accion. Si no coincide: la tarea TERMINA en 'failed' con el
- *    mensaje de la detencion (D5: no queda pausada esperando a nadie; el usuario reformula y pide de
- *    nuevo). En NINGUN caso la accion se ejecuta cuando la verificacion no paso.
- *
- * La corrida de ejecucion NO lleva la barrera D2b (verboBloqueado null): esa barrera existe para
- * atrapar al agente que termina con DONE sin haber ejecutado ni reportado, y aca la ejecucion es
- * justamente lo que se acaba de autorizar; aplicarla convertiria el exito en una detencion.
+ * El paso sintetico de una verificacion, con el LUGAR de la corrida en que ocurrio (cuantas acciones
+ * del agente la precedieron). La posicion importa: la receta que se promueva de esta corrida aprende
+ * a volver a comparar EN ESE PUNTO, no al principio (D7).
  */
-async function verificarYEjecutar(
+interface VerificacionEnLaTraza {
+  /** Acciones que el agente ya habia propuesto cuando esta verificacion corrio. */
+  accionesPrevias: number;
+  paso: PasoCensurado;
+}
+
+/** La guardia tal como la usa el handler: el puerto mas lo que hay que saber al terminar la corrida. */
+interface GuardiaDeTareaWeb extends GuardiaDeAccion {
+  /** ¿Alguna accion llego a pasar por la verificacion y fue autorizada? */
+  autorizoAlgo(): boolean;
+  /** Pasos sinteticos de verificacion de esta corrida, para la trayectoria. */
+  verificaciones(): VerificacionEnLaTraza[];
+}
+
+/**
+ * GUARDIA DE ACCION (CAMBIO 2): la VERIFICACION DETERMINISTA corriendo INMEDIATAMENTE ANTES de la
+ * accion, dentro del mismo bucle del agente y sin que el agente participe.
+ *
+ * QUE SUSTITUYE: hasta este PR la verificacion corria DESPUES de que el agente terminara su corrida
+ * entera, y solo si el agente se detenia y lo reportaba; si pasaba, se lanzaba una SEGUNDA corrida
+ * del motor para ejecutar. Toda esa maquinaria dependia de que el agente cooperara dos veces (que se
+ * detuviera y que despues ejecutara). Ahora el agente ejecuta de una sola corrida y es el worker
+ * quien se interpone: el adaptador del motor consulta `revisar` con la descripcion de cada accion
+ * ANTES de mandarla al navegador.
+ *
+ * COMO DECIDE, en este orden:
+ *  1. el objetivo del usuario no contiene ningun verbo bloqueado -> no hay nada que verificar;
+ *  2. la tarea se termino desde la consola -> se bloquea (ejecutar lo que el usuario acaba de
+ *     cancelar es lo peor que puede hacer este camino);
+ *  3. la descripcion de la accion no corresponde a una accion bloqueada ni a un cierre de formulario
+ *     -> pasa (es un paso intermedio: abrir, escribir, navegar);
+ *  4. ya se autorizo una accion en esta corrida -> se bloquea con 'otraAccion': no se encadenan
+ *     verificaciones dentro de una misma corrida (seria un bucle sin cota sobre la cuenta real) y es
+ *     lo que impide que el agente envie dos veces;
+ *  5. si no: politica del usuario + parametros del objetivo + foto del DOM. Coinciden y la politica
+ *     lo permite -> pasa. Si no -> se bloquea con el mensaje que dice que se pidio y que se encontro.
+ *
+ * NUNCA LANZA: cualquier error inesperado se convierte en bloqueo (falla cerrada). Una excepcion que
+ * escapara de aqui saldria por la tool del agente y se leeria como un fallo del motor, no como lo que
+ * es: que el sistema no pudo comprobar la accion.
+ */
+function crearGuardiaDeAccion(
   deps: TareaWebDeps,
   job: Job,
   sitio: SitioConectado,
@@ -666,123 +744,82 @@ async function verificarYEjecutar(
   opciones: {
     politica: PoliticaVigente | null;
     verboBloqueado: string | null;
-    contexto: string;
-    apiKey: string;
-    /** Traza acumulada del job: esta corrida la completa y, si sale bien, se promueve a receta. */
-    pasosDelJob: PasoCensurado[];
-    control?: ControlDeTareaWeb;
+    control?: ControlDeTareaWeb | undefined;
   },
-): Promise<ResultadoTareaWeb> {
-  // El dueno TERMINO la tarea desde la consola mientras el agente llegaba a la accion pendiente: no
-  // hay nada que verificar ni que ejecutar. Se corta ANTES de leer la pagina y, sobre todo, antes de
-  // la corrida que ejecutaria: ejecutar lo que el usuario acaba de cancelar seria lo peor que puede
-  // hacer este camino. Mismo criterio que la exencion de la barrera determinista (D2b).
-  if (opciones.control?.signal?.aborted === true) {
-    throw new PermanentExecutionError(
-      'la tarea se termino desde la consola antes de ejecutar la accion pendiente; no se ejecuto nada',
-    );
-  }
+): GuardiaDeTareaWeb {
+  const verificaciones: VerificacionEnLaTraza[] = [];
+  let acciones = 0;
+  let autorizada = false;
 
-  const iniciadaEn = new Date();
-  const veredicto = await resolverVerificacion(deps, job, sitio, objetivo, sesionExternaId, {
-    politica: opciones.politica,
-    verboBloqueado: opciones.verboBloqueado,
+  const bloquear = (veredicto: Extract<Veredicto, { tipo: 'detener' }>): VeredictoDeGuardia => ({
+    tipo: 'bloquear',
+    mensaje: mensajeDeDetencion(veredicto),
   });
 
-  // El resultado de la verificacion queda como UN PASO de la trayectoria (valores comparados +
-  // veredicto), ya censurado. Si se detiene, esa trayectoria es la unica constancia de la corrida.
-  const paso = construirPasoDeVerificacion(veredicto);
-
-  if (veredicto.tipo === 'detener') {
-    await guardarTrayectoriaBestEffort(
-      deps,
-      job,
-      sitio,
-      objetivo,
-      'fallida',
-      iniciadaEn,
-      { acciones: [], tokensIn: null, tokensOut: null },
-      [paso],
-    );
-    deps.logger.warn('tarea web DETENIDA antes de ejecutar la accion (verificacion determinista)', {
-      jobId: job.id,
-      connectionId: sitio.id,
-      dominio: sitio.dominio,
-      motivo: veredicto.detencion.motivo,
-    });
-    throw new PermanentExecutionError(mensajeDeDetencion(veredicto));
-  }
-
-  deps.logger.info('tarea web: verificacion determinista superada; se ejecuta la accion', {
-    jobId: job.id,
-    connectionId: sitio.id,
-    dominio: sitio.dominio,
-    parametrosComparados: veredicto.comparaciones.length,
-  });
-
-  const { resultado, desenlace } = await ejecutarMotorConRegistro(
-    deps,
-    job,
-    sitio,
-    objetivo,
-    sesionExternaId,
-    opciones.apiKey,
-    construirEjecucionVerificada(objetivo),
-    opciones.control?.signal,
-    null,
-    [paso],
-    opciones.pasosDelJob,
-  );
-
-  if (desenlace.tipo === 'sesion_caducada') {
-    await marcarSitioBestEffort(deps, sitio, job.ownerId, 'caducado');
-    throw new PermanentExecutionError(
-      `la sesion del sitio ${sitio.dominio} caduco al ejecutar la accion verificada; ` +
-        'vuelve a conectarlo desde la consola para reanudar las tareas',
-    );
-  }
-
-  if (desenlace.tipo === 'requiere_aprobacion') {
-    // La corrida de ejecucion topo con OTRA accion irreversible. NO se encadena una verificacion
-    // nueva dentro de la misma corrida (seria un bucle sin cota sobre la cuenta real del usuario):
-    // la tarea termina y el usuario pide esa segunda accion por separado.
-    deps.logger.warn('tarea web: aparecio otra accion irreversible tras la verificada; se detiene', {
-      jobId: job.id,
-      connectionId: sitio.id,
-    });
-    throw new PermanentExecutionError(mensajeDeDetencion(detencionDirecta('otraAccion')));
-  }
-
-  if (!resultado.exito) {
-    throw new PermanentExecutionError(
-      describirFalloDelMotor(resultado, deps.maxPasos, 'la accion verificada'),
-    );
-  }
-
-  await refrescarContextoBestEffort(deps, sitio, job.ownerId, sesionExternaId, opciones.contexto);
-  // PROMOCION AUTOMATICA (CAMBIO 3) con la traza COMPLETA del job: la corrida que preparo la pagina
-  // MAS el paso de verificacion MAS la que ejecuto la accion. Asi la receta aprende donde hay que
-  // volver a comparar antes de ejecutar (D7).
-  await promoverRecetaBestEffort(
-    deps,
-    job,
-    sitio,
-    objetivo,
-    opciones.pasosDelJob,
-    opciones.verboBloqueado,
-  );
-  await deps.guardarResultado(job.id, {
-    estado: 'ok',
-    resumen: desenlace.resumen,
-    verificada: true,
-    via: 'modelo',
-  });
-  deps.logger.info('tarea web completada: accion verificada y ejecutada', {
-    jobId: job.id,
-    connectionId: sitio.id,
-    dominio: sitio.dominio,
-  });
-  return 'completada';
+  return {
+    autorizoAlgo: () => autorizada,
+    verificaciones: () => verificaciones,
+    revisar: async (accion: string): Promise<VeredictoDeGuardia> => {
+      const accionesPrevias = acciones++;
+      if (opciones.verboBloqueado === null) return { tipo: 'permitir' };
+      if (opciones.control?.signal?.aborted === true) {
+        return {
+          tipo: 'bloquear',
+          mensaje:
+            'la tarea se termino desde la consola antes de ejecutar la accion pendiente; no se ejecuto nada',
+        };
+      }
+      const etiqueta = detectarAccionQueExigeVerificacion(accion);
+      if (etiqueta === null) return { tipo: 'permitir' };
+      if (autorizada) {
+        deps.logger.warn('tarea web: segunda accion irreversible en la misma corrida; se bloquea', {
+          jobId: job.id,
+          connectionId: sitio.id,
+          etiqueta,
+        });
+        return bloquear(detencionDirecta('otraAccion'));
+      }
+      try {
+        const veredicto = await resolverVerificacion(deps, job, sitio, objetivo, sesionExternaId, {
+          politica: opciones.politica,
+          verboBloqueado: opciones.verboBloqueado,
+        });
+        // El resultado queda como UN PASO de la trayectoria (valores comparados + veredicto), ya
+        // censurado, en el punto exacto del flujo en que se comparo.
+        verificaciones.push({ accionesPrevias, paso: construirPasoDeVerificacion(veredicto) });
+        if (veredicto.tipo === 'detener') {
+          deps.logger.warn(
+            'tarea web DETENIDA antes de ejecutar la accion (verificacion determinista)',
+            {
+              jobId: job.id,
+              connectionId: sitio.id,
+              dominio: sitio.dominio,
+              motivo: veredicto.detencion.motivo,
+              etiqueta,
+            },
+          );
+          return bloquear(veredicto);
+        }
+        autorizada = true;
+        deps.logger.info('tarea web: verificacion determinista superada; la accion pasa al navegador', {
+          jobId: job.id,
+          connectionId: sitio.id,
+          dominio: sitio.dominio,
+          parametrosComparados: veredicto.comparaciones.length,
+          etiqueta,
+        });
+        return { tipo: 'permitir' };
+      } catch (error) {
+        // Falla CERRADA: si la comprobacion no se pudo completar, la accion no pasa.
+        deps.logger.error('tarea web: la verificacion previa fallo; la accion NO se ejecuta', {
+          jobId: job.id,
+          connectionId: sitio.id,
+          err: describir(error),
+        });
+        return bloquear(detencionDirecta('politicaNoDisponible'));
+      }
+    },
+  };
 }
 
 /**
@@ -1155,11 +1192,10 @@ export async function procesarTareaWeb(
     return reanudarTrasDecision(deps, job, sitio, objetivo, credential, contexto, aprobacion, control);
   }
 
-  // 2.7. DETECCION DETERMINISTA (D2a): si el objetivo contiene un verbo de accion bloqueada, el job
-  //      queda marcado internamente como "requiere aprobacion esperada". El marcador del modelo dejo
-  //      de ser la unica via (D1): si el agente termina con DONE sin haber generado checkpoint, la
-  //      via (b) crea el checkpoint de todos modos (ver ejecutarMotorConRegistro). Solo aplica a la
-  //      corrida INICIAL: en una reanudacion el humano ya decidio sobre este objetivo.
+  // 2.7. DETECCION DETERMINISTA (D2a) sobre el TEXTO DEL USUARIO: si el objetivo contiene un verbo de
+  //      accion bloqueada, la corrida lleva GUARDIA y ninguna accion que corresponda a ese verbo
+  //      llega al navegador sin que el worker compare antes. Solo aplica a la corrida INICIAL: en una
+  //      reanudacion el humano ya decidio sobre este objetivo.
   const verboBloqueado = detectarVerboBloqueado(objetivo);
   if (verboBloqueado !== null) {
     deps.logger.info('tarea web: el objetivo contiene una accion bloqueada; se verificara antes de ejecutar', {
@@ -1174,10 +1210,9 @@ export async function procesarTareaWeb(
   //      detiene la accion (falla cerrada).
   const politica = await leerPoliticaVigente(deps, job.ownerId);
 
-  // 2.9. TRAZA ACUMULADA de todo el job (CAMBIO 3): las corridas del motor la van llenando y, si la
-  //      tarea termina bien, es lo que se promueve a receta. Cuando hay una accion irreversible de
-  //      por medio son DOS corridas (la que prepara y la que ejecuta ya verificada) y la receta
-  //      necesita las dos.
+  // 2.9. TRAZA ACUMULADA de todo el job: la corrida del motor la va llenando y, si la tarea termina
+  //      bien, es lo que se promueve a receta. El paso de verificacion entra en el LUGAR en que
+  //      ocurrio, para que la receta aprenda a volver a comparar justo antes de la accion (D7).
   const pasosDelJob: PasoCensurado[] = [];
 
   // 3. Abrir la sesion RECONECTANDO el contexto guardado y FORZANDO el proxy pineado con la
@@ -1256,9 +1291,15 @@ export async function procesarTareaWeb(
       }
     }
 
-    // 6. Ejecutar el objetivo con el motor de navegacion, bajo el deadline de pared del worker y el
-    //    cap DURO de pasos. La ejecucion queda REGISTRADA como trayectoria (V030) sea cual sea el
-    //    desenlace, ya clasificado por los marcadores del prompt.
+    // 6. Ejecutar el objetivo ENTERO con el motor de navegacion, bajo el deadline de pared del worker
+    //    y el cap DURO de pasos, con la GUARDIA interpuesta: la accion irreversible se verifica
+    //    dentro de esta misma corrida, justo antes de llegar al navegador. La ejecucion queda
+    //    REGISTRADA como trayectoria (V030) sea cual sea el desenlace.
+    const guardia = crearGuardiaDeAccion(deps, job, sitio, objetivo, sesion.sesionExternaId, {
+      politica,
+      verboBloqueado,
+      control,
+    });
     const { resultado, desenlace } = await ejecutarMotorConRegistro(
       deps,
       job,
@@ -1268,8 +1309,7 @@ export async function procesarTareaWeb(
       credential.apiKey,
       { objetivo, systemPrompt: construirSystemPromptTareaWeb() },
       control?.signal,
-      verboBloqueado,
-      [],
+      guardia,
       pasosDelJob,
     );
 
@@ -1281,21 +1321,30 @@ export async function procesarTareaWeb(
       );
     }
 
-    if (desenlace.tipo === 'requiere_aprobacion') {
-      // Accion irreversible/financiera detectada y NO ejecutada: la VERIFICACION DETERMINISTA decide
-      // (D1/D2/D5). Ejecuta si todo coincide y la politica lo permite; si no, LANZA y el job termina
-      // en 'failed' con el mensaje de la detencion. Nunca queda pausado esperando una aprobacion.
-      return await verificarYEjecutar(deps, job, sitio, objetivo, sesion.sesionExternaId, {
-        politica,
-        verboBloqueado,
-        contexto,
-        apiKey: credential.apiKey,
-        pasosDelJob,
-        ...(control !== undefined ? { control } : {}),
+    // 7. DONE PREMATURO (CAMBIO 3): el objetivo pedia una accion bloqueada y la corrida termino sin
+    //    que esa accion pasara por la guardia. No se ejecuto y tampoco la detuvo el sistema: el
+    //    agente se paro solo. Causa PROPIA y mensaje propio, distinto del fallo generico del motor.
+    //    Un desenlace 'requiere_aprobacion' cuenta como lo mismo: el prompt ya no pide ese marcador,
+    //    asi que emitirlo es exactamente pararse solo ante la accion.
+    //    EXCEPCION: si la senal externa ya aborto, el job dejo de ser 'running' porque su dueno lo
+    //    TERMINO desde la consola; ahi no hay nada que diagnosticar.
+    if (
+      verboBloqueado !== null &&
+      !guardia.autorizoAlgo() &&
+      (desenlace.tipo === 'requiere_aprobacion' || resultado.completado) &&
+      control?.signal?.aborted !== true
+    ) {
+      deps.logger.warn('tarea web: el agente termino sin ejecutar la accion que el objetivo pedia', {
+        jobId: job.id,
+        connectionId: sitio.id,
+        verbo: verboBloqueado,
       });
+      throw new PermanentExecutionError(
+        describirAccionNoVerificada(verboBloqueado, resultado, deps.maxPasos),
+      );
     }
 
-    if (!resultado.exito) {
+    if (desenlace.tipo === 'requiere_aprobacion' || !resultado.exito) {
       // BUG C: mensaje VERAZ por causa (limite real de pasos / DONE sin cumplir / otro corte),
       // siempre con los pasos consumidos y el limite configurado.
       throw new PermanentExecutionError(describirFalloDelMotor(resultado, deps.maxPasos));
@@ -1334,6 +1383,40 @@ async function cerrarSesionBestEffort(deps: TareaWebDeps, sesionExternaId: strin
 }
 
 /**
+ * INTERCALA los pasos de verificacion entre los del motor, en el lugar en que ocurrieron: una
+ * verificacion con N acciones previas va JUSTO ANTES de la accion numero N+1 del agente. Es lo que
+ * hace que la receta promovida de esta corrida vuelva a comparar en el mismo punto del flujo (D7) y
+ * no al principio, cuando la pagina todavia esta vacia.
+ *
+ * Las acciones del agente son las de tipo 'act' de la traza (una por llamada a la tool, que es
+ * exactamente lo que la guardia revisa). Una verificacion que BLOQUEO no tiene accion detras (nunca
+ * llego al navegador) y cierra la traza.
+ */
+function intercalarVerificaciones(
+  delMotor: PasoCensurado[],
+  verificaciones: VerificacionEnLaTraza[],
+): PasoCensurado[] {
+  if (verificaciones.length === 0) return delMotor;
+  const pendientes = [...verificaciones].sort((a, b) => a.accionesPrevias - b.accionesPrevias);
+  const pasos: PasoCensurado[] = [];
+  let acciones = 0;
+  for (const paso of delMotor) {
+    if (paso.accion.tipo === 'act') {
+      let siguiente = pendientes[0];
+      while (siguiente !== undefined && siguiente.accionesPrevias <= acciones) {
+        pasos.push(siguiente.paso);
+        pendientes.shift();
+        siguiente = pendientes[0];
+      }
+      acciones++;
+    }
+    pasos.push(paso);
+  }
+  for (const pendiente of pendientes) pasos.push(pendiente.paso);
+  return pasos;
+}
+
+/**
  * Persiste la TRAYECTORIA de una ejecucion del motor (V030), SIEMPRE best-effort: la traza es
  * observabilidad; su fallo jamas cambia el desenlace de la tarea (misma politica que el screenshot
  * del checkpoint). El objetivo y las acciones pasan por la CENSURA (censura.ts / trayectoria.ts)
@@ -1347,8 +1430,10 @@ async function guardarTrayectoriaBestEffort(
   estado: EstadoTrayectoria,
   iniciadaEn: Date,
   resultado: Pick<ResultadoMotor, 'acciones' | 'tokensIn' | 'tokensOut'>,
-  /** Pasos SINTETICOS que van ANTES de los del motor (hoy: el resultado de la verificacion previa). */
+  /** Pasos SINTETICOS que van ANTES de los del motor (la ejecucion por receta pasa los suyos). */
   pasosPrevios: PasoCensurado[] = [],
+  /** Pasos SINTETICOS de la verificacion previa, con el lugar de la corrida en que ocurrieron. */
+  verificaciones: VerificacionEnLaTraza[] = [],
   /** Observaciones del DOM tomadas durante la corrida (CAMBIO 1), para enriquecer cada paso. */
   observaciones: ObservacionDePaso[] = [],
   /**
@@ -1358,9 +1443,13 @@ async function guardarTrayectoriaBestEffort(
    */
   acumulador?: PasoCensurado[],
 ): Promise<void> {
-  const pasos = [...pasosPrevios, ...extraerPasosCensurados(resultado.acciones, observaciones)].map(
-    (paso, idx) => ({ ...paso, idx }),
-  );
+  const pasos = [
+    ...pasosPrevios,
+    ...intercalarVerificaciones(
+      extraerPasosCensurados(resultado.acciones, observaciones),
+      verificaciones,
+    ),
+  ].map((paso, idx) => ({ ...paso, idx }));
   acumulador?.push(...pasos);
   if (!deps.trayectorias) return;
   const terminadaEn = new Date();
@@ -1377,8 +1466,8 @@ async function guardarTrayectoriaBestEffort(
       duracionMs: Math.max(0, terminadaEn.getTime() - iniciadaEn.getTime()),
       tokensIn: resultado.tokensIn,
       tokensOut: resultado.tokensOut,
-      // Los pasos previos (verificacion) abren la traza y el idx ya viene renumerado para que el
-      // orden persistido sea el orden real de lo que paso.
+      // El paso de verificacion queda intercalado donde ocurrio y el idx ya viene renumerado, para
+      // que el orden persistido sea el orden real de lo que paso.
       pasos,
     });
   } catch (error) {
@@ -1406,13 +1495,11 @@ async function ejecutarMotorConRegistro(
   apiKey: string,
   prompt: { objetivo: string; systemPrompt: string },
   senalExterna?: AbortSignal,
-  // D2(b): verbo de accion bloqueada detectado en el objetivo (D2a), o null. Solo la corrida
-  // INICIAL lo pasa; ni la reanudacion ni la corrida que ejecuta una accion ya VERIFICADA (el
-  // humano, o la verificacion determinista, ya decidieron sobre este objetivo).
-  verboBloqueado: string | null = null,
-  // Pasos sinteticos que preceden a los del motor en la trayectoria (el paso de verificacion).
-  pasosPrevios: PasoCensurado[] = [],
-  // Acumulador de los pasos de TODO el job, insumo de la promocion a receta (CAMBIO 3).
+  // GUARDIA DE ACCION de esta corrida (solo la corrida INICIAL la lleva): se interpone entre el
+  // agente y el navegador. Ni la reanudacion tras una decision humana ni la escalada de un paso de
+  // receta la llevan: ahi la accion ya esta decidida por otra via.
+  guardia?: GuardiaDeTareaWeb,
+  // Acumulador de los pasos de TODO el job, insumo de la promocion a receta.
   acumulador?: PasoCensurado[],
 ): Promise<{ resultado: ResultadoMotor; desenlace: DesenlaceTareaWeb }> {
   const iniciadaEn = new Date();
@@ -1432,8 +1519,11 @@ async function ejecutarMotorConRegistro(
       senalExterna,
       observador,
       (accion) => accionesEnVivo.push(accion),
+      guardia,
     );
   } catch (error) {
+    // Incluye el caso en que la GUARDIA bloqueo la accion: la trayectoria fallida conserva lo que el
+    // agente alcanzo a hacer MAS el paso de verificacion que explica por que se corto.
     await guardarTrayectoriaBestEffort(
       deps,
       job,
@@ -1442,38 +1532,13 @@ async function ejecutarMotorConRegistro(
       'fallida',
       iniciadaEn,
       { acciones: accionesEnVivo, tokensIn: null, tokensOut: null },
-      pasosPrevios,
+      [],
+      guardia?.verificaciones() ?? [],
       observaciones,
     );
     throw error;
   }
-  let desenlace = clasificarDesenlace(resultado.mensaje);
-  // D2(b): el objetivo pedia una accion bloqueada y el agente TERMINO con DONE sin emitir el
-  // marcador (ni el de sesion caducada). Falso negativo del modelo (D1): se FUERZA el desenlace
-  // 'requiere_aprobacion' para que el flujo de siempre cree el checkpoint con el ultimo screenshot
-  // disponible y PAUSE el job (nunca failed). Un falso positivo es una aprobacion de mas (D3);
-  // esta via JAMAS ejecuta la accion: solo crea el checkpoint.
-  //
-  // EXCEPCION: si la senal externa ya aborto, el job dejo de ser 'running' porque su dueno lo
-  // TERMINO desde la consola (cancelacion cooperativa). Ahi no hay duda que resolver a favor del
-  // checkpoint: el usuario ya decidio, pedirle que apruebe lo que acaba de cancelar seria absurdo y
-  // la fila quedaria pendiente hasta que el barrido de vencidas la expire (el CAS de marcarJobPausado
-  // no puede pausar un job ya 'failed'). Mismo criterio que la exencion de la barrera del BUG A.
-  if (
-    verboBloqueado !== null &&
-    resultado.completado &&
-    desenlace.tipo === 'ok' &&
-    senalExterna?.aborted !== true
-  ) {
-    deps.logger.warn(
-      'tarea web: el agente termino con DONE sin checkpoint sobre un objetivo con accion bloqueada; se crea el checkpoint determinista (D2b)',
-      { jobId: job.id, connectionId: sitio.id, verbo: verboBloqueado },
-    );
-    desenlace = {
-      tipo: 'requiere_aprobacion',
-      detalle: construirDetalleAprobacionEsperada(verboBloqueado, objetivo),
-    };
-  }
+  const desenlace = clasificarDesenlace(resultado.mensaje);
   const estado: EstadoTrayectoria =
     desenlace.tipo === 'requiere_aprobacion'
       ? 'pausada'
@@ -1488,7 +1553,8 @@ async function ejecutarMotorConRegistro(
     estado,
     iniciadaEn,
     resultado,
-    pasosPrevios,
+    [],
+    guardia?.verificaciones() ?? [],
     observaciones,
     acumulador,
   );
@@ -1556,6 +1622,7 @@ async function ejecutarMotor(
   senalExterna?: AbortSignal,
   observador?: ((paso: PasoObservado) => Promise<void>) | undefined,
   registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined,
+  guardia?: GuardiaDeAccion | undefined,
 ): Promise<ResultadoMotor> {
   const controller = new AbortController();
   let expiroDeadline = false;
@@ -1577,6 +1644,7 @@ async function ejecutarMotor(
       signal: controller.signal,
       observador,
       registrarAccion,
+      guardia,
     });
   } catch (error) {
     // Fallo del motor con la sesion ya abierta: PERMANENTE (no se re-ejecuta una navegacion a
@@ -1587,6 +1655,12 @@ async function ejecutarMotor(
     // CORTE POR FALLO DE ESQUEMA DEL MOTOR (CAMBIO 3): causa PROPIA del motor de navegacion, ni
     // limite de pasos ni error del usuario. Se nombra como tal para que el diagnostico no mande al
     // usuario a reformular un objetivo que estaba bien.
+    // ACCION BLOQUEADA POR LA GUARDIA: no es un fallo del motor ni del objetivo. Su mensaje ya es la
+    // detencion serializada (DETENIDA_VERIFICACION) y viaja INTACTO hasta el last_error del job para
+    // que la consola pueda decirle al usuario que se pidio y que se encontro.
+    if (error instanceof AccionBloqueadaError) {
+      throw new PermanentExecutionError(error.message);
+    }
     if (error instanceof FalloDeEsquemaDelMotorError) {
       throw new PermanentExecutionError(
         `el motor de navegacion fallo al resolver las acciones de la pagina (${error.message}); ` +

@@ -4,12 +4,13 @@ import { parsearDetencion } from '@ledesma-platform/shared';
 import type { SitioConectado } from '@ledesma-platform/backend/sitios';
 import { procesarTareaWeb } from '../src/tarea-web.js';
 import type {
+  GuardiaDeAccion,
   MotorDeTareaWeb,
   NavegadorParaTarea,
   RepositorioSitiosParaTarea,
   TareaWebDeps,
 } from '../src/tarea-web.js';
-import { MARCADOR_REQUIERE_APROBACION } from '../src/prompt-tarea-web.js';
+import { AccionBloqueadaError } from '../src/errores.js';
 import type { CampoDeLaPagina, RepositorioPoliticasParaWorker } from '../src/verificacion.js';
 import { makeAprobacionesRepo } from './aprobaciones-fakes.js';
 import type { Logger } from '../src/logger.js';
@@ -19,11 +20,16 @@ import type { Logger } from '../src/logger.js';
  * objetivo del usuario, la foto del DOM y la politica entran; la accion se ejecuta o la tarea
  * TERMINA sin ejecutarla. Cero navegador, cero modelo, cero base: todo por fakes.
  *
- * Lo que estos tests fijan y no debe poder cambiar en silencio:
- *  - coincidir ejecuta SIN preguntarle nada al usuario (el camino normal);
+ * Estos tests corren contra la GUARDIA: el motor fake propone sus acciones igual que el real (le
+ * pregunta al worker ANTES de cada una) y solo llegan al navegador las que la guardia deja pasar. Ya
+ * no hay una segunda corrida del motor: la accion se ejecuta dentro de la misma.
+ *
+ * Lo que fijan y no debe poder cambiar en silencio:
+ *  - coincidir EJECUTA la accion, sin preguntarle nada al usuario (el camino normal);
  *  - no coincidir, no poder leer el dato, o que la politica lo impida, NO ejecuta NUNCA;
  *  - una accion detenida deja el job en 'failed' (nunca pausado esperando aprobacion);
- *  - sin fila de politica se usan los defaults y NO se crea la fila.
+ *  - sin fila de politica se usan los defaults y NO se crea la fila;
+ *  - un agente que termina con DONE sin ejecutar la accion tiene su propio fallo, distinto del resto.
  */
 
 const CONNECTION_ID = '99999999-9999-4999-8999-999999999999';
@@ -102,21 +108,38 @@ function makeNavegador(campos: CampoDeLaPagina[], texto = ''): NavegadorParaTare
   };
 }
 
-/** Motor que reporta la accion pendiente en la primera corrida y la ejecuta en la segunda. */
-function makeMotor(): MotorDeTareaWeb {
-  let llamada = 0;
+/** Acciones que el motor fake propone por defecto: preparar la pagina y despues la accion final. */
+const ACCIONES_HASTA_ENVIAR = ['escribe el destinatario', 'haz clic en el boton Enviar'];
+
+/**
+ * Motor FAKE que se comporta como el real: le pregunta a la GUARDIA por cada accion ANTES de
+ * ejecutarla y, si la bloquea, lanza AccionBloqueadaError (lo mismo que hace el adaptador de
+ * Stagehand cuando la tool `act` se corta). `ejecutadas` deja ver que llego de verdad al navegador.
+ */
+function makeMotor(
+  acciones: string[] = ACCIONES_HASTA_ENVIAR,
+  mensajeFinal = 'accion ejecutada',
+): MotorDeTareaWeb & { ejecutadas: string[] } {
+  const ejecutadas: string[] = [];
   return {
-    ejecutar: vi.fn(async () => ({
-      exito: llamada > 0,
-      completado: true,
-      mensaje:
-        llamada++ === 0
-          ? `${MARCADOR_REQUIERE_APROBACION}: irreversible: la accion quedo lista`
-          : 'accion ejecutada',
-      acciones: [],
-      tokensIn: null,
-      tokensOut: null,
-    })),
+    ejecutadas,
+    ejecutar: vi.fn(async (params: { guardia?: GuardiaDeAccion | undefined }) => {
+      for (const accion of acciones) {
+        const veredicto = await params.guardia?.revisar(accion);
+        if (veredicto?.tipo === 'bloquear') {
+          throw new AccionBloqueadaError(veredicto.mensaje);
+        }
+        ejecutadas.push(accion);
+      }
+      return {
+        exito: true,
+        completado: true,
+        mensaje: mensajeFinal,
+        acciones: ejecutadas.map((accion) => ({ type: 'act', action: accion, success: true })),
+        tokensIn: null,
+        tokensOut: null,
+      };
+    }),
   };
 }
 
@@ -157,11 +180,14 @@ async function detencionDe(deps: TareaWebDeps, job: Job) {
 describe('objetivo con destinatario declarado', () => {
   const OBJETIVO = 'envia el resumen mensual a juan@ejemplo.com';
 
-  it('DOM COINCIDENTE: ejecuta sin detenerse y sin preguntar nada (test 2)', async () => {
+  it('DOM COINCIDENTE: la accion final LLEGA al navegador, sin preguntar nada (test 2)', async () => {
     const navegador = makeNavegador([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]);
-    const deps = makeDeps({ navegador });
+    const motor = makeMotor();
+    const deps = makeDeps({ navegador, motor });
     await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
-    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(2);
+    // UNA sola corrida del motor: el agente completa el objetivo entero, clic de Enviar incluido.
+    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+    expect(motor.ejecutadas).toEqual(ACCIONES_HASTA_ENVIAR);
     expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
     expect(deps.marcarJobPausado).not.toHaveBeenCalled();
     expect(deps.guardarResultado).toHaveBeenCalledWith(
@@ -170,30 +196,56 @@ describe('objetivo con destinatario declarado', () => {
     );
   });
 
-  it('DOM DISTINTO: NO ejecuta y reporta ambos valores (test 3)', async () => {
+  it('la verificacion corre JUSTO ANTES de la accion, no antes de preparar la pagina', async () => {
+    const navegador = makeNavegador([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]);
+    const motor = makeMotor();
+    const deps = makeDeps({ navegador, motor });
+    await procesarTareaWeb(deps, makeJob(OBJETIVO));
+    // El DOM se lee UNA vez: solo la accion final ("Enviar") dispara la comparacion; escribir el
+    // destinatario es un paso intermedio y pasa sin leer nada.
+    expect(navegador.leerCamposDeLaPagina).toHaveBeenCalledTimes(1);
+  });
+
+  it('DOM DISTINTO: la accion NO llega al navegador y se reportan ambos valores (test 3)', async () => {
     const navegador = makeNavegador([{ contexto: 'input email para', valor: 'otro@atacante.com' }]);
-    const deps = makeDeps({ navegador });
+    const motor = makeMotor();
+    const deps = makeDeps({ navegador, motor });
     const detencion = await detencionDe(deps, makeJob(OBJETIVO));
     expect(detencion).toMatchObject({
       motivo: 'noCoincide',
       pedido: 'juan@ejemplo.com',
       encontrado: 'otro@atacante.com',
     });
-    // La accion NUNCA se ejecuto: el motor corrio solo la corrida que reporto.
-    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+    // Los pasos previos si corrieron; la accion final NO.
+    expect(motor.ejecutadas).toEqual(['escribe el destinatario']);
     // El job termina failed (lo cierra execution.ts con el error), NO queda pausado.
     expect(deps.marcarJobPausado).not.toHaveBeenCalled();
     expect(deps.navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
+  });
+
+  it('bloqueada la accion, el agente NO puede intentar una ruta alternativa: la corrida se corta', async () => {
+    const navegador = makeNavegador([{ contexto: 'input email para', valor: 'otro@atacante.com' }]);
+    // El motor fake intenta DOS rutas hacia la misma accion. La primera lo corta en seco.
+    const motor = makeMotor([
+      'haz clic en el boton Enviar',
+      'pulsa el atajo para enviar el mensaje',
+    ]);
+    const deps = makeDeps({ navegador, motor });
+    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).rejects.toThrow(/DETENIDA_VERIFICACION/);
+    expect(motor.ejecutadas).toEqual([]);
+    // Y la pagina solo se leyo una vez: no hubo una segunda comparacion que pudiera salir distinta.
+    expect(navegador.leerCamposDeLaPagina).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('objetivo sin el dato que la accion exige', () => {
   it('accion de envio sin destinatario declarado: NO ejecuta (test 4)', async () => {
     const navegador = makeNavegador([{ contexto: 'input email para', valor: 'quien@sea.com' }]);
-    const deps = makeDeps({ navegador });
+    const motor = makeMotor();
+    const deps = makeDeps({ navegador, motor });
     const detencion = await detencionDe(deps, makeJob('envia el correo de bienvenida al cliente nuevo'));
     expect(detencion).toMatchObject({ motivo: 'faltaDato', campo: 'destinatario' });
-    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+    expect(motor.ejecutadas).toEqual(['escribe el destinatario']);
   });
 });
 
@@ -207,7 +259,9 @@ describe('politica de ejecucion del usuario', () => {
   }
 
   it('monto sobre el tope configurado: NO ejecuta (test 5)', async () => {
+    const motor = makeMotor(['haz clic en pagar ahora']);
     const deps = makeDeps({
+      motor,
       navegador: makeNavegador([{ contexto: 'input total a pagar', valor: '9900' }]),
       politicas: politicasQueDevuelven({
         ejecutarAccionesIrreversibles: true,
@@ -219,11 +273,13 @@ describe('politica de ejecucion del usuario', () => {
     expect(detencion?.motivo).toBe('topeExcedido');
     expect(detencion?.monto).toContain('9900');
     expect(detencion?.tope).toContain('5000');
-    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+    expect(motor.ejecutadas).toEqual([]);
   });
 
   it('dominio en sitios_excluidos: NO ejecuta (test 6)', async () => {
+    const motor = makeMotor(['haz clic en pagar ahora']);
     const deps = makeDeps({
+      motor,
       navegador: makeNavegador([{ contexto: 'input total a pagar', valor: '9900' }]),
       politicas: politicasQueDevuelven({
         ejecutarAccionesIrreversibles: true,
@@ -233,11 +289,13 @@ describe('politica de ejecucion del usuario', () => {
     });
     const detencion = await detencionDe(deps, makeJob(OBJETIVO));
     expect(detencion).toMatchObject({ motivo: 'sitioExcluido', dominio: 'ejemplo.com' });
-    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+    expect(motor.ejecutadas).toEqual([]);
   });
 
   it('acciones irreversibles desactivadas: NO ejecuta', async () => {
+    const motor = makeMotor(['borra el archivo']);
     const deps = makeDeps({
+      motor,
       politicas: politicasQueDevuelven({
         ejecutarAccionesIrreversibles: false,
         topeMontoSinConfirmacion: 100_000,
@@ -246,7 +304,7 @@ describe('politica de ejecucion del usuario', () => {
     });
     const detencion = await detencionDe(deps, makeJob('borra el archivo viejo del panel'));
     expect(detencion?.motivo).toBe('accionesDesactivadas');
-    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+    expect(motor.ejecutadas).toEqual([]);
   });
 
   it('SIN fila de politica: se usan los defaults y NO se crea la fila (test 7)', async () => {
@@ -274,7 +332,9 @@ describe('politica de ejecucion del usuario', () => {
   });
 
   it('si la politica NO se puede leer, la accion se DETIENE (falla cerrada)', async () => {
+    const motor = makeMotor();
     const deps = makeDeps({
+      motor,
       navegador: makeNavegador([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]),
       politicas: {
         obtenerPorOwner: vi.fn(async () => {
@@ -284,7 +344,7 @@ describe('politica de ejecucion del usuario', () => {
     });
     const detencion = await detencionDe(deps, makeJob('envia el resumen a juan@ejemplo.com'));
     expect(detencion?.motivo).toBe('politicaNoDisponible');
-    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+    expect(motor.ejecutadas).toEqual(['escribe el destinatario']);
   });
 
   it('sin repositorio cableado (deploy sin V034): defaults, la tarea corre igual', async () => {
@@ -303,14 +363,17 @@ describe('lectura del DOM', () => {
     navegador.leerCamposDeLaPagina = vi.fn(async () => {
       throw new Error('sesion caida');
     });
-    const deps = makeDeps({ navegador });
+    const motor = makeMotor();
+    const deps = makeDeps({ navegador, motor });
     const detencion = await detencionDe(deps, makeJob('envia el resumen a juan@ejemplo.com'));
     expect(detencion?.motivo).toBe('noCoincide');
-    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+    expect(motor.ejecutadas).toEqual(['escribe el destinatario']);
   });
 
   it('tarea TERMINADA por el usuario: no se verifica ni se ejecuta nada', async () => {
+    const motor = makeMotor();
     const deps = makeDeps({
+      motor,
       navegador: makeNavegador([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]),
     });
     const controller = new AbortController();
@@ -320,30 +383,65 @@ describe('lectura del DOM', () => {
         signal: controller.signal,
       }),
     ).rejects.toThrow(/se termino desde la consola/);
-    // Ni la lectura de la pagina ni la corrida que ejecuta llegan a ocurrir.
+    // Ni se lee la pagina ni llega ninguna accion al navegador.
     expect(deps.navegador.leerCamposDeLaPagina).not.toHaveBeenCalled();
-    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+    expect(motor.ejecutadas).toEqual([]);
   });
 
-  it('una SEGUNDA accion irreversible tras la verificada no encadena otra verificacion', async () => {
-    // El motor reporta una accion pendiente en las DOS corridas: la segunda no se verifica ni se
-    // ejecuta (seria un bucle sin cota sobre la cuenta real del usuario).
-    const motor: MotorDeTareaWeb = {
-      ejecutar: vi.fn(async () => ({
-        exito: false,
-        completado: true,
-        mensaje: `${MARCADOR_REQUIERE_APROBACION}: irreversible: otra accion mas`,
-        acciones: [],
-        tokensIn: null,
-        tokensOut: null,
-      })),
-    };
-    const deps = makeDeps({
-      motor,
-      navegador: makeNavegador([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]),
-    });
+  it('una SEGUNDA accion irreversible en la misma corrida no encadena otra verificacion', async () => {
+    // La primera se verifica y se ejecuta; la segunda se bloquea sin volver a comparar (seria un
+    // bucle sin cota sobre la cuenta real del usuario, y es lo que impide enviar dos veces).
+    const navegador = makeNavegador([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]);
+    const motor = makeMotor(['haz clic en Enviar', 'haz clic en Enviar otra vez']);
+    const deps = makeDeps({ motor, navegador });
     const detencion = await detencionDe(deps, makeJob('envia el resumen a juan@ejemplo.com'));
     expect(detencion?.motivo).toBe('otraAccion');
-    expect(motor.ejecutar).toHaveBeenCalledTimes(2);
+    expect(motor.ejecutadas).toEqual(['haz clic en Enviar']);
+    expect(navegador.leerCamposDeLaPagina).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('DONE prematuro: el agente se detuvo por su cuenta (CAMBIO 3)', () => {
+  const OBJETIVO = 'envia el resumen mensual a juan@ejemplo.com';
+
+  it('objetivo con accion bloqueada y ninguna accion verificada: fallo con mensaje PROPIO', async () => {
+    // El agente prepara la pagina entera y cierra con DONE sin intentar la accion final: es
+    // exactamente el job de produccion que dejo un borrador. Ni se ejecuto, ni la detuvo el sistema.
+    const navegador = makeNavegador([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]);
+    const motor = makeMotor(
+      ['escribe el destinatario', 'escribe el asunto'],
+      'Deje el correo listo en un borrador, no lo envie',
+    );
+    const deps = makeDeps({ motor, navegador });
+    let error: unknown;
+    try {
+      await procesarTareaWeb(deps, makeJob(OBJETIVO));
+    } catch (e) {
+      error = e;
+    }
+    const mensaje = String(error);
+    expect(mensaje).toContain('nunca llego a la verificacion previa');
+    expect(mensaje).toContain('"enviar"');
+    // Distinto del fallo generico del motor y distinto de una detencion del sistema.
+    expect(mensaje).not.toContain('termino con DONE sin cumplir el objetivo');
+    expect(mensaje).not.toContain('DETENIDA_VERIFICACION');
+    // El mensaje final del agente viaja como diagnostico: es la pista de que se paro solo.
+    expect(mensaje).toContain('no lo envie');
+    expect(deps.guardarResultado).not.toHaveBeenCalled();
+  });
+
+  it('sin verbo bloqueado en el objetivo, terminar sin acciones NO es este fallo', async () => {
+    const motor = makeMotor(['lee el panel'], 'el panel muestra 3 agentes');
+    const deps = makeDeps({ motor });
+    await expect(procesarTareaWeb(deps, makeJob('dime que dice mi panel'))).resolves.toBe(
+      'completada',
+    );
+  });
+
+  it('si el agente ejecuto la accion verificada, NO se reporta como DONE prematuro', async () => {
+    const navegador = makeNavegador([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]);
+    const motor = makeMotor();
+    const deps = makeDeps({ motor, navegador });
+    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
   });
 });

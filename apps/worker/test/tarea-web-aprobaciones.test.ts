@@ -3,6 +3,7 @@ import type { Job } from '@ledesma-platform/shared';
 import type { SitioConectado } from '@ledesma-platform/backend/sitios';
 import { procesarTareaWeb } from '../src/tarea-web.js';
 import type {
+  GuardiaDeAccion,
   MotorDeTareaWeb,
   NavegadorParaTarea,
   RepositorioSitiosParaTarea,
@@ -10,7 +11,7 @@ import type {
 } from '../src/tarea-web.js';
 import { MARCADOR_REQUIERE_APROBACION } from '../src/prompt-tarea-web.js';
 import { SalidaDeRedNoDisponibleError } from '../src/sitios.js';
-import { PermanentExecutionError } from '../src/errores.js';
+import { AccionBloqueadaError, PermanentExecutionError } from '../src/errores.js';
 import { makeAprobacion, makeAprobacionesRepo } from './aprobaciones-fakes.js';
 import type { Logger } from '../src/logger.js';
 
@@ -146,25 +147,37 @@ function makeDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
 const MENSAJE_CHECKPOINT = `${MARCADOR_REQUIERE_APROBACION}: financiera: Enviar el formulario de pago por 2,400 MXN a Aeromexico`;
 
 describe('corrida inicial: la aprobacion por accion ya no es el default (D1)', () => {
-  /** Motor con un resultado distinto por llamada (reportar la accion / ejecutarla ya verificada). */
-  function makeMotorSecuencia(resultados: { exito: boolean; mensaje: string }[]): MotorDeTareaWeb {
-    let llamada = 0;
+  /**
+   * Motor FAKE que consulta a la GUARDIA antes de cada accion, igual que el real. `ejecutadas` deja
+   * ver que llego de verdad al navegador.
+   */
+  function makeMotorQuePropone(
+    acciones: string[],
+    mensajeFinal = 'listo',
+  ): MotorDeTareaWeb & { ejecutadas: string[] } {
+    const ejecutadas: string[] = [];
     return {
-      ejecutar: vi.fn(async () => {
-        const resultado = resultados[Math.min(llamada++, resultados.length - 1)] as {
-          exito: boolean;
-          mensaje: string;
+      ejecutadas,
+      ejecutar: vi.fn(async (params: { guardia?: GuardiaDeAccion | undefined }) => {
+        for (const accion of acciones) {
+          const veredicto = await params.guardia?.revisar(accion);
+          if (veredicto?.tipo === 'bloquear') throw new AccionBloqueadaError(veredicto.mensaje);
+          ejecutadas.push(accion);
+        }
+        return {
+          exito: true,
+          completado: true,
+          mensaje: mensajeFinal,
+          acciones: ejecutadas.map((accion) => ({ type: 'act', action: accion, success: true })),
+          tokensIn: null,
+          tokensOut: null,
         };
-        return { ...resultado, completado: true, acciones: [], tokensIn: null, tokensOut: null };
       }),
     };
   }
 
-  it('accion financiera detectada: NO crea checkpoint, NO pausa el job y NO notifica', async () => {
-    const motor = makeMotorSecuencia([
-      { exito: false, mensaje: MENSAJE_CHECKPOINT },
-      { exito: true, mensaje: 'compra confirmada' },
-    ]);
+  it('accion financiera: NO crea checkpoint, NO pausa el job y NO notifica', async () => {
+    const motor = makeMotorQuePropone(['haz clic en confirmar la compra'], 'compra confirmada');
     const navegador = makeNavegador();
     const deps = makeDeps({ motor, navegador });
 
@@ -172,6 +185,7 @@ describe('corrida inicial: la aprobacion por accion ya no es el default (D1)', (
     // ninguno: la verificacion no encuentra nada que pueda no coincidir y la accion se ejecuta.
     await expect(procesarTareaWeb(deps, makeJob())).resolves.toBe('completada');
 
+    expect(motor.ejecutadas).toEqual(['haz clic en confirmar la compra']);
     expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
     expect(deps.marcarJobPausado).not.toHaveBeenCalled();
     expect(deps.notificadorAprobaciones?.notificarPendiente).not.toHaveBeenCalled();
@@ -181,7 +195,7 @@ describe('corrida inicial: la aprobacion por accion ya no es el default (D1)', (
   });
 
   it('la accion se DETIENE (no se ejecuta) cuando lo pedido no coincide con lo que hay en pantalla', async () => {
-    const motor = makeMotorSecuencia([{ exito: false, mensaje: MENSAJE_CHECKPOINT }]);
+    const motor = makeMotorQuePropone(['haz clic en confirmar la compra']);
     const navegador = makeNavegador({
       leerCamposDeLaPagina: vi.fn(async () => [
         { contexto: 'input text total a pagar', valor: '$ 9,900.00' },
@@ -189,18 +203,27 @@ describe('corrida inicial: la aprobacion por accion ya no es el default (D1)', (
     });
     const deps = makeDeps({ motor, navegador });
     await expect(procesarTareaWeb(deps, makeJob())).rejects.toThrow(/DETENIDA_VERIFICACION/);
-    // El motor corrio UNA sola vez: la accion jamas se ejecuto.
-    expect(motor.ejecutar).toHaveBeenCalledTimes(1);
+    // La accion jamas llego al navegador.
+    expect(motor.ejecutadas).toEqual([]);
     expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
     expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
   });
 
+  it('un agente que se detiene solo y emite el marcador NO crea checkpoint: es un fallo propio', async () => {
+    // El marcador ya no esta en el prompt de la corrida inicial. Si el modelo lo emite igual, es que
+    // se paro solo ante la accion, y eso se reporta como tal (nunca como una pausa esperando a nadie).
+    const motor = makeMotorQuePropone(['lee el itinerario'], MENSAJE_CHECKPOINT);
+    const deps = makeDeps({ motor });
+    await expect(procesarTareaWeb(deps, makeJob())).rejects.toThrow(
+      /nunca llego a la verificacion previa/,
+    );
+    expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
+    expect(deps.marcarJobPausado).not.toHaveBeenCalled();
+  });
+
   it('la infraestructura de aprobaciones sigue INTACTA: el repositorio no se toca en la corrida inicial', async () => {
     const aprobaciones = makeAprobacionesRepo();
-    const motor = makeMotorSecuencia([
-      { exito: false, mensaje: MENSAJE_CHECKPOINT },
-      { exito: true, mensaje: 'listo' },
-    ]);
+    const motor = makeMotorQuePropone(['haz clic en confirmar la compra']);
     const deps = makeDeps({ motor, aprobaciones });
     await procesarTareaWeb(deps, makeJob());
     // Solo la consulta de reanudacion (que devuelve null en una corrida fresca).

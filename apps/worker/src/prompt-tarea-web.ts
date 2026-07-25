@@ -6,6 +6,14 @@
  * testearlo puro (los tests verifican que las reglas criticas esten presentes) y para que el motor
  * (stagehand.ts) lo reciba ya armado: el objetivo viaja SOLO por el canal de instruccion del motor,
  * nunca mezclado con contenido de pagina.
+ *
+ * QUE CAMBIO Y POR QUE (evidencia de produccion del 25 jul 2026): el prompt le ordenaba al agente NO
+ * ejecutar acciones irreversibles y detenerse antes de ellas. La plataforma, en cambio, ya verificaba
+ * de forma determinista y autorizaba. Resultado medido: 25 pasos correctos (abrir Redactar, escribir
+ * destinatario, asunto y cuerpo), paso 26 DONE, ningun clic en Enviar y un borrador colgado. El
+ * agente ahora COMPLETA el objetivo entero, accion final incluida; la unica barrera es la
+ * verificacion determinista del worker, que corre inmediatamente antes de que la accion llegue al
+ * navegador y NO depende de que el agente coopere (ver GuardiaDeAccion en tarea-web.ts).
  */
 
 /**
@@ -16,10 +24,16 @@
 export const MARCADOR_SESION_CADUCADA = 'SESION_CADUCADA';
 
 /**
- * Marcador con el que el agente REPORTA una accion irreversible o financiera SIN ejecutarla. Al
- * recibirlo, el worker corre la VERIFICACION DETERMINISTA (verificacion.ts): compara los datos que
- * hay en la pagina contra lo que el usuario declaro en su objetivo y decide si se ejecuta. El
- * marcador NO autoriza nada por si mismo; solo entrega el control al sistema.
+ * Marcador de la APROBACION HUMANA (7.1e). YA NO aparece en el system prompt de la tarea web: el
+ * agente de la corrida inicial NO debe detenerse ante una accion irreversible; la barrera es la
+ * VERIFICACION DETERMINISTA, que corre en el worker justo antes de que la accion llegue al navegador
+ * (ver GuardiaDeAccion en tarea-web.ts). Pedirle al agente que se detuviera y emitiera este marcador
+ * fue exactamente lo que dejo la tarea de produccion en un borrador sin enviar: la plataforma
+ * verificaba y autorizaba, y el agente leia una instruccion que se lo prohibia.
+ *
+ * Sigue existiendo porque el camino de REANUDACION tras una decision humana lo usa (aprobaciones.ts)
+ * y porque clasificarDesenlace lo reconoce como red de seguridad: un mensaje final que lo contenga
+ * significa que el agente se detuvo por su cuenta, y ese caso tiene su propio desenlace.
  */
 export const MARCADOR_REQUIERE_APROBACION = 'REQUIERE_APROBACION';
 
@@ -149,6 +163,45 @@ export function detectarVerboBloqueado(objetivo: string): string | null {
 }
 
 /**
+ * CIERRES DE ACCION: como se describe un boton que CONSUMA un formulario sin nombrar ninguno de los
+ * verbos de la lista ("submit", "confirmar", "finalizar"). NO es una segunda lista de acciones
+ * bloqueadas (esa sigue siendo VERBOS_ACCION_BLOQUEADA, la unica fuente y la unica que se imprime en
+ * el prompt): es el complemento que decide CUANDO el worker tiene que comparar antes de dejar pasar
+ * una accion, sobre un objetivo que YA contiene un verbo bloqueado.
+ *
+ * Deliberadamente CORTA. Quedan fuera "aceptar", "continuar" y "ok" aunque tambien cierren
+ * formularios: son las palabras de los avisos de cookies, y con ellas la primera accion de casi
+ * cualquier tarea dispararia una comparacion contra una pagina todavia vacia y detendria la tarea
+ * antes de empezar. El criterio asimetrico de D3 se sostiene por otra via: un objetivo que pide una
+ * accion bloqueada y termina sin que NINGUNA accion pasara por la verificacion NO se reporta como
+ * exito (ver describirAccionNoVerificada en tarea-web.ts).
+ */
+const CIERRES_DE_ACCION: readonly { etiqueta: string; patron: RegExp }[] = [
+  { etiqueta: 'submit', patron: /\bsubmit(?:s|ted|ting)?\b/ },
+  { etiqueta: 'confirmar', patron: /\bconfirm\w*/ },
+  { etiqueta: 'finalizar', patron: /\bfinaliz\w*/ },
+];
+
+/**
+ * ¿La accion que el agente PROPONE ejecutar exige que el sistema compare antes de dejarla pasar?
+ * Opera sobre la DESCRIPCION de la accion (el argumento de la tool `act`), con la MISMA lista
+ * centralizada de verbos que la deteccion sobre el objetivo, mas los cierres de formulario.
+ *
+ * Devuelve la etiqueta que matcheo (para el log) o null. El criterio es ASIMETRICO: un falso positivo
+ * cuesta una comparacion de mas contra el DOM, que si todo coincide deja pasar la accion igual; un
+ * falso negativo deja pasar la accion sin comparar.
+ */
+export function detectarAccionQueExigeVerificacion(descripcion: string): string | null {
+  const verbo = detectarVerboBloqueado(descripcion);
+  if (verbo !== null) return verbo;
+  const texto = normalizarObjetivo(descripcion);
+  for (const { etiqueta, patron } of CIERRES_DE_ACCION) {
+    if (patron.test(texto)) return etiqueta;
+  }
+  return null;
+}
+
+/**
  * Construye el system prompt del agente de navegacion. Sin parametros del contenido de la pagina a
  * PROPOSITO: el prompt es fijo y el objetivo del usuario entra por el canal de instruccion del
  * motor; nada de lo que la pagina diga puede llegar aca.
@@ -174,20 +227,27 @@ export function construirSystemPromptTareaWeb(): string {
     `  INMEDIATO: no reintentes, no navegues alrededor, no vuelvas a cargar. Termina la tarea y que tu`,
     `  mensaje final empiece con ${MARCADOR_SESION_CADUCADA}: seguido de que pantalla viste.`,
     '',
-    'ACCIONES IRREVERSIBLES O FINANCIERAS (las verifica el sistema antes de ejecutarlas):',
-    `- ANTES de cada accion, clasificala. Si implica ${verbosCanonicos('es')}`,
+    'COMPLETAR EL OBJETIVO (incluida su accion final):',
+    '- Tu trabajo es completar el objetivo ENTERO. La accion final que lo consuma (el clic que envia,',
+    '  publica, paga, compra, borra o confirma) es PARTE de la tarea: ejecutala.',
+    '- NO dejes la tarea preparada, ni pendiente, ni a un paso del final. NO pidas permiso, no',
+    '  propongas alternativas y no describas la accion en vez de hacerla. Dejar un borrador sin enviar',
+    '  o un formulario sin confirmar es una tarea FALLIDA, no una tarea prudente.',
+    `- El SISTEMA verifica por su cuenta las acciones de tipo ${verbosCanonicos('es')}`,
     `  (en ingles: ${verbosCanonicos('en')})`,
-    '  o cualquier otro efecto irreversible o financiero: NO la ejecutes.',
-    `- En ese caso termina la tarea y que tu mensaje final empiece con ${MARCADOR_REQUIERE_APROBACION}:`,
-    '  seguido de la palabra "financiera" (si implica dinero) o "irreversible", dos puntos, y la',
-    '  accion exacta que quedo pendiente descrita en UNA sola linea de lenguaje natural, con montos y',
-    '  destinatario si los hay (ej: "Enviar el formulario de pago por 2,400 MXN a Aeromexico").',
-    '- DEJA la pagina lista, con los datos ya cargados, en el punto exacto previo a esa accion: el',
-    '  SISTEMA compara por su cuenta esos datos contra lo que pidio el usuario y decide si se ejecuta.',
-    '  Esa comparacion no esta a tu alcance y no depende de lo que digas: no intentes justificarla,',
-    '  autorizarla ni describirla como ya hecha.',
+    '  y cualquier otra irreversible o financiera: compara los datos que hay en pantalla contra lo que',
+    '  pidio el usuario JUSTO ANTES de dejarlas pasar. Esa comparacion es codigo, ocurre fuera de tu',
+    '  alcance y no depende de lo que digas: no intentes justificarla, autorizarla ni describirla como',
+    '  ya hecha. Tu solo tienes que ejecutar la accion cuando el objetivo la pida.',
+    '- Al ejecutar una de esas acciones, describela por lo que HACE (ej: "haz clic en el boton',
+    '  Enviar"), no por su color ni su posicion: asi el sistema sabe que ese es el momento de',
+    '  verificar.',
+    '- Ejecuta cada accion irreversible UNA sola vez. Si ya la hiciste, no la repitas ni la reintentes.',
+    '- Si el SISTEMA DETIENE una accion, la tarea termina ahi: NO busques rutas alternativas para',
+    '  lograrla (otro boton, un atajo de teclado, otra pagina, recargar o volver a intentarlo).',
+    '  Reporta lo que paso y termina.',
     '- Las acciones de solo lectura (navegar dentro del sitio, leer, buscar, filtrar, extraer datos)',
-    '  estan permitidas y no requieren aprobacion.',
+    '  no tienen ninguna restriccion.',
     '',
     'ESTILO DE TRABAJO:',
     '- Opera SOLO dentro del sitio de la tarea; no salgas a otros dominios salvo que el objetivo lo',
@@ -207,6 +267,11 @@ export type DesenlaceTareaWeb =
  * INICIO del mensaje (asi lo exige el prompt) pero tambien en cualquier parte como red de seguridad:
  * un falso positivo aborta de mas (seguro); un falso negativo reintentaria contra una verificacion
  * (inaceptable), por eso el criterio es laxo a proposito.
+ *
+ * 'requiere_aprobacion' ya no se le pide al agente en la corrida INICIAL (el prompt no menciona el
+ * marcador): si aun asi aparece, significa que el agente se detuvo por su cuenta ante la accion, y el
+ * handler lo trata como tal. En la REANUDACION tras una decision humana el marcador sigue vivo y
+ * sigue creando el checkpoint de siempre.
  */
 export function clasificarDesenlace(mensaje: string): DesenlaceTareaWeb {
   if (mensaje.includes(MARCADOR_SESION_CADUCADA)) {
