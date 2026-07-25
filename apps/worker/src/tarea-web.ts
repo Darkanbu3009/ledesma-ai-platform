@@ -8,6 +8,7 @@ import type { AprobacionWeb } from '@ledesma-platform/backend/aprobaciones';
 import type { DecryptedProviderCredential } from '@ledesma-platform/backend/execution';
 import {
   AccionBloqueadaError,
+  AccionSinConfirmarError,
   FalloDeEsquemaDelMotorError,
   PermanentExecutionError,
 } from './errores.js';
@@ -27,10 +28,12 @@ import {
   type NotificadorAprobaciones,
   type RepositorioAprobacionesParaWorker,
 } from './aprobaciones.js';
-import { extraerParametrosDeclarados } from './parametros-objetivo.js';
+import { contarParametrosDeclarados, extraerParametrosDeclarados } from './parametros-objetivo.js';
 import {
+  accionSurtioEfecto,
   construirPasoDeVerificacion,
   mensajeDeDetencion,
+  mensajeDeIncompleto,
   verificarAccion,
   type CampoDeLaPagina,
   type EstadoDeLaPagina,
@@ -177,8 +180,23 @@ export interface NavegadorParaTarea {
   cerrarSesion(sesionExternaId: string): Promise<void>;
 }
 
-/** Que hace el worker con una accion que el agente propone: dejarla pasar o cortarla en seco. */
-export type VeredictoDeGuardia = { tipo: 'permitir' } | { tipo: 'bloquear'; mensaje: string };
+/**
+ * Que hace el worker con una accion que el agente propone:
+ *  - 'permitir': pasa al navegador. `confirmar` marca las que ademas hay que CONFIRMAR en el DOM
+ *    despues de ejecutarlas (CAMBIO 4): son las irreversibles que acaban de pasar la verificacion.
+ *  - 'incompleto' (CAMBIO 1): NO pasa, pero la tarea SIGUE. Faltan datos del objetivo por escribir en
+ *    la pagina; el mensaje vuelve al agente para que termine de llenarlos.
+ *  - 'bloquear': NO pasa y la tarea termina con el mensaje de la detencion.
+ */
+export type VeredictoDeGuardia =
+  | { tipo: 'permitir'; confirmar?: boolean }
+  | { tipo: 'incompleto'; mensaje: string }
+  | { tipo: 'bloquear'; mensaje: string };
+
+/** Resultado de confirmar en el DOM que una accion irreversible surtio efecto (CAMBIO 4). */
+export type ResultadoDeConfirmacion =
+  | { confirmada: true }
+  | { confirmada: false; mensaje: string };
 
 /**
  * GUARDIA DE ACCION: el punto de INTERCEPCION entre el agente y el navegador. El adaptador del motor
@@ -193,6 +211,13 @@ export type VeredictoDeGuardia = { tipo: 'permitir' } | { tipo: 'bloquear'; mens
 export interface GuardiaDeAccion {
   /** Veredicto sobre UNA accion propuesta, descrita en lenguaje natural por el agente. Nunca lanza. */
   revisar(accion: string): Promise<VeredictoDeGuardia>;
+  /**
+   * CONFIRMA en el DOM que la accion irreversible que se acaba de ejecutar surtio efecto (CAMBIO 4).
+   * Se llama despues de CADA accion permitida con `confirmar`, haya salido bien o mal la llamada al
+   * navegador. Nunca lanza: devuelve el veredicto y el adaptador decide. Una accion que no se puede
+   * confirmar TERMINA la tarea; jamas se reintenta por cuenta propia.
+   */
+  confirmar(): Promise<ResultadoDeConfirmacion>;
 }
 
 /**
@@ -362,6 +387,11 @@ export interface TareaWebDeps {
   resolveCredential(ownerId: string, credentialId: string): Promise<DecryptedProviderCredential>;
   /** Persiste el resultado del job (jobs.resultado, V026) antes del cierre. */
   guardarResultado(jobId: string, resultado: unknown): Promise<void>;
+  /**
+   * Espera de pared entre relecturas del DOM al confirmar una accion irreversible (CAMBIO 4).
+   * OPCIONAL: sin ella se usa un setTimeout real. Los tests inyectan una que no duerme.
+   */
+  esperar?: ((ms: number) => Promise<void>) | undefined;
   logger: Logger;
 }
 
@@ -449,6 +479,28 @@ export function describirAccionNoVerificada(
     `tampoco fue el sistema quien la detuvo (consumio ${resultado.acciones.length} de ${maxPasos} ` +
     `pasos)${detalle}; no se reintenta automaticamente para no repetir acciones sobre la cuenta del ` +
     'usuario'
+  );
+}
+
+/**
+ * DATOS QUE NUNCA SE COMPLETARON (CAMBIO 1): la accion llego a la verificacion, pero la pagina jamas
+ * mostro todos los datos que el objetivo declaraba, asi que nunca paso al navegador y el agente
+ * termino sin ejecutarla. Es distinto de describirAccionNoVerificada (donde la accion ni siquiera
+ * llego a la verificacion): aqui SI hubo comparacion, y el diagnostico dice exactamente que dato
+ * faltaba, que es lo unico accionable para el usuario.
+ */
+export function describirDatosNuncaCompletados(
+  verbo: string,
+  faltantes: string[],
+  resultado: Pick<ResultadoMotor, 'acciones'>,
+  maxPasos: number,
+): string {
+  return (
+    `el objetivo pedia una accion de tipo "${verbo}" y NO se ejecuto: la verificacion previa del ` +
+    `sistema nunca encontro en la pagina todos los datos que el objetivo declaraba (falto: ` +
+    `${faltantes.join(', ')}), asi que la accion jamas paso al navegador (consumio ` +
+    `${resultado.acciones.length} de ${maxPasos} pasos); no se reintenta automaticamente para no ` +
+    'repetir acciones sobre la cuenta del usuario'
   );
 }
 
@@ -664,6 +716,24 @@ function detencionDirecta(motivo: 'otraAccion' | 'politicaNoDisponible'): Extrac
 }
 
 /**
+ * La verificacion INCOMPLETA como DETENCION, para el unico camino que no puede seguir llenando
+ * campos (la ejecucion por receta). Motivo 'noCoincide' con lo pedido vacio: no hay otro valor con
+ * el que discrepar, lo que hay es un dato que la pagina no muestra.
+ */
+function detencionPorDatosIncompletos(faltantes: string[]): Extract<Veredicto, { tipo: 'detener' }> {
+  return {
+    tipo: 'detener',
+    detencion: {
+      motivo: 'noCoincide',
+      pedido: faltantes.join(', '),
+      encontrado: '',
+      detalle: 'la pagina no muestra todos los datos declarados en el objetivo',
+    },
+    comparaciones: [],
+  };
+}
+
+/**
  * VERIFICACION DETERMINISTA completa: politica del usuario + parametros del objetivo + foto del DOM.
  * UNA sola implementacion para los DOS caminos (el del motor y el de la receta): que la ejecucion por
  * receta pudiera verificar con otro criterio seria exactamente la puerta trasera que D7 prohibe.
@@ -678,15 +748,21 @@ async function resolverVerificacion(
   objetivo: string,
   sesionExternaId: string,
   opciones: { politica: PoliticaVigente | null; verboBloqueado: string | null },
-): Promise<Veredicto> {
-  if (opciones.politica === null) return detencionDirecta('politicaNoDisponible');
-  return verificarAccion({
-    politica: opciones.politica,
-    dominio: sitio.dominio,
-    verbo: opciones.verboBloqueado,
-    parametros: extraerParametrosDeclarados(objetivo),
-    pagina: await leerEstadoDeLaPagina(deps, job, sesionExternaId),
-  });
+): Promise<{ veredicto: Veredicto; pagina: EstadoDeLaPagina | null }> {
+  if (opciones.politica === null) {
+    return { veredicto: detencionDirecta('politicaNoDisponible'), pagina: null };
+  }
+  const pagina = await leerEstadoDeLaPagina(deps, job, sesionExternaId);
+  return {
+    veredicto: verificarAccion({
+      politica: opciones.politica,
+      dominio: sitio.dominio,
+      verbo: opciones.verboBloqueado,
+      parametros: extraerParametrosDeclarados(objetivo),
+      pagina,
+    }),
+    pagina,
+  };
 }
 
 /**
@@ -704,8 +780,23 @@ interface VerificacionEnLaTraza {
 interface GuardiaDeTareaWeb extends GuardiaDeAccion {
   /** ¿Alguna accion llego a pasar por la verificacion y fue autorizada? */
   autorizoAlgo(): boolean;
+  /** Mensaje de la detencion con la que la guardia corto la corrida, o null si no corto ninguna. */
+  bloqueo(): string | null;
+  /** Parametros que la ultima verificacion incompleta echo en falta (CAMBIO 1), o null si no hubo. */
+  faltantes(): string[] | null;
   /** Pasos sinteticos de verificacion de esta corrida, para la trayectoria. */
   verificaciones(): VerificacionEnLaTraza[];
+}
+
+/** Cuantas veces se relee el DOM buscando la confirmacion de la accion antes de darla por no confirmada. */
+const INTENTOS_DE_CONFIRMACION = 3;
+
+/** Espera entre relecturas de la confirmacion (el sitio tarda en cerrar el redactor o pintar el aviso). */
+const ESPERA_ENTRE_CONFIRMACIONES_MS = 500;
+
+/** Espera real: solo se usa fuera de los tests, que inyectan la suya para no dormir. */
+function esperarMs(ms: number): Promise<void> {
+  return new Promise((resolver) => setTimeout(resolver, ms));
 }
 
 /**
@@ -725,11 +816,19 @@ interface GuardiaDeTareaWeb extends GuardiaDeAccion {
  *     cancelar es lo peor que puede hacer este camino);
  *  3. la descripcion de la accion no corresponde a una accion bloqueada ni a un cierre de formulario
  *     -> pasa (es un paso intermedio: abrir, escribir, navegar);
- *  4. ya se autorizo una accion en esta corrida -> se bloquea con 'otraAccion': no se encadenan
- *     verificaciones dentro de una misma corrida (seria un bucle sin cota sobre la cuenta real) y es
- *     lo que impide que el agente envie dos veces;
- *  5. si no: politica del usuario + parametros del objetivo + foto del DOM. Coinciden y la politica
- *     lo permite -> pasa. Si no -> se bloquea con el mensaje que dice que se pidio y que se encontro.
+ *  4. ya se EJECUTO una accion irreversible en esta corrida -> se bloquea con 'otraAccion': no se
+ *     encadenan verificaciones dentro de una misma corrida (seria un bucle sin cota sobre la cuenta
+ *     real) y es lo que impide que el agente envie dos veces;
+ *  5. si no: politica del usuario + parametros del objetivo + foto del DOM. Coinciden LOS N
+ *     parametros declarados y la politica lo permite -> pasa. Falta escribir alguno -> 'incompleto'
+ *     (la accion no pasa y la tarea SIGUE). Hay otro valor donde deberia estar el pedido, o la
+ *     politica lo impide -> se bloquea con el mensaje que dice que se pidio y que se encontro.
+ *
+ * QUE CUENTA COMO "YA SE EJECUTO UNA ACCION" (CAMBIO 2): SOLO una accion que la guardia dejo pasar
+ * al navegador (`irreversiblesEjecutadas`). Antes contaba cualquier verificacion superada, aunque la
+ * accion no fuera la irreversible de verdad: un intento prematuro (el formulario a medio llenar)
+ * consumia el unico cupo de la corrida y el envio real, ya con todos los datos, se bloqueaba como si
+ * fuera un segundo envio. Un intento que no supero la verificacion, o que se bloqueo, NO cuenta.
  *
  * NUNCA LANZA: cualquier error inesperado se convierte en bloqueo (falla cerrada). Una excepcion que
  * escapara de aqui saldria por la tool del agente y se leeria como un fallo del motor, no como lo que
@@ -748,21 +847,50 @@ function crearGuardiaDeAccion(
   },
 ): GuardiaDeTareaWeb {
   const verificaciones: VerificacionEnLaTraza[] = [];
+  const parametros = extraerParametrosDeclarados(objetivo);
+  const declarados = contarParametrosDeclarados(parametros);
+  const esperar = deps.esperar ?? esperarMs;
   let acciones = 0;
-  let autorizada = false;
+  /**
+   * Acciones irreversibles que la guardia dejo IR AL NAVEGADOR en esta corrida. Es la barrera de la
+   * segunda accion y es MONOTONA a proposito: una vez que una accion salio hacia el navegador, ya no
+   * hay forma de reabrir el cupo (ni con un fallo de la confirmacion, ni con un error inesperado).
+   * Solo se incrementa al PERMITIR, que es el instante en que la accion se ejecuta de verdad: un
+   * intento que no supero la verificacion, o que se bloqueo, jamas llega aca (CAMBIO 2).
+   */
+  let irreversiblesEjecutadas = 0;
+  /** De esas, las que ademas se CONFIRMARON leyendo el DOM (CAMBIO 4). */
+  let irreversiblesConfirmadas = 0;
+  /** Foto del DOM de la accion permitida, contra la que se confirma su efecto. */
+  let paginaPrevia: EstadoDeLaPagina | null = null;
+  let mensajeDeBloqueo: string | null = null;
+  let ultimosFaltantes: string[] | null = null;
 
-  const bloquear = (veredicto: Extract<Veredicto, { tipo: 'detener' }>): VeredictoDeGuardia => ({
-    tipo: 'bloquear',
-    mensaje: mensajeDeDetencion(veredicto),
-  });
+  const bloquear = (veredicto: Extract<Veredicto, { tipo: 'detener' }>): VeredictoDeGuardia => {
+    mensajeDeBloqueo = mensajeDeDetencion(veredicto);
+    return { tipo: 'bloquear', mensaje: mensajeDeBloqueo };
+  };
 
   return {
-    autorizoAlgo: () => autorizada,
+    // "Autorizo algo" es exactamente "dejo salir una accion irreversible al navegador".
+    autorizoAlgo: () => irreversiblesEjecutadas > 0,
+    bloqueo: () => mensajeDeBloqueo,
+    faltantes: () => ultimosFaltantes,
     verificaciones: () => verificaciones,
     revisar: async (accion: string): Promise<VeredictoDeGuardia> => {
-      const accionesPrevias = acciones++;
-      if (opciones.verboBloqueado === null) return { tipo: 'permitir' };
+      // Cuantas acciones del agente LLEGARON al navegador antes que esta. Solo avanza con las
+      // permitidas (permitir()): una accion que no paso no deja paso en la traza, y si se contara
+      // igual, el paso de verificacion quedaria intercalado en el lugar equivocado.
+      const accionesPrevias = acciones;
+      const permitir = (veredicto: VeredictoDeGuardia): VeredictoDeGuardia => {
+        acciones += 1;
+        return veredicto;
+      };
+      if (opciones.verboBloqueado === null) return permitir({ tipo: 'permitir' });
       if (opciones.control?.signal?.aborted === true) {
+        // NO se registra como bloqueo de la guardia: no es una detencion de la verificacion, es una
+        // cancelacion del dueno. Su cierre ya lo escribio quien cancelo y esta corrida no escribe
+        // nada encima (ver el cierre ordenado en procesarTareaWeb).
         return {
           tipo: 'bloquear',
           mensaje:
@@ -770,20 +898,28 @@ function crearGuardiaDeAccion(
         };
       }
       const etiqueta = detectarAccionQueExigeVerificacion(accion);
-      if (etiqueta === null) return { tipo: 'permitir' };
-      if (autorizada) {
+      if (etiqueta === null) return permitir({ tipo: 'permitir' });
+      // Una accion irreversible que YA salio al navegador cierra la corrida para cualquier otra: es
+      // la barrera que impide enviar dos veces.
+      if (irreversiblesEjecutadas > 0) {
         deps.logger.warn('tarea web: segunda accion irreversible en la misma corrida; se bloquea', {
           jobId: job.id,
           connectionId: sitio.id,
           etiqueta,
+          irreversiblesEjecutadas,
+          irreversiblesConfirmadas,
         });
         return bloquear(detencionDirecta('otraAccion'));
       }
       try {
-        const veredicto = await resolverVerificacion(deps, job, sitio, objetivo, sesionExternaId, {
-          politica: opciones.politica,
-          verboBloqueado: opciones.verboBloqueado,
-        });
+        const { veredicto, pagina } = await resolverVerificacion(
+          deps,
+          job,
+          sitio,
+          objetivo,
+          sesionExternaId,
+          { politica: opciones.politica, verboBloqueado: opciones.verboBloqueado },
+        );
         // El resultado queda como UN PASO de la trayectoria (valores comparados + veredicto), ya
         // censurado, en el punto exacto del flujo en que se comparo.
         verificaciones.push({ accionesPrevias, paso: construirPasoDeVerificacion(veredicto) });
@@ -796,19 +932,44 @@ function crearGuardiaDeAccion(
               dominio: sitio.dominio,
               motivo: veredicto.detencion.motivo,
               etiqueta,
+              parametrosComparados: veredicto.comparaciones.length,
+              parametrosDeclarados: declarados,
             },
           );
           return bloquear(veredicto);
         }
-        autorizada = true;
+        if (veredicto.tipo === 'incompleto') {
+          // CAMBIO 1: la accion NO pasa, pero esto no es un fallo. La tarea sigue para que el agente
+          // termine de llenar los campos y vuelva a intentarla con todo escrito.
+          ultimosFaltantes = veredicto.faltantes;
+          deps.logger.warn(
+            'tarea web: la verificacion previa NO se supera todavia; faltan datos por escribir y la accion no pasa',
+            {
+              jobId: job.id,
+              connectionId: sitio.id,
+              dominio: sitio.dominio,
+              etiqueta,
+              parametrosComparados: veredicto.comparaciones.filter((c) => c.coincide).length,
+              parametrosDeclarados: declarados,
+              faltantes: veredicto.faltantes,
+            },
+          );
+          return { tipo: 'incompleto', mensaje: mensajeDeIncompleto(veredicto) };
+        }
+        ultimosFaltantes = null;
+        // El cupo se consume AQUI, no al confirmar: desde este punto la accion va al navegador.
+        irreversiblesEjecutadas += 1;
+        // La foto que se acaba de comparar es la referencia contra la que se confirmara el efecto.
+        paginaPrevia = pagina ?? { campos: [], texto: '' };
         deps.logger.info('tarea web: verificacion determinista superada; la accion pasa al navegador', {
           jobId: job.id,
           connectionId: sitio.id,
           dominio: sitio.dominio,
           parametrosComparados: veredicto.comparaciones.length,
+          parametrosDeclarados: declarados,
           etiqueta,
         });
-        return { tipo: 'permitir' };
+        return permitir({ tipo: 'permitir', confirmar: true });
       } catch (error) {
         // Falla CERRADA: si la comprobacion no se pudo completar, la accion no pasa.
         deps.logger.error('tarea web: la verificacion previa fallo; la accion NO se ejecuta', {
@@ -819,8 +980,47 @@ function crearGuardiaDeAccion(
         return bloquear(detencionDirecta('politicaNoDisponible'));
       }
     },
+    confirmar: async (): Promise<ResultadoDeConfirmacion> => {
+      const antes = paginaPrevia;
+      // Nada que confirmar: o no hubo accion verificada, o esta ya se confirmo. Confirmar dos veces
+      // la misma accion no puede sumar dos al contador.
+      if (antes === null || irreversiblesConfirmadas >= irreversiblesEjecutadas) {
+        return { confirmada: true };
+      }
+      for (let intento = 0; intento < INTENTOS_DE_CONFIRMACION; intento++) {
+        if (intento > 0) await esperar(ESPERA_ENTRE_CONFIRMACIONES_MS);
+        const despues = await leerEstadoDeLaPagina(deps, job, sesionExternaId);
+        if (despues === null) continue;
+        if (!accionSurtioEfecto({ parametros, antes, despues })) continue;
+        irreversiblesConfirmadas += 1;
+        deps.logger.info('tarea web: la accion irreversible surtio efecto en la pagina (confirmada)', {
+          jobId: job.id,
+          connectionId: sitio.id,
+          dominio: sitio.dominio,
+          intentos: intento + 1,
+          irreversiblesConfirmadas,
+        });
+        return { confirmada: true };
+      }
+      deps.logger.warn(
+        'tarea web: la accion se ejecuto pero el sitio no muestra que haya surtido efecto; NO se reintenta',
+        { jobId: job.id, connectionId: sitio.id, dominio: sitio.dominio },
+      );
+      return { confirmada: false, mensaje: MENSAJE_SIN_CONFIRMAR };
+    },
   };
 }
+
+/**
+ * Mensaje del cierre cuando la accion se ejecuto y el sitio no mostro que surtiera efecto (CAMBIO 4).
+ * Dice exactamente eso, sin afirmar ni negar que haya ocurrido, y deja claro que el sistema no la va
+ * a repetir: repetir a ciegas una accion irreversible es como se duplica un envio o un pago.
+ */
+const MENSAJE_SIN_CONFIRMAR =
+  'la accion se intento pero no se pudo confirmar que surtiera efecto en el sitio (ni se cerro el ' +
+  'formulario ni aparecio una confirmacion); la tarea termina aqui y NO se reintenta ' +
+  'automaticamente, para no repetir una accion que quiza ya se ejecuto. Revisa el sitio antes de ' +
+  'volver a pedirla';
 
 /**
  * CAMINO POR RECETA (CAMBIO 5): busca la receta ACTIVA de este owner, dominio y firma de objetivo.
@@ -962,15 +1162,26 @@ async function ejecutarPorReceta(
     {
       navegador: determinista,
       escalador,
-      // El paso `verificar` de la receta resuelve con la MISMA funcion que el camino con motor.
+      // El paso `verificar` de la receta resuelve con la MISMA funcion que el camino con motor. Una
+      // verificacion INCOMPLETA aqui SI detiene: la receta repite un flujo cerrado, no tiene con que
+      // "seguir llenando campos"; si al llegar a este punto faltan datos, lo aprendido ya no sirve.
       verificar: async (): Promise<VeredictoDeVerificacion> => {
-        const veredicto = await resolverVerificacion(deps, job, sitio, objetivo, sesionExternaId, {
-          politica: opciones.politica,
-          verboBloqueado: opciones.verboBloqueado,
-        });
-        return veredicto.tipo === 'ejecutar'
-          ? { tipo: 'ejecutar' }
-          : { tipo: 'detener', mensaje: mensajeDeDetencion(veredicto) };
+        const { veredicto } = await resolverVerificacion(
+          deps,
+          job,
+          sitio,
+          objetivo,
+          sesionExternaId,
+          { politica: opciones.politica, verboBloqueado: opciones.verboBloqueado },
+        );
+        if (veredicto.tipo === 'ejecutar') return { tipo: 'ejecutar' };
+        return {
+          tipo: 'detener',
+          mensaje:
+            veredicto.tipo === 'incompleto'
+              ? mensajeDeDetencion(detencionPorDatosIncompletos(veredicto.faltantes))
+              : mensajeDeDetencion(veredicto),
+        };
       },
       sesionExternaId,
       apiKey: opciones.apiKey,
@@ -1300,18 +1511,30 @@ export async function procesarTareaWeb(
       verboBloqueado,
       control,
     });
-    const { resultado, desenlace } = await ejecutarMotorConRegistro(
-      deps,
-      job,
-      sitio,
-      objetivo,
-      sesion.sesionExternaId,
-      credential.apiKey,
-      { objetivo, systemPrompt: construirSystemPromptTareaWeb() },
-      control?.signal,
-      guardia,
-      pasosDelJob,
-    );
+    let resultado: ResultadoMotor;
+    let desenlace: DesenlaceTareaWeb;
+    try {
+      ({ resultado, desenlace } = await ejecutarMotorConRegistro(
+        deps,
+        job,
+        sitio,
+        objetivo,
+        sesion.sesionExternaId,
+        credential.apiKey,
+        { objetivo, systemPrompt: construirSystemPromptTareaWeb() },
+        control?.signal,
+        guardia,
+        pasosDelJob,
+      ));
+    } catch (error) {
+      // CIERRE ORDENADO DE UN BLOQUEO (CAMBIO 3): la guardia detuvo la accion, asi que la corrida
+      // TERMINA -- pero termina como una tarea que llego a un desenlace, no como una que se cayo a
+      // medias. La trayectoria completa ya quedo guardada (ejecutarMotorConRegistro) y aqui se
+      // escriben el resultado del job y el contexto de la sesion ANTES de propagar el cierre. Sin
+      // esto, el unico rastro del bloqueo era el last_error y la corrida quedaba sin resultado.
+      await cerrarCorridaDetenida(deps, job, sitio, sesion.sesionExternaId, contexto, guardia);
+      throw error;
+    }
 
     if (desenlace.tipo === 'sesion_caducada') {
       await marcarSitioBestEffort(deps, sitio, job.ownerId, 'caducado');
@@ -1334,13 +1557,17 @@ export async function procesarTareaWeb(
       (desenlace.tipo === 'requiere_aprobacion' || resultado.completado) &&
       control?.signal?.aborted !== true
     ) {
+      const faltantes = guardia.faltantes();
       deps.logger.warn('tarea web: el agente termino sin ejecutar la accion que el objetivo pedia', {
         jobId: job.id,
         connectionId: sitio.id,
         verbo: verboBloqueado,
+        faltantes,
       });
       throw new PermanentExecutionError(
-        describirAccionNoVerificada(verboBloqueado, resultado, deps.maxPasos),
+        faltantes === null
+          ? describirAccionNoVerificada(verboBloqueado, resultado, deps.maxPasos)
+          : describirDatosNuncaCompletados(verboBloqueado, faltantes, resultado, deps.maxPasos),
       );
     }
 
@@ -1369,6 +1596,46 @@ export async function procesarTareaWeb(
     // La sesion dejo de ser responsabilidad de esta corrida. El corte duro externo ya no debe tocarla.
     control?.alCambiarSesion?.(null);
   }
+}
+
+/**
+ * CIERRE ORDENADO de una corrida que la guardia DETUVO (CAMBIO 3). No decide nada del desenlace (ya
+ * esta decidido y el error se propaga intacto): deja la tarea terminada como corresponde, con su
+ * resultado escrito y el contexto de la sesion refrescado, antes de que el error suba.
+ *
+ * Por que importa: hasta este PR un bloqueo salia como una excepcion y nada mas. El job pasaba a
+ * 'failed' y, mientras se escribia ese cierre, el latido leia el estado nuevo, lo interpretaba como
+ * una cancelacion externa y abortaba la corrida a mitad de camino. El bloqueo es un desenlace
+ * NORMAL del sistema (comparo y no dejo pasar), no una caida.
+ *
+ * NO hace nada si la corrida no termino por un bloqueo de la guardia: un fallo del motor, un
+ * deadline o una cancelacion siguen su camino de siempre.
+ */
+async function cerrarCorridaDetenida(
+  deps: TareaWebDeps,
+  job: Job,
+  sitio: SitioConectado,
+  sesionExternaId: string,
+  contexto: string,
+  guardia: GuardiaDeTareaWeb,
+): Promise<void> {
+  const bloqueo = guardia.bloqueo();
+  if (bloqueo === null) return;
+  // La sesion se uso legitimamente hasta el bloqueo: mismo refresco que un checkpoint de aprobacion.
+  await refrescarContextoBestEffort(deps, sitio, job.ownerId, sesionExternaId, contexto);
+  try {
+    await deps.guardarResultado(job.id, { estado: 'detenida', detalle: bloqueo });
+  } catch (error) {
+    deps.logger.error('tarea web: no se pudo guardar el resultado de la accion detenida', {
+      jobId: job.id,
+      err: describir(error),
+    });
+  }
+  deps.logger.warn('tarea web TERMINADA de forma ordenada tras detener la accion', {
+    jobId: job.id,
+    connectionId: sitio.id,
+    dominio: sitio.dominio,
+  });
 }
 
 /** Cierra la sesion sin propagar (minutos del proveedor + higiene; el desenlace ya esta decidido). */
@@ -1659,6 +1926,11 @@ async function ejecutarMotor(
     // detencion serializada (DETENIDA_VERIFICACION) y viaja INTACTO hasta el last_error del job para
     // que la consola pueda decirle al usuario que se pidio y que se encontro.
     if (error instanceof AccionBloqueadaError) {
+      throw new PermanentExecutionError(error.message);
+    }
+    // ACCION SIN CONFIRMAR (CAMBIO 4): se ejecuto y el sitio no mostro que surtiera efecto. La tarea
+    // termina reportandolo tal cual; jamas se reintenta (repetirla podria duplicar el efecto).
+    if (error instanceof AccionSinConfirmarError) {
       throw new PermanentExecutionError(error.message);
     }
     if (error instanceof FalloDeEsquemaDelMotorError) {

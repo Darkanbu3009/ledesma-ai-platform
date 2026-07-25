@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  contarParametrosDeclarados,
   extraerCorreos,
   extraerMontos,
   extraerParametrosDeclarados,
@@ -105,6 +106,38 @@ describe('extraerParametrosDeclarados', () => {
 
   it('DOS productos entrecomillados distintos son ambiguos: producto NO declarado', () => {
     const p = extraerParametrosDeclarados('compra "Plan Basico" o "Plan Pro"');
+    expect(p.producto).toBeNull();
+  });
+
+  it('asunto y cuerpo entrecomillados y rotulados se declaran como parametros propios', () => {
+    const p = extraerParametrosDeclarados(
+      'envia a juan@ejemplo.com un correo con asunto "Reporte de agosto" y cuerpo "Adjunto el reporte"',
+    );
+    expect(p.destinatarios).toEqual(['juan@ejemplo.com']);
+    expect(p.asunto).toBe('Reporte de agosto');
+    expect(p.cuerpo).toBe('Adjunto el reporte');
+    // El texto que ya es asunto o cuerpo no se cuenta ademas como producto: seria el mismo dato
+    // comparado dos veces con criterios distintos.
+    expect(p.producto).toBeNull();
+    expect(contarParametrosDeclarados(p)).toBe(3);
+  });
+
+  it('sin rotulo o sin comillas, el asunto y el cuerpo NO se declaran (jamas se adivinan)', () => {
+    const sinComillas = extraerParametrosDeclarados(
+      'envia a juan@ejemplo.com un correo con asunto reporte de agosto',
+    );
+    expect(sinComillas.asunto).toBeNull();
+    expect(contarParametrosDeclarados(sinComillas)).toBe(1);
+
+    const sinRotulo = extraerParametrosDeclarados('envia a juan@ejemplo.com el "Plan Basico"');
+    expect(sinRotulo.asunto).toBeNull();
+    expect(sinRotulo.cuerpo).toBeNull();
+    expect(sinRotulo.producto).toBe('Plan Basico');
+  });
+
+  it('DOS asuntos distintos son ambiguos: asunto NO declarado y tampoco pasan a producto', () => {
+    const p = extraerParametrosDeclarados('envia con asunto "Uno" y con asunto "Dos"');
+    expect(p.asunto).toBeNull();
     expect(p.producto).toBeNull();
   });
 

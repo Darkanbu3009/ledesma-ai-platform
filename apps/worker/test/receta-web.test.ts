@@ -47,7 +47,9 @@ describe('firmaDeObjetivo (D3: criterio de equivalencia entre objetivos)', () =>
     const b = firmaDeObjetivo('envia un correo a ana@y.com con asunto "Adios"');
     expect(a).toBe(b);
     expect(a).toContain('<destinatario>');
-    expect(a).toContain('<producto>');
+    // El texto entrecomillado que el objetivo ROTULA como asunto firma como asunto, no como producto:
+    // la firma habla el mismo vocabulario que la verificacion (contrato de MarcadorParametro).
+    expect(a).toContain('<asunto>');
   });
 
   it('dos objetivos con estructura distinta NO comparten firma', () => {

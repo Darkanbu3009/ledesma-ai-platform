@@ -5,6 +5,7 @@ import {
   type PoliticaDeEjecucion,
 } from '@ledesma-platform/shared';
 import {
+  contarParametrosDeclarados,
   extraerCorreos,
   extraerMontos,
   normalizarMonto,
@@ -71,17 +72,39 @@ export interface EstadoDeLaPagina {
   texto: string;
 }
 
+/** Nombre de negocio de un parametro comparable (el que se le muestra al usuario). */
+export type NombreDeParametro =
+  | 'destinatario'
+  | 'monto'
+  | 'producto'
+  | 'cantidad'
+  | 'asunto'
+  | 'cuerpo';
+
 /** Una comparacion concreta: que se pidio, que habia, y si son lo mismo. */
 export interface Comparacion {
-  parametro: 'destinatario' | 'monto' | 'producto' | 'cantidad';
+  parametro: NombreDeParametro;
   pedido: string;
   encontrado: string;
   coincide: boolean;
+  /**
+   * El dato pedido TODAVIA NO ESTA en la pagina: nadie lo escribio (CAMBIO 1). Es la distincion que
+   * separa "el formulario esta a medio llenar" (la tarea sigue, el agente termina de llenarlo) de
+   * "hay OTRO valor donde deberia estar el mio" (eso detiene la tarea en seco y se reporta).
+   */
+  ausente: boolean;
 }
 
-/** Resultado de la verificacion: ejecutar la accion, o detener la tarea con un motivo. */
+/**
+ * Resultado de la verificacion:
+ *  - 'ejecutar': los N parametros declarados estan en la pagina y coinciden; la accion pasa.
+ *  - 'incompleto' (CAMBIO 1): falta escribir alguno de los datos declarados. La accion NO pasa, pero
+ *    NO es un fallo: la tarea sigue para que el agente termine de llenar los campos.
+ *  - 'detener': la tarea termina sin ejecutar, con el motivo que se le reporta al usuario.
+ */
 export type Veredicto =
   | { tipo: 'ejecutar'; comparaciones: Comparacion[] }
+  | { tipo: 'incompleto'; comparaciones: Comparacion[]; faltantes: NombreDeParametro[] }
   | { tipo: 'detener'; detencion: DetencionDeVerificacion; comparaciones: Comparacion[] };
 
 /**
@@ -120,6 +143,16 @@ const CONTEXTO_MONTO = /\b(monto|importe|total|precio|price|amount|pago|payment|
 
 /** Contexto de un campo de CANTIDAD (numero de unidades). */
 const CONTEXTO_CANTIDAD = /\b(cantidad|cant|quantity|qty|unidades|units|piezas)\b/;
+
+/** Contexto de un campo de ASUNTO (el titulo de un mensaje). */
+const CONTEXTO_ASUNTO = /\b(asunto|subject|subjectbox|titulo|title)\b/;
+
+/**
+ * Contexto de un campo de CUERPO de mensaje. Incluye los nombres que usan los redactores modernos
+ * (contenteditable con aria-label "Cuerpo del mensaje" / "Message Body"), que es donde el agente
+ * escribe el texto en un sitio de correo real.
+ */
+const CONTEXTO_CUERPO = /\b(cuerpo|mensaje|message|body|texto|contenido|content|redaccion)\b/;
 
 /** Tolerancia de la comparacion numerica de montos (medio centavo). */
 const TOLERANCIA_MONTO = 0.005;
@@ -198,7 +231,8 @@ function textosDeLaPagina(pagina: EstadoDeLaPagina): string[] {
  *  3. la accion exige un dato que el objetivo nunca declaro;
  *  4. no se pudo leer la pagina (nunca se ejecuta a ciegas);
  *  5. un monto comprometido supera el tope configurado;
- *  6. algun parametro declarado no coincide con lo que hay en pantalla.
+ *  6. algun parametro declarado tiene en pantalla un valor DISTINTO del pedido;
+ *  7. algun parametro declarado todavia no esta en pantalla -> 'incompleto' (la tarea sigue).
  */
 export function verificarAccion(entrada: {
   politica: PoliticaVigente;
@@ -259,23 +293,74 @@ export function verificarAccion(entrada: {
     }
   }
 
-  // 6. COMPARACION de cada parametro declarado contra el DOM.
+  // 6. COMPARACION de cada parametro declarado contra el DOM. Un valor DISTINTO del pedido detiene la
+  //    tarea (es una accion distinta a la que se pidio, y puede ser una pagina que sustituyo el dato).
   const comparaciones = compararParametros(parametros, pagina);
-  const fallida = comparaciones.find((c) => !c.coincide);
-  if (fallida !== undefined) {
+  const discordante = comparaciones.find((c) => !c.coincide && !c.ausente);
+  if (discordante !== undefined) {
     return {
       tipo: 'detener',
       detencion: {
         motivo: 'noCoincide',
-        pedido: fallida.pedido,
-        encontrado: fallida.encontrado,
-        detalle: `el parametro ${fallida.parametro} no coincide`,
+        pedido: discordante.pedido,
+        encontrado: discordante.encontrado,
+        detalle: `el parametro ${discordante.parametro} no coincide`,
       },
       comparaciones,
     };
   }
 
+  // 7. TODOS LOS PARAMETROS DECLARADOS O NINGUNA ACCION (CAMBIO 1). La verificacion solo se supera
+  //    cuando los N parametros que el objetivo declaro estan en la pagina y coinciden. Dos guardas:
+  //    los que faltan por escribir, y la INVARIANTE de que se comparo uno por cada declarado (si un
+  //    parametro nuevo se agregara al extractor sin su comparacion, esto lo detiene en vez de
+  //    dejarlo pasar sin mirar). En produccion la accion paso con 1 de 3 datos en pantalla: el
+  //    correo se envio a medio escribir y el resto de la corrida quedo inutilizable.
+  const faltantes = comparaciones.filter((c) => !c.coincide).map((c) => c.parametro);
+  const declarados = contarParametrosDeclarados(parametros);
+  if (faltantes.length > 0 || comparaciones.length < declarados) {
+    return { tipo: 'incompleto', comparaciones, faltantes };
+  }
+
   return { tipo: 'ejecutar', comparaciones };
+}
+
+/**
+ * ¿La accion irreversible SURTIO EFECTO? (CAMBIO 4). Se responde LEYENDO EL DOM despues de ejecutar,
+ * jamas preguntandole al modelo. Dos criterios, en orden:
+ *  1. el sitio muestra su confirmacion ("mensaje enviado", "pago realizado");
+ *  2. los datos que la accion comprometia YA NO ESTAN en la pagina: la ventana de redaccion (o el
+ *     formulario de pago) se cerro, que es como se ve un envio consumado.
+ * Si el objetivo no declaro nada comparable, el unico rastro posible es que la pagina CAMBIE: una
+ * accion que no cambio nada no se puede dar por hecha.
+ */
+export function accionSurtioEfecto(entrada: {
+  parametros: ParametrosDeclarados;
+  /** Foto tomada JUSTO ANTES de ejecutar (la de la verificacion previa). */
+  antes: EstadoDeLaPagina;
+  /** Foto tomada DESPUES de ejecutar. */
+  despues: EstadoDeLaPagina;
+}): boolean {
+  if (PATRON_CONFIRMACION.test(normalizarTexto(entrada.despues.texto))) return true;
+  const comparaciones = compararParametros(entrada.parametros, entrada.despues);
+  if (comparaciones.length > 0) {
+    return comparaciones.every((c) => c.encontrado.trim() === '');
+  }
+  return huellaDePagina(entrada.antes) !== huellaDePagina(entrada.despues);
+}
+
+/**
+ * CONFIRMACION que un sitio muestra tras consumar la accion. Deliberadamente acotada a las formas en
+ * que un sitio dice que YA lo hizo: palabras genericas ("listo", "confirmacion") aparecen tambien
+ * ANTES de ejecutar y darian por hecha una accion que nunca ocurrio.
+ */
+const PATRON_CONFIRMACION =
+  /\b(?:mensaje enviado|correo enviado|se envio|enviado con exito|enviada correctamente|message sent|email sent|pago (?:realizado|enviado|exitoso|aprobado)|payment (?:sent|complete|completed|successful)|transferencia (?:realizada|enviada|exitosa)|compra (?:realizada|confirmada|exitosa)|gracias por tu compra|pedido (?:confirmado|realizado)|order (?:confirmed|placed)|se elimino|eliminado correctamente|deleted successfully|publicado correctamente|published successfully)\b/;
+
+/** Huella de una foto de la pagina: sus campos con su valor, mas el texto visible. */
+function huellaDePagina(pagina: EstadoDeLaPagina): string {
+  const campos = pagina.campos.map((c) => `${c.contexto}=${c.valor}`).join('|');
+  return `${campos}##${pagina.texto}`;
 }
 
 /** Resumen de lo que el objetivo pedia, para el mensaje cuando no hay nada legible con que comparar. */
@@ -285,6 +370,8 @@ function descripcionDeLoPedido(parametros: ParametrosDeclarados): string {
   if (parametros.monto !== null) partes.push(parametros.monto.texto);
   if (parametros.producto !== null) partes.push(parametros.producto);
   if (parametros.cantidad !== null) partes.push(String(parametros.cantidad));
+  if (parametros.asunto !== null) partes.push(parametros.asunto);
+  if (parametros.cuerpo !== null) partes.push(parametros.cuerpo);
   return partes.join(' / ');
 }
 
@@ -313,6 +400,7 @@ function compararParametros(
       pedido: pedidos.join(', '),
       encontrado: encontrados.join(', '),
       coincide: encontrados.length > 0 && pedidos.join('|') === encontrados.join('|'),
+      ausente: encontrados.length === 0,
     });
   }
 
@@ -331,6 +419,7 @@ function compararParametros(
       pedido: formatearMonto(declarado.valor, declarado.moneda),
       encontrado: candidatos.map((m) => formatearMonto(m.valor, m.moneda)).join(', '),
       coincide,
+      ausente: candidatos.length === 0,
     });
   }
 
@@ -345,6 +434,9 @@ function compararParametros(
       pedido: parametros.producto,
       encontrado: coincide ? parametros.producto : '',
       coincide,
+      // Es una comparacion de PRESENCIA: si el nombre no aparece, es que todavia no esta en la
+      // pagina. No hay un "otro producto" con el que discrepar.
+      ausente: !coincide,
     });
   }
 
@@ -360,15 +452,84 @@ function compararParametros(
       pedido: String(parametros.cantidad),
       encontrado: valores.join(', '),
       coincide: valores.length > 0 && valores.every((v) => v === parametros.cantidad),
+      ausente: valores.length === 0,
     });
+  }
+
+  // ASUNTO y CUERPO (CAMBIO 1): lo que el agente TECLEO en el redactor. Se buscan en los campos cuyo
+  // contexto los nombra y, si el sitio no los rotula, en el resto de los campos; el texto visible NO
+  // entra (lo escribe el sitio, no el agente, y en un hilo de correo mostraria el mensaje anterior).
+  // Comparacion de PRESENCIA (el valor declarado aparece dentro del campo): una firma automatica
+  // pegada al final del cuerpo no debe leerse como que el usuario pidio otra cosa.
+  if (parametros.asunto !== null) {
+    comparaciones.push(compararTextoTecleado('asunto', parametros.asunto, pagina, CONTEXTO_ASUNTO));
+  }
+  if (parametros.cuerpo !== null) {
+    comparaciones.push(compararTextoTecleado('cuerpo', parametros.cuerpo, pagina, CONTEXTO_CUERPO));
   }
 
   return comparaciones;
 }
 
+/** Tope del valor leido del DOM que viaja en una comparacion (el mensaje de detencion ya se acota). */
+const MAX_ENCONTRADO_CHARS = 200;
+
+/**
+ * Compara un texto DECLARADO (asunto, cuerpo) contra lo que hay tecleado en la pagina. Los candidatos
+ * son los campos cuyo contexto nombra al parametro y, si el sitio no rotula ninguno, TODOS los campos:
+ * un redactor que no dice como se llama su caja de texto no puede volver imposible la verificacion.
+ */
+function compararTextoTecleado(
+  parametro: NombreDeParametro,
+  declarado: string,
+  pagina: EstadoDeLaPagina,
+  contexto: RegExp,
+): Comparacion {
+  const rotulados = pagina.campos.filter((c) => contexto.test(normalizarTexto(c.contexto)));
+  const candidatos = (rotulados.length > 0 ? rotulados : pagina.campos).filter(
+    (c) => c.valor.trim() !== '',
+  );
+  const buscado = normalizarTexto(declarado);
+  const coincide =
+    buscado !== '' && candidatos.some((c) => normalizarTexto(c.valor).includes(buscado));
+  return {
+    parametro,
+    pedido: declarado,
+    // Solo se reporta lo que hay tecleado en los campos ROTULADOS: volcar el valor de cualquier campo
+    // de la pagina en el mensaje de la detencion filtraria datos que nadie pidio comparar.
+    encontrado: coincide
+      ? declarado
+      : rotulados
+          .map((c) => c.valor.trim())
+          .filter((v) => v !== '')
+          .join(' ')
+          .slice(0, MAX_ENCONTRADO_CHARS),
+    coincide,
+    ausente: !coincide,
+  };
+}
+
 /** Mensaje de cierre del job cuando la accion se detiene (contrato estable con la consola). */
 export function mensajeDeDetencion(veredicto: Extract<Veredicto, { tipo: 'detener' }>): string {
   return serializarDetencion(censurarDetencion(veredicto.detencion));
+}
+
+/**
+ * Mensaje de una verificacion INCOMPLETA (CAMBIO 1). NO es una detencion y por eso NO lleva el
+ * prefijo del contrato con la consola: la tarea no termino, solo que esta accion no puede pasar
+ * todavia. Nombra los parametros que faltan, JAMAS sus valores ni nada leido de la pagina (este
+ * texto vuelve al modelo como resultado de su herramienta).
+ */
+export function mensajeDeIncompleto(veredicto: Extract<Veredicto, { tipo: 'incompleto' }>): string {
+  const faltan = veredicto.faltantes.join(', ');
+  return (
+    'la verificacion previa del sistema todavia no se supera y la accion NO se ejecuto: ' +
+    (faltan === ''
+      ? 'la pagina no muestra todos los datos que pidio el usuario'
+      : `faltan datos del objetivo por escribir en la pagina (${faltan})`) +
+    '. Termina de completar esos datos en el formulario y despues vuelve a intentar esta misma ' +
+    'accion; no busques otra ruta ni des la tarea por terminada.'
+  );
 }
 
 /**
@@ -396,7 +557,9 @@ export function construirPasoDeVerificacion(veredicto: Veredicto): PasoCensurado
   const detalle =
     veredicto.tipo === 'ejecutar'
       ? 'verificacion previa: los datos coinciden con lo pedido'
-      : `verificacion previa: la accion se detuvo (${veredicto.detencion.motivo})`;
+      : veredicto.tipo === 'incompleto'
+        ? `verificacion previa: faltan datos por escribir (${veredicto.faltantes.join(', ')})`
+        : `verificacion previa: la accion se detuvo (${veredicto.detencion.motivo})`;
   return {
     idx: 0,
     accion: {

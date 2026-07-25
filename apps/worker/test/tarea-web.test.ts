@@ -24,9 +24,11 @@ import type { AccionCrudaDeMotor, TrayectoriaNueva } from '../src/trayectoria.js
 import { SalidaDeRedNoDisponibleError } from '../src/sitios.js';
 import {
   AccionBloqueadaError,
+  AccionSinConfirmarError,
   FalloDeEsquemaDelMotorError,
   PermanentExecutionError,
 } from '../src/errores.js';
+import type { CampoDeLaPagina } from '../src/verificacion.js';
 import type { Logger } from '../src/logger.js';
 
 const VAULT_SECRET = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
@@ -130,22 +132,72 @@ function makeMotor(resultado: { exito: boolean; mensaje: string; completado?: bo
 }
 
 /**
- * Motor FAKE que se comporta como el real frente a la GUARDIA: le pregunta por cada accion ANTES de
- * ejecutarla y, si la bloquea, lanza AccionBloqueadaError (lo mismo que el adaptador de Stagehand al
- * cortar la tool `act`). `ejecutadas` deja ver que llego de verdad al navegador.
+ * Pagina MUTABLE que comparten el navegador fake y el motor fake. Existe porque una accion
+ * irreversible CAMBIA la pagina (el redactor se cierra, aparece el aviso de enviado) y eso es
+ * justamente lo que el worker relee para confirmar que surtio efecto.
+ */
+interface PaginaFake {
+  campos: CampoDeLaPagina[];
+  texto: string;
+}
+
+function makePagina(campos: CampoDeLaPagina[] = [], texto = ''): PaginaFake {
+  return { campos, texto };
+}
+
+/** Navegador fake cuya lectura del DOM sale de una pagina mutable. */
+function makeNavegadorDePagina(pagina: PaginaFake): NavegadorParaTarea {
+  return makeNavegador({
+    leerCamposDeLaPagina: vi.fn(async () => pagina.campos),
+    leerTextoVisible: vi.fn(async () => pagina.texto),
+  });
+}
+
+/**
+ * Motor FAKE que se comporta como el real frente a la GUARDIA, con el MISMO protocolo que el
+ * adaptador de Stagehand (crearActBlindado): pregunta antes de cada accion; un bloqueo lanza
+ * AccionBloqueadaError; un veredicto 'incompleto' NO ejecuta la accion pero deja seguir la corrida; y
+ * una accion permitida que exige confirmacion se confirma DESPUES de tocar la pagina.
+ *
+ * `pagina` es el estado que la accion irreversible consuma: por defecto se vacia (el formulario se
+ * cerro, que es como se ve un envio hecho). Un test que quiera el caso "no se pudo confirmar" pasa
+ * una pagina que no cambia.
  */
 function makeMotorQuePropone(
   acciones: string[],
   mensajeFinal = 'listo',
-): MotorDeTareaWeb & { ejecutadas: string[] } {
+  pagina?: PaginaFake,
+  /** Efecto sobre la pagina de una accion INTERMEDIA que si llega al navegador (llenar un campo). */
+  efectos: Record<string, () => void> = {},
+): MotorDeTareaWeb & { ejecutadas: string[]; rechazadas: string[] } {
   const ejecutadas: string[] = [];
+  const rechazadas: string[] = [];
   return {
     ejecutadas,
-    ejecutar: vi.fn(async (params: { guardia?: GuardiaDeAccion | undefined }) => {
+    rechazadas,
+    ejecutar: vi.fn(async (params: {
+      guardia?: GuardiaDeAccion | undefined;
+      registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined;
+    }) => {
       for (const accion of acciones) {
         const veredicto = await params.guardia?.revisar(accion);
         if (veredicto?.tipo === 'bloquear') throw new AccionBloqueadaError(veredicto.mensaje);
+        if (veredicto?.tipo === 'incompleto') {
+          rechazadas.push(accion);
+          continue;
+        }
         ejecutadas.push(accion);
+        // Igual que el adaptador real: la accion entra a la traza EN VIVO, al llegar al navegador.
+        params.registrarAccion?.({ type: 'act', action: accion, success: true });
+        efectos[accion]?.();
+        if (veredicto?.tipo === 'permitir' && veredicto.confirmar === true && params.guardia) {
+          if (pagina) {
+            pagina.campos = [];
+            pagina.texto = 'Mensaje enviado. Deshacer';
+          }
+          const confirmacion = await params.guardia.confirmar();
+          if (!confirmacion.confirmada) throw new AccionSinConfirmarError(confirmacion.mensaje);
+        }
       }
       return {
         exito: true,
@@ -178,6 +230,8 @@ function makeDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
     aprobaciones: makeAprobacionesRepo(),
     aprobacionTtlMs: 15 * 60 * 1000,
     marcarJobPausado: vi.fn(async () => {}),
+    // Los tests no duermen entre relecturas de la confirmacion (CAMBIO 4).
+    esperar: async () => {},
     logger: makeLogger(),
     ...overrides,
   };
@@ -318,8 +372,9 @@ describe('procesarTareaWeb', () => {
     // El objetivo no declara destinatario, monto, producto ni cantidad, y el verbo ("compra") no
     // exige ninguno: no hay nada que pueda no coincidir. Es el camino normal de D2: se ejecuta sin
     // preguntarle nada al usuario y sin una segunda corrida del motor.
-    const motor = makeMotorQuePropone(['haz clic en confirmar la compra']);
-    const navegador = makeNavegador();
+    const pagina = makePagina([{ contexto: 'input cupon', valor: 'VERANO' }]);
+    const motor = makeMotorQuePropone(['haz clic en confirmar la compra'], 'listo', pagina);
+    const navegador = makeNavegadorDePagina(pagina);
     const deps = makeDeps({ motor, navegador });
     const job = makeJob({
       payload: { kind: 'tarea_web', connectionId: CONNECTION_ID, objetivo: 'compra el plan basico' },
@@ -561,13 +616,13 @@ describe('registro de trayectorias (Fase F, V030)', () => {
 
   it('accion verificada: el paso de verificacion queda JUSTO ANTES de la accion que autorizo', async () => {
     const trayectorias = makeTrayectorias();
-    const motor = makeMotorQuePropone(['escribe el destinatario', 'haz clic en Enviar']);
-    const navegador = makeNavegador({
-      leerCamposDeLaPagina: vi.fn(async () => [
-        { contexto: 'input email para', valor: 'juan@ejemplo.com' },
-      ]),
-    });
-    const deps = makeDeps({ motor, navegador, trayectorias });
+    const pagina = makePagina([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]);
+    const motor = makeMotorQuePropone(
+      ['escribe el destinatario', 'haz clic en Enviar'],
+      'listo',
+      pagina,
+    );
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina), trayectorias });
     const job = makeJob({
       payload: {
         kind: 'tarea_web',
@@ -610,6 +665,81 @@ describe('registro de trayectorias (Fase F, V030)', () => {
     expect(detencion.pasos[0]).toMatchObject({ accion: { tipo: 'verificacion' }, exito: false });
     // Los valores comparados quedan en la constancia (ya censurados).
     expect(JSON.stringify(detencion.pasos[0])).toContain('juan@ejemplo.com');
+  });
+
+  it('un intento incompleto no desalinea la traza: la verificacion que autoriza va antes de su accion', async () => {
+    // La verificacion incompleta no deja accion en la traza (no llego al navegador), asi que no puede
+    // correr el lugar de la que si autorizo: la receta que se aprenda debe volver a comparar en el
+    // punto exacto del flujo (D7).
+    const trayectorias = makeTrayectorias();
+    const destinatario = { contexto: 'input email para', valor: 'juan@ejemplo.com' };
+    const pagina = makePagina([]);
+    const motor = makeMotorQuePropone(
+      ['haz clic en Enviar', 'escribe el destinatario', 'haz clic en Enviar'],
+      'listo',
+      pagina,
+      { 'escribe el destinatario': () => void pagina.campos.push(destinatario) },
+    );
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina), trayectorias });
+    const job = makeJob({
+      payload: {
+        kind: 'tarea_web',
+        connectionId: CONNECTION_ID,
+        objetivo: 'envia el resumen a juan@ejemplo.com',
+      },
+    });
+
+    await expect(procesarTareaWeb(deps, job)).resolves.toBe('completada');
+
+    const guardada = guardadaEn(trayectorias);
+    expect(guardada.pasos.map((p) => p.accion.tipo)).toEqual([
+      'verificacion', // el intento con la pagina vacia: no paso
+      'act', // escribir el destinatario
+      'verificacion', // ahora si coincide
+      'act', // el envio
+    ]);
+    expect(guardada.pasos.map((p) => p.exito)).toEqual([false, true, true, true]);
+  });
+
+  /**
+   * CAMBIO 3: un bloqueo es un DESENLACE del sistema, no una caida. La tarea termina de forma
+   * ordenada: la trayectoria conserva TODOS los pasos (los que el agente alcanzo a hacer mas el de
+   * la verificacion que explica el corte), se escribe el resultado del job y se refresca el contexto
+   * de la sesion. El mensaje de la detencion sigue viajando intacto al cierre del job.
+   */
+  it('accion BLOQUEADA: la tarea termina ordenada, con trayectoria completa y resultado escrito', async () => {
+    const trayectorias = makeTrayectorias();
+    const repo = makeRepo();
+    const pagina = makePagina([{ contexto: 'input email para', valor: 'otro@malicioso.com' }]);
+    const motor = makeMotorQuePropone(
+      ['abre el redactor', 'escribe el destinatario', 'haz clic en Enviar'],
+      'listo',
+      pagina,
+    );
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina), trayectorias, repo });
+    const job = makeJob({
+      payload: {
+        kind: 'tarea_web',
+        connectionId: CONNECTION_ID,
+        objetivo: 'envia el resumen a juan@ejemplo.com',
+      },
+    });
+
+    await expect(procesarTareaWeb(deps, job)).rejects.toThrow(/DETENIDA_VERIFICACION/);
+
+    // TRAYECTORIA COMPLETA: los dos pasos que si ocurrieron, y el de verificacion en su lugar exacto
+    // (justo antes de la accion que no paso). Nada se pierde por haberse bloqueado.
+    const guardada = guardadaEn(trayectorias);
+    expect(guardada.estado).toBe('fallida');
+    expect(guardada.pasos.map((p) => p.accion.tipo)).toEqual(['act', 'act', 'verificacion']);
+    expect(guardada.pasos.map((p) => p.idx)).toEqual([0, 1, 2]);
+    // CIERRE ORDENADO: resultado del job escrito y contexto de la sesion refrescado.
+    expect(deps.guardarResultado).toHaveBeenCalledWith(
+      'job-1',
+      expect.objectContaining({ estado: 'detenida' }),
+    );
+    expect(repo.guardarContexto).toHaveBeenCalledTimes(1);
+    expect(deps.navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
   });
 
   it('sesion caducada a mitad de tarea: la trayectoria fallida queda igual registrada', async () => {
@@ -881,23 +1011,23 @@ describe('barrera de la GUARDIA sobre un objetivo con accion bloqueada', () => {
     return makeJob({ payload: { kind: 'tarea_web', connectionId: CONNECTION_ID, objetivo } });
   }
 
-  /** Navegador cuya pagina YA tiene el destinatario que el objetivo declaro. */
-  function makeNavegadorConDestinatario(correo: string) {
-    return makeNavegador({
-      leerCamposDeLaPagina: vi.fn(async () => [
-        { contexto: 'input email para destinatario', valor: correo },
-        { contexto: 'textarea cuerpo mensaje', valor: 'ahi va el resumen' },
-      ]),
-    });
+  /** Pagina que YA tiene el destinatario que el objetivo declaro. */
+  function paginaConDestinatario(correo: string): PaginaFake {
+    return makePagina([
+      { contexto: 'input email para destinatario', valor: correo },
+      { contexto: 'textarea cuerpo mensaje', valor: 'ahi va el resumen' },
+    ]);
   }
 
   it('el dato declarado no se puede leer de la pagina: la accion NO llega al navegador', async () => {
     const motor = makeMotorQuePropone(['haz clic en Enviar']);
-    // La pagina no expone ningun campo de destinatario: no hay contra que comparar -> se detiene.
+    // La pagina no expone ningun campo de destinatario: no hay contra que comparar. La accion no
+    // pasa y, como el agente termina sin que el dato aparezca nunca, la tarea cierra diciendo cual
+    // fue el dato que falto (CAMBIO 1).
     const navegador = makeNavegador();
     const deps = makeDeps({ motor, navegador });
     await expect(procesarTareaWeb(deps, makeJobConObjetivo(OBJETIVO_BLOQUEADO))).rejects.toThrow(
-      /DETENIDA_VERIFICACION/,
+      /nunca encontro en la pagina todos los datos.*destinatario/s,
     );
     expect(motor.ejecutadas).toEqual([]);
     expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
@@ -909,7 +1039,10 @@ describe('barrera de la GUARDIA sobre un objetivo con accion bloqueada', () => {
     // Ante la duda no se cree lo que el agente dice: si la accion no paso por la verificacion, la
     // tarea no se reporta como exito.
     const motor = makeMotorQuePropone(['lee la bandeja'], 'listo, correo enviado');
-    const deps = makeDeps({ motor, navegador: makeNavegadorConDestinatario('juan@ejemplo.com') });
+    const deps = makeDeps({
+      motor,
+      navegador: makeNavegadorDePagina(paginaConDestinatario('juan@ejemplo.com')),
+    });
     await expect(procesarTareaWeb(deps, makeJobConObjetivo(OBJETIVO_BLOQUEADO))).rejects.toThrow(
       /nunca llego a la verificacion previa/,
     );
@@ -949,17 +1082,53 @@ describe('barrera de la GUARDIA sobre un objetivo con accion bloqueada', () => {
   });
 
   it('con el destinatario correcto en pantalla, la accion se ejecuta en la misma corrida', async () => {
+    const pagina = paginaConDestinatario('juan@ejemplo.com');
     const motor = makeMotorQuePropone(
       ['escribe el destinatario', 'haz clic en el boton Enviar'],
       'correo enviado',
+      pagina,
     );
-    const deps = makeDeps({ motor, navegador: makeNavegadorConDestinatario('juan@ejemplo.com') });
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina) });
     await expect(procesarTareaWeb(deps, makeJobConObjetivo(OBJETIVO_BLOQUEADO))).resolves.toBe(
       'completada',
     );
     expect(motor.ejecutadas).toEqual(['escribe el destinatario', 'haz clic en el boton Enviar']);
     expect(motor.ejecutar).toHaveBeenCalledTimes(1);
     expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
+  });
+
+  /**
+   * CAMBIO 4: una accion irreversible no se da por buena porque el modelo lo diga, sino porque el
+   * DOM lo muestra. Si el sitio no cierra el formulario ni muestra confirmacion, la tarea termina
+   * diciendo exactamente eso y NO reintenta.
+   */
+  it('accion ejecutada que el sitio no confirma: se reporta sin reintentar', async () => {
+    // La pagina NO cambia tras la accion (no se pasa `pagina` al motor): nada que confirmar.
+    const pagina = paginaConDestinatario('juan@ejemplo.com');
+    const motor = makeMotorQuePropone(['haz clic en el boton Enviar'], 'correo enviado');
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina), esperar: async () => {} });
+    await expect(procesarTareaWeb(deps, makeJobConObjetivo(OBJETIVO_BLOQUEADO))).rejects.toThrow(
+      /se intento pero no se pudo confirmar/,
+    );
+    // La accion se ejecuto UNA sola vez: el sistema jamas la repite por su cuenta.
+    expect(motor.ejecutadas).toEqual(['haz clic en el boton Enviar']);
+    expect(deps.navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
+  });
+
+  it('el aviso del sitio tambien confirma, aunque el formulario siga en pantalla', async () => {
+    const pagina = paginaConDestinatario('juan@ejemplo.com');
+    const motor = makeMotorQuePropone(['haz clic en el boton Enviar'], 'correo enviado');
+    const deps = makeDeps({
+      motor,
+      navegador: makeNavegador({
+        leerCamposDeLaPagina: vi.fn(async () => pagina.campos),
+        leerTextoVisible: vi.fn(async () => 'Mensaje enviado. Deshacer'),
+      }),
+      esperar: async () => {},
+    });
+    await expect(procesarTareaWeb(deps, makeJobConObjetivo(OBJETIVO_BLOQUEADO))).resolves.toBe(
+      'completada',
+    );
   });
 });
 

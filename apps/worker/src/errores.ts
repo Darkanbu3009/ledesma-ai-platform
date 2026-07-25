@@ -67,6 +67,21 @@ export class AccionBloqueadaError extends Error {
 }
 
 /**
+ * Una accion IRREVERSIBLE se ejecuto y el sistema NO pudo confirmar en el DOM que surtiera efecto
+ * (CAMBIO 4): ni se cerro el formulario que la accion consumia ni el sitio mostro su confirmacion.
+ * La tarea TERMINA reportandolo tal cual, sin afirmar que ocurrio y sin negarlo, y sin reintentar:
+ * repetir a ciegas una accion que quiza ya se ejecuto es exactamente como se duplica un envio.
+ * Lanzarlo desde la tool corta el bucle del agente en el acto, que es lo que impide que el modelo
+ * "no vea la confirmacion" y decida repetir por su cuenta.
+ */
+export class AccionSinConfirmarError extends Error {
+  constructor(mensaje: string) {
+    super(mensaje);
+    this.name = 'AccionSinConfirmarError';
+  }
+}
+
+/**
  * El worker se esta apagando (SIGTERM/SIGINT) y aborto el run en curso. NO es culpa del job: se devuelve
  * a 'pending' para que se re-reclame, sin marcarlo failed aunque haya agotado intentos.
  */

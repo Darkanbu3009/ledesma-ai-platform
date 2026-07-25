@@ -94,15 +94,29 @@ export function esAtributoEstable(atributo: string): boolean {
 export type AccionDeReceta = 'click' | 'escribir' | 'teclas' | 'navegar' | 'esperar' | 'verificar';
 
 /**
- * PARAMETRO del objetivo que un paso de escritura teclea. Son los MISMOS cuatro que extrae
+ * PARAMETRO del objetivo que un paso de escritura teclea. Son los MISMOS que extrae
  * parametros-objetivo.ts (el extractor del PR anterior, D3): asi la firma del objetivo, la
- * verificacion determinista y la sustitucion de la receta hablan del mismo vocabulario.
+ * verificacion determinista y la sustitucion de la receta hablan del mismo vocabulario. Divergir
+ * permitiria promover una receta bajo una firma y ejecutarla sustituyendo otra cosa.
  */
-export type MarcadorParametro = 'destinatario' | 'monto' | 'producto' | 'cantidad';
+export type MarcadorParametro =
+  | 'destinatario'
+  | 'monto'
+  | 'producto'
+  | 'cantidad'
+  | 'asunto'
+  | 'cuerpo';
 
-const MARCADORES: readonly MarcadorParametro[] = ['destinatario', 'monto', 'producto', 'cantidad'];
+const MARCADORES: readonly MarcadorParametro[] = [
+  'destinatario',
+  'monto',
+  'producto',
+  'cantidad',
+  'asunto',
+  'cuerpo',
+];
 
-/** ¿Es `valor` uno de los cuatro marcadores de parametro? */
+/** ¿Es `valor` uno de los marcadores de parametro? */
 export function esMarcadorParametro(valor: unknown): valor is MarcadorParametro {
   return typeof valor === 'string' && MARCADORES.includes(valor as MarcadorParametro);
 }

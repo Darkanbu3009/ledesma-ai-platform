@@ -416,6 +416,36 @@ describe('latido del job en ejecucion y cancelacion cooperativa (CAMBIOS 1 y 3)'
     expect(deps.notifyJobFailure).not.toHaveBeenCalled();
   });
 
+  /**
+   * CAMBIO 3: el cierre que escribe ESTA corrida no puede leerse como una cancelacion externa. El
+   * latido existe para detectar que el job dejo de estar 'running' MIENTRAS corre; si sigue vivo
+   * mientras handleFailure escribe 'failed', lee el estado que acabamos de escribir nosotros, lo
+   * trata como una cancelacion y aborta la corrida a mitad del cierre. Eso convirtio un bloqueo de
+   * la guardia (un desenlace normal) en una corrida abortada sin cierre.
+   */
+  it('el cierre de un fallo NO se cancela a si mismo: el latido se detiene ANTES de escribirlo', async () => {
+    vi.useFakeTimers();
+    const deps = makeDeps({
+      runAgent: vi.fn(() => {
+        throw new Error('la guardia detuvo la accion');
+      }),
+    });
+    // Escribir el cierre tarda (DB lenta + notificacion): sin detener el latido antes, en esa
+    // ventana llegarian DOS latidos y los dos verian 'failed'.
+    deps.jobs.markPendingRetry = vi.fn(async () => {
+      await new Promise((r) => setTimeout(r, 60_000));
+    });
+    (deps.jobs.latirJob as ReturnType<typeof vi.fn>).mockResolvedValue('failed');
+
+    const corrida = processClaimedJob(deps, makeJob({ attempts: 1 }));
+    await vi.advanceTimersByTimeAsync(90_000);
+    await corrida;
+
+    // El cierre se escribio entero y el latido nunca llego a mirar el estado que el mismo cierre puso.
+    expect(deps.jobs.markPendingRetry).toHaveBeenCalledTimes(1);
+    expect(deps.jobs.latirJob).not.toHaveBeenCalled();
+  });
+
   it('un job que pasa a pausado detiene el latido SIN abortar la corrida', async () => {
     vi.useFakeTimers();
     const deps = makeDeps();
