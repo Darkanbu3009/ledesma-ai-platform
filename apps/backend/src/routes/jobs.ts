@@ -6,6 +6,7 @@ import { AppError } from '../errors/app-error.js';
 import { getSql } from '../db/client.js';
 import { createSupabaseJwtVerifier, type JwtVerifier } from '../auth/jwt-verifier.js';
 import { requireUser } from '../auth/require-user.js';
+import { AprobacionesWebRepository } from '../aprobaciones/aprobaciones-repository.js';
 
 // Paginacion del historial: 50 es el TECHO duro por pagina (cota defensiva contra scans grandes) y 20
 // el tamano por defecto. Se acota server-side: el cliente no puede pedir mas de 50.
@@ -72,12 +73,17 @@ export function jobsRoutes(
   config: Env,
   deps?: {
     verifier?: JwtVerifier;
-    jobsRepo?: Pick<JobsRepository, 'listByOwner' | 'getSummaryForOwner'>;
+    jobsRepo?: Pick<JobsRepository, 'listByOwner' | 'getSummaryForOwner' | 'cancelarPorUsuario'>;
+    aprobacionesRepo?: Pick<
+      AprobacionesWebRepository,
+      'cerrarPendientePorCancelacion' | 'registrarIntervencion'
+    >;
   },
 ) {
   return async function (app: FastifyInstance): Promise<void> {
     const verifier = deps?.verifier ?? createSupabaseJwtVerifier(config);
     const jobsRepo = deps?.jobsRepo ?? new JobsRepository(getSql(config));
+    const aprobacionesRepo = deps?.aprobacionesRepo ?? new AprobacionesWebRepository(getSql(config));
 
     // Lista el historial de ejecuciones del owner (mas nuevas primero), paginado y filtrable por estado.
     app.get('/v1/jobs', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -116,6 +122,55 @@ export function jobsRoutes(
         const job = await jobsRepo.getSummaryForOwner(params.data.id, user.id);
         if (!job) throw new AppError('NOT_FOUND', 404, 'Job not found');
         return reply.send({ job: toJobActivity(job) });
+      },
+    );
+
+    // CANCELAR (terminar) un job PROPIO desde la consola. Solo acepta jobs del owner del token en
+    // 'pending' | 'running' | 'pausado': el repositorio los cierra como 'failed' con el prefijo
+    // CANCELADO_POR_USUARIO (D1: sin estado nuevo ni migracion) en un UPDATE atomico. Un job ya
+    // terminado responde 409 sin efectos; uno ajeno o inexistente, 404 (jamas se toca ni se revela).
+    // Si el job estaba 'pausado' (checkpoint de aprobacion), su aprobacion pendiente queda cerrada
+    // como cancelada por el usuario (rechazada + marca) con su constancia Art.22; la sesion de
+    // navegador que el checkpoint mantuvo viva la cierra el barrido del worker al reclamar la marca.
+    // Un job 'running' lo detecta el propio worker en su siguiente latido y aborta la corrida.
+    app.post(
+      '/v1/jobs/:id/cancelar',
+      async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+        const user = await requireUser(request, verifier);
+        const params = JobIdParamSchema.safeParse(request.params);
+        if (!params.success) {
+          throw new AppError('VALIDATION_ERROR', 400, 'Invalid job id', params.error.issues);
+        }
+
+        const resultado = await jobsRepo.cancelarPorUsuario(params.data.id, user.id);
+        if (resultado.resultado === 'no_encontrado') {
+          throw new AppError('NOT_FOUND', 404, 'Job not found');
+        }
+        if (resultado.resultado === 'conflicto') {
+          throw new AppError('CONFLICT', 409, 'La tarea ya termino; no hay nada que cancelar');
+        }
+
+        if (resultado.estadoPrevio === 'pausado') {
+          const aprobacion = await aprobacionesRepo.cerrarPendientePorCancelacion(
+            params.data.id,
+            user.id,
+            user.id,
+          );
+          if (aprobacion) {
+            await aprobacionesRepo.registrarIntervencion({
+              ownerId: user.id,
+              aprobacionId: aprobacion.id,
+              decision: 'rechazada',
+              decididaPor: user.id,
+              descripcion: aprobacion.descripcion,
+              screenshotPath: aprobacion.screenshotPath,
+              instruccion: aprobacion.instruccionRechazo,
+            });
+          }
+        }
+
+        const job = await jobsRepo.getSummaryForOwner(params.data.id, user.id);
+        return reply.send({ job: job ? toJobActivity(job) : null });
       },
     );
   };
