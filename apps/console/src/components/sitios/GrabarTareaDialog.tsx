@@ -35,6 +35,7 @@ export function GrabarTareaDialog({
   dominio,
   grabacion,
   abriendo,
+  esperandoCierre,
   guardada,
   error,
   onComenzar,
@@ -48,6 +49,13 @@ export function GrabarTareaDialog({
   grabacion: Grabacion | null;
   /** true mientras se espera a que la vista en vivo este lista. */
   abriendo: boolean;
+  /**
+   * true entre que el usuario dice "ya termine" y el sistema termina de guardar lo que hizo. Existe
+   * porque son dos momentos distintos: el estado de la grabacion cambia de inmediato, pero los pasos
+   * capturados se escriben unos segundos despues. Sin esto, al usuario se le pediria marcar sus datos
+   * sobre una lista todavia vacia.
+   */
+  esperandoCierre: boolean;
   /** true cuando la tarea ya quedo guardada (ultimo momento del flujo). */
   guardada: boolean;
   /** Mensaje de error a mostrar dentro del modal, o null. */
@@ -75,7 +83,7 @@ export function GrabarTareaDialog({
   const detenidaPorContrasena =
     grabacion?.estado === 'descartada' && grabacion.motivo === 'contrasena';
   const descartada = grabacion?.estado === 'descartada' && !detenidaPorContrasena;
-  const aRevisar = grabacion?.estado === 'terminada' && !guardada;
+  const aRevisar = grabacion?.estado === 'terminada' && !guardada && !esperandoCierre;
   const datos = pasosConDatos(grabacion ?? undefined);
 
   function handleComenzar(evento: FormEvent) {
@@ -174,6 +182,14 @@ export function GrabarTareaDialog({
           >
             <Loader2 className="h-4 w-4 flex-none animate-spin text-brasa" />
             {t('grabacion.abriendo', { dominio })}
+          </div>
+        )}
+
+        {/* Entre "ya termine" y tener lo que hizo guardado. */}
+        {esperandoCierre && grabacion?.estado === 'terminada' && (
+          <div role="status" className="flex items-center gap-2.5 px-6 py-6 text-sm text-muted">
+            <Loader2 className="h-4 w-4 flex-none animate-spin text-brasa" />
+            {t('grabacion.terminando')}
           </div>
         )}
 

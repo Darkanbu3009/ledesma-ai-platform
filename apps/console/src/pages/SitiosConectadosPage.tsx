@@ -210,6 +210,7 @@ export function SitiosConectadosPage() {
    */
   const [ensenando, setEnsenando] = useState<SitioConectado | null>(null);
   const [grabacionId, setGrabacionId] = useState<string | null>(null);
+  const [grabacionJobId, setGrabacionJobId] = useState<string | null>(null);
   const [guardadoJobId, setGuardadoJobId] = useState<string | null>(null);
 
   const conectar = useConectarSitio();
@@ -220,7 +221,13 @@ export function SitiosConectadosPage() {
   const terminarGrabacion = useTerminarGrabacion();
   const guardarGrabacion = useGuardarGrabacion();
 
-  const grabacion = useGrabacion(grabacionId);
+  const grabacionJob = useJobSeguimiento(grabacionJobId);
+  // El job de la grabacion sigue en vuelo: "ya termine" ya cambio el estado de la fila, pero los pasos
+  // los escribe el worker unos segundos despues. Hasta entonces no hay nada que marcar.
+  const cerrandoGrabacion =
+    grabacionJobId !== null &&
+    (grabacionJob.data === undefined || isJobInFlight(grabacionJob.data.status));
+  const grabacion = useGrabacion(grabacionId, cerrandoGrabacion);
   const guardadoJob = useJobSeguimiento(guardadoJobId);
   const conexionJob = useJobSeguimiento(conexion?.jobId ?? null);
   const eliminacionJobs = useJobsSeguimiento(eliminaciones.map((e) => e.jobId));
@@ -331,6 +338,7 @@ export function SitiosConectadosPage() {
   function handleCerrarEnsenanza() {
     setEnsenando(null);
     setGrabacionId(null);
+    setGrabacionJobId(null);
     setGuardadoJobId(null);
   }
 
@@ -339,7 +347,12 @@ export function SitiosConectadosPage() {
     if (!sitio) return;
     abrirGrabacion.mutate(
       { connectionId: sitio.id, descripcion },
-      { onSuccess: (aceptada) => setGrabacionId(aceptada.grabacion.id) },
+      {
+        onSuccess: (aceptada) => {
+          setGrabacionId(aceptada.grabacion.id);
+          setGrabacionJobId(aceptada.jobId);
+        },
+      },
     );
   }
 
@@ -492,6 +505,7 @@ export function SitiosConectadosPage() {
                   onEnsenar={() => {
                     abrirGrabacion.reset();
                     setGrabacionId(null);
+                    setGrabacionJobId(null);
                     setGuardadoJobId(null);
                     setEnsenando(sitio);
                   }}
@@ -537,6 +551,7 @@ export function SitiosConectadosPage() {
           grabacion={grabacion.data ?? null}
           abriendo={abrirGrabacion.isPending || (grabacionId !== null && grabacion.data === undefined)}
           guardada={guardadoJob.data?.status === 'completed'}
+          esperandoCierre={cerrandoGrabacion}
           error={
             abrirGrabacion.isError || terminarGrabacion.isError || guardarGrabacion.isError
               ? backendMessage(

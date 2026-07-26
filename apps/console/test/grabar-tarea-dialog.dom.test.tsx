@@ -47,6 +47,7 @@ function setup(props: Partial<Parameters<typeof GrabarTareaDialog>[0]> = {}) {
       dominio="correo.ejemplo.com"
       grabacion={null}
       abriendo={false}
+      esperandoCierre={false}
       guardada={false}
       error={null}
       ocupado={false}
@@ -145,6 +146,15 @@ describe('momento 3: que datos cambian cada vez', () => {
     expect(screen.getByText(/No escribiste ningún dato/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Guardar' }));
     expect(onGuardar).toHaveBeenCalledWith([]);
+  });
+});
+
+describe('entre "ya termine" y tener lo grabado', () => {
+  it('no pide marcar nada hasta que el sistema termino de guardar lo que hizo', () => {
+    setup({ grabacion: makeGrabacion(), esperandoCierre: true });
+    expect(screen.getByRole('status')).toHaveTextContent('Guardando lo que hiciste');
+    expect(screen.queryByRole('button', { name: 'Guardar' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
   });
 });
 
