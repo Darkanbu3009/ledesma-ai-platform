@@ -63,6 +63,12 @@ export interface CampoDeLaPagina {
   contexto: string;
   /** Valor ACTUAL del campo. Los campos de contrasena jamas se leen (ver browserbase.ts). */
   valor: string;
+  /**
+   * El campo EXISTE pero su valor no se pudo determinar (CAMBIO 2): tiene chips u otro contenido
+   * comprometido del que el lector no extrajo ningun dato. NO es lo mismo que vacio: un campo vacio
+   * esta por escribirse (la tarea sigue); uno no leible no se puede comprobar (la tarea se detiene).
+   */
+  noLeible?: boolean;
 }
 
 /** Foto de solo lectura de la pagina en el momento previo a ejecutar la accion. */
@@ -93,6 +99,11 @@ export interface Comparacion {
    * "hay OTRO valor donde deberia estar el mio" (eso detiene la tarea en seco y se reporta).
    */
   ausente: boolean;
+  /**
+   * El campo del parametro existe pero su valor NO SE PUDO LEER (CAMBIO 2): no hay con que comparar
+   * y tampoco se puede afirmar que falte escribirlo. Detiene la tarea diciendo exactamente eso.
+   */
+  noLeible?: boolean;
 }
 
 /**
@@ -229,9 +240,10 @@ function textosDeLaPagina(pagina: EstadoDeLaPagina): string[] {
  *  1. el usuario apago las acciones irreversibles;
  *  2. el dominio esta excluido;
  *  3. la accion exige un dato que el objetivo nunca declaro;
- *  4. no se pudo leer la pagina (nunca se ejecuta a ciegas);
+ *  4. no se pudo leer la pagina (nunca se ejecuta a ciegas) -> 'noLeible';
  *  5. un monto comprometido supera el tope configurado;
  *  6. algun parametro declarado tiene en pantalla un valor DISTINTO del pedido;
+ *  6.5. el campo de un parametro declarado existe pero no se pudo leer -> 'noLeible' (CAMBIO 2);
  *  7. algun parametro declarado todavia no esta en pantalla -> 'incompleto' (la tarea sigue).
  */
 export function verificarAccion(entrada: {
@@ -265,11 +277,13 @@ export function verificarAccion(entrada: {
   }
 
   if (pagina === null) {
-    // Sin foto del DOM no hay verificacion posible. Jamas se ejecuta a ciegas.
+    // Sin foto del DOM no hay verificacion posible. Jamas se ejecuta a ciegas. Es un NO LEIBLE
+    // (CAMBIO 2), no un "no coincide": decirle al usuario que "en el sitio aparecia nada" cuando lo
+    // que paso es que no se pudo leer manda a diagnosticar lo que no fue.
+    const campo = primerParametroDeclarado(parametros);
     return detener({
-      motivo: 'noCoincide',
-      pedido: descripcionDeLoPedido(parametros),
-      encontrado: '',
+      motivo: 'noLeible',
+      ...(campo !== null ? { campo } : {}),
       detalle: 'no se pudo leer el estado de la pagina antes de ejecutar',
     });
   }
@@ -296,7 +310,9 @@ export function verificarAccion(entrada: {
   // 6. COMPARACION de cada parametro declarado contra el DOM. Un valor DISTINTO del pedido detiene la
   //    tarea (es una accion distinta a la que se pidio, y puede ser una pagina que sustituyo el dato).
   const comparaciones = compararParametros(parametros, pagina);
-  const discordante = comparaciones.find((c) => !c.coincide && !c.ausente);
+  // Un parametro NO LEIBLE no es un valor DISTINTO (no hay valor con que discrepar): se resuelve en
+  // el paso 6.5 con su propio motivo, no como noCoincide.
+  const discordante = comparaciones.find((c) => !c.coincide && !c.ausente && c.noLeible !== true);
   if (discordante !== undefined) {
     return {
       tipo: 'detener',
@@ -305,6 +321,23 @@ export function verificarAccion(entrada: {
         pedido: discordante.pedido,
         encontrado: discordante.encontrado,
         detalle: `el parametro ${discordante.parametro} no coincide`,
+      },
+      comparaciones,
+    };
+  }
+
+  // 6.5. NO LEIBLE (CAMBIO 2): el campo de un parametro declarado existe pero su valor no se pudo
+  //      determinar. No se puede comprobar y no se puede afirmar que falte escribirlo: la tarea se
+  //      detiene DICIENDO eso, en vez de girar para siempre como 'incompleto' o de reportar que "en
+  //      el sitio aparecia nada" (el falso diagnostico de la evidencia de produccion).
+  const ilegible = comparaciones.find((c) => !c.coincide && c.noLeible === true);
+  if (ilegible !== undefined) {
+    return {
+      tipo: 'detener',
+      detencion: {
+        motivo: 'noLeible',
+        campo: ilegible.parametro,
+        detalle: `el campo ${ilegible.parametro} existe en la pagina pero su valor no se pudo leer`,
       },
       comparaciones,
     };
@@ -335,11 +368,12 @@ export function verificarAccion(entrada: {
  *
  * QUE SE RETIRO Y POR QUE (evidencia de produccion): antes bastaba con que TODOS los campos
  * comparados quedaran vacios. Ese estado no distingue una accion consumada de un simple cambio de
- * representacion del dato: Gmail convierte el destinatario tecleado en un CHIP, el lector de campos
- * solo recorre input/textarea/select/[contenteditable] y descarta los valores vacios
- * (browserbase.ts), asi que "el dato ya no esta donde estaba" se leia como "la accion se consumo" y
+ * representacion del dato: Gmail convierte el destinatario tecleado en un CHIP y el lector de campos
+ * leia cadena vacia, asi que "el dato ya no esta donde estaba" se leia como "la accion se consumo" y
  * un correo jamas enviado se reporto como enviado. Un token, un autocompletado o un campo que se
- * deshabilita producen exactamente el mismo estado.
+ * deshabilita producen exactamente el mismo estado. HOY el lector ademas LEE los chips como valor
+ * del campo (browserbase.ts), asi que un dato vuelto chip sigue presente en la foto y ya no puede
+ * confundirse con un contenedor que desaparecio; el criterio estricto de abajo queda como esta.
  *
  * Tambien se retiro el ultimo recurso "la pagina cambio": entre dos lecturas del DOM casi cualquier
  * pagina viva cambia (un reloj, un contador, un aviso), asi que era evidencia de nada.
@@ -406,16 +440,18 @@ function contenedorDeLaAccionDesaparecio(
 const PATRON_CONFIRMACION =
   /\b(?:mensaje enviado|correo enviado|se envio|enviado con exito|enviada correctamente|message sent|email sent|pago (?:realizado|enviado|exitoso|aprobado)|payment (?:sent|complete|completed|successful)|transferencia (?:realizada|enviada|exitosa)|compra (?:realizada|confirmada|exitosa)|gracias por tu compra|pedido (?:confirmado|realizado)|order (?:confirmed|placed)|se elimino|eliminado correctamente|deleted successfully|publicado correctamente|published successfully)\b/;
 
-/** Resumen de lo que el objetivo pedia, para el mensaje cuando no hay nada legible con que comparar. */
-function descripcionDeLoPedido(parametros: ParametrosDeclarados): string {
-  const partes: string[] = [];
-  if (parametros.destinatarios.length > 0) partes.push(parametros.destinatarios.join(', '));
-  if (parametros.monto !== null) partes.push(parametros.monto.texto);
-  if (parametros.producto !== null) partes.push(parametros.producto);
-  if (parametros.cantidad !== null) partes.push(String(parametros.cantidad));
-  if (parametros.asunto !== null) partes.push(parametros.asunto);
-  if (parametros.cuerpo !== null) partes.push(parametros.cuerpo);
-  return partes.join(' / ');
+/**
+ * El PRIMER parametro que el objetivo declara (orden fijo, el mismo de contarParametrosDeclarados):
+ * es el dato que se nombra cuando la pagina entera no se pudo leer. null = no declaro ninguno.
+ */
+function primerParametroDeclarado(parametros: ParametrosDeclarados): NombreDeParametro | null {
+  if (parametros.destinatarios.length > 0) return 'destinatario';
+  if (parametros.monto !== null) return 'monto';
+  if (parametros.producto !== null) return 'producto';
+  if (parametros.cantidad !== null) return 'cantidad';
+  if (parametros.asunto !== null) return 'asunto';
+  if (parametros.cuerpo !== null) return 'cuerpo';
+  return null;
 }
 
 /**
@@ -438,12 +474,16 @@ function compararParametros(
     const enPagina = extraerCorreos(campos.map((c) => c.valor).join(' '));
     const pedidos = [...parametros.destinatarios].sort();
     const encontrados = [...enPagina].sort();
+    // Sin ningun correo legible, un campo de destinatario NO LEIBLE (CAMBIO 2) manda: no se puede
+    // afirmar que falte escribirlo (quiza ya esta, en un chip que no se pudo leer) ni compararlo.
+    const noLeible = encontrados.length === 0 && campos.some((c) => c.noLeible === true);
     comparaciones.push({
       parametro: 'destinatario',
       pedido: pedidos.join(', '),
       encontrado: encontrados.join(', '),
       coincide: encontrados.length > 0 && pedidos.join('|') === encontrados.join('|'),
-      ausente: encontrados.length === 0,
+      ausente: encontrados.length === 0 && !noLeible,
+      ...(noLeible ? { noLeible: true } : {}),
     });
   }
 
@@ -457,12 +497,19 @@ function compararParametros(
     const coincide = candidatos.some(
       (m) => Math.abs(m.valor - declarado.valor) < TOLERANCIA_MONTO,
     );
+    // Un campo de dinero NO LEIBLE sin ningun monto legible en la pagina: no se puede comprobar.
+    const noLeible =
+      candidatos.length === 0 &&
+      pagina.campos.some(
+        (c) => c.noLeible === true && CONTEXTO_MONTO.test(normalizarTexto(c.contexto)),
+      );
     comparaciones.push({
       parametro: 'monto',
       pedido: formatearMonto(declarado.valor, declarado.moneda),
       encontrado: candidatos.map((m) => formatearMonto(m.valor, m.moneda)).join(', '),
       coincide,
-      ausente: candidatos.length === 0,
+      ausente: candidatos.length === 0 && !noLeible,
+      ...(noLeible ? { noLeible: true } : {}),
     });
   }
 
@@ -490,12 +537,15 @@ function compararParametros(
     const valores = campos
       .map((c) => normalizarMonto(c.valor))
       .filter((v): v is number => v !== null);
+    // Un campo de cantidad NO LEIBLE sin ningun valor legible: no se puede comprobar.
+    const noLeible = valores.length === 0 && campos.some((c) => c.noLeible === true);
     comparaciones.push({
       parametro: 'cantidad',
       pedido: String(parametros.cantidad),
       encontrado: valores.join(', '),
       coincide: valores.length > 0 && valores.every((v) => v === parametros.cantidad),
-      ausente: valores.length === 0,
+      ausente: valores.length === 0 && !noLeible,
+      ...(noLeible ? { noLeible: true } : {}),
     });
   }
 
@@ -535,6 +585,12 @@ function compararTextoTecleado(
   const buscado = normalizarTexto(declarado);
   const coincide =
     buscado !== '' && candidatos.some((c) => normalizarTexto(c.valor).includes(buscado));
+  // El campo rotulado del parametro es NO LEIBLE y ninguno de los rotulados tiene un valor legible:
+  // no se puede comprobar (CAMBIO 2). Con algun rotulado legible, ese valor decide como siempre.
+  const noLeible =
+    !coincide &&
+    rotulados.some((c) => c.noLeible === true) &&
+    rotulados.every((c) => c.valor.trim() === '');
   return {
     parametro,
     pedido: declarado,
@@ -548,7 +604,8 @@ function compararTextoTecleado(
           .join(' ')
           .slice(0, MAX_ENCONTRADO_CHARS),
     coincide,
-    ausente: !coincide,
+    ausente: !coincide && !noLeible,
+    ...(noLeible ? { noLeible: true } : {}),
   };
 }
 

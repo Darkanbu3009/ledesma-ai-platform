@@ -602,7 +602,7 @@ describe('politica de ejecucion del usuario', () => {
 });
 
 describe('lectura del DOM', () => {
-  it('si no se puede leer la pagina, NO se ejecuta a ciegas', async () => {
+  it('si no se puede leer la pagina, NO se ejecuta a ciegas y se reporta como NO LEIBLE', async () => {
     const navegador = makeNavegador([]);
     navegador.leerCamposDeLaPagina = vi.fn(async () => {
       throw new Error('sesion caida');
@@ -610,7 +610,9 @@ describe('lectura del DOM', () => {
     const motor = makeMotor();
     const deps = makeDeps({ navegador, motor });
     const detencion = await detencionDe(deps, makeJob('envia el resumen a juan@ejemplo.com'));
-    expect(detencion?.motivo).toBe('noCoincide');
+    // CAMBIO 2: no poder leer NO es "en el sitio aparecia nada"; el motivo dice que no se pudo leer.
+    expect(detencion?.motivo).toBe('noLeible');
+    expect(detencion?.campo).toBe('destinatario');
     expect(motor.ejecutadas).toEqual(['escribe el destinatario']);
   });
 

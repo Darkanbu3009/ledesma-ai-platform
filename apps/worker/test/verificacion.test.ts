@@ -337,6 +337,14 @@ describe('accionSurtioEfecto', () => {
       expect(accionSurtioEfecto({ parametros, antes: soloDestinatario, despues })).toBe(false);
     });
 
+    it('con el lector corregido el chip MANTIENE el campo presente: NO confirmada (CAMBIO 3)', () => {
+      // El lector ahora devuelve el chip como valor del campo Para: la foto siguiente tiene los
+      // mismos campos que la previa y el criterio del contenedor ni siquiera se acerca a confirmar.
+      // "El dato se volvio chip" ya no puede confundirse con "el contenedor desaparecio".
+      const despues = pagina([DESTINATARIO, ASUNTO, CUERPO]);
+      expect(accionSurtioEfecto({ parametros, antes, despues })).toBe(false);
+    });
+
     it('el redactor se cerro de verdad: confirmada', () => {
       expect(accionSurtioEfecto({ parametros, antes, despues: pagina([], 'Bandeja de entrada') })).toBe(
         true,
@@ -438,13 +446,107 @@ describe('dominioExcluido', () => {
 });
 
 describe('sin poder leer la pagina', () => {
-  it('NO ejecuta: la ausencia de datos jamas es una autorizacion', () => {
+  it('NO ejecuta y lo dice como NO LEIBLE, no como "aparecia nada" (CAMBIO 2)', () => {
     const veredicto = verificar({
       objetivo: 'envia el resumen a juan@ejemplo.com',
       verbo: 'enviar',
       pagina: null,
     });
+    expect(motivo(veredicto)).toBe('noLeible');
+    if (veredicto.tipo !== 'detener') throw new Error('inalcanzable');
+    expect(veredicto.detencion.campo).toBe('destinatario');
+  });
+});
+
+/**
+ * CAMBIO 1 y CAMBIO 2: el caso EXACTO de la evidencia de produccion. Gmail convierte el destinatario
+ * confirmado en un CHIP: el input queda vacio y el correo pasa a vivir en un elemento con atributos.
+ * El lector ahora devuelve el chip como valor del campo; y cuando un campo existe pero su valor no
+ * se pudo determinar, eso es NO LEIBLE, que es un veredicto DISTINTO de "esta vacio".
+ */
+describe('chips y campos no leibles (CAMBIO 1 y 2)', () => {
+  const OBJETIVO = 'envia el resumen a juan@ejemplo.com';
+
+  it('un destinatario convertido en chip (leido como valor del campo) supera la verificacion', () => {
+    // El lector ya asocio el valor del chip al campo Para: para la verificacion es un campo mas.
+    const veredicto = verificar({
+      objetivo: OBJETIVO,
+      verbo: 'enviar',
+      pagina: pagina([{ contexto: 'input text destinatarios en para', valor: 'juan@ejemplo.com' }]),
+    });
+    expect(veredicto.tipo).toBe('ejecutar');
+  });
+
+  it('campo de destinatario VACIO: incompleto (falta escribirlo y la tarea sigue)', () => {
+    const veredicto = verificar({
+      objetivo: OBJETIVO,
+      verbo: 'enviar',
+      pagina: pagina([{ contexto: 'textarea cuerpo', valor: 'ahi va' }]),
+    });
+    expect(veredicto.tipo).toBe('incompleto');
+  });
+
+  it('campo de destinatario NO LEIBLE: detiene con noLeible (no se puede comprobar)', () => {
+    const veredicto = verificar({
+      objetivo: OBJETIVO,
+      verbo: 'enviar',
+      pagina: pagina([{ contexto: 'input text destinatarios en para', valor: '', noLeible: true }]),
+    });
+    expect(motivo(veredicto)).toBe('noLeible');
+    if (veredicto.tipo !== 'detener') throw new Error('inalcanzable');
+    expect(veredicto.detencion.campo).toBe('destinatario');
+    // El mensaje serializado es interpretable por la consola, que dira "no pudimos leer", no "nada".
+    const detencion = parsearDetencion(
+      `PermanentExecutionError: ${mensajeDeDetencion(veredicto)}`,
+    );
+    expect(detencion).toMatchObject({ motivo: 'noLeible', campo: 'destinatario' });
+  });
+
+  it('vacio y no leible producen veredictos DISTINTOS (la distincion del CAMBIO 2)', () => {
+    const vacio = verificar({ objetivo: OBJETIVO, verbo: 'enviar', pagina: pagina([]) });
+    const noLeible = verificar({
+      objetivo: OBJETIVO,
+      verbo: 'enviar',
+      pagina: pagina([{ contexto: 'input para', valor: '', noLeible: true }]),
+    });
+    expect(vacio.tipo).toBe('incompleto');
+    expect(noLeible.tipo).toBe('detener');
+  });
+
+  it('con un chip LEGIBLE el campo no leible de al lado no estorba la comparacion', () => {
+    // El correo se leyo (de un chip o del input): hay valor con que comparar y ese valor decide.
+    const veredicto = verificar({
+      objetivo: OBJETIVO,
+      verbo: 'enviar',
+      pagina: pagina([
+        { contexto: 'input text destinatarios en para', valor: 'juan@ejemplo.com' },
+        { contexto: 'input cc', valor: '', noLeible: true },
+      ]),
+    });
+    expect(veredicto.tipo).toBe('ejecutar');
+  });
+
+  it('un chip con OTRO destinatario sigue deteniendo con noCoincide (nada se relajo)', () => {
+    const veredicto = verificar({
+      objetivo: OBJETIVO,
+      verbo: 'enviar',
+      pagina: pagina([{ contexto: 'input text destinatarios en para', valor: 'otro@atacante.com' }]),
+    });
     expect(motivo(veredicto)).toBe('noCoincide');
+  });
+
+  it('el asunto no leible tambien detiene con noLeible', () => {
+    const veredicto = verificar({
+      objetivo: 'envia a juan@ejemplo.com un correo con asunto "Reporte"',
+      verbo: 'enviar',
+      pagina: pagina([
+        { contexto: 'input email para', valor: 'juan@ejemplo.com' },
+        { contexto: 'input asunto', valor: '', noLeible: true },
+      ]),
+    });
+    expect(motivo(veredicto)).toBe('noLeible');
+    if (veredicto.tipo !== 'detener') throw new Error('inalcanzable');
+    expect(veredicto.detencion.campo).toBe('asunto');
   });
 });
 
