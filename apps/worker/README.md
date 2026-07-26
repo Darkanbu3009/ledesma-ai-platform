@@ -244,3 +244,36 @@ cambia lo que el agente decide (mismo objetivo, mismas reglas de sistema, mismas
 Al terminar cada corrida del motor (haya devuelto o haya sido cortada por deadline o cancelacion) se
 loguea `tarea web: consumo de la corrida del motor` con los tokens de entrada, de salida, leidos de
 cache y creados en cache, mas el numero de llamadas al modelo. Es la medida directa del ahorro.
+
+### Tareas que usan varios sitios conectados
+
+Una tarea web puede operar sobre mas de un sitio conectado del mismo usuario (por ejemplo, buscar un
+precio en la cuenta de una tienda y mandar el resultado por correo). El job lleva una LISTA CERRADA
+de sitios autorizados (`payload.sitios`, tope `MAX_SITIOS_POR_TAREA` = 3, validada en `shared`); un
+payload sin esa lista autoriza un solo sitio y se comporta exactamente como antes de este cambio.
+
+Lo que NO cambia, y es lo que hace que la capacidad sea segura:
+
+- **Una sesion POR SITIO, aislada.** Cada sitio abre su propia sesion de navegador contra su propio
+  contexto externo, con su proxy y su pais pineado, y recibe SOLO su contexto descifrado. Las cookies
+  de un sitio nunca entran en la sesion de otro; no hay un navegador con varias pestanas, hay N
+  sesiones separadas en el proveedor (`crearGestorDeSitios`, `src/tarea-web.ts`).
+- **Apertura BAJO DEMANDA.** Solo se abre la sesion del sitio de arranque; las demas se abren la
+  primera vez que el agente cambia a ellas. Una tarea que autoriza tres sitios y usa uno paga una
+  sesion. Todas se cierran al terminar, por la ruta de cierre de siempre.
+- **El destino de un cambio se resuelve SERVER-SIDE** contra la lista del job
+  (`resolverDominioAutorizado`, `src/multisitio.ts`), por comparacion exacta: ni sufijos, ni
+  subdominios, ni un sitio del usuario que ESTA tarea no autorizo. Un destino rechazado vuelve al
+  modelo como fallo de la tool y no abre nada.
+- **El cupo de accion irreversible es POR SITIO.** Enviar un correo en un sitio y comprar en otro son
+  dos acciones distintas y las dos pueden ejecutarse en la misma tarea; dos acciones irreversibles en
+  el MISMO sitio siguen bloqueadas, y volver a un sitio ya visitado no reabre su cupo (el contador
+  vive en `crearRegistroDeSitios`, fuera de la guardia del tramo).
+- **La verificacion determinista y la politica del usuario se aplican igual en cada sitio**, contra
+  los parametros que declaro el USUARIO. Lo que un sitio "le cuenta" al siguiente viaja como dato
+  delimitado y censurado dentro de la instruccion del tramo, nunca como instruccion.
+
+El bucle del agente esta atado a la sesion en la que arranca, asi que un cambio de sitio TERMINA el
+tramo y el handler vuelve a correr el motor sobre la sesion del destino. El presupuesto de pasos
+(`TAREA_WEB_MAX_STEPS`) y el deadline de pared (`TAREA_WEB_TIMEOUT_SECONDS`) son de la TAREA, no del
+tramo, y los cambios estan acotados por `MAX_CAMBIOS_DE_SITIO_POR_TAREA`.

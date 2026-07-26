@@ -58,6 +58,14 @@ export interface PasoCensurado {
    * cuando la promocion a receta la necesita.
    */
   estrategias: EstrategiaLocalizacion[];
+  /**
+   * SITIO en el que ocurrio el paso (tareas multisitio). Lo estampa el handler al cerrar el tramo:
+   * dentro de un tramo TODOS los pasos pertenecen al mismo sitio, porque un cambio de sitio termina
+   * el tramo. Es lo que permite promover una receta que cruza sitios sabiendo a cual pertenece cada
+   * paso. Igual que `estrategias`, NO se persiste en pasos_trayectoria (V030 no tiene columna): vive
+   * el tiempo que dura la corrida, que es cuando la promocion lo necesita.
+   */
+  dominio?: string | null;
 }
 
 /**
