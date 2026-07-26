@@ -619,10 +619,39 @@ describe('JobsRepository: existeFalloPermanenteReciente (barrera anti relanzamie
       'user-1',
       'tarea_web',
       'con-1',
+      'con-1',
       120,
       CANCELADO_POR_USUARIO_PREFIX,
       SISTEMA_DETUVO_TAREA_PREFIX,
     ]);
+  });
+
+  it('la conexion se busca TAMBIEN en payload.sitios: una tarea multisitio fallida bloquea sus otros sitios', async () => {
+    // El agujero de produccion: la tarea fallida (o detenida por la verificacion) guardaba solo su
+    // sitio de ARRANQUE en payload.connectionId; un relanzamiento dirigido al SEGUNDO sitio de esa
+    // misma tarea no encontraba fallo reciente y pasaba la barrera. La consulta ahora matchea la
+    // lista completa payload.sitios ademas del arranque.
+    const sql = makeSqlReturning([{ id: 'job-1' }]);
+    await new JobsRepository(sql).existeFalloPermanenteReciente('user-1', 'con-2', 120_000);
+    const texto = sqlText(sql);
+    expect(texto).toContain("jsonb_exists(payload->'sitios', <param>)");
+    expect(texto).toContain("payload->>'connectionId' = <param>\n          or jsonb_exists");
+  });
+
+  it('una tarea DETENIDA POR LA VERIFICACION cuenta para la barrera: el modelo no la relanza (test 4)', async () => {
+    // El last_error de una detencion empieza con el nombre de la clase de error y trae
+    // DETENIDA_VERIFICACION adentro: NO empieza con ninguno de los dos prefijos exentos, asi que el
+    // WHERE la incluye. La exencion es SOLO para cancelacion del usuario y reaper (ahi el usuario ya
+    // decidio); tras una detencion de la verificacion decidir le toca al usuario, no al modelo.
+    const lastErrorDeDetencion = 'PermanentExecutionError: DETENIDA_VERIFICACION: {"motivo":"noLeible"}';
+    expect(lastErrorDeDetencion.startsWith(CANCELADO_POR_USUARIO_PREFIX)).toBe(false);
+    expect(lastErrorDeDetencion.startsWith(SISTEMA_DETUVO_TAREA_PREFIX)).toBe(false);
+    const sql = makeSqlReturning([{ id: 'job-detenido' }]);
+    const hay = await new JobsRepository(sql).existeFalloPermanenteReciente('user-1', 'con-1', 120_000);
+    expect(hay).toBe(true);
+    // La consulta no tiene ninguna otra exencion por texto de last_error que pudiera colarla.
+    const texto = sqlText(sql);
+    expect(texto.match(/starts_with/g)).toHaveLength(2);
   });
 
   it('false sin filas (sin fallo reciente): la tarea se puede encolar', async () => {

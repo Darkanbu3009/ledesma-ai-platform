@@ -470,6 +470,16 @@ export class JobsRepository {
    *    el usuario ya tomo una decision explicita (o ya sabe que la tarea murio) y reintentar es
    *    legitimo. La deteccion usa los MISMOS prefijos que escriben esos dos caminos
    *    (CANCELADO_POR_USUARIO_PREFIX / SISTEMA_DETUVO_TAREA_PREFIX), no literales propios.
+   * SI cuenta, y a proposito, una tarea DETENIDA POR LA VERIFICACION (DETENIDA_VERIFICACION en el
+   * last_error): ahi el usuario todavia NO decidio nada -- decidio el sistema al no dejar ejecutar
+   * -- y relanzarla tiene que ser una decision del usuario, no del modelo.
+   *
+   * LA CONEXION SE BUSCA EN TODOS LOS SITIOS DE LA TAREA FALLIDA, no solo en el de arranque: una
+   * tarea multisitio guarda el arranque en payload.connectionId y la lista completa en
+   * payload.sitios. Antes solo se comparaba connectionId, asi que una tarea que fallo (o fue
+   * detenida por la verificacion) mientras operaba en su SEGUNDO sitio no activaba la barrera para
+   * un relanzamiento dirigido a ese sitio: es el agujero por el que el modelo relanzo tras un
+   * bloqueo en produccion.
    *
    * `starts_with` y no LIKE a proposito: los prefijos contienen guiones bajos, que en un patron LIKE
    * son comodines de un caracter y volverian la EXENCION mas permisiva de lo escrito (y una exencion
@@ -487,7 +497,10 @@ export class JobsRepository {
       where owner_id = ${ownerId}
         and status = 'failed'
         and payload->>'kind' = ${TAREA_WEB_JOB_KIND}
-        and payload->>'connectionId' = ${connectionId}
+        and (
+          payload->>'connectionId' = ${connectionId}
+          or jsonb_exists(payload->'sitios', ${connectionId})
+        )
         and finished_at is not null
         and finished_at > now() - make_interval(secs => ${ventanaMs / 1000})
         and (
