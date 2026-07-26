@@ -17,6 +17,8 @@ import type { SitioConectado } from './sitios';
 import type { PoliticaEjecucion } from './politicas';
 import type { Trayectoria } from './trayectorias';
 import { JOB_SEGUIMIENTO_REFETCH_MS, SITIOS_REFETCH_MS, haySitiosEnTransicion } from './sitios';
+import type { Grabacion } from './grabaciones';
+import { GRABACION_REFETCH_MS, grabacionEnCurso } from './grabaciones';
 import type { ConsentsState, DataRequest } from './privacy';
 import type { AprobacionWeb } from './aprobaciones';
 import { APROBACIONES_REFETCH_MS, obtenerScreenshotUrl } from './aprobaciones';
@@ -178,6 +180,27 @@ function jobSeguimientoQueryOptions(jobId: string | null) {
 
 export function useJobSeguimiento(jobId: string | null) {
   return useQuery(jobSeguimientoQueryOptions(jobId));
+}
+
+/**
+ * UNA GRABACION en curso (GET /v1/grabaciones/:id). Polling con refetchInterval (patron V017, sin
+ * useEffect) mientras la grabacion sigue abierta: primero se espera a que aparezca la vista en vivo
+ * (la publica el worker al instalar la captura) y despues a que el cierre deje los pasos guardados.
+ *
+ * `pollingExtra` existe por una carrera real: "ya termine" cambia el estado de la fila DE INMEDIATO
+ * (lo escribe el backend), pero los pasos capturados los escribe el WORKER unos segundos despues, al
+ * detectar el cambio y cerrar la captura. Sin seguir consultando en esa ventana, la consola le pediria
+ * al usuario que marque sus datos sobre una lista todavia vacia. La pagina lo pasa en true mientras el
+ * job de la grabacion sigue en vuelo.
+ */
+export function useGrabacion(id: string | null, pollingExtra = false) {
+  return useQuery({
+    queryKey: ['grabaciones', id] as const,
+    queryFn: () => apiFetch<{ grabacion: Grabacion }>(`/v1/grabaciones/${id}`).then((r) => r.grabacion),
+    enabled: Boolean(id),
+    refetchInterval: (query: { state: { data?: Grabacion } }) =>
+      pollingExtra || grabacionEnCurso(query.state.data) ? GRABACION_REFETCH_MS : false,
+  });
 }
 
 /**

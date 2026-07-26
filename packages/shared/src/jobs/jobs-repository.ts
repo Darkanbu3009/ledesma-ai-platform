@@ -12,6 +12,7 @@ import type {
 import { RECIPE_JOB_KIND } from './recipe-payload.js';
 import { SITIO_JOB_KINDS } from './sitio-payload.js';
 import { TAREA_WEB_JOB_KIND } from './tarea-web-payload.js';
+import { GRABACION_JOB_KINDS } from './grabacion-payload.js';
 
 /**
  * Cliente postgres (tagged template) que el repositorio recibe por inyeccion, IGUAL que los
@@ -594,8 +595,13 @@ export class JobsRepository {
     for (const candidato of candidatos) {
       const attempts = Number(candidato.attempts ?? 0);
       const kind = candidato.payload_kind ?? '';
+      // Un job de GRABACION tampoco se reencola: re-ejecutar 'grabar_tarea' abriria una segunda sesion
+      // de navegador sobre una grabacion que el usuario ya dio por terminada, y re-ejecutar
+      // 'promover_grabacion' crearia una segunda version de la misma receta.
       const nuncaReencolar =
-        kind === TAREA_WEB_JOB_KIND || (SITIO_JOB_KINDS as readonly string[]).includes(kind);
+        kind === TAREA_WEB_JOB_KIND ||
+        (SITIO_JOB_KINDS as readonly string[]).includes(kind) ||
+        (GRABACION_JOB_KINDS as readonly string[]).includes(kind);
       const aFailed = nuncaReencolar || attempts >= maxAttempts;
       const lastError = nuncaReencolar
         ? SISTEMA_DETUVO_TAREA_ERROR

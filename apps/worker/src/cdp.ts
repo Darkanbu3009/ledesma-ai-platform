@@ -52,6 +52,16 @@ export class ClienteCdp {
     sessionId: string | undefined;
     resolve(params: unknown): void;
   }> = [];
+  /**
+   * Suscripciones CONTINUAS a un evento (a diferencia de esperarEvento, que resuelve una sola vez).
+   * Existe para la grabacion de tareas: el guion que corre en la pagina le habla al worker por
+   * Runtime.bindingCalled, que llega N veces mientras el usuario hace la tarea.
+   */
+  private suscripciones: Array<{
+    method: string;
+    sessionId: string | undefined;
+    manejador(params: unknown): void;
+  }> = [];
   private cerrado = false;
 
   private constructor(
@@ -109,6 +119,17 @@ export class ClienteCdp {
       return;
     }
     if (typeof mensaje.method === 'string') {
+      for (const suscripcion of this.suscripciones) {
+        const coincide =
+          suscripcion.method === mensaje.method &&
+          (suscripcion.sessionId === undefined || suscripcion.sessionId === mensaje.sessionId);
+        if (!coincide) continue;
+        try {
+          suscripcion.manejador(mensaje.params);
+        } catch {
+          // Un manejador que lanza no puede romper la lectura del socket ni el resto de las esperas.
+        }
+      }
       const restantes: typeof this.esperasDeEvento = [];
       for (const espera of this.esperasDeEvento) {
         const coincide =
@@ -167,6 +188,23 @@ export class ClienteCdp {
       };
       this.esperasDeEvento.push({ method, sessionId, resolve: envoltura });
     });
+  }
+
+  /**
+   * SUSCRIBE un manejador a TODAS las apariciones de un evento CDP (opcionalmente de una sesion
+   * flatten concreta). Devuelve la funcion que cancela la suscripcion. Sin timeout a proposito: quien
+   * suscribe decide cuando dejar de escuchar.
+   */
+  suscribirEvento(
+    method: string,
+    manejador: (params: unknown) => void,
+    sessionId?: string,
+  ): () => void {
+    const entrada = { method, sessionId, manejador };
+    this.suscripciones.push(entrada);
+    return () => {
+      this.suscripciones = this.suscripciones.filter((s) => s !== entrada);
+    };
   }
 
   /** Cierra el WebSocket. La sesion remota sigue viva (keep alive del proveedor); solo se desconecta. */

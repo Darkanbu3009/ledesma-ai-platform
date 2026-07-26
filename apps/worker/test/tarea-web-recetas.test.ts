@@ -230,7 +230,7 @@ function makeDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
 }
 
 /** Una receta activa lista para ejecutar, con los pasos ya validados por el contrato compartido. */
-function makeReceta(pasos: unknown[]): RecetaWeb {
+function makeReceta(pasos: unknown[], origen: RecetaWeb['origen'] = 'automatica'): RecetaWeb {
   const validados = parsearPasosDeReceta(pasos);
   if (validados === null) throw new Error('los pasos del fixture no validan contra el contrato');
   return {
@@ -240,6 +240,7 @@ function makeReceta(pasos: unknown[]): RecetaWeb {
     firmaObjetivo: 'x',
     version: 1,
     estado: 'activa',
+    origen,
     pasos: validados,
     creadaDesdeTrayectoria: null,
     ejecucionesExitosas: 3,

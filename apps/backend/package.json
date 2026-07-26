@@ -27,6 +27,10 @@
     "./recetas-web": {
       "types": "./dist/recetas-web/index.d.ts",
       "import": "./dist/recetas-web/index.js"
+    },
+    "./grabaciones": {
+      "types": "./dist/grabaciones/index.d.ts",
+      "import": "./dist/grabaciones/index.js"
     }
   },
   "scripts": {

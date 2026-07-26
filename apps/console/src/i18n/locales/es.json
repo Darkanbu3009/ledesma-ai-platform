@@ -1949,6 +1949,40 @@
       "sitioInvalido": "Revisa los sitios: escribe solo el dominio, como banco.com."
     }
   },
+  "grabacion": {
+    "iniciar": "Enseñarle una tarea",
+    "titulo": "Enseñarle una tarea en {{dominio}}",
+    "descripcion": "Qué le vas a enseñar",
+    "descripcionPlaceholder": "Ejemplo: enviar el reporte semanal a mi jefe",
+    "descripcionRequerida": "Escribe en una línea qué le vas a enseñar.",
+    "ayuda": "Haz la tarea como la harías normalmente. Después nos dices qué datos cambian cada vez.",
+    "comenzar": "Empezar",
+    "abriendo": "Estamos abriendo {{dominio}} para que hagas la tarea.",
+    "terminar": "Ya terminé",
+    "terminando": "Guardando lo que hiciste",
+    "marcarVariables": "Qué datos cambian cada vez",
+    "marcarAyuda": "Marca los datos que van a ser distintos la próxima vez. Los demás quedan siempre igual.",
+    "datoFijo": "Siempre es el mismo",
+    "sinDatos": "No escribiste ningún dato en esta tarea, así que no hay nada que marcar.",
+    "guardar": "Guardar",
+    "guardando": "Guardando",
+    "guardada": "Listo. La próxima vez la hace sola.",
+    "detenidaPorContrasena": "Se detuvo la grabación porque apareció un campo de contraseña. No guardamos nada.",
+    "descartada": "No pudimos guardar lo que hiciste. Vuelve a intentarlo con calma.",
+    "error": "Algo salió mal. Inténtalo de nuevo.",
+    "cancelar": "Cancelar",
+    "cerrarAria": "Cerrar",
+    "iframeTitulo": "Navegador seguro para hacer la tarea en {{dominio}}",
+    "pie": "Se abre en un navegador seguro con tu sesión ya iniciada. Nunca te pedimos tu contraseña.",
+    "tipos": {
+      "destinatario": "Para quién es",
+      "asunto": "El asunto",
+      "cuerpo": "El mensaje",
+      "monto": "El monto",
+      "producto": "El producto",
+      "cantidad": "La cantidad"
+    }
+  },
   "receta": {
     "etiqueta": "Tarea aprendida",
     "detalle": "Esta tarea se ejecuto con lo aprendido de una vez anterior, sin volver a analizar el sitio.",

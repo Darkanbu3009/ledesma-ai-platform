@@ -4,6 +4,13 @@ import { ClienteCdp } from './cdp.js';
 import { SalidaDeRedNoDisponibleError } from './sitios.js';
 import type { NavegadorRemoto, SesionDeLoginAbierta } from './sitios.js';
 import type { NavegadorParaTarea, SesionDeTareaAbierta } from './tarea-web.js';
+import type {
+  CapturaEnCurso,
+  NavegadorParaGrabacion,
+  SesionDeGrabacionAbierta,
+} from './grabacion.js';
+import { EXPRESION_HAY_CAMPO_DE_CONTRASENA } from './contrasena.js';
+import { ENLACE_DE_GRABACION, GUION_GRABADOR, MUNDO_DE_GRABACION } from './guion-grabador.js';
 import type { CampoDeLaPagina } from './verificacion.js';
 import type {
   InstruccionDePaso,
@@ -65,6 +72,14 @@ const SESSION_TIMEOUT_SECONDS = 15 * 60;
  * timeout queda de techo duro de costo si el worker muriera.
  */
 const TAREA_SESSION_TIMEOUT_SECONDS = 45 * 60;
+
+/**
+ * Timeout propio de la sesion de GRABACION (segundos). Es un HUMANO el que maneja el navegador, asi que
+ * el plazo se parece al del login: el worker da por abandonada la grabacion a los 10 minutos
+ * (GRABACION_TIMEOUT_MS) y cierra la sesion el mismo; estos 20 minutos son el techo duro de costo si el
+ * worker muriera antes de llegar a cerrarla.
+ */
+const GRABACION_SESSION_TIMEOUT_SECONDS = 20 * 60;
 
 /**
  * Echo para OBSERVAR la salida real del proxy (la API no la expone). El trace de Cloudflare devuelve
@@ -315,7 +330,7 @@ interface TargetInfo {
 }
 
 export class NavegadorBrowserbase
-  implements NavegadorRemoto, NavegadorParaTarea, NavegadorDeterminista
+  implements NavegadorRemoto, NavegadorParaTarea, NavegadorDeterminista, NavegadorParaGrabacion
 {
   private readonly bb: Browserbase;
 
@@ -582,12 +597,145 @@ export class NavegadorBrowserbase
       await carga;
       const evaluado = await cdp.enviar<{ result?: { value?: unknown } }>(
         'Runtime.evaluate',
-        { expression: "!!document.querySelector('input[type=password]')", returnByValue: true },
+        { expression: EXPRESION_HAY_CAMPO_DE_CONTRASENA, returnByValue: true },
         sessionId,
       );
       return evaluado.result?.value === true;
     } finally {
       cdp.cerrar();
+    }
+  }
+
+  /**
+   * Abre la sesion de una GRABACION DE TAREA: igual que la de una tarea web (reconecta el contexto
+   * guardado y FUERZA la salida pineada con la geolocalizacion del pais pineado), pero ademas devuelve
+   * la URL DE LA VISTA EN VIVO, porque aqui es un humano quien va a manejar el navegador.
+   *
+   * Reusa el MISMO viewport explicito que el login (LOGIN_VIEWPORT): es lo que dimensiona la vista en
+   * vivo del proveedor, asi que sin el la grabacion se veria al tamano por defecto.
+   */
+  async abrirSesionParaGrabacion(params: {
+    contextoExternoId: string;
+    proxyRef: string;
+    proxyCountry: string;
+  }): Promise<SesionDeGrabacionAbierta> {
+    const { proxies } = this.resolverProxy(params.proxyRef, params.proxyCountry);
+
+    const session = await this.bb.sessions.create({
+      projectId: this.config.projectId,
+      browserSettings: {
+        context: { id: params.contextoExternoId, persist: true },
+        viewport: { width: LOGIN_VIEWPORT.width, height: LOGIN_VIEWPORT.height },
+      },
+      proxies,
+      keepAlive: true,
+      timeout: GRABACION_SESSION_TIMEOUT_SECONDS,
+    });
+
+    let salida: SalidaEcho;
+    const cdp = await ClienteCdp.conectar(session.connectUrl);
+    try {
+      const sessionId = await this.attachPaginaInicial(cdp);
+      salida = await this.observarSalidaEnPagina(cdp, sessionId);
+    } catch (error) {
+      cdp.cerrar();
+      await this.cerrarSesionSilencioso(session.id);
+      throw error;
+    }
+    cdp.cerrar();
+
+    const debug = await this.bb.sessions.debug(session.id);
+    return {
+      sesionExternaId: session.id,
+      vistaEnVivoUrl: debug.debuggerFullscreenUrl,
+      egressIp: salida.egressIp,
+      egressCountry: salida.egressCountry,
+    };
+  }
+
+  /**
+   * INSTALA el grabador en la pagina y empieza a recibir sus eventos (CAMBIO 1 de la grabacion).
+   *
+   * Tres piezas de CDP, todas de solo lectura sobre la pagina:
+   *  1. `Runtime.addBinding` con `executionContextName`: crea la funcion por la que el guion le habla
+   *     al worker. Al llamarla, el navegador emite `Runtime.bindingCalled`, que es lo que se escucha
+   *     aqui. Ligada al MUNDO AISLADO por nombre, asi que la pagina no la ve ni la puede llamar.
+   *  2. `Page.addScriptToEvaluateOnNewDocument` con `worldName`: reinstala el guion en cada navegacion
+   *     (la grabacion sobrevive a los cambios de pagina del usuario).
+   *  3. Un `Page.createIsolatedWorld` + `Runtime.evaluate` para el documento que YA esta cargado, que
+   *     el punto 2 por si solo no cubre.
+   *
+   * La conexion CDP queda ABIERTA mientras dura la grabacion (a diferencia del resto de los metodos,
+   * que abren y cierran una por llamada): es el canal por el que llegan los eventos. `detener` la
+   * cierra y quita el guion de las navegaciones futuras.
+   */
+  async iniciarCaptura(
+    sesionExternaId: string,
+    alRecibir: (crudo: string) => void,
+  ): Promise<CapturaEnCurso> {
+    const session = await this.bb.sessions.retrieve(sesionExternaId);
+    if (!session.connectUrl) {
+      throw new Error('la sesion de navegador no expone un connect URL (ya no esta corriendo)');
+    }
+    const cdp = await ClienteCdp.conectar(session.connectUrl);
+    try {
+      const sessionId = await this.attachPaginaInicial(cdp);
+      await cdp.enviar('Runtime.enable', {}, sessionId);
+      await cdp.enviar(
+        'Runtime.addBinding',
+        { name: ENLACE_DE_GRABACION, executionContextName: MUNDO_DE_GRABACION },
+        sessionId,
+      );
+      const { identifier } = await cdp.enviar<{ identifier: string }>(
+        'Page.addScriptToEvaluateOnNewDocument',
+        { source: GUION_GRABADOR, worldName: MUNDO_DE_GRABACION },
+        sessionId,
+      );
+
+      cdp.suscribirEvento(
+        'Runtime.bindingCalled',
+        (params) => {
+          const evento = params as { name?: unknown; payload?: unknown } | null;
+          if (!evento || evento.name !== ENLACE_DE_GRABACION) return;
+          if (typeof evento.payload === 'string') alRecibir(evento.payload);
+        },
+        sessionId,
+      );
+
+      // El documento que ya estaba cargado cuando se instalo el grabador: se le inyecta el guion en el
+      // mismo mundo aislado, para no perder los primeros pasos del usuario.
+      const { frameTree } = await cdp.enviar<{ frameTree: { frame: { id: string } } }>(
+        'Page.getFrameTree',
+        {},
+        sessionId,
+      );
+      const { executionContextId } = await cdp.enviar<{ executionContextId: number }>(
+        'Page.createIsolatedWorld',
+        { frameId: frameTree.frame.id, worldName: MUNDO_DE_GRABACION },
+        sessionId,
+      );
+      await cdp.enviar(
+        'Runtime.evaluate',
+        { expression: GUION_GRABADOR, contextId: executionContextId },
+        sessionId,
+      );
+
+      let detenida = false;
+      return {
+        detener: async (): Promise<void> => {
+          if (detenida) return;
+          detenida = true;
+          try {
+            await cdp.enviar('Page.removeScriptToEvaluateOnNewDocument', { identifier }, sessionId);
+          } catch {
+            // La sesion puede haberse caido ya: cerrar el socket alcanza para dejar de escuchar.
+          }
+          cdp.cerrar();
+        },
+      };
+    } catch (error) {
+      cdp.cerrar();
+      throw error;
     }
   }
 

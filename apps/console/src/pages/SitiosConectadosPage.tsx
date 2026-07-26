@@ -1,15 +1,25 @@
 import { useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Globe, Loader2, Lock, Trash2 } from 'lucide-react';
+import { Globe, GraduationCap, Loader2, Lock, Trash2 } from 'lucide-react';
 import { ApiError } from '../lib/api';
 import i18n from '../i18n';
-import { useJobSeguimiento, useJobsSeguimiento, useMe, useSitios } from '../lib/queries';
 import {
+  useGrabacion,
+  useJobSeguimiento,
+  useJobsSeguimiento,
+  useMe,
+  useSitios,
+} from '../lib/queries';
+import {
+  useAbrirGrabacion,
   useConectarSitio,
   useConfirmarSitio,
   useEliminarSitio,
+  useGuardarGrabacion,
+  useTerminarGrabacion,
   useUpdateProfilePais,
 } from '../lib/mutations';
+import type { TipoDeDato } from '../lib/grabaciones';
 import {
   estadoSitioLabel,
   inicialDeDominio,
@@ -22,6 +32,7 @@ import { isJobInFlight } from '../lib/jobs';
 import { formatRunAt } from '../lib/schedule';
 import { CatalogoSitiosCombobox } from '../components/sitios/CatalogoSitiosCombobox';
 import { LoginEnVivoDialog } from '../components/sitios/LoginEnVivoDialog';
+import { GrabarTareaDialog } from '../components/sitios/GrabarTareaDialog';
 import { SeleccionPaisDialog } from '../components/sitios/SeleccionPaisDialog';
 import { EliminarSitioDialog } from '../components/sitios/EliminarSitioDialog';
 import { PageHeader } from '../components/ui/PageHeader';
@@ -65,15 +76,19 @@ function EstadoBadge({ estado }: { estado: EstadoSitio }) {
 }
 
 /**
- * Fila de UN sitio conectado: inicial del dominio, dominio, estado, ultimo uso y UNA sola salida:
- * el boton "Eliminar" (bote de basura + etiqueta), que dispara el borrado FORZADO garantizado (el
- * que funciona desde cualquier estado, aunque la sesion o el contexto del proveedor ya no existan).
+ * Fila de UN sitio conectado: inicial del dominio, dominio, estado, ultimo uso y sus acciones. La
+ * primera, SOLO en un sitio ya conectado, es ensenarle una tarea: el usuario la hace una vez y a
+ * partir de ahi el sistema la repite solo (via COMPLEMENTARIA, el agente sigue pudiendo hacer
+ * cualquier cosa en el sitio sin que nadie le ensene nada). La segunda es "Eliminar" (bote de basura
+ * + etiqueta), que dispara el borrado FORZADO garantizado, el que funciona desde cualquier estado.
  */
 function SitioCard({
   sitio,
+  onEnsenar,
   onEliminar,
 }: {
   sitio: SitioConectado;
+  onEnsenar: () => void;
   onEliminar: () => void;
 }) {
   const { t } = useTranslation();
@@ -103,6 +118,16 @@ function SitioCard({
         </div>
       </div>
       <div className="flex flex-none items-center gap-2 self-start sm:self-center">
+        {sitio.estado === 'activo' && (
+          <button
+            type="button"
+            onClick={onEnsenar}
+            className="inline-flex flex-none items-center justify-center gap-1.5 rounded-[10px] border border-line bg-surface px-3.5 py-2 text-[13px] font-medium text-ink transition hover:border-brasa hover:text-brasa"
+          >
+            <GraduationCap className="h-4 w-4" />
+            {t('grabacion.iniciar')}
+          </button>
+        )}
         <button
           type="button"
           onClick={onEliminar}
@@ -177,12 +202,33 @@ export function SitiosConectadosPage() {
    */
   const [eliminaciones, setEliminaciones] = useState<Array<{ jobId: string; sitioId: string }>>([]);
   const [aEliminar, setAEliminar] = useState<SitioConectado | null>(null);
+  /**
+   * ENSENARLE UNA TAREA a un sitio ya conectado. Tres piezas de estado y nada mas: el sitio elegido,
+   * la grabacion que se abrio (su avance se DERIVA del polling de useGrabacion) y el job que guarda la
+   * tarea al final (su desenlace se DERIVA de useJobSeguimiento). Sin efectos, igual que el resto de
+   * la pagina.
+   */
+  const [ensenando, setEnsenando] = useState<SitioConectado | null>(null);
+  const [grabacionId, setGrabacionId] = useState<string | null>(null);
+  const [grabacionJobId, setGrabacionJobId] = useState<string | null>(null);
+  const [guardadoJobId, setGuardadoJobId] = useState<string | null>(null);
 
   const conectar = useConectarSitio();
   const confirmar = useConfirmarSitio();
   const eliminar = useEliminarSitio();
   const guardarPais = useUpdateProfilePais();
+  const abrirGrabacion = useAbrirGrabacion();
+  const terminarGrabacion = useTerminarGrabacion();
+  const guardarGrabacion = useGuardarGrabacion();
 
+  const grabacionJob = useJobSeguimiento(grabacionJobId);
+  // El job de la grabacion sigue en vuelo: "ya termine" ya cambio el estado de la fila, pero los pasos
+  // los escribe el worker unos segundos despues. Hasta entonces no hay nada que marcar.
+  const cerrandoGrabacion =
+    grabacionJobId !== null &&
+    (grabacionJob.data === undefined || isJobInFlight(grabacionJob.data.status));
+  const grabacion = useGrabacion(grabacionId, cerrandoGrabacion);
+  const guardadoJob = useJobSeguimiento(guardadoJobId);
   const conexionJob = useJobSeguimiento(conexion?.jobId ?? null);
   const eliminacionJobs = useJobsSeguimiento(eliminaciones.map((e) => e.jobId));
 
@@ -286,6 +332,36 @@ export function SitiosConectadosPage() {
     // Cierra el modal (o el spinner) sin confirmar. La sesion remota expira sola del lado del
     // proveedor y el barrido del worker marca la fila; aqui no hay nada mas que limpiar.
     setConexion(null);
+  }
+
+  /** Cierra el flujo de ensenanza y olvida su seguimiento (la grabacion sigue su curso en el servidor). */
+  function handleCerrarEnsenanza() {
+    setEnsenando(null);
+    setGrabacionId(null);
+    setGrabacionJobId(null);
+    setGuardadoJobId(null);
+  }
+
+  function handleComenzarEnsenanza(descripcion: string) {
+    const sitio = ensenando;
+    if (!sitio) return;
+    abrirGrabacion.mutate(
+      { connectionId: sitio.id, descripcion },
+      {
+        onSuccess: (aceptada) => {
+          setGrabacionId(aceptada.grabacion.id);
+          setGrabacionJobId(aceptada.jobId);
+        },
+      },
+    );
+  }
+
+  function handleGuardarEnsenanza(variables: Array<{ idx: number; marcador: TipoDeDato }>) {
+    if (grabacionId === null) return;
+    guardarGrabacion.mutate(
+      { id: grabacionId, variables },
+      { onSuccess: (aceptada) => setGuardadoJobId(aceptada.jobId) },
+    );
   }
 
   function handleEliminar() {
@@ -426,6 +502,13 @@ export function SitiosConectadosPage() {
                 <SitioCard
                   key={sitio.id}
                   sitio={sitio}
+                  onEnsenar={() => {
+                    abrirGrabacion.reset();
+                    setGrabacionId(null);
+                    setGrabacionJobId(null);
+                    setGuardadoJobId(null);
+                    setEnsenando(sitio);
+                  }}
                   onEliminar={() => {
                     eliminar.reset();
                     setAEliminar(sitio);
@@ -456,6 +539,40 @@ export function SitiosConectadosPage() {
           error={confirmar.isError ? backendMessage(confirmar.error) : null}
           onConfirmar={handleConfirmar}
           onCerrar={handleCancelarLogin}
+        />
+      )}
+
+      {/* Ensenarle una tarea: el usuario la hace una vez en el navegador seguro y el sistema la
+          repite despues sola. Es una via COMPLEMENTARIA; el agente sigue pudiendo hacer cualquier
+          cosa en el sitio sin que nadie le ensene nada. */}
+      {ensenando && (
+        <GrabarTareaDialog
+          dominio={ensenando.dominio}
+          grabacion={grabacion.data ?? null}
+          abriendo={abrirGrabacion.isPending || (grabacionId !== null && grabacion.data === undefined)}
+          guardada={guardadoJob.data?.status === 'completed'}
+          esperandoCierre={cerrandoGrabacion}
+          error={
+            abrirGrabacion.isError || terminarGrabacion.isError || guardarGrabacion.isError
+              ? backendMessage(
+                  abrirGrabacion.error ?? terminarGrabacion.error ?? guardarGrabacion.error,
+                )
+              : guardadoJob.data?.status === 'failed'
+                ? t('grabacion.error')
+                : null
+          }
+          ocupado={
+            abrirGrabacion.isPending ||
+            terminarGrabacion.isPending ||
+            guardarGrabacion.isPending ||
+            (guardadoJobId !== null && guardadoJob.data?.status !== 'completed' && guardadoJob.data?.status !== 'failed')
+          }
+          onComenzar={handleComenzarEnsenanza}
+          onTerminar={() => {
+            if (grabacionId !== null) terminarGrabacion.mutate(grabacionId);
+          }}
+          onGuardar={handleGuardarEnsenanza}
+          onCerrar={handleCerrarEnsenanza}
         />
       )}
 

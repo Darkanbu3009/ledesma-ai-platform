@@ -12,5 +12,6 @@ export {
   RecetasWebRepository,
   type EstadoReceta,
   type NuevaRecetaWeb,
+  type OrigenReceta,
   type RecetaWeb,
 } from './recetas-web-repository.js';
