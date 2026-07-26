@@ -1911,6 +1911,9 @@
       "titulo": "The task stopped before doing it",
       "detalle": "You asked for {{pedido}} and the site showed {{encontrado}}. Nothing was done. Check it and ask again."
     },
+    "noLeible": {
+      "detalle": "We could not read {{campo}} on the site to check it. Nothing was done."
+    },
     "faltaDato": {
       "detalle": "One detail is missing to complete this action: {{campo}}. Ask again and include it."
     },
@@ -1920,7 +1923,12 @@
     "nada": "nothing",
     "campos": {
       "destinatario": "who to send it to",
-      "monto": "the amount"
+      "monto": "the amount",
+      "producto": "the product",
+      "cantidad": "the quantity",
+      "asunto": "the subject",
+      "cuerpo": "the message",
+      "datos": "the data"
     }
   },
   "politica": {

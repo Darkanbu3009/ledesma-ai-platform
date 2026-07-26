@@ -98,6 +98,22 @@ describe('textoDeDetencion (ES)', () => {
     );
   });
 
+  it('no leible: dice que NO SE PUDO LEER, jamas que "aparecia nada" (CAMBIO 2)', () => {
+    // El diagnostico falso de produccion: un dato que no se pudo leer se reportaba como si el sitio
+    // no mostrara nada. Ahora el mensaje dice exactamente lo que paso.
+    const texto = textoDeDetencion({ motivo: 'noLeible', campo: 'destinatario' });
+    expect(texto.titulo).toBe('La tarea se detuvo antes de ejecutar');
+    expect(texto.detalle).toBe(
+      'No pudimos leer a quien enviarlo en el sitio para comprobarlo. No se ejecuto nada.',
+    );
+    expect(texto.detalle).not.toContain('aparecia');
+  });
+
+  it('no leible sin campo (la pagina entera no se pudo leer): nombra los datos en generico', () => {
+    const texto = textoDeDetencion({ motivo: 'noLeible' });
+    expect(texto.detalle).toBe('No pudimos leer los datos en el sitio para comprobarlo. No se ejecuto nada.');
+  });
+
   it('tope excedido: cita monto, limite y donde cambiarlo', () => {
     const texto = textoDeDetencion({ motivo: 'topeExcedido', monto: '9900 MXN', tope: '5000 MXN' });
     expect(texto.detalle).toBe(
@@ -117,6 +133,7 @@ describe('textoDeDetencion (ES)', () => {
   it('NINGUN motivo usa terminos tecnicos', () => {
     const motivos = [
       { motivo: 'noCoincide' as const, pedido: 'a', encontrado: 'b' },
+      { motivo: 'noLeible' as const, campo: 'asunto' as const },
       { motivo: 'faltaDato' as const, campo: 'monto' as const },
       { motivo: 'topeExcedido' as const, monto: '1', tope: '0' },
       { motivo: 'sitioExcluido' as const, dominio: 'x.com' },
@@ -145,6 +162,9 @@ describe('textoDeDetencion (EN)', () => {
     expect(texto.detalle).toContain('juan@ejemplo.com');
     expect(texto.detalle).toContain('otro@atacante.com');
     expect(textoDeDetencion({ motivo: 'faltaDato', campo: 'monto' }).detalle).toContain('the amount');
+    expect(textoDeDetencion({ motivo: 'noLeible', campo: 'destinatario' }).detalle).toBe(
+      'We could not read who to send it to on the site to check it. Nothing was done.',
+    );
   });
 });
 
