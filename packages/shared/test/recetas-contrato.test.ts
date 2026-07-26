@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   dominiosDePasos,
   esAtributoEstable,
+  marcadoresDeParametros,
   MAX_ESPERA_MS,
   MAX_PASOS_RECETA,
   ordenarEstrategias,
@@ -238,5 +239,36 @@ describe('parsearPasosDeReceta y el sitio de cada paso', () => {
     ]);
     expect(pasos).not.toBeNull();
     expect(dominiosDePasos(pasos ?? [])).toEqual(['correo.ejemplo.com']);
+  });
+});
+
+describe('que datos necesita una receta (marcadoresDeParametros)', () => {
+  function pasoEscribir(idx: number, valor: unknown): unknown {
+    return {
+      idx,
+      accion: 'escribir',
+      estrategias: [{ tipo: 'atributo', atributo: 'name', valor: `campo-${idx}` }],
+      valor,
+      teclas: null,
+      ruta: null,
+      esperaMs: null,
+    };
+  }
+
+  it('lista los marcadores DISTINTOS de sus pasos de escritura, en orden fijo', () => {
+    const pasos = parsearPasosDeReceta([
+      pasoEscribir(0, { tipo: 'parametro', parametro: 'cuerpo' }),
+      pasoEscribir(1, { tipo: 'parametro', parametro: 'destinatario' }),
+      pasoEscribir(2, { tipo: 'parametro', parametro: 'destinatario' }),
+      pasoEscribir(3, { tipo: 'literal', texto: 'Bandeja de entrada' }),
+    ]);
+    expect(pasos).not.toBeNull();
+    // Orden fijo (el de MARCADORES), no el de aparicion: dos lecturas dan siempre la misma lista.
+    expect(marcadoresDeParametros(pasos ?? [])).toEqual(['destinatario', 'cuerpo']);
+  });
+
+  it('una receta que solo teclea texto fijo no necesita ningun dato', () => {
+    const pasos = parsearPasosDeReceta([pasoEscribir(0, { tipo: 'literal', texto: 'x' })]);
+    expect(marcadoresDeParametros(pasos ?? [])).toEqual([]);
   });
 });

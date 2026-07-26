@@ -288,6 +288,27 @@ export function tienePasoDeVerificacion(pasos: PasoDeReceta[]): boolean {
   return pasos.some((paso) => paso.accion === 'verificar');
 }
 
+/**
+ * QUE DATOS necesita una receta para poder ejecutarse: los marcadores DISTINTOS que sus pasos de
+ * escritura teclean, en el orden de `MARCADORES` (fijo, para que dos lecturas de la misma receta
+ * devuelvan siempre la misma lista).
+ *
+ * Los usa la consola para decirle al usuario que datos le tiene que dar, y el worker para ofrecerle
+ * al modelo que datos pide cada tarea ya ensenada. Sale de los PASOS y de ningun otro lado: es la
+ * unica fuente que no puede divergir de lo que la ejecucion va a pedir de verdad (`sustituirParametros`
+ * falla cerrada si al ejecutar falta cualquiera de estos).
+ */
+export function marcadoresDeParametros(pasos: PasoDeReceta[]): MarcadorParametro[] {
+  const presentes = new Set<MarcadorParametro>();
+  for (const paso of pasos) {
+    const valor = paso.valor;
+    if (paso.accion === 'escribir' && valor !== null && valor.tipo === 'parametro') {
+      presentes.add(valor.parametro);
+    }
+  }
+  return MARCADORES.filter((marcador) => presentes.has(marcador));
+}
+
 /** Valida el `valor` de un paso de escritura (marcador de parametro o literal acotado). */
 function parsearValor(crudo: unknown): ValorDePaso | null {
   if (typeof crudo !== 'object' || crudo === null) return null;
