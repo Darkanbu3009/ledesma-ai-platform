@@ -240,6 +240,38 @@ describe('promocion y valores sensibles (D8)', () => {
     expect(resultado.pasos[0]?.valor).toEqual({ tipo: 'literal', texto: 'facturas' });
   });
 
+  it('el valor del usuario tampoco queda DENTRO de una localizacion', () => {
+    // El campo se observo con el dato ya escrito, asi que su texto visible ES el dato. Guardar esa
+    // estrategia persistiria el correo del usuario en la receta y ademas localizaria por un valor
+    // que la proxima corrida no va a tener.
+    const resultado = promover(
+      [
+        paso({
+          accion: { tipo: 'act', instruccion: null, metodo: 'fill', argumentos: ['juan@ejemplo.com'] },
+          estrategias: [ATRIBUTO, { tipo: 'texto', texto: 'juan@ejemplo.com' }, XPATH],
+        }),
+      ],
+      OBJETIVO,
+    );
+    expect(resultado.promovida).toBe(true);
+    if (!resultado.promovida) return;
+    expect(JSON.stringify(resultado.pasos)).not.toContain('juan@ejemplo.com');
+    expect(resultado.pasos[0]?.estrategias).toEqual([ATRIBUTO, XPATH]);
+  });
+
+  it('un paso que SOLO se localiza por el dato tecleado no se promueve', () => {
+    const resultado = promover(
+      [
+        paso({
+          accion: { tipo: 'act', instruccion: null, metodo: 'fill', argumentos: ['juan@ejemplo.com'] },
+          estrategias: [{ tipo: 'texto', texto: 'juan@ejemplo.com' }],
+        }),
+      ],
+      OBJETIVO,
+    );
+    expect(resultado.promovida).toBe(false);
+  });
+
   it('un paso por COORDENADAS (click/type sin selector del motor) se promueve si hubo observacion', () => {
     const resultado = promover(
       [
@@ -303,6 +335,28 @@ describe('auto reparacion y obsolescencia (D5 / D6)', () => {
     expect(reparados[1]?.estrategias).toEqual(nuevas);
     expect(reparados[0]?.estrategias).toEqual([ATRIBUTO, XPATH]);
     expect(original.pasos[1]?.estrategias).toEqual([ATRIBUTO, XPATH]);
+  });
+
+  it('reparar NO guarda una estrategia que dependa del dato que ese paso acaba de teclear', () => {
+    const original = promover([paso(), paso({ idx: 1 })], 'abre el correo');
+    expect(original.promovida).toBe(true);
+    if (!original.promovida) return;
+    // Las estrategias se releen del DOM DESPUES de escribir, o sea con el campo ya lleno.
+    const leidasDelDom: EstrategiaLocalizacion[] = [
+      { tipo: 'texto', texto: 'ana@ejemplo.com' },
+      { tipo: 'atributo', atributo: 'name', valor: 'to' },
+    ];
+    const reparados = repararEstrategias(original.pasos, 1, leidasDelDom, 'ana@ejemplo.com');
+    expect(reparados[1]?.estrategias).toEqual([{ tipo: 'atributo', atributo: 'name', valor: 'to' }]);
+    expect(JSON.stringify(reparados)).not.toContain('ana@ejemplo.com');
+  });
+
+  it('si TODAS las estrategias nuevas dependen del dato, se conserva la que la receta ya tenia', () => {
+    const original = promover([paso(), paso({ idx: 1 })], 'abre el correo');
+    expect(original.promovida).toBe(true);
+    if (!original.promovida) return;
+    const soloElDato: EstrategiaLocalizacion[] = [{ tipo: 'texto', texto: 'ana@ejemplo.com' }];
+    expect(repararEstrategias(original.pasos, 1, soloElDato, 'ana@ejemplo.com')).toEqual(original.pasos);
   });
 
   it('D6: mas de la MITAD de los pasos escalados marca obsoleta; exactamente la mitad no', () => {

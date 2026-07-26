@@ -196,6 +196,7 @@ function makeRecetaGrabada(): RecetaWeb {
     ownerId: 'user-1',
     dominio: DOMINIO,
     firmaObjetivo: 'x',
+    descripcion: null,
     version: 1,
     estado: 'activa',
     origen: 'grabacion',
@@ -212,6 +213,7 @@ function makeRecetaGrabada(): RecetaWeb {
 function makeRecetas(activa: RecetaWeb): RepositorioRecetasParaWorker {
   return {
     buscarActiva: vi.fn(async () => activa),
+    listarActivas: vi.fn(async () => (activa === null ? [] : [activa])),
     promover: vi.fn(async () => null),
     marcarObsoleta: vi.fn(async () => {}),
     reemplazarPasos: vi.fn(async () => {}),

@@ -12,6 +12,21 @@ import { AYUDANTES_DOM } from './localizacion.js';
  * ayudantes de DOM que la ejecucion determinista (AYUDANTES_DOM de localizacion.ts): si el grabador
  * describiera los elementos de otra forma que el ejecutor, la receta grabada no localizaria nada.
  *
+ * LA ESCRITURA SE ANOTA MIENTRAS SE TECLEA, no al salir del campo (CAMBIO 1). Antes el valor se leia
+ * en 'change'/'focusout', y para entonces muchos sitios ya habian VACIADO el campo: el "Para" de un
+ * correo acepta la sugerencia del autocompletado, borra lo tecleado y lo reemplaza por una etiqueta.
+ * Medido en produccion: de una grabacion de 9 pasos, el destinatario no quedo como escritura y el
+ * unico rastro fue un clic sobre la sugerencia, que al repetir la tarea no existe. Ahora cada 'input'
+ * ANOTA el ultimo valor no vacio del campo y ese valor se emite cuando el usuario CONFIRMA (al hacer
+ * clic en otra cosa, al pulsar Enter o Tab, o al cerrarse el campo), aunque la pagina ya lo haya
+ * borrado. Por eso una sugerencia aceptada deja SIEMPRE dos pasos: primero el escribir con lo
+ * tecleado, despues el clic (o la tecla) que la confirma.
+ *
+ * QUE CUENTA COMO CAMPO EDITABLE: input, textarea y select como siempre, mas los contenedores
+ * `contenteditable` y los que el sitio declara con rol de combobox, textbox o searchbox. Un correo
+ * moderno no usa un input para el cuerpo ni para los destinatarios, y limitarse a los campos estandar
+ * era justo lo que dejaba fuera el dato que mas importa.
+ *
  * CERO LLAMADAS AL MODELO: esto es lectura de DOM y eventos del navegador. No hay ningun canal por el
  * que este guion, ni el worker mientras graba, hablen con un modelo.
  *
@@ -44,6 +59,13 @@ const INTERVALO_GUARDIA_MS = 1000;
 const TECLAS_GRABABLES = ['Enter', 'Tab', 'Escape'];
 
 /**
+ * ROLES que hacen editable a un contenedor que NO es input ni textarea. Lista cerrada y corta a
+ * proposito: son los tres con los que un sitio implementa un campo de texto propio (el "Para" de un
+ * correo es un combobox; un redactor enriquecido es un textbox). Cualquier otro rol no se lee.
+ */
+const ROLES_EDITABLES = ['combobox', 'textbox', 'searchbox'];
+
+/**
  * El guion, listo para inyectar. Es idempotente (si ya se instalo en este documento, no hace nada) y
  * jamas lanza hacia la pagina: cualquier fallo propio se traga, porque romper la navegacion del
  * usuario mientras ensena una tarea seria peor que perder la grabacion.
@@ -53,6 +75,7 @@ export const GUION_GRABADOR = `(() => {
   window.__ledesmaGrabadorInstalado = true;
 ${AYUDANTES_DOM}
   const TECLAS = ${JSON.stringify(TECLAS_GRABABLES)};
+  const ROLES_EDITABLES = ${JSON.stringify(ROLES_EDITABLES)};
   let apagado = false;
 
   function emitir(dato) {
@@ -99,6 +122,7 @@ ${AYUDANTES_DOM}
   }
 
   // Lee el valor de un campo editable. NUNCA de un campo de contrasena: se salta antes de tocarlo.
+  // Devuelve null cuando el elemento NO es un campo donde se escriba (entonces no se anota nada).
   function valorDe(el) {
     const tag = String(el.tagName || '').toLowerCase();
     const tipo = String(el.getAttribute ? el.getAttribute('type') || '' : '').toLowerCase();
@@ -110,6 +134,12 @@ ${AYUDANTES_DOM}
     }
     if (tag === 'input' || tag === 'textarea') return String(el.value || '');
     if (el.isContentEditable === true) return String(el.innerText || el.textContent || '');
+    // Contenedor que el sitio declara editable por ROL sin ser un campo estandar (el "Para" de un
+    // correo, un buscador propio): se lee su valor si lo expone y, si no, su texto visible.
+    if (ROLES_EDITABLES.indexOf(rolDe(el)) !== -1) {
+      if (typeof el.value === 'string') return el.value;
+      return String(el.innerText || el.textContent || '');
+    }
     return null;
   }
 
@@ -121,33 +151,65 @@ ${AYUDANTES_DOM}
   emitir({ tipo: 'navegacion', url: String(location.href) });
   guardia();
 
-  // Los tres escuchas van en FASE DE CAPTURA: se registran antes que los del sitio, asi que un sitio
+  // LO QUE EL USUARIO ESTA ESCRIBIENDO AHORA: el campo y el ultimo valor NO VACIO que se le leyo.
+  // Vive fuera del DOM a proposito. Cuando el sitio vacia el campo al aceptar una sugerencia, el
+  // valor tecleado ya no esta en la pagina; sin esta anotacion el paso se perderia entero (que es
+  // exactamente lo que pasaba con el destinatario de un correo).
+  let pendiente = null;
+
+  function anotar(el) {
+    if (!el) return;
+    // Escribir en OTRO campo cierra el anterior: su escritura se emite antes de empezar la nueva.
+    if (pendiente !== null && pendiente.el !== el) volcar();
+    const valor = valorDe(el);
+    if (valor === null || valor.trim() === '') return;
+    pendiente = { el: el, valor: valor };
+  }
+
+  // EMITE la escritura anotada (si hay). Las estrategias se leen AQUI, con el campo todavia en la
+  // pagina: se emite durante la fase de captura del evento que la confirma, antes de que el sitio
+  // reaccione.
+  function volcar() {
+    const anotado = pendiente;
+    pendiente = null;
+    if (anotado === null) return;
+    emitir({
+      tipo: 'escritura',
+      url: String(location.href),
+      estrategias: estrategiasDe(anotado.el),
+      valor: anotado.valor,
+      contexto: contextoDe(anotado.el),
+    });
+  }
+
+  // Los escuchas van en FASE DE CAPTURA: se registran antes que los del sitio, asi que un sitio
   // que detiene la propagacion de sus propios eventos no puede esconderle la accion a la grabacion.
+
+  // 'input' dispara en CADA pulsacion, en campos estandar y en contenteditable. No emite nada: solo
+  // anota, para que el valor sobreviva a que el sitio vacie el campo.
+  document.addEventListener('input', (evento) => {
+    if (guardia()) return;
+    anotar(elementoDe(evento));
+  }, true);
+
   document.addEventListener('click', (evento) => {
     if (guardia()) return;
     const el = elementoDe(evento);
+    // Clic FUERA del campo que se venia escribiendo: primero la escritura, despues el clic. Ese
+    // orden es el que hace reutilizable una sugerencia de autocompletado. Un clic DENTRO del mismo
+    // campo (mover el cursor) no cierra nada.
+    if (pendiente !== null && pendiente.el !== el) volcar();
     if (!el) return;
     emitir({ tipo: 'clic', url: String(location.href), estrategias: estrategiasDe(el) });
   }, true);
 
-  // 'change' cubre input/textarea/select (dispara al salir del campo o al confirmar) y 'focusout'
-  // cubre los redactores contenteditable, que no disparan 'change'. El valor que se graba es el FINAL
-  // del campo, no cada pulsacion: una receta teclea el valor completo de una vez.
-  function emitirEscritura(el) {
-    if (!el) return;
-    const valor = valorDe(el);
-    if (valor === null || valor.trim() === '') return;
-    emitir({
-      tipo: 'escritura',
-      url: String(location.href),
-      estrategias: estrategiasDe(el),
-      valor: valor,
-      contexto: contextoDe(el),
-    });
-  }
+  // 'change' cubre input/textarea/select y 'focusout' cubre los redactores contenteditable y los
+  // contenedores con rol de campo, que no disparan 'change'. Los dos CIERRAN el campo: se relee su
+  // valor (por si nunca hubo un 'input': autocompletado del navegador, un select) y se emite.
   function alTerminarDeEscribir(evento) {
     if (guardia()) return;
-    emitirEscritura(elementoDe(evento));
+    anotar(elementoDe(evento));
+    volcar();
   }
   document.addEventListener('change', alTerminarDeEscribir, true);
   document.addEventListener('focusout', alTerminarDeEscribir, true);
@@ -158,9 +220,8 @@ ${AYUDANTES_DOM}
     const el = elementoDe(evento);
     // El valor del campo se emite ANTES que la tecla. Sin esto el orden quedaria invertido (keydown
     // ocurre antes que change/focusout) y la receta pulsaria Tab o Enter sobre un campo todavia vacio.
-    // La escritura que llegue despues por change/focusout no duplica el paso: el acumulador reemplaza
-    // la ultima escritura del mismo elemento por su valor final.
-    emitirEscritura(el);
+    anotar(el);
+    volcar();
     emitir({
       tipo: 'tecla',
       url: String(location.href),

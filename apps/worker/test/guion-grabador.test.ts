@@ -52,19 +52,33 @@ describe('GUION_GRABADOR', () => {
     expect(GUION_GRABADOR).toContain(`el.matches('${SELECTOR_CAMPO_CONTRASENA}')`);
   });
 
-  it('escucha clic, escritura y tecla en FASE DE CAPTURA', () => {
-    for (const evento of ['click', 'change', 'focusout', 'keydown']) {
+  it('escucha escritura, clic, cierre de campo y tecla en FASE DE CAPTURA', () => {
+    for (const evento of ['input', 'click', 'change', 'focusout', 'keydown']) {
       expect(GUION_GRABADOR).toContain(`addEventListener('${evento}'`);
     }
-    // El tercer argumento `true` de addEventListener es la fase de captura: los cuatro escuchas.
-    expect(GUION_GRABADOR.match(/, true\);/g)?.length).toBe(4);
+    // El tercer argumento `true` de addEventListener es la fase de captura: los cinco escuchas.
+    expect(GUION_GRABADOR.match(/, true\);/g)?.length).toBe(5);
   });
 
   it('al pulsar una tecla emite PRIMERO el valor del campo y despues la tecla', () => {
-    const posicionEscritura = GUION_GRABADOR.indexOf('emitirEscritura(el);');
+    const posicionEscritura = GUION_GRABADOR.indexOf('volcar();\n    emitir({');
     const posicionTecla = GUION_GRABADOR.indexOf("tipo: 'tecla'");
     expect(posicionEscritura).toBeGreaterThan(-1);
     expect(posicionEscritura).toBeLessThan(posicionTecla);
+  });
+
+  it('anota lo tecleado mientras se escribe, para que sobreviva a que el sitio vacie el campo', () => {
+    // El valor NO se lee al cerrar el campo (para entonces el sitio ya lo reemplazo por una
+    // etiqueta): se anota en cada pulsacion y se emite al confirmar.
+    expect(GUION_GRABADOR).toContain('let pendiente = null;');
+    expect(GUION_GRABADOR).toContain('function anotar(el)');
+    expect(GUION_GRABADOR).toContain('function volcar()');
+  });
+
+  it('lee tambien los campos que no son input: contenteditable y rol de campo', () => {
+    expect(GUION_GRABADOR).toContain('el.isContentEditable === true');
+    expect(GUION_GRABADOR).toContain('["combobox","textbox","searchbox"]');
+    expect(GUION_GRABADOR).toContain('ROLES_EDITABLES.indexOf(rolDe(el))');
   });
 
   it('describe los elementos con los MISMOS ayudantes que la ejecucion determinista', () => {

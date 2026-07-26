@@ -180,6 +180,7 @@ function makeRecetas(activa: RecetaWeb | null = null): RepositorioRecetasParaWor
 } {
   return {
     buscarActiva: vi.fn(async () => activa),
+    listarActivas: vi.fn(async () => (activa === null ? [] : [activa])),
     promover: vi.fn(async () => null),
     marcarObsoleta: vi.fn(async () => {}),
     reemplazarPasos: vi.fn(async () => {}),
@@ -238,6 +239,7 @@ function makeReceta(pasos: unknown[], origen: RecetaWeb['origen'] = 'automatica'
     ownerId: 'user-1',
     dominio: DOMINIO,
     firmaObjetivo: 'x',
+    descripcion: null,
     version: 1,
     estado: 'activa',
     origen,

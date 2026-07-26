@@ -406,6 +406,89 @@ describe('AcumuladorDeGrabacion (reglas deterministas de la captura)', () => {
     );
     expect(acumulador.agregar(sinEstrategias!)).toBe('no_repetible');
   });
+
+  it('el paso que CONFIRMA una escritura no se localiza por el dato que se acaba de escribir', () => {
+    const acumulador = new AcumuladorDeGrabacion(DOMINIO);
+    acumulador.agregar(
+      evento({
+        tipo: 'escritura',
+        url: `https://${DOMINIO}/x`,
+        estrategias: ESTRATEGIAS_CAMPO,
+        valor: 'ana@ejemplo.com',
+        contexto: 'input text to Para',
+      }),
+    );
+    // La sugerencia del autocompletado: su texto ES el correo, y ademas esta en el nombre accesible.
+    acumulador.agregar(
+      evento({
+        tipo: 'clic',
+        url: `https://${DOMINIO}/x`,
+        estrategias: [
+          { tipo: 'texto', texto: 'ana@ejemplo.com ana@ejemplo.com' },
+          { tipo: 'rol', rol: 'option', nombre: 'ana@ejemplo.com' },
+          { tipo: 'xpath', xpath: '/html[1]/body[1]/div[2]/div[1]' },
+        ],
+      }),
+    );
+    const confirmacion = acumulador.pasos()[1];
+    expect(confirmacion?.accion).toBe('click');
+    // Queda la POSICION en la lista de sugerencias, que sirve con cualquier otro destinatario.
+    expect(confirmacion?.estrategias).toEqual([
+      { tipo: 'xpath', xpath: '/html[1]/body[1]/div[2]/div[1]' },
+    ]);
+  });
+
+  it('si la confirmacion SOLO se localiza por el dato y ya hubo Tab, la tecla es el paso', () => {
+    const acumulador = new AcumuladorDeGrabacion(DOMINIO);
+    acumulador.agregar(
+      evento({
+        tipo: 'escritura',
+        url: `https://${DOMINIO}/x`,
+        estrategias: ESTRATEGIAS_CAMPO,
+        valor: 'ana@ejemplo.com',
+        contexto: 'input text to Para',
+      }),
+    );
+    acumulador.agregar(evento({ tipo: 'tecla', url: `https://${DOMINIO}/x`, teclas: 'Tab', estrategias: [] }));
+    const clicSoloPorElDato = evento({
+      tipo: 'clic',
+      url: `https://${DOMINIO}/x`,
+      estrategias: [{ tipo: 'texto', texto: 'ana@ejemplo.com' }],
+    });
+    expect(acumulador.agregar(clicSoloPorElDato)).toBe('ignorado');
+    expect(acumulador.pasos().map((p) => p.accion)).toEqual(['escribir', 'teclas']);
+  });
+
+  it('si la confirmacion SOLO se localiza por el dato y no hubo tecla, la grabacion no sirve', () => {
+    const acumulador = new AcumuladorDeGrabacion(DOMINIO);
+    acumulador.agregar(
+      evento({
+        tipo: 'escritura',
+        url: `https://${DOMINIO}/x`,
+        estrategias: ESTRATEGIAS_CAMPO,
+        valor: 'ana@ejemplo.com',
+        contexto: 'input text to Para',
+      }),
+    );
+    const clicSoloPorElDato = evento({
+      tipo: 'clic',
+      url: `https://${DOMINIO}/x`,
+      estrategias: [{ tipo: 'texto', texto: 'ana@ejemplo.com' }],
+    });
+    expect(acumulador.agregar(clicSoloPorElDato)).toBe('no_repetible');
+  });
+
+  it('un campo que solo se localiza por lo que se escribio dentro no es repetible', () => {
+    const acumulador = new AcumuladorDeGrabacion(DOMINIO);
+    const soloPorSuTexto = evento({
+      tipo: 'escritura',
+      url: `https://${DOMINIO}/x`,
+      estrategias: [{ tipo: 'texto', texto: 'llego el paquete' }],
+      valor: 'llego el paquete',
+      contexto: 'div',
+    });
+    expect(acumulador.agregar(soloPorSuTexto)).toBe('no_repetible');
+  });
 });
 
 describe('los datos marcados como variables NO quedan persistidos', () => {
@@ -470,6 +553,52 @@ describe('los datos marcados como variables NO quedan persistidos', () => {
     expect(deps.recetas.promover).toHaveBeenCalledWith(
       expect.objectContaining({ dominio: DOMINIO, origen: 'grabacion' }),
     );
+  });
+
+  it('el dato marcado tampoco queda dentro de NINGUNA localizacion, ni en la de otro paso', () => {
+    // Es el caso de produccion: el paso que escribia el cuerpo conservaba una estrategia de texto
+    // con el cuerpo entero, y el paso siguiente se localizaba por ese mismo texto.
+    const promocion = promoverGrabacion({
+      pasos: [
+        {
+          idx: 0,
+          accion: 'escribir',
+          estrategias: [
+            { tipo: 'atributo', atributo: 'aria-label', valor: 'Cuerpo del mensaje' },
+            { tipo: 'texto', texto: 'llego el paquete' },
+          ],
+          valor: 'llego el paquete',
+          teclas: null,
+          ruta: null,
+        },
+        {
+          idx: 1,
+          accion: 'click',
+          estrategias: [
+            { tipo: 'rol', rol: 'option', nombre: 'llego el paquete' },
+            { tipo: 'xpath', xpath: '/html[1]/body[1]/button[1]' },
+          ],
+          valor: null,
+          teclas: null,
+          ruta: null,
+        },
+      ],
+      descripcion: 'mandar un mensaje',
+      variables: [{ idx: 0, marcador: 'cuerpo' }],
+    });
+    expect(promocion.promovida).toBe(true);
+    if (!promocion.promovida) return;
+    // Ni en la receta ni en la grabacion re escrita queda rastro del dato, en ningun campo.
+    expect(JSON.stringify(promocion)).not.toContain('llego el paquete');
+    expect(promocion.pasos[0]?.estrategias).toEqual([
+      { tipo: 'atributo', atributo: 'aria-label', valor: 'Cuerpo del mensaje' },
+    ]);
+    // El paso de confirmacion (la receta lleva ademas su punto de verificacion, por el verbo).
+    const confirmacion = promocion.pasos.find((paso) => paso.accion === 'click');
+    expect(confirmacion?.estrategias).toEqual([
+      { tipo: 'xpath', xpath: '/html[1]/body[1]/button[1]' },
+    ]);
+    expect(promocion.grabados[0]?.estrategias).toEqual(promocion.pasos[0]?.estrategias);
   });
 
   it('un dato SENSIBLE que no se marco como variable no se guarda como texto fijo: se rechaza', () => {

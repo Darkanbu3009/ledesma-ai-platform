@@ -23,7 +23,7 @@ import type { NuevaRecetaWeb, RecetaWeb } from '@ledesma-platform/backend/receta
 import { PermanentExecutionError } from './errores.js';
 import { SalidaDeRedNoDisponibleError } from './sitios.js';
 import { censurarUrl, censurarValor, VALOR_CENSURADO } from './censura.js';
-import { sanearEstrategias } from './localizacion.js';
+import { estrategiasIndependientesDelValor, sanearEstrategias } from './localizacion.js';
 import { detectarVerboBloqueado } from './prompt-tarea-web.js';
 import { firmaDeObjetivo } from './receta-web.js';
 import type { Logger } from './logger.js';
@@ -269,6 +269,14 @@ function claveDeElemento(estrategias: EstrategiaLocalizacion[]): string {
  *  - Una ESCRITURA sobre el mismo elemento REEMPLAZA a la anterior en vez de acumularse: el guion emite
  *    el valor al confirmar el campo y de nuevo al salir de el, y lo que la receta teclea es el valor
  *    FINAL, no cada version intermedia.
+ *  - NINGUN paso se localiza por el VALOR que el usuario acaba de teclear (CAMBIO 2 y 5). En una
+ *    escritura se descartan las estrategias que dependen de lo tecleado (un campo no se encuentra por
+ *    su contenido: antes de escribir esta vacio). En el paso que CONFIRMA esa escritura -- el clic
+ *    sobre la sugerencia del autocompletado -- se descartan las mismas, y queda la posicion en la
+ *    lista, que es lo unico que sirve con otro dato.
+ *  - Si al descartarlas el paso de confirmacion se queda SIN NINGUNA pista, no se graba como clic: si
+ *    el usuario ya habia confirmado con Tab o Enter, esa tecla es el paso (y ya esta grabada); si no,
+ *    la grabacion entera es 'no_repetible'.
  *  - Una interaccion cuyo elemento no dejo NINGUNA estrategia utilizable corta la grabacion entera
  *    ('no_repetible'): guardar el resto ensenaria una tarea a la que le falta un paso, que es
  *    exactamente lo que hay que evitar.
@@ -310,15 +318,21 @@ export class AcumuladorDeGrabacion {
     this.huboInteraccion = true;
 
     if (evento.tipo === 'escritura') {
+      // Un campo NO se localiza por lo que se acaba de teclear dentro: antes de escribir esta vacio,
+      // y con otro dato el texto es otro. Si esa es su unica pista, el paso no es repetible.
+      const estrategias = estrategiasIndependientesDelValor(evento.estrategias, [
+        evento.valor ?? '',
+      ]);
+      if (estrategias.length === 0) return 'no_repetible';
       const paso: PasoGrabado = {
         idx: 0,
         accion: 'escribir',
-        estrategias: evento.estrategias,
+        estrategias,
         valor: evento.valor,
         teclas: null,
         ruta: null,
       };
-      const previo = this.indiceDeEscrituraReemplazable(evento.estrategias);
+      const previo = this.indiceDeEscrituraReemplazable(estrategias);
       if (previo !== null) {
         this.capturados[previo] = paso;
         return 'ok';
@@ -339,14 +353,47 @@ export class AcumuladorDeGrabacion {
       });
     }
 
+    // CLIC. Si viene DESPUES de una escritura, es (o puede ser) el paso que la CONFIRMA: la
+    // sugerencia del autocompletado que el usuario eligio. Sus pistas no pueden ser el dato tecleado.
+    const escrito = this.valorRecienEscrito();
+    const estrategias =
+      escrito === null
+        ? evento.estrategias
+        : estrategiasIndependientesDelValor(evento.estrategias, [escrito]);
+    if (estrategias.length === 0) {
+      // Sin ninguna pista independiente del valor: si el usuario ya habia confirmado con una tecla,
+      // ESA tecla es el paso de confirmacion y ya quedo grabada, asi que el clic sobra. Si no la hay,
+      // no existe forma honesta de repetir este paso con otro dato.
+      return this.ultimoEsTecla() ? 'ignorado' : 'no_repetible';
+    }
     return this.empujar({
       idx: 0,
       accion: 'click',
-      estrategias: evento.estrategias,
+      estrategias,
       valor: null,
       teclas: null,
       ruta: null,
     });
+  }
+
+  /**
+   * El valor de la escritura que este paso estaria CONFIRMANDO: la ultima escritura grabada, si desde
+   * entonces solo hubo pulsaciones de tecla. Cualquier otra cosa en medio significa que el clic ya no
+   * confirma nada de lo tecleado y sus pistas no tienen por que filtrarse.
+   */
+  private valorRecienEscrito(): string | null {
+    for (let i = this.capturados.length - 1; i >= 0; i--) {
+      const paso = this.capturados[i];
+      if (paso === undefined) return null;
+      if (paso.accion === 'teclas') continue;
+      return paso.accion === 'escribir' ? paso.valor : null;
+    }
+    return null;
+  }
+
+  /** ¿El ultimo paso grabado es una pulsacion de tecla (Enter/Tab al confirmar el campo)? */
+  private ultimoEsTecla(): boolean {
+    return this.capturados[this.capturados.length - 1]?.accion === 'teclas';
   }
 
   private empujar(paso: PasoGrabado): ResultadoDeAcumular {
@@ -427,11 +474,37 @@ export function posicionDeVerificacion(pasos: PasoDeReceta[]): number {
 }
 
 /**
+ * BORRA de las LOCALIZACIONES todo rastro de los valores marcados como variables (CAMBIO 5).
+ *
+ * Un valor marcado no puede quedar persistido en NINGUN lado, y una estrategia es un lado: en la
+ * evidencia de produccion el paso que escribia el cuerpo del mensaje conservaba una estrategia de
+ * texto con el cuerpo entero, que es justo el dato que el usuario habia marcado como variable. Se
+ * limpian TODOS los pasos y no solo el marcado, porque el mismo dato reaparece despues (la etiqueta
+ * del destinatario ya aceptado, el resumen de confirmacion) y ahi tambien seria un valor persistido y
+ * una localizacion que con otro dato no encuentra nada.
+ *
+ * Se aplica ADEMAS de la limpieza que ya hace el acumulador al capturar: esta corre sobre lo que hay
+ * en la fila, asi que tambien alcanza a las grabaciones hechas antes de este cambio.
+ */
+function depurarValoresMarcados(
+  pasos: PasoGrabado[],
+  marcados: readonly string[],
+): PasoGrabado[] {
+  if (marcados.length === 0) return pasos;
+  return pasos.map((paso) => ({
+    ...paso,
+    estrategias: estrategiasIndependientesDelValor(paso.estrategias, marcados),
+  }));
+}
+
+/**
  * PROMUEVE una grabacion terminada a los pasos de una receta.
  *
  * LOS DATOS VARIABLES NO SE PERSISTEN: un paso marcado como variable guarda el MARCADOR del parametro
  * ('destinatario', 'monto', ...), y el valor que el usuario tecleo se borra tambien de la grabacion
- * (ver `grabados`). Los valores NO marcados son parte fija del procedimiento y se guardan tal cual.
+ * (ver `grabados`) Y de las estrategias de localizacion de todos los pasos (ver
+ * `depurarValoresMarcados`). Los valores NO marcados son parte fija del procedimiento y se guardan
+ * tal cual.
  *
  * LA RECETA GRABADA NO SALTA LA VERIFICACION: si la descripcion que dio el usuario contiene un verbo de
  * accion bloqueada, la receta se promueve CON su paso `verificar` en el punto del flujo donde
@@ -450,8 +523,12 @@ export function promoverGrabacion(entrada: {
   const porIdx = new Map(entrada.variables.map((v) => [v.idx, v.marcador]));
   const pasos: PasoDeReceta[] = [];
   const grabados: PasoGrabado[] = [];
+  // Los valores que el usuario marco como variables, para borrarlos tambien de las localizaciones.
+  const marcados = entrada.pasos
+    .filter((paso) => porIdx.has(paso.idx) && paso.valor !== null)
+    .map((paso) => paso.valor as string);
 
-  for (const grabado of entrada.pasos) {
+  for (const grabado of depurarValoresMarcados(entrada.pasos, marcados)) {
     const marcador = porIdx.get(grabado.idx);
     const base = {
       idx: pasos.length,
@@ -752,6 +829,10 @@ async function promover(
     ownerId: job.ownerId,
     dominio: grabacion.dominio,
     firmaObjetivo: firmaDeObjetivo(grabacion.descripcion),
+    // La DESCRIPCION en palabras del usuario viaja tal cual (V037): es lo que la consola muestra y lo
+    // que permite RECONOCER esta tarea cuando la pida con otras palabras y la firma no coincida. No
+    // interviene en la ejecucion: los pasos se ejecutan con la misma verificacion y la misma politica.
+    descripcion: grabacion.descripcion,
     pasos: promocion.pasos,
     creadaDesdeTrayectoria: null,
     origen: 'grabacion',
