@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
+  MAX_SITIOS_POR_TAREA,
   TAREA_WEB_JOB_KIND,
   TAREA_WEB_OBJETIVO_MAX_CHARS,
   isTareaWebJobPayload,
   parseTareaWebJobPayload,
+  sitiosAutorizadosDePayload,
 } from '../src/jobs/tarea-web-payload.js';
 
 const VALIDO = {
@@ -69,5 +71,81 @@ describe('parseTareaWebJobPayload', () => {
 
   it('el kind exportado coincide con el literal del payload', () => {
     expect(TAREA_WEB_JOB_KIND).toBe('tarea_web');
+  });
+});
+
+/**
+ * VARIOS SITIOS EN UNA MISMA TAREA. Lo que estos tests fijan es que la capacidad nueva no cambia el
+ * payload de siempre y que el limite duro de sitios se aplica RECHAZANDO, no recortando.
+ */
+describe('sitios autorizados del payload', () => {
+  const A = 'conn-a';
+  const B = 'conn-b';
+  const C = 'conn-c';
+
+  it('un payload sin lista autoriza exactamente un sitio y no gana campos', () => {
+    const parsed = parseTareaWebJobPayload({ kind: 'tarea_web', connectionId: A, objetivo: 'hola' });
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.sitios).toBeUndefined();
+    expect(sitiosAutorizadosDePayload(parsed.data)).toEqual([A]);
+  });
+
+  it('la lista pone el sitio de arranque primero y elimina repetidos', () => {
+    const parsed = parseTareaWebJobPayload({
+      kind: 'tarea_web',
+      connectionId: B,
+      sitios: [A, B, A],
+      objetivo: 'hola',
+    });
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.sitios).toEqual([B, A]);
+  });
+
+  it('una lista que se reduce a un solo sitio no deja el campo (queda igual que el payload viejo)', () => {
+    const parsed = parseTareaWebJobPayload({
+      kind: 'tarea_web',
+      connectionId: A,
+      sitios: [A, A],
+      objetivo: 'hola',
+    });
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.sitios).toBeUndefined();
+  });
+
+  it('por encima del tope el payload se RECHAZA (no se recorta)', () => {
+    const parsed = parseTareaWebJobPayload({
+      kind: 'tarea_web',
+      connectionId: A,
+      sitios: [A, B, C, 'conn-d'],
+      objetivo: 'hola',
+    });
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(parsed.error).toContain(String(MAX_SITIOS_POR_TAREA));
+  });
+
+  it('el tope admite exactamente MAX_SITIOS_POR_TAREA', () => {
+    const parsed = parseTareaWebJobPayload({
+      kind: 'tarea_web',
+      connectionId: A,
+      sitios: [A, B, C],
+      objetivo: 'hola',
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('una lista mal formada invalida el payload: no se ejecuta media autorizacion', () => {
+    for (const sitios of ['conn-a', [1, 2], [A, ''], [A, null]]) {
+      const parsed = parseTareaWebJobPayload({
+        kind: 'tarea_web',
+        connectionId: A,
+        sitios,
+        objetivo: 'hola',
+      });
+      expect(parsed.success).toBe(false);
+    }
   });
 });

@@ -22,8 +22,9 @@
  *
  * DOS INVARIANTES DE SEGURIDAD que el tipo mismo hace cumplir:
  *  1. Un paso de navegacion guarda una RUTA relativa, jamas una URL: el ejecutor la resuelve contra
- *     el dominio de la conexion, asi que ninguna receta puede sacar la sesion del usuario de su
- *     sitio (ni a otro dominio, ni a javascript:, ni a data:).
+ *     el dominio del paso (el de la conexion, o el del sitio multisitio que el job AUTORIZO), asi que
+ *     ninguna receta puede sacar la sesion del usuario de sus sitios (ni a otro dominio, ni a
+ *     javascript:, ni a data:).
  *  2. Un paso de escritura guarda un MARCADOR de parametro o un literal, y el marcador se resuelve
  *     con los parametros del objetivo DE ESTA corrida (D8). Los valores sensibles no se guardan.
  *
@@ -137,6 +138,20 @@ export interface PasoDeReceta {
   idx: number;
   accion: AccionDeReceta;
   /**
+   * SITIO al que pertenece el paso, cuando la tarea aprendida cruza varios sitios conectados. null =
+   * el sitio de la propia receta (`recetas_web.dominio`), que es lo que trae toda receta anterior a
+   * este cambio y lo que trae cualquier receta de un solo sitio.
+   *
+   * Es un DOMINIO, jamas una URL: el ejecutor lo compara contra los sitios que el job autorizo y, si
+   * no esta en esa lista, ABANDONA la receta. Una receta manipulada no puede llevar la sesion del
+   * usuario a un sitio que la tarea no autorizo.
+   *
+   * OPCIONAL en el tipo (el parser SIEMPRE lo escribe, con null cuando no viene) para que los pasos
+   * que ya construyen las dos vias de siembra -- promocion automatica y grabacion -- sigan siendo
+   * validos sin tocarlos: una receta de un solo sitio no tiene nada que declarar aqui.
+   */
+  dominio?: string | null;
+  /**
    * Formas de localizar el elemento, ya ordenadas por `ORDEN_DE_ESTRATEGIAS`. Vacia SOLO en las
    * acciones que no tocan un elemento ('navegar', 'esperar', y 'teclas' sin foco previo).
    */
@@ -234,6 +249,31 @@ export function parsearRuta(crudo: unknown): string | null {
   return ruta;
 }
 
+/**
+ * DOMINIO admitido en un paso: hostname en minusculas, con al menos un punto, sin esquema, sin
+ * puerto, sin barra y sin credenciales. Lista blanca de caracteres a proposito: cualquier cosa que
+ * no sea exactamente un hostname (una URL, `javascript:`, un `//otro.sitio`) queda fuera.
+ */
+const PATRON_DOMINIO = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
+
+/** Tope de longitud de un hostname (RFC 1035). */
+const MAX_DOMINIO_CHARS = 253;
+
+/** ¿Es `valor` un dominio con la forma que este contrato admite? */
+export function esDominioDePaso(valor: string): boolean {
+  return valor.length <= MAX_DOMINIO_CHARS && PATRON_DOMINIO.test(valor);
+}
+
+/** Los dominios DISTINTOS que los pasos de una receta nombran (sin el null, que es el de la receta). */
+export function dominiosDePasos(pasos: PasoDeReceta[]): string[] {
+  const dominios: string[] = [];
+  for (const paso of pasos) {
+    const dominio = paso.dominio ?? null;
+    if (dominio !== null && !dominios.includes(dominio)) dominios.push(dominio);
+  }
+  return dominios;
+}
+
 const ACCIONES: readonly AccionDeReceta[] = [
   'click',
   'escribir',
@@ -284,9 +324,21 @@ function parsearPaso(crudo: unknown, idxEsperado: number): PasoDeReceta | null {
     estrategias.push(estrategia);
   }
 
+  // El sitio del paso (multisitio). Ausente o null = el dominio de la propia receta. Cualquier otra
+  // cosa que no sea exactamente un hostname INVALIDA la receta entera: el ejecutor resuelve rutas y
+  // sesiones sobre este valor, asi que no puede tolerar una URL ni un esquema colado.
+  const dominioCrudo = objeto.dominio;
+  let dominio: string | null = null;
+  if (dominioCrudo !== undefined && dominioCrudo !== null) {
+    const texto = comoTextoAcotado(dominioCrudo)?.toLowerCase();
+    if (texto === undefined || !esDominioDePaso(texto)) return null;
+    dominio = texto;
+  }
+
   const paso: PasoDeReceta = {
     idx: idxEsperado,
     accion: accion as AccionDeReceta,
+    dominio,
     estrategias: ordenarEstrategias(estrategias),
     valor: null,
     teclas: null,
