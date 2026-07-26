@@ -21,6 +21,7 @@ import { sitiosRoutes } from './routes/sitios.js';
 import { aprobacionesRoutes } from './routes/aprobaciones.js';
 import { politicasEjecucionRoutes } from './routes/politicas-ejecucion.js';
 import { trayectoriasRoutes } from './routes/trayectorias.js';
+import { grabacionesRoutes } from './routes/grabaciones.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { triggerRoutes } from './routes/triggers.js';
 import { incomingTriggerRoutes } from './routes/incoming-triggers.js';
@@ -117,6 +118,9 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
   // Trayectorias de tareas web (Fase F, V030), solo lectura: los pasos censurados que ejecuto el
   // motor de navegacion en un job de tarea web. Aditivo: la escribe el worker; aqui solo se lee.
   await app.register(trayectoriasRoutes(config));
+  // Grabacion de tareas (V036): la via COMPLEMENTARIA para sembrar una receta en los sitios donde el
+  // agente falla de forma repetida. Solo encola jobs; el login jamas se graba (exige sitio 'activo').
+  await app.register(grabacionesRoutes(config));
   // Resumen AGREGADO del dashboard (solo lectura): los tres ejes (actividad, operaciones, gasto) por
   // owner. Aditivo: lee agent_runs, jobs y los repos de recursos; no escribe nada.
   await app.register(dashboardRoutes(config));

@@ -13,6 +13,7 @@ import { AprobacionesWebRepository } from '@ledesma-platform/backend/aprobacione
 import { PoliticasEjecucionRepository } from '@ledesma-platform/backend/politicas';
 import { TrayectoriasWebRepository } from '@ledesma-platform/backend/trayectorias';
 import { RecetasWebRepository } from '@ledesma-platform/backend/recetas-web';
+import { GrabacionesRepository } from '@ledesma-platform/backend/grabaciones';
 import { crearNotificadorAprobaciones, type BarridoAprobacionesDeps } from './aprobaciones.js';
 import { crearSubidorDeScreenshots } from './storage.js';
 import { parseEnv, type WorkerEnv } from './env.js';
@@ -20,6 +21,7 @@ import { NavegadorBrowserbase } from './browserbase.js';
 import type { SitiosJobDeps } from './sitios.js';
 import { MotorStagehand } from './stagehand.js';
 import type { TareaWebDeps } from './tarea-web.js';
+import type { GrabacionDeps } from './grabacion.js';
 import { createLogger } from './logger.js';
 import { verificarParcheStagehand } from './parche-stagehand.js';
 import { getSql, closeSql } from './db.js';
@@ -94,6 +96,7 @@ function main(): void {
   // solicitud de cancelacion YA RESUELTA por cada desconexion (el borrado ya ocurrio en el mismo job).
   let sitios: SitiosJobDeps | undefined;
   let tareaWeb: TareaWebDeps | undefined;
+  let grabacion: GrabacionDeps | undefined;
   let barridoAprobaciones: BarridoAprobacionesDeps | undefined;
   if (config.BROWSERBASE_API_KEY !== undefined && config.BROWSERBASE_PROJECT_ID !== undefined) {
     const sitiosRepo = new SitiosConectadosRepository(sql);
@@ -177,6 +180,19 @@ function main(): void {
       guardarResultado: (jobId, resultado) => jobs.guardarResultado(jobId, resultado),
       logger,
     };
+    // GRABACION DE TAREAS (V036): la via COMPLEMENTARIA para sembrar una receta. Comparte el mismo
+    // adaptador de navegador y el mismo repositorio de recetas que la promocion automatica, para que
+    // las dos vias produzcan exactamente el mismo formato. NO recibe motor ni credencial de modelo: la
+    // grabacion no llama a ningun modelo en ningun punto.
+    grabacion = {
+      repo: sitiosRepo,
+      grabaciones: new GrabacionesRepository(sql),
+      recetas: recetasRepo,
+      navegador,
+      vaultSecret: config.VAULT_SECRET,
+      guardarResultado: (jobId, resultado) => jobs.guardarResultado(jobId, resultado),
+      logger,
+    };
     // BARRIDO de aprobaciones vencidas (7.1e): expira checkpoints sin decision, cierra su sesion de
     // navegador y cierra el job pausado. Corre throttled en el loop del worker.
     barridoAprobaciones = {
@@ -230,6 +246,7 @@ function main(): void {
     recordRun: (run) => runRepo.record(run),
     ...(sitios !== undefined ? { sitios } : {}),
     ...(tareaWeb !== undefined ? { tareaWeb } : {}),
+    ...(grabacion !== undefined ? { grabacion } : {}),
     ...(barridoAprobaciones !== undefined ? { barridoAprobaciones } : {}),
   };
 

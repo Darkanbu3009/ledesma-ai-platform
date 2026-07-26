@@ -1948,6 +1948,40 @@
       "sitioInvalido": "Check the sites: write only the domain, like banco.com."
     }
   },
+  "grabacion": {
+    "iniciar": "Teach it a task",
+    "titulo": "Teach it a task on {{dominio}}",
+    "descripcion": "What are you going to teach it",
+    "descripcionPlaceholder": "Example: send the weekly report to my manager",
+    "descripcionRequerida": "Write in one line what you are going to teach it.",
+    "ayuda": "Do the task the way you normally would. Afterwards you tell us which details change every time.",
+    "comenzar": "Start",
+    "abriendo": "We are opening {{dominio}} so you can do the task.",
+    "terminar": "I am done",
+    "terminando": "Saving what you did",
+    "marcarVariables": "Which details change every time",
+    "marcarAyuda": "Mark the details that will be different next time. The rest stay the same.",
+    "datoFijo": "Always the same",
+    "sinDatos": "You did not type any detail in this task, so there is nothing to mark.",
+    "guardar": "Save",
+    "guardando": "Saving",
+    "guardada": "All set. Next time it does it on its own.",
+    "detenidaPorContrasena": "The recording stopped because a password field appeared. We did not save anything.",
+    "descartada": "We could not save what you did. Try again without rushing.",
+    "error": "Something went wrong. Try again.",
+    "cancelar": "Cancel",
+    "cerrarAria": "Close",
+    "iframeTitulo": "Secure browser to do the task on {{dominio}}",
+    "pie": "It opens in a secure browser with your session already signed in. We never ask for your password.",
+    "tipos": {
+      "destinatario": "Who it goes to",
+      "asunto": "The subject",
+      "cuerpo": "The message",
+      "monto": "The amount",
+      "producto": "The product",
+      "cantidad": "The quantity"
+    }
+  },
   "receta": {
     "etiqueta": "Learned task",
     "detalle": "This task ran using what was learned from a previous time, without analyzing the site again.",

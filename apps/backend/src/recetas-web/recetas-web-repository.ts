@@ -21,6 +21,16 @@ import { parsearPasosDeReceta } from '@ledesma-platform/shared';
 
 export type EstadoReceta = 'activa' | 'obsoleta';
 
+/**
+ * DE DONDE salio la receta (V036): 'automatica' = promovida sola desde una trayectoria exitosa del
+ * agente; 'grabacion' = sembrada por el usuario ensenandole la tarea al sistema una vez.
+ *
+ * Sirve para DISTINGUIRLAS, no para tratarlas distinto: una receta grabada se ejecuta con la MISMA
+ * verificacion determinista de parametros y la MISMA politica del usuario que cualquier otra. Que el
+ * usuario haya grabado los pasos no autoriza a ejecutar con datos que no coinciden con lo pedido.
+ */
+export type OrigenReceta = 'automatica' | 'grabacion';
+
 /** Una receta tal como la usa el worker: cabecera + pasos YA VALIDADOS. */
 export interface RecetaWeb {
   id: string;
@@ -29,6 +39,7 @@ export interface RecetaWeb {
   firmaObjetivo: string;
   version: number;
   estado: EstadoReceta;
+  origen: OrigenReceta;
   pasos: PasoDeReceta[];
   creadaDesdeTrayectoria: string | null;
   ejecucionesExitosas: number;
@@ -45,6 +56,8 @@ export interface NuevaRecetaWeb {
   firmaObjetivo: string;
   pasos: PasoDeReceta[];
   creadaDesdeTrayectoria: string | null;
+  /** De donde salio. Ausente = 'automatica' (la promocion desde una trayectoria exitosa). */
+  origen?: OrigenReceta;
 }
 
 interface RecetaRow {
@@ -54,6 +67,7 @@ interface RecetaRow {
   firma_objetivo: string;
   version: number;
   estado: string;
+  origen: string | null;
   pasos: unknown;
   creada_desde_trayectoria: string | null;
   ejecuciones_exitosas: number;
@@ -86,6 +100,8 @@ function rowToReceta(row: RecetaRow): RecetaWeb | null {
     firmaObjetivo: row.firma_objetivo,
     version: Number(row.version ?? 1),
     estado: row.estado === 'obsoleta' ? 'obsoleta' : 'activa',
+    // Una fila anterior a V036 no tiene la columna: cuenta como 'automatica', que es lo que era.
+    origen: row.origen === 'grabacion' ? 'grabacion' : 'automatica',
     pasos,
     creadaDesdeTrayectoria: row.creada_desde_trayectoria,
     ejecucionesExitosas: Number(row.ejecuciones_exitosas ?? 0),
@@ -109,7 +125,7 @@ export class RecetasWebRepository {
     firmaObjetivo: string,
   ): Promise<RecetaWeb | null> {
     const rows = await this.sql<RecetaRow[]>`
-      select id, owner_id, dominio, firma_objetivo, version, estado, pasos,
+      select id, owner_id, dominio, firma_objetivo, version, estado, origen, pasos,
         creada_desde_trayectoria, ejecuciones_exitosas, ejecuciones_fallidas, ultima_ejecucion_en,
         creada_en, actualizada_en
       from recetas_web
@@ -139,12 +155,13 @@ export class RecetasWebRepository {
       const version = Number(anteriores[0]?.version ?? 0) + 1;
       const creadas = await tx<RecetaRow[]>`
         insert into recetas_web
-          (owner_id, dominio, firma_objetivo, version, estado, pasos, creada_desde_trayectoria)
+          (owner_id, dominio, firma_objetivo, version, estado, origen, pasos, creada_desde_trayectoria)
         values
           (${input.ownerId}, ${input.dominio}, ${input.firmaObjetivo}, ${version}, 'activa',
+           ${input.origen ?? 'automatica'},
            ${tx.json(input.pasos as unknown as Parameters<Sql['json']>[0])},
            ${input.creadaDesdeTrayectoria})
-        returning id, owner_id, dominio, firma_objetivo, version, estado, pasos,
+        returning id, owner_id, dominio, firma_objetivo, version, estado, origen, pasos,
           creada_desde_trayectoria, ejecuciones_exitosas, ejecuciones_fallidas, ultima_ejecucion_en,
           creada_en, actualizada_en
       `;

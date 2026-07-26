@@ -31,6 +31,9 @@ vi.mock('../src/lib/queries', () => ({
   useSitios: useSitiosMock,
   useJobSeguimiento: useJobSeguimientoMock,
   useJobsSeguimiento: useJobsSeguimientoMock,
+  // La pagina tambien puede ensenarle una tarea a un sitio; ese flujo tiene su propio test de
+  // componente (grabar-tarea-dialog.dom.test.tsx) y aqui basta con que el hook exista y no consulte.
+  useGrabacion: () => ({ data: undefined }),
 }));
 
 vi.mock('../src/lib/mutations', () => {
@@ -40,6 +43,9 @@ vi.mock('../src/lib/mutations', () => {
     useConfirmarSitio: mutacionInerte,
     useEliminarSitio: () => ({ mutate: eliminarMock, reset: vi.fn(), isPending: false, isError: false, error: null }),
     useUpdateProfilePais: mutacionInerte,
+    useAbrirGrabacion: mutacionInerte,
+    useTerminarGrabacion: mutacionInerte,
+    useGuardarGrabacion: mutacionInerte,
   };
 });
 

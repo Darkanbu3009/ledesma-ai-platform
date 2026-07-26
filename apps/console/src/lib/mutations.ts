@@ -34,6 +34,7 @@ import type {
 import type { Consent, CreateConsentInput, CreateDataRequestInput, DataRequest } from './privacy';
 import type { CreateUpgradeRequestInput, CreateUpgradeRequestResult } from './upgrade-requests';
 import type { ConexionAceptada, SitioJobAceptado } from './sitios';
+import type { GrabacionAceptada, GrabacionJobAceptado, TipoDeDato } from './grabaciones';
 import type { AprobacionWeb } from './aprobaciones';
 import type { PlanId } from './plans';
 
@@ -410,6 +411,48 @@ export function useEliminarSitio() {
     mutationFn: (id: string) =>
       apiFetch<SitioJobAceptado>(`/v1/sitios/${id}?force=true`, { method: 'DELETE' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['sitios'] }),
+  });
+}
+
+/**
+ * ENSENARLE UNA TAREA (POST /v1/grabaciones): abre la grabacion sobre un sitio YA conectado y encola
+ * el job que abre la vista en vivo. El body lleva solo la conexion y lo que el usuario va a ensenar,
+ * escrito en lenguaje llano. Aqui no viaja (ni puede viajar) ninguna contrasena.
+ */
+export function useAbrirGrabacion() {
+  return useMutation({
+    mutationFn: (input: { connectionId: string; descripcion: string }) =>
+      apiFetch<GrabacionAceptada>('/v1/grabaciones', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+  });
+}
+
+/** "Ya termine" (POST /v1/grabaciones/:id/terminar): el worker cierra la captura y guarda los pasos. */
+export function useTerminarGrabacion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ status: string }>(`/v1/grabaciones/${id}/terminar`, { method: 'POST' }),
+    onSuccess: (_data, id) => void qc.invalidateQueries({ queryKey: ['grabaciones', id] }),
+  });
+}
+
+/**
+ * GUARDAR la grabacion (POST /v1/grabaciones/:id/confirmar): el usuario ya marco que datos cambian
+ * cada vez. Solo viajan el indice del paso y el tipo de dato; el valor que escribio no vuelve al
+ * servidor, y al guardar se borra tambien de la grabacion.
+ */
+export function useGuardarGrabacion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; variables: Array<{ idx: number; marcador: TipoDeDato }> }) =>
+      apiFetch<GrabacionJobAceptado>(`/v1/grabaciones/${input.id}/confirmar`, {
+        method: 'POST',
+        body: JSON.stringify({ variables: input.variables }),
+      }),
+    onSuccess: (_data, input) => void qc.invalidateQueries({ queryKey: ['grabaciones', input.id] }),
   });
 }
 

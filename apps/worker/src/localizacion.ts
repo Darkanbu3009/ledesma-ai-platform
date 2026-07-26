@@ -40,7 +40,7 @@ import { censurarValor, VALOR_CENSURADO } from './censura.js';
  * placeholder, title, texto del control) sin arrastrar una implementacion completa que aqui no
  * aporta. Si no alcanzan, quedan el texto visible y el xpath por debajo.
  */
-const AYUDANTES_DOM = `
+export const AYUDANTES_DOM = `
 const ROL_POR_TAG = { button: 'button', a: 'link', select: 'combobox', textarea: 'textbox',
   h1: 'heading', h2: 'heading', h3: 'heading', h4: 'heading', h5: 'heading', h6: 'heading' };
 const ROL_POR_INPUT = { checkbox: 'checkbox', radio: 'radio', button: 'button', submit: 'button',
@@ -124,10 +124,24 @@ function porXpath(xpath) {
     return r && r.singleNodeValue && r.singleNodeValue.nodeType === 1 ? r.singleNodeValue : null;
   } catch (e) { return null; }
 }
+const ATRIBUTOS_A_LEER = ['data-testid','data-test','data-qa','data-cy','id','name','aria-label'];
+function estrategiasDe(el) {
+  const estrategias = [];
+  for (const atributo of ATRIBUTOS_A_LEER) {
+    const valor = el.getAttribute ? el.getAttribute(atributo) : null;
+    if (valor && valor.trim() !== '') {
+      estrategias.push({ tipo: 'atributo', atributo: atributo, valor: valor.trim() });
+    }
+  }
+  const rol = rolDe(el);
+  const nombre = nombreDe(el);
+  if (rol !== '' && nombre !== '') estrategias.push({ tipo: 'rol', rol: rol, nombre: nombre });
+  const texto = textoDe(el);
+  if (texto !== '' && texto.length <= 120) estrategias.push({ tipo: 'texto', texto: texto });
+  estrategias.push({ tipo: 'xpath', xpath: xpathDe(el) });
+  return estrategias;
+}
 `;
-
-/** Atributos que se leen como estrategia estable, en el orden de preferencia del contrato. */
-const ATRIBUTOS_A_LEER = "['data-testid','data-test','data-qa','data-cy','id','name','aria-label']";
 
 /**
  * Expresion que LEE las estrategias del elemento indicado por `referencia` y devuelve un JSON con
@@ -143,20 +157,7 @@ export function expresionLeerEstrategias(referencia: ReferenciaDeElemento): stri
 ${AYUDANTES_DOM}
   const el = ${resolver};
   if (!el || el.nodeType !== 1) return '';
-  const estrategias = [];
-  for (const atributo of ${ATRIBUTOS_A_LEER}) {
-    const valor = el.getAttribute ? el.getAttribute(atributo) : null;
-    if (valor && valor.trim() !== '') {
-      estrategias.push({ tipo: 'atributo', atributo: atributo, valor: valor.trim() });
-    }
-  }
-  const rol = rolDe(el);
-  const nombre = nombreDe(el);
-  if (rol !== '' && nombre !== '') estrategias.push({ tipo: 'rol', rol: rol, nombre: nombre });
-  const texto = textoDe(el);
-  if (texto !== '' && texto.length <= 120) estrategias.push({ tipo: 'texto', texto: texto });
-  estrategias.push({ tipo: 'xpath', xpath: xpathDe(el) });
-  return JSON.stringify(estrategias);
+  return JSON.stringify(estrategiasDe(el));
 })()`;
 }
 
@@ -221,28 +222,11 @@ ${AYUDANTES_DOM}
   try { elegido.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) { /* sin scroll */ }
   const caja = elegido.getBoundingClientRect();
   if (caja.width <= 0 || caja.height <= 0) return '';
-  const estrategiasActuales = [];
-  for (const atributo of ${ATRIBUTOS_A_LEER}) {
-    const valor = elegido.getAttribute ? elegido.getAttribute(atributo) : null;
-    if (valor && valor.trim() !== '') {
-      estrategiasActuales.push({ tipo: 'atributo', atributo: atributo, valor: valor.trim() });
-    }
-  }
-  const rolActual = rolDe(elegido);
-  const nombreActual = nombreDe(elegido);
-  if (rolActual !== '' && nombreActual !== '') {
-    estrategiasActuales.push({ tipo: 'rol', rol: rolActual, nombre: nombreActual });
-  }
-  const textoActual = textoDe(elegido);
-  if (textoActual !== '' && textoActual.length <= 120) {
-    estrategiasActuales.push({ tipo: 'texto', texto: textoActual });
-  }
-  estrategiasActuales.push({ tipo: 'xpath', xpath: xpathDe(elegido) });
   return JSON.stringify({
     x: Math.round(caja.left + caja.width / 2),
     y: Math.round(caja.top + caja.height / 2),
     usada: usada,
-    estrategias: estrategiasActuales,
+    estrategias: estrategiasDe(elegido),
   });
 })()`;
 }
