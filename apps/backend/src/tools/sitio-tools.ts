@@ -1,4 +1,12 @@
-import type { JsonSchema, ToolDefinition, CreateJobInput, Job, JobConsulta } from '@ledesma-platform/shared';
+import type {
+  JsonSchema,
+  ToolDefinition,
+  CreateJobInput,
+  Job,
+  JobConsulta,
+  NormalizedMessage,
+  TextBlock,
+} from '@ledesma-platform/shared';
 import { TAREA_WEB_JOB_KIND, TAREA_WEB_OBJETIVO_MAX_CHARS } from '@ledesma-platform/shared';
 import type { SitioConectado } from '../sitios/sitios-conectados-repository.js';
 import type { ToolCall, ToolExecutionResult, ToolExecutor } from '../agent/index.js';
@@ -114,6 +122,17 @@ export interface SitioToolsContext {
   agentId: string;
   /** Credencial de la boveda con la que el worker ejecutara la tarea (la misma del run). */
   credentialId: string;
+  /**
+   * TEXTO LITERAL del ultimo mensaje del usuario de la conversacion, resuelto POR CODIGO en el
+   * ensamblado del run (textoLiteralDelUsuario) y adjuntado al payload del job junto al objetivo que
+   * escribe el modelo. Ver TareaWebJobPayload.textoUsuario: el modelo parafrasea y la extraccion
+   * determinista de parametros necesita el texto tal cual. undefined si el run no trae mensajes de
+   * usuario con texto (el worker cae al objetivo).
+   *
+   * PROHIBIDO resolverlo pidiendoselo al modelo en su prompt: los usuarios de esta plataforma no son
+   * tecnicos y el modelo ya demostro que reescribe lo que le piden copiar.
+   */
+  textoUsuario?: string | undefined;
 }
 
 /**
@@ -186,6 +205,33 @@ function esperar(ms: number, signal?: AbortSignal): Promise<void> {
 export interface EsperaRevisarOpciones {
   esperaMaxMs?: number;
   esperaIntervaloMs?: number;
+}
+
+/**
+ * TEXTO LITERAL del ULTIMO mensaje del usuario que trae texto propio. Recorre los mensajes ya
+ * normalizados de atras hacia adelante y se queda con el primero de rol 'user' que tenga bloques de
+ * texto; concatena esos bloques y acota al tope del objetivo.
+ *
+ * SOLO bloques `text` de mensajes de rol 'user'. Los `tool_result` viajan tambien en mensajes de rol
+ * usuario y son CONTENIDO NO CONFIABLE (traen el resultado de una tarea web, es decir texto de
+ * paginas): leerlos aqui permitiria que una pagina se colara como si fuera lo que pidio el usuario,
+ * que es exactamente lo que el resto de esta capa existe para impedir. Un mensaje sin texto propio
+ * se saltea y se sigue buscando hacia atras.
+ *
+ * Devuelve undefined si no hay ninguno: el worker cae al objetivo que escribio el modelo.
+ */
+export function textoLiteralDelUsuario(mensajes: readonly NormalizedMessage[]): string | undefined {
+  for (let i = mensajes.length - 1; i >= 0; i--) {
+    const mensaje = mensajes[i];
+    if (mensaje === undefined || mensaje.role !== 'user') continue;
+    const texto = mensaje.content
+      .filter((bloque): bloque is TextBlock => bloque.type === 'text')
+      .map((bloque) => bloque.text)
+      .join('\n')
+      .trim();
+    if (texto !== '') return texto.slice(0, TAREA_WEB_OBJETIVO_MAX_CHARS);
+  }
+  return undefined;
 }
 
 function inputString(input: Record<string, unknown>, key: string): string | null {
@@ -261,11 +307,18 @@ export function createSitioToolsExecutor(
         isError: true,
       };
     }
+    // El objetivo lo redacta el MODELO; `textoUsuario` es lo que el usuario escribio, tal cual, y
+    // viaja como campo SEPARADO. El worker compara contra el segundo y le da al motor el primero.
     const job = await deps.jobs.createJob({
       agentId: ctx.agentId,
       ownerId: ctx.ownerId,
       credentialId: ctx.credentialId,
-      payload: { kind: TAREA_WEB_JOB_KIND, connectionId, objetivo },
+      payload: {
+        kind: TAREA_WEB_JOB_KIND,
+        connectionId,
+        objetivo,
+        ...(ctx.textoUsuario !== undefined ? { textoUsuario: ctx.textoUsuario } : {}),
+      },
     });
     return {
       content: JSON.stringify({

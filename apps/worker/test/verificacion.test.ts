@@ -284,7 +284,9 @@ describe('accionSurtioEfecto', () => {
     expect(accionSurtioEfecto({ parametros, antes, despues: antes })).toBe(false);
   });
 
-  it('sin parametros que comparar, la pagina tiene que haber cambiado', () => {
+  it('que la pagina CAMBIE no es evidencia de nada (CAMBIO 2)', () => {
+    // Entre dos lecturas del DOM casi cualquier pagina viva cambia (un contador, un aviso, un
+    // reloj). Se exige el aviso de exito o el cierre del contenedor, nunca "algo se movio".
     const sinParametros = extraerParametrosDeclarados('borra el archivo viejo del panel');
     const vacia = pagina([], 'panel de archivos');
     expect(accionSurtioEfecto({ parametros: sinParametros, antes: vacia, despues: vacia })).toBe(false);
@@ -294,7 +296,58 @@ describe('accionSurtioEfecto', () => {
         antes: vacia,
         despues: pagina([], 'panel de archivos (vacio)'),
       }),
+    ).toBe(false);
+    // Con el aviso explicito del sitio SI se confirma.
+    expect(
+      accionSurtioEfecto({
+        parametros: sinParametros,
+        antes: vacia,
+        despues: pagina([], 'el archivo se elimino'),
+      }),
     ).toBe(true);
+  });
+
+  /**
+   * EL FALSO POSITIVO DE PRODUCCION (CAMBIO 2). Gmail convierte el destinatario tecleado en un CHIP:
+   * el input queda vacio y el lector de campos descarta los valores vacios, asi que el dato
+   * "desaparece" de los campos sin que nada se haya enviado. Antes eso se leia como accion
+   * consumada y un correo jamas enviado se reporto como enviado.
+   */
+  describe('un campo convertido en chip NO es una accion confirmada', () => {
+    const OBJETIVO =
+      'envia a juan@ejemplo.com un correo con asunto "Reporte de agosto" y cuerpo "Adjunto el reporte"';
+    const parametros = extraerParametrosDeclarados(OBJETIVO);
+    const DESTINATARIO = { contexto: 'input email para', valor: 'juan@ejemplo.com' };
+    const ASUNTO = { contexto: 'input asunto', valor: 'Reporte de agosto' };
+    const CUERPO = { contexto: 'div contenteditable cuerpo', valor: 'Adjunto el reporte' };
+    const antes = pagina([DESTINATARIO, ASUNTO, CUERPO]);
+
+    it('el redactor sigue abierto con el destinatario en chip: NO confirmada', () => {
+      // El campo del destinatario ya no aparece (su valor quedo vacio), pero el asunto y el cuerpo
+      // siguen ahi: la ventana de redaccion no se cerro.
+      const despues = pagina([ASUNTO, CUERPO], 'Para: juan@ejemplo.com');
+      expect(accionSurtioEfecto({ parametros, antes, despues })).toBe(false);
+    });
+
+    it('un redactor de UN solo campo cuyo dato quedo pintado como chip: NO confirmada', () => {
+      // Caso limite: sin campos en la foto siguiente, la lista de campos no distingue nada. Lo que
+      // decide es que el dato del usuario sigue legible en la pagina.
+      const soloDestinatario = pagina([DESTINATARIO]);
+      const despues = pagina([], 'Nuevo mensaje  Para: juan@ejemplo.com');
+      expect(accionSurtioEfecto({ parametros, antes: soloDestinatario, despues })).toBe(false);
+    });
+
+    it('el redactor se cerro de verdad: confirmada', () => {
+      expect(accionSurtioEfecto({ parametros, antes, despues: pagina([], 'Bandeja de entrada') })).toBe(
+        true,
+      );
+    });
+
+    it('el sitio muestra su aviso de exito: confirmada aunque el redactor siga', () => {
+      expect(
+        accionSurtioEfecto({ parametros, antes, despues: pagina(antes.campos, 'Mensaje enviado') }),
+      ).toBe(true);
+    });
   });
 });
 

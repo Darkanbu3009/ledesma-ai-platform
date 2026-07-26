@@ -8,6 +8,7 @@ import {
   BLOQUE_SEPARACION_INSTRUCCION_CONTENIDO,
   createSitioToolsExecutor,
   sitioToolsToDefinitions,
+  textoLiteralDelUsuario,
   SITIO_TOOL_NAMES,
   type SitioToolsContext,
   type SitioToolsDeps,
@@ -143,8 +144,17 @@ export function assembleAgentRun(params: AssembleAgentRunParams): AssembledAgent
     workerUrl && workerSecret
       ? createNativeExecutor(workerUrl, workerSecret, undefined, { warn })
       : null;
+  // El TEXTO LITERAL del usuario se resuelve AQUI, de los mensajes ya normalizados del run, y viaja
+  // en el contexto de la tool: el modelo no participa (ver textoLiteralDelUsuario y
+  // TareaWebJobPayload.textoUsuario). Un contexto que ya lo traiga puesto por su llamador manda.
   const sitioExec = sitiosActivos && params.sitios
-    ? createSitioToolsExecutor(params.sitios.context, params.sitios.deps)
+    ? createSitioToolsExecutor(
+        {
+          ...params.sitios.context,
+          textoUsuario: params.sitios.context.textoUsuario ?? textoLiteralDelUsuario(messages),
+        },
+        params.sitios.deps,
+      )
     : null;
   const executeTool: ToolExecutor = (call, abortSignal) => {
     if (nativeExec && NATIVE_TOOL_NAMES.has(call.name)) return nativeExec(call, abortSignal);

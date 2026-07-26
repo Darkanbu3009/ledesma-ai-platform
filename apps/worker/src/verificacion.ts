@@ -326,13 +326,23 @@ export function verificarAccion(entrada: {
 }
 
 /**
- * ¿La accion irreversible SURTIO EFECTO? (CAMBIO 4). Se responde LEYENDO EL DOM despues de ejecutar,
- * jamas preguntandole al modelo. Dos criterios, en orden:
- *  1. el sitio muestra su confirmacion ("mensaje enviado", "pago realizado");
- *  2. los datos que la accion comprometia YA NO ESTAN en la pagina: la ventana de redaccion (o el
- *     formulario de pago) se cerro, que es como se ve un envio consumado.
- * Si el objetivo no declaro nada comparable, el unico rastro posible es que la pagina CAMBIE: una
- * accion que no cambio nada no se puede dar por hecha.
+ * ¿La accion irreversible SURTIO EFECTO? (CAMBIO 4, endurecido en CAMBIO 2). Se responde LEYENDO EL
+ * DOM despues de ejecutar, jamas preguntandole al modelo. Se exige AL MENOS UNO de dos criterios:
+ *  1. el sitio muestra un aviso EXPLICITO de exito ("mensaje enviado", "pago realizado");
+ *  2. el CONTENEDOR de la accion desaparecio del DOM: la ventana de redaccion (o el formulario de
+ *     pago) se cerro, que es como se ve una accion consumada.
+ * Si ninguno se cumple, la accion NO esta confirmada y se reporta como tal. Jamas se asume exito.
+ *
+ * QUE SE RETIRO Y POR QUE (evidencia de produccion): antes bastaba con que TODOS los campos
+ * comparados quedaran vacios. Ese estado no distingue una accion consumada de un simple cambio de
+ * representacion del dato: Gmail convierte el destinatario tecleado en un CHIP, el lector de campos
+ * solo recorre input/textarea/select/[contenteditable] y descarta los valores vacios
+ * (browserbase.ts), asi que "el dato ya no esta donde estaba" se leia como "la accion se consumo" y
+ * un correo jamas enviado se reporto como enviado. Un token, un autocompletado o un campo que se
+ * deshabilita producen exactamente el mismo estado.
+ *
+ * Tambien se retiro el ultimo recurso "la pagina cambio": entre dos lecturas del DOM casi cualquier
+ * pagina viva cambia (un reloj, un contador, un aviso), asi que era evidencia de nada.
  */
 export function accionSurtioEfecto(entrada: {
   parametros: ParametrosDeclarados;
@@ -342,11 +352,50 @@ export function accionSurtioEfecto(entrada: {
   despues: EstadoDeLaPagina;
 }): boolean {
   if (PATRON_CONFIRMACION.test(normalizarTexto(entrada.despues.texto))) return true;
-  const comparaciones = compararParametros(entrada.parametros, entrada.despues);
-  if (comparaciones.length > 0) {
-    return comparaciones.every((c) => c.encontrado.trim() === '');
-  }
-  return huellaDePagina(entrada.antes) !== huellaDePagina(entrada.despues);
+  return contenedorDeLaAccionDesaparecio(entrada.parametros, entrada.antes, entrada.despues);
+}
+
+/** Identidad de un campo entre dos fotos: su contexto normalizado (name/id/tipo/rotulo). */
+function claveDeCampo(campo: CampoDeLaPagina): string {
+  return normalizarTexto(campo.contexto);
+}
+
+/**
+ * ¿El CONTENEDOR de la accion desaparecio del DOM? Se responde con dos condiciones, las dos
+ * necesarias, porque cada una sola tiene su falso positivo conocido:
+ *
+ *  a) NINGUNO de los campos que habia antes de ejecutar sigue presente. Un chip vacia UN campo (el
+ *     destinatario) y deja los demas del redactor -- asunto, cuerpo -- intactos; cerrar la ventana
+ *     se los lleva TODOS. Se compara por contexto (name/id/rotulo), no por valor.
+ *  b) ningun dato de texto que el usuario declaro sigue siendo legible en la pagina (ni en un campo
+ *     ni en el texto visible). Es lo que cubre el caso limite de a): un redactor con un unico campo
+ *     lleno, donde el chip deja la lista de campos vacia pero el destinatario sigue pintado en la
+ *     pantalla.
+ *
+ * Sin campos en la foto previa no hay contenedor que pueda cerrarse y la respuesta es NO: una accion
+ * sin rastro previo tampoco puede dejar rastro de haberse consumado.
+ *
+ * Montos y cantidades quedan FUERA de (b) a proposito: un numero aparece en cualquier parte de una
+ * pagina (totales, historial, saldos) y su presencia no dice nada sobre si el formulario sigue vivo.
+ */
+function contenedorDeLaAccionDesaparecio(
+  parametros: ParametrosDeclarados,
+  antes: EstadoDeLaPagina,
+  despues: EstadoDeLaPagina,
+): boolean {
+  if (antes.campos.length === 0) return false;
+  const presentes = new Set(despues.campos.map(claveDeCampo));
+  if (antes.campos.some((campo) => presentes.has(claveDeCampo(campo)))) return false;
+  const enLaPagina = [...despues.campos.map((c) => c.valor), despues.texto].map(normalizarTexto);
+  const declarados = [
+    ...parametros.destinatarios,
+    ...(parametros.producto !== null ? [parametros.producto] : []),
+    ...(parametros.asunto !== null ? [parametros.asunto] : []),
+    ...(parametros.cuerpo !== null ? [parametros.cuerpo] : []),
+  ].map(normalizarTexto);
+  return !declarados.some(
+    (valor) => valor !== '' && enLaPagina.some((texto) => texto.includes(valor)),
+  );
 }
 
 /**
@@ -356,12 +405,6 @@ export function accionSurtioEfecto(entrada: {
  */
 const PATRON_CONFIRMACION =
   /\b(?:mensaje enviado|correo enviado|se envio|enviado con exito|enviada correctamente|message sent|email sent|pago (?:realizado|enviado|exitoso|aprobado)|payment (?:sent|complete|completed|successful)|transferencia (?:realizada|enviada|exitosa)|compra (?:realizada|confirmada|exitosa)|gracias por tu compra|pedido (?:confirmado|realizado)|order (?:confirmed|placed)|se elimino|eliminado correctamente|deleted successfully|publicado correctamente|published successfully)\b/;
-
-/** Huella de una foto de la pagina: sus campos con su valor, mas el texto visible. */
-function huellaDePagina(pagina: EstadoDeLaPagina): string {
-  const campos = pagina.campos.map((c) => `${c.contexto}=${c.valor}`).join('|');
-  return `${campos}##${pagina.texto}`;
-}
 
 /** Resumen de lo que el objetivo pedia, para el mensaje cuando no hay nada legible con que comparar. */
 function descripcionDeLoPedido(parametros: ParametrosDeclarados): string {
@@ -581,5 +624,26 @@ export function construirPasoDeVerificacion(veredicto: Veredicto): PasoCensurado
     estrategias: [],
     url: null,
     exito: veredicto.tipo === 'ejecutar',
+  };
+}
+
+/**
+ * UNA DECISION DE LA GUARDIA que no nace de comparar, como PASO de la trayectoria (CAMBIO 4): el
+ * cupo ya consumido, la cancelacion del dueno o un fallo de la comprobacion. Antes esas ramas
+ * cortaban la corrida ANTES de escribir nada, asi que la decision que mataba la accion era invisible
+ * en la traza: el usuario veia una tarea que termino sin su envio y ni un renglon que dijera quien
+ * lo impidio. Siempre exito false: ninguna de estas ramas ejecuta nada.
+ *
+ * `detalle` lo arma el llamador y JAMAS lleva valores leidos de la pagina sin censurar.
+ */
+export function construirPasoDeBloqueo(detalle: string): PasoCensurado {
+  return {
+    idx: 0,
+    accion: { tipo: 'verificacion', instruccion: detalle, metodo: null, argumentos: [] },
+    selector: null,
+    valorCensurado: null,
+    estrategias: [],
+    url: null,
+    exito: false,
   };
 }

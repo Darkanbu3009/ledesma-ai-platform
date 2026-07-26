@@ -24,8 +24,22 @@ export interface TareaWebJobPayload {
   kind: typeof TAREA_WEB_JOB_KIND;
   /** Id de la fila de sitios_conectados (V024) sobre cuya sesion activa se ejecuta. */
   connectionId: string;
-  /** La tarea en lenguaje natural, tal como la pidio el usuario. UNICA fuente de instrucciones. */
+  /** La tarea en lenguaje natural, tal como la REDACTO el modelo al llamar a su tool. */
   objetivo: string;
+  /**
+   * TEXTO LITERAL del ultimo mensaje del usuario en la conversacion, adjuntado POR CODIGO en el
+   * backend (jamas pedido al modelo). ACOMPANA al objetivo, no lo sustituye: el objetivo sigue
+   * siendo lo unico que viaja al motor de navegacion como instruccion.
+   *
+   * Existe porque `objetivo` lo escribe el modelo conversacional y en produccion lo PARAFRASEO: los
+   * rotulos y las comillas que el usuario habia escrito ("con asunto \"X\"") desaparecieron, y la
+   * extraccion determinista de parametros -- que exige justamente rotulo y comillas para no adivinar
+   * nada -- saco 1 de los 3 datos declarados. Con menos parametros, la verificacion previa compara
+   * menos de lo que el usuario pidio. El worker extrae los parametros de ESTE campo cuando llega.
+   *
+   * Opcional: los jobs encolados antes de este cambio no lo traen y el worker cae al objetivo.
+   */
+  textoUsuario?: string;
 }
 
 /** Resultado de validar un payload de tarea web (estilo safeParse, sin lanzar). */
@@ -66,8 +80,22 @@ export function parseTareaWebJobPayload(value: unknown): TareaWebJobPayloadParse
       error: `objetivo supera el tope de ${TAREA_WEB_OBJETIVO_MAX_CHARS} caracteres`,
     };
   }
+  // textoUsuario es OPCIONAL y su ausencia (o su forma invalida) NO invalida el job: sin el, el
+  // worker cae al objetivo, que es el comportamiento de siempre. Fallar el payload entero por un
+  // campo auxiliar dejaria sin ejecutar tareas que antes corrian.
+  const textoUsuario =
+    typeof value.textoUsuario === 'string' &&
+    value.textoUsuario.trim().length > 0 &&
+    value.textoUsuario.length <= TAREA_WEB_OBJETIVO_MAX_CHARS
+      ? value.textoUsuario
+      : undefined;
   return {
     success: true,
-    data: { kind: TAREA_WEB_JOB_KIND, connectionId: value.connectionId, objetivo: value.objetivo },
+    data: {
+      kind: TAREA_WEB_JOB_KIND,
+      connectionId: value.connectionId,
+      objetivo: value.objetivo,
+      ...(textoUsuario !== undefined ? { textoUsuario } : {}),
+    },
   };
 }
