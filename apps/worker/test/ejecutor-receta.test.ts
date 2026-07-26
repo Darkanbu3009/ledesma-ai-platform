@@ -319,3 +319,94 @@ describe('robustez: un fallo del navegador no tumba la tarea', () => {
     expect(resultado.desenlace.tipo).toBe('abandonada');
   });
 });
+
+/**
+ * RECETAS QUE CRUZAN SITIOS: cada paso guarda a que sitio pertenece y el ejecutor cambia de SESION
+ * cuando cambia el sitio. La puerta de seguridad es que ese cambio solo lo puede conceder el job:
+ * una receta que nombre un sitio que la tarea no autorizo se ABANDONA, y la termina el motor.
+ */
+describe('ejecutarReceta con pasos de varios sitios', () => {
+  const PASOS_MULTISITIO: PasoDeReceta[] = [
+    pasoReceta({ idx: 0, accion: 'navegar', estrategias: [], ruta: '/productos' }),
+    pasoReceta({ idx: 1, accion: 'click', dominio: 'correo.ejemplo.com' }),
+  ];
+
+  it('cambia de sesion en el paso que declara otro sitio y resuelve su ruta contra ESE dominio', async () => {
+    const { navegador } = makeNavegador();
+    const sesiones: string[] = [];
+    const ejecutados: InstruccionDePaso[] = [];
+    const deps = makeDeps({
+      navegador,
+      cambiarASitio: vi.fn(async (dominio: string) => (dominio === 'correo.ejemplo.com' ? 'ses-2' : null)),
+    });
+    // El fake registra la sesion CON LA QUE se llamo a cada paso, que es lo que este test mira.
+    (navegador.ejecutarPasoDeterminista as ReturnType<typeof vi.fn>).mockImplementation(
+      async (sesion: string, instruccion: InstruccionDePaso) => {
+        sesiones.push(sesion);
+        ejecutados.push(instruccion);
+        return { estado: 'ok', estrategias: [], detalle: null };
+      },
+    );
+
+    const resultado = await ejecutarReceta(PASOS_MULTISITIO, SIN_PARAMETROS, deps);
+
+    expect(resultado.desenlace).toEqual({ tipo: 'completada' });
+    expect(sesiones).toEqual(['ses-1', 'ses-2']);
+    // La ruta del primer paso se resolvio contra el dominio de la conexion, no contra el del segundo.
+    expect(ejecutados[0]?.url).toBe('https://app.ejemplo.com/productos');
+  });
+
+  it('un sitio que ESTA tarea no autoriza abandona la receta, sin tocar la pagina de ese sitio', async () => {
+    const { navegador } = makeNavegador();
+    const cambiarASitio = vi.fn(async () => null);
+    const deps = makeDeps({ navegador, cambiarASitio });
+
+    const resultado = await ejecutarReceta(
+      [pasoReceta({ idx: 0, accion: 'click', dominio: 'evil.com' })],
+      SIN_PARAMETROS,
+      deps,
+    );
+
+    expect(resultado.desenlace).toEqual({
+      tipo: 'abandonada',
+      motivo: 'lo aprendido usa un sitio que esta tarea no autoriza',
+      obsoleta: false,
+    });
+    expect(navegador.ejecutarPasoDeterminista).not.toHaveBeenCalled();
+  });
+
+  it('sin forma de cambiar de sitio (tarea de un solo sitio) tampoco se ejecuta el paso ajeno', async () => {
+    const { navegador } = makeNavegador();
+    const deps = makeDeps({ navegador });
+
+    const resultado = await ejecutarReceta(
+      [pasoReceta({ idx: 0, accion: 'click', dominio: 'correo.ejemplo.com' })],
+      SIN_PARAMETROS,
+      deps,
+    );
+
+    expect(resultado.desenlace.tipo).toBe('abandonada');
+    expect(navegador.ejecutarPasoDeterminista).not.toHaveBeenCalled();
+  });
+
+  it('la verificacion recibe el sitio en el que la receta esta, no el de arranque', async () => {
+    const { navegador } = makeNavegador();
+    const verificar = vi.fn(async () => ({ tipo: 'ejecutar' as const }));
+    const deps = makeDeps({
+      navegador,
+      verificar,
+      cambiarASitio: vi.fn(async () => 'ses-2'),
+    });
+
+    await ejecutarReceta(
+      [pasoReceta({ idx: 0, accion: 'verificar', estrategias: [], dominio: 'correo.ejemplo.com' })],
+      SIN_PARAMETROS,
+      deps,
+    );
+
+    expect(verificar).toHaveBeenCalledWith({
+      sesionExternaId: 'ses-2',
+      dominio: 'correo.ejemplo.com',
+    });
+  });
+});

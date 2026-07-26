@@ -1769,6 +1769,9 @@
       "tareaWeb": "Tarea web"
     }
   },
+  "multisitio": {
+    "sitiosUsados": "Sitios usados en esta tarea"
+  },
   "sitios": {
     "titulo": "Sitios conectados",
     "subtitulo": "Conecta sitios donde tú inicias sesión para que tus agentes trabajen dentro de tu cuenta.",

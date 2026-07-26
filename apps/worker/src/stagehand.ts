@@ -4,8 +4,10 @@ import { z } from 'zod';
 import {
   AccionBloqueadaError,
   AccionSinConfirmarError,
+  CambioDeSitioError,
   FalloDeEsquemaDelMotorError,
 } from './errores.js';
+import { TOOL_CAMBIAR_DE_SITIO } from './prompt-tarea-web.js';
 import {
   crearAcumuladorDeConsumo,
   crearPoliticaDeScreenshots,
@@ -18,7 +20,14 @@ import {
 import type { Logger } from './logger.js';
 import type { EscaladorDePaso, ResultadoEscalada } from './ejecutor-receta.js';
 import type { AccionCrudaDeMotor } from './trayectoria.js';
-import type { GuardiaDeAccion, MotorDeTareaWeb, PasoObservado, ResultadoMotor } from './tarea-web.js';
+import type {
+  CambiadorDeSitio,
+  CambioDeSitioPedido,
+  GuardiaDeAccion,
+  MotorDeTareaWeb,
+  PasoObservado,
+  ResultadoMotor,
+} from './tarea-web.js';
 
 /**
  * ADAPTADOR real del puerto MotorDeTareaWeb (tarea-web.ts) sobre Stagehand v3
@@ -435,6 +444,94 @@ function herramientaActBlindada(blindado: ActBlindado): NonNullable<
   };
 }
 
+/** Salida de la tool de cambio de sitio hacia el modelo cuando el destino NO esta autorizado. */
+export interface SalidaDeCambioDeSitio {
+  success: boolean;
+  error?: string;
+}
+
+/** La tool de cambio de sitio mas lo que el adaptador necesita saber al terminar la corrida. */
+export interface CambiadorDeSitioBlindado {
+  herramienta: NonNullable<Parameters<Stagehand['agent']>[0]>['tools'];
+  /** El cambio AUTORIZADO que corto esta corrida, o null si el agente nunca cambio de sitio. */
+  solicitado(): CambioDeSitioPedido | null;
+  /**
+   * El cambio como PASO de la traza, o null. La tool LANZA para cortar el bucle, asi que Stagehand no
+   * llega a empujar esa llamada a su propia traza: sin esto, el paso que explica por que la tarea
+   * cambio de sitio no aparecia en la trayectoria que ve el usuario.
+   */
+  paso(): AccionCrudaDeMotor | null;
+}
+
+/** Tope del resumen que el agente puede llevarse al otro sitio (el handler lo vuelve a acotar). */
+const MAX_RESUMEN_TOOL_CHARS = 4_000;
+
+/**
+ * TOOL DE CAMBIO DE SITIO (tareas multisitio). Solo se registra cuando el job autorizo MAS DE UN
+ * sitio; con uno solo el toolset del agente queda exactamente como estaba.
+ *
+ * QUIEN DECIDE: el destino lo escribe el modelo, pero quien autoriza es `cambiador.solicitar`, que
+ * compara contra la lista CERRADA del job (multisitio.ts). Un destino fuera de esa lista vuelve al
+ * modelo como fallo de la tool -- no corta la tarea, porque un nombre mal escrito no es un ataque y
+ * el agente puede corregirse -- y NADA se abre.
+ *
+ * POR QUE LANZA cuando el cambio SI se autoriza: el bucle del agente esta atado a la sesion de
+ * navegador en la que arranco. Devolver "ok" y seguir el bucle dejaria al agente razonando sobre la
+ * pagina del sitio anterior. Lanzar corta el bucle en el acto; el adaptador reconstruye el desenlace
+ * y el handler abre (o reutiliza) la sesion del destino y vuelve a correr el motor alli.
+ *
+ * EL RESUMEN ES UN PARAMETRO DE LA TOOL, no el mensaje final del agente: cuando una tool lanza, el
+ * mensaje final que devuelve el motor es el del error, no el del agente. Pedirlo aqui es lo unico
+ * que garantiza que lo que el agente traiga del sitio anterior sobreviva al cambio. El handler lo
+ * trata como DATO no confiable (delimitado y censurado), nunca como instruccion.
+ */
+export function crearCambiadorDeSitio(params: {
+  cambiador: CambiadorDeSitio;
+  registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined;
+}): CambiadorDeSitioBlindado {
+  let solicitado: CambioDeSitioPedido | null = null;
+  let paso: AccionCrudaDeMotor | null = null;
+  return {
+    solicitado: () => solicitado,
+    paso: () => paso,
+    herramienta: {
+      [TOOL_CAMBIAR_DE_SITIO]: tool({
+        description:
+          'Cambia a otro de los sitios conectados que esta tarea autoriza. Termina lo que estas ' +
+          'haciendo en el sitio actual: lo unico que llevas contigo es lo que escribas en `resumen`.',
+        inputSchema: z.object({
+          dominio: z
+            .string()
+            .describe('Dominio exacto del sitio autorizado al que quieres cambiar, sin https ni rutas'),
+          resumen: z
+            .string()
+            .describe(
+              'Todo lo que encontraste en el sitio actual y necesitas para continuar la tarea en el otro sitio',
+            ),
+        }),
+        execute: async ({ dominio, resumen }): Promise<SalidaDeCambioDeSitio> => {
+          const veredicto = params.cambiador.solicitar(dominio);
+          if (veredicto.tipo === 'rechazado') {
+            return { success: false, error: veredicto.mensaje };
+          }
+          solicitado = { dominio: veredicto.dominio, resumen: resumen.slice(0, MAX_RESUMEN_TOOL_CHARS) };
+          // EL CAMBIO QUEDA EN LA TRAYECTORIA: es un paso mas de lo que la tarea hizo, con el destino
+          // (un dominio ya autorizado, nunca texto libre del modelo) como unica informacion. Se
+          // reporta por los DOS caminos porque solo uno de ellos ocurre: `registrarAccion` cubre la
+          // corrida que ademas lanza (cancelacion, deadline), y `paso()` la que devuelve normalmente.
+          paso = {
+            type: TOOL_CAMBIAR_DE_SITIO,
+            action: `cambio al sitio ${veredicto.dominio}`,
+            success: true,
+          };
+          params.registrarAccion?.(paso);
+          throw new CambioDeSitioError(veredicto.dominio);
+        },
+      }),
+    },
+  };
+}
+
 /** Salida de la tool `screenshot`, con la MISMA forma que la nativa de Stagehand (agent/tools). */
 export interface SalidaDeScreenshot {
   success: boolean;
@@ -747,6 +844,7 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
     observador?: ((paso: PasoObservado) => Promise<void>) | undefined;
     registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined;
     guardia?: GuardiaDeAccion | undefined;
+    cambiador?: CambiadorDeSitio | undefined;
     historialPasos: number;
     modoScreenshots: ModoScreenshots;
     reportarConsumo?: ((consumo: ConsumoDeCorrida) => void) | undefined;
@@ -785,6 +883,15 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
               conGuardia: params.guardia !== undefined,
               yaAutorizo: () => blindado.autorizoIrreversible(),
             });
+      // CAMBIO DE SITIO (multisitio): la tool solo existe cuando el job autorizo mas de un sitio.
+      // Sin ella el toolset del agente es exactamente el de una tarea de un solo sitio.
+      const cambiador =
+        params.cambiador !== undefined
+          ? crearCambiadorDeSitio({
+              cambiador: params.cambiador,
+              registrarAccion: params.registrarAccion,
+            })
+          : null;
       const agente = stagehand.agent({
         systemPrompt: params.systemPrompt,
         tools: {
@@ -795,6 +902,7 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
                 pagina: () => stagehand.context.awaitActivePage(),
               })
             : {}),
+          ...(cambiador !== null ? cambiador.herramienta : {}),
         },
       });
       const resultado = await agente.execute(
@@ -837,6 +945,25 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
       if (corte !== null) {
         throw corte;
       }
+      // CAMBIO DE SITIO AUTORIZADO: el bucle no fallo, TERMINO este tramo. Va despues de los tres
+      // desenlaces anteriores porque todos ellos cierran la tarea entera y este solo cierra el tramo.
+      const cambio = cambiador?.solicitado() ?? null;
+      if (cambio !== null) {
+        const pasoDelCambio = cambiador?.paso() ?? null;
+        return {
+          // Ni exito ni DONE: el tramo se corto a proposito. Quien decide que pasa despues es el
+          // handler, que ve `cambioDeSitio` antes que cualquier otra cosa.
+          exito: false,
+          completado: false,
+          mensaje: cambio.resumen,
+          // El paso del cambio se agrega a mano: la tool lanzo, asi que Stagehand no la empujo a su
+          // traza y la trayectoria del tramo quedaria sin el paso que explica por que termino.
+          acciones: [...(resultado.actions ?? []), ...(pasoDelCambio !== null ? [pasoDelCambio] : [])],
+          tokensIn: resultado.usage?.input_tokens ?? null,
+          tokensOut: resultado.usage?.output_tokens ?? null,
+          cambioDeSitio: cambio,
+        };
+      }
       // AgentResult (v3, types/public/agent.d.ts:64-89) ya trae la TRAZA estructurada: `actions`
       // (una por tool ejecutada, con playwrightArguments.selector en 'act'/'fillForm') y `usage`
       // (tokens). Se devuelven CRUDAS: la censura y la persistencia son del handler (trayectoria.ts),
@@ -848,6 +975,7 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
         acciones: resultado.actions ?? [],
         tokensIn: resultado.usage?.input_tokens ?? null,
         tokensOut: resultado.usage?.output_tokens ?? null,
+        cambioDeSitio: null,
       };
     } finally {
       params.reportarConsumo?.(consumo.total());

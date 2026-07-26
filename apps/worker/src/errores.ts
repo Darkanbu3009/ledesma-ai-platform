@@ -82,6 +82,21 @@ export class AccionSinConfirmarError extends Error {
 }
 
 /**
+ * El agente pidio CAMBIAR AL OTRO SITIO CONECTADO de la tarea y el worker lo AUTORIZO (el destino
+ * estaba en la lista cerrada del job). No es un fallo: es como termina un tramo de una tarea
+ * multisitio. Se lanza desde la tool porque un cambio de sitio cambia la sesion del navegador, y el
+ * bucle del agente esta atado a la sesion en la que arranco: seguir ese bucle despues del cambio
+ * dejaria al agente actuando sobre la pagina del sitio anterior. El adaptador reconstruye el
+ * desenlace al terminar y el handler abre (o reutiliza) la sesion del sitio destino.
+ */
+export class CambioDeSitioError extends Error {
+  constructor(dominio: string) {
+    super(`el agente cambio al sitio autorizado ${dominio}`);
+    this.name = 'CambioDeSitioError';
+  }
+}
+
+/**
  * El worker se esta apagando (SIGTERM/SIGINT) y aborto el run en curso. NO es culpa del job: se devuelve
  * a 'pending' para que se re-reclame, sin marcarlo failed aunque haya agotado intentos.
  */

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  dominiosDePasos,
   esAtributoEstable,
   MAX_ESPERA_MS,
   MAX_PASOS_RECETA,
@@ -180,5 +181,62 @@ describe('estrategias de localizacion', () => {
       }),
     ]);
     expect(pasos?.[0]?.estrategias.map((e) => e.tipo)).toEqual(['atributo', 'xpath']);
+  });
+});
+
+/**
+ * RECETAS QUE CRUZAN SITIOS: cada paso puede declarar a que sitio pertenece. Como el ejecutor
+ * resuelve rutas y sesiones sobre ese valor, tiene que ser un DOMINIO y nada mas; cualquier otra
+ * cosa invalida la receta entera (mismo criterio de rechazo total que el resto del contrato).
+ */
+describe('parsearPasosDeReceta y el sitio de cada paso', () => {
+  function pasoCon(dominio: unknown): unknown {
+    return {
+      idx: 0,
+      accion: 'click',
+      dominio,
+      estrategias: [{ tipo: 'atributo', atributo: 'id', valor: 'enviar' }],
+      valor: null,
+      teclas: null,
+      ruta: null,
+      esperaMs: null,
+    };
+  }
+
+  it('un paso sin dominio (receta de un solo sitio) queda con null', () => {
+    const pasos = parsearPasosDeReceta([pasoCon(undefined)]);
+    expect(pasos?.[0]?.dominio).toBeNull();
+    expect(parsearPasosDeReceta([pasoCon(null)])?.[0]?.dominio).toBeNull();
+  });
+
+  it('un dominio valido se normaliza a minusculas', () => {
+    expect(parsearPasosDeReceta([pasoCon('Correo.Ejemplo.COM')])?.[0]?.dominio).toBe(
+      'correo.ejemplo.com',
+    );
+  });
+
+  it('cualquier cosa que no sea un hostname INVALIDA la receta entera', () => {
+    for (const invalido of [
+      'https://correo.ejemplo.com',
+      'correo.ejemplo.com/inbox',
+      'correo.ejemplo.com:8443',
+      'javascript:alert(1)',
+      '//correo.ejemplo.com',
+      'localhost',
+      'correo ejemplo com',
+      42,
+    ]) {
+      expect(parsearPasosDeReceta([pasoCon(invalido)])).toBeNull();
+    }
+  });
+
+  it('dominiosDePasos lista los sitios distintos que la receta nombra', () => {
+    const pasos = parsearPasosDeReceta([
+      pasoCon(null),
+      { ...(pasoCon('correo.ejemplo.com') as Record<string, unknown>), idx: 1 },
+      { ...(pasoCon('correo.ejemplo.com') as Record<string, unknown>), idx: 2 },
+    ]);
+    expect(pasos).not.toBeNull();
+    expect(dominiosDePasos(pasos ?? [])).toEqual(['correo.ejemplo.com']);
   });
 });

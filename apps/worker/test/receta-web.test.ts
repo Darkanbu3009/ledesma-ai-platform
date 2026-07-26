@@ -312,3 +312,92 @@ describe('auto reparacion y obsolescencia (D5 / D6)', () => {
     expect(superaElLimiteDeEscaladas(0, 10)).toBe(false);
   });
 });
+
+/**
+ * TAREAS QUE CRUZAN VARIOS SITIOS: la firma incorpora el CONJUNTO de dominios y cada paso guarda a
+ * que sitio pertenece. Sin lo primero, una tarea de un sitio y otra que usa dos compartirian receta;
+ * sin lo segundo, la receta no sabria en que sitio repetir cada paso.
+ */
+describe('firmaDeObjetivo con varios sitios', () => {
+  it('una tarea de UN sitio firma EXACTAMENTE como antes de este cambio', () => {
+    const objetivo = 'envia el informe a juan@ejemplo.com';
+    expect(firmaDeObjetivo(objetivo, ['app.ejemplo.com'])).toBe(firmaDeObjetivo(objetivo));
+    expect(firmaDeObjetivo(objetivo, [])).toBe(firmaDeObjetivo(objetivo));
+  });
+
+  it('el mismo objetivo con dos sitios NO comparte firma con el de un sitio', () => {
+    const objetivo = 'envia el informe a juan@ejemplo.com';
+    expect(firmaDeObjetivo(objetivo, ['tienda.com', 'correo.com'])).not.toBe(firmaDeObjetivo(objetivo));
+  });
+
+  it('el conjunto de dominios no depende del orden en que se empezo', () => {
+    const objetivo = 'envia el informe a juan@ejemplo.com';
+    expect(firmaDeObjetivo(objetivo, ['tienda.com', 'correo.com'])).toBe(
+      firmaDeObjetivo(objetivo, ['correo.com', 'tienda.com']),
+    );
+  });
+
+  it('dos conjuntos de sitios distintos firman distinto', () => {
+    const objetivo = 'envia el informe a juan@ejemplo.com';
+    expect(firmaDeObjetivo(objetivo, ['tienda.com', 'correo.com'])).not.toBe(
+      firmaDeObjetivo(objetivo, ['agenda.com', 'correo.com']),
+    );
+  });
+});
+
+describe('promoverTrayectoria con pasos de varios sitios', () => {
+  it('un paso de OTRO sitio guarda su dominio; los del sitio de la receta lo dejan en null', () => {
+    const resultado = promover(
+      [
+        paso({ dominio: DOMINIO }),
+        paso({ dominio: 'correo.ejemplo.com', url: 'https://correo.ejemplo.com/inbox' }),
+      ],
+      'abre el ultimo correo',
+    );
+    expect(resultado.promovida).toBe(true);
+    if (!resultado.promovida) return;
+    expect(resultado.pasos.map((p) => p.dominio)).toEqual([null, 'correo.ejemplo.com']);
+    // Y sigue validando contra el contrato compartido: es lo que se persiste como jsonb.
+    expect(parsearPasosDeReceta(JSON.parse(JSON.stringify(resultado.pasos)))).not.toBeNull();
+  });
+
+  it('una navegacion se resuelve contra el dominio DEL PASO, no contra el de la receta', () => {
+    const resultado = promover(
+      [
+        paso({
+          accion: { tipo: 'goto', instruccion: null, metodo: null, argumentos: [] },
+          dominio: 'correo.ejemplo.com',
+          url: 'https://correo.ejemplo.com/redactar',
+          estrategias: [],
+        }),
+      ],
+      'abre el redactor',
+    );
+    expect(resultado.promovida).toBe(true);
+    if (!resultado.promovida) return;
+    expect(resultado.pasos[0]).toMatchObject({
+      accion: 'navegar',
+      ruta: '/redactar',
+      dominio: 'correo.ejemplo.com',
+    });
+  });
+
+  it('el cambio de sitio no se promueve como paso: lo que viaja es el dominio de cada paso', () => {
+    const resultado = promover(
+      [
+        paso({ dominio: DOMINIO }),
+        paso({
+          accion: { tipo: 'cambiar_de_sitio', instruccion: null, metodo: null, argumentos: [] },
+          estrategias: [],
+          dominio: DOMINIO,
+        }),
+        paso({ dominio: 'correo.ejemplo.com', url: 'https://correo.ejemplo.com/inbox' }),
+      ],
+      'abre el ultimo correo',
+    );
+    expect(resultado.promovida).toBe(true);
+    if (!resultado.promovida) return;
+    expect(resultado.pasos).toHaveLength(2);
+    expect(resultado.pasos.map((p) => p.accion)).toEqual(['click', 'click']);
+  });
+});

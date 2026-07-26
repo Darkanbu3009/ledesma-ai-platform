@@ -1,4 +1,8 @@
-import { POLITICA_EJECUCION_DEFAULT, parseTareaWebJobPayload } from '@ledesma-platform/shared';
+import {
+  POLITICA_EJECUCION_DEFAULT,
+  parseTareaWebJobPayload,
+  sitiosAutorizadosDePayload,
+} from '@ledesma-platform/shared';
 import type { Job } from '@ledesma-platform/shared';
 // IMPORT DE TIPOS (type-only): igual que sitios.ts, el repositorio real (7.1a) y la boveda se
 // INYECTAN; este modulo no carga en runtime el backend ni el SDK de Stagehand. Los tests pasan
@@ -71,6 +75,15 @@ import {
   promoverTrayectoria,
   valoresDeParametros,
 } from './receta-web.js';
+import {
+  MAX_CAMBIOS_DE_SITIO_POR_TAREA,
+  construirContinuacionEnOtroSitio,
+  crearRegistroDeSitios,
+  resolverDominioAutorizado,
+  type EstadoDeSitioParaGuardia,
+  type RegistroDeSitios,
+  type ResolucionDeDominio,
+} from './multisitio.js';
 import type { Logger } from './logger.js';
 
 /**
@@ -226,6 +239,29 @@ export interface GuardiaDeAccion {
   confirmar(): Promise<ResultadoDeConfirmacion>;
 }
 
+/** Lo que el agente pidio al cambiar de sitio: a donde va y que se lleva del sitio anterior. */
+export interface CambioDeSitioPedido {
+  /** Dominio DESTINO, ya resuelto contra la lista autorizada del job (jamas texto libre del modelo). */
+  dominio: string;
+  /** Lo que el agente resume del sitio que deja. CONTENIDO NO CONFIABLE: viaja como dato delimitado. */
+  resumen: string;
+}
+
+/**
+ * PUERTO del CAMBIO DE SITIO (tareas multisitio): lo unico que el motor puede hacer respecto de los
+ * otros sitios del usuario es PEDIR el cambio. Quien autoriza es el worker, comparando contra la
+ * lista cerrada que el job trae; el adaptador del motor no conoce esa lista ni puede ampliarla.
+ *
+ * Se pasa SOLO cuando el job autorizo mas de un sitio: con uno solo, el toolset del agente y el
+ * system prompt quedan exactamente como en una tarea de un sitio.
+ */
+export interface CambiadorDeSitio {
+  /** Dominios autorizados, en orden (el primero es donde arranco la tarea). Para el prompt del motor. */
+  dominios: readonly string[];
+  /** Resuelve un destino contra la lista autorizada. Puro y sincrono: no abre nada, no lanza. */
+  solicitar(dominio: string): ResolucionDeDominio;
+}
+
 /**
  * PUERTO hacia el motor de navegacion por IA (Stagehand). El adaptador real (stagehand.ts) es el
  * UNICO modulo del worker que importa Stagehand; los tests pasan fakes y nunca llaman al modelo.
@@ -264,6 +300,11 @@ export interface MotorDeTareaWeb {
      * humana que ya autorizo la accion, escalada de UN paso de receta).
      */
     guardia?: GuardiaDeAccion | undefined;
+    /**
+     * CAMBIO DE SITIO: presente SOLO en tareas que autorizan mas de un sitio conectado. Ausente, el
+     * motor no expone ninguna herramienta para salir del sitio en el que corre.
+     */
+    cambiador?: CambiadorDeSitio | undefined;
     /** Ventana de historial que se reenvia al modelo en cada llamada (TAREA_WEB_HISTORIAL_PASOS). */
     historialPasos: number;
     /** Cuando se toma una captura de pantalla durante la corrida (TAREA_WEB_SCREENSHOTS). */
@@ -309,6 +350,12 @@ export interface ResultadoMotor {
   /** Tokens reportados por el motor (usage). null = no reportados. */
   tokensIn: number | null;
   tokensOut: number | null;
+  /**
+   * El tramo termino porque el agente pidio CAMBIAR a otro sitio autorizado y el worker lo aprobo.
+   * No es un fallo: el handler abre (o reutiliza) la sesion del destino y vuelve a correr el motor
+   * alli. Ausente o null = el motor termino por si mismo, como en una tarea de un solo sitio.
+   */
+  cambioDeSitio?: CambioDeSitioPedido | null;
 }
 
 /** Subconjunto del SitiosConectadosRepository (7.1a) que la tarea web usa (facil de mockear). */
@@ -806,7 +853,7 @@ interface VerificacionEnLaTraza {
 
 /** La guardia tal como la usa el handler: el puerto mas lo que hay que saber al terminar la corrida. */
 interface GuardiaDeTareaWeb extends GuardiaDeAccion {
-  /** ¿Alguna accion llego a pasar por la verificacion y fue autorizada? */
+  /** ¿Alguna accion llego a pasar por la verificacion y fue autorizada EN ESTE SITIO? */
   autorizoAlgo(): boolean;
   /** Mensaje de la detencion con la que la guardia corto la corrida, o null si no corto ninguna. */
   bloqueo(): string | null;
@@ -860,6 +907,12 @@ function esperarMs(ms: number): Promise<void> {
  * consumia el unico cupo de la corrida y el envio real, ya con todos los datos, se bloqueaba como si
  * fuera un segundo envio. Un intento que no supero la verificacion, o que se bloqueo, NO cuenta.
  *
+ * EL CUPO ES POR SITIO (multisitio): ese contador vive en `opciones.estado`, que el handler mantiene
+ * POR CONEXION y a lo largo de TODA la tarea, no en esta guardia. Enviar un correo en un sitio y
+ * comprar en otro son dos acciones distintas y las dos tienen que poder ejecutarse en la misma tarea;
+ * lo que no puede haber es dos acciones irreversibles en el MISMO sitio, ni siquiera volviendo a el
+ * despues de haber pasado por otro (por eso el contador sobrevive al cambio de tramo).
+ *
  * NUNCA LANZA: cualquier error inesperado se convierte en bloqueo (falla cerrada). Una excepcion que
  * escapara de aqui saldria por la tool del agente y se leeria como un fallo del motor, no como lo que
  * es: que el sistema no pudo comprobar la accion.
@@ -879,23 +932,19 @@ function crearGuardiaDeAccion(
     /** Texto del que salen los parametros: el LITERAL del usuario si llego (CAMBIO 3). */
     textoParametros: string;
     control?: ControlDeTareaWeb | undefined;
+    /**
+     * ESTADO DEL SITIO a lo largo de TODA la tarea (no de este tramo): el cupo de accion irreversible.
+     * Lo mantiene el handler por conexion, para que volver a un sitio ya visitado no reabra su cupo.
+     */
+    estado: EstadoDeSitioParaGuardia;
   },
 ): GuardiaDeTareaWeb {
   const verificaciones: VerificacionEnLaTraza[] = [];
   const parametros = extraerParametrosDeclarados(opciones.textoParametros);
   const declarados = contarParametrosDeclarados(parametros);
   const esperar = deps.esperar ?? esperarMs;
+  const estado = opciones.estado;
   let acciones = 0;
-  /**
-   * Acciones irreversibles que la guardia dejo IR AL NAVEGADOR en esta corrida. Es la barrera de la
-   * segunda accion y es MONOTONA a proposito: una vez que una accion salio hacia el navegador, ya no
-   * hay forma de reabrir el cupo (ni con un fallo de la confirmacion, ni con un error inesperado).
-   * Solo se incrementa al PERMITIR, que es el instante en que la accion se ejecuta de verdad: un
-   * intento que no supero la verificacion, o que se bloqueo, jamas llega aca (CAMBIO 2).
-   */
-  let irreversiblesEjecutadas = 0;
-  /** De esas, las que ademas se CONFIRMARON leyendo el DOM (CAMBIO 4). */
-  let irreversiblesConfirmadas = 0;
   /** Foto del DOM de la accion permitida, contra la que se confirma su efecto. */
   let paginaPrevia: EstadoDeLaPagina | null = null;
   let mensajeDeBloqueo: string | null = null;
@@ -908,7 +957,7 @@ function crearGuardiaDeAccion(
 
   return {
     // "Autorizo algo" es exactamente "dejo salir una accion irreversible al navegador".
-    autorizoAlgo: () => irreversiblesEjecutadas > 0,
+    autorizoAlgo: () => estado.irreversiblesEjecutadas > 0,
     bloqueo: () => mensajeDeBloqueo,
     faltantes: () => ultimosFaltantes,
     verificaciones: () => verificaciones,
@@ -957,13 +1006,13 @@ function crearGuardiaDeAccion(
       if (etiqueta === null) return permitir({ tipo: 'permitir' });
       // Una accion irreversible que YA salio al navegador cierra la corrida para cualquier otra: es
       // la barrera que impide enviar dos veces.
-      if (irreversiblesEjecutadas > 0) {
+      if (estado.irreversiblesEjecutadas > 0) {
         deps.logger.warn('tarea web: segunda accion irreversible en la misma corrida; se bloquea', {
           jobId: job.id,
           connectionId: sitio.id,
           etiqueta,
-          irreversiblesEjecutadas,
-          irreversiblesConfirmadas,
+          irreversiblesEjecutadas: estado.irreversiblesEjecutadas,
+          irreversiblesConfirmadas: estado.irreversiblesConfirmadas,
         });
         return bloquearRegistrando(detencionDirecta('otraAccion'));
       }
@@ -1011,7 +1060,7 @@ function crearGuardiaDeAccion(
         }
         ultimosFaltantes = null;
         // El cupo se consume AQUI, no al confirmar: desde este punto la accion va al navegador.
-        irreversiblesEjecutadas += 1;
+        estado.irreversiblesEjecutadas += 1;
         // La foto que se acaba de comparar es la referencia contra la que se confirmara el efecto.
         paginaPrevia = pagina ?? { campos: [], texto: '' };
         deps.logger.info('tarea web: verificacion determinista superada; la accion pasa al navegador', {
@@ -1037,7 +1086,7 @@ function crearGuardiaDeAccion(
       const antes = paginaPrevia;
       // Nada que confirmar: o no hubo accion verificada, o esta ya se confirmo. Confirmar dos veces
       // la misma accion no puede sumar dos al contador.
-      if (antes === null || irreversiblesConfirmadas >= irreversiblesEjecutadas) {
+      if (antes === null || estado.irreversiblesConfirmadas >= estado.irreversiblesEjecutadas) {
         return { confirmada: true };
       }
       for (let intento = 0; intento < INTENTOS_DE_CONFIRMACION; intento++) {
@@ -1045,13 +1094,13 @@ function crearGuardiaDeAccion(
         const despues = await leerEstadoDeLaPagina(deps, job, sesionExternaId);
         if (despues === null) continue;
         if (!accionSurtioEfecto({ parametros, antes, despues })) continue;
-        irreversiblesConfirmadas += 1;
+        estado.irreversiblesConfirmadas += 1;
         deps.logger.info('tarea web: la accion irreversible surtio efecto en la pagina (confirmada)', {
           jobId: job.id,
           connectionId: sitio.id,
           dominio: sitio.dominio,
           intentos: intento + 1,
-          irreversiblesConfirmadas,
+          irreversiblesConfirmadas: estado.irreversiblesConfirmadas,
         });
         return { confirmada: true };
       }
@@ -1090,11 +1139,18 @@ async function buscarRecetaAplicable(
   sitio: SitioConectado,
   objetivo: string,
   verboBloqueado: string | null,
+  dominios: readonly string[],
 ): Promise<RecetaWeb | null> {
   if (!deps.recetas || !deps.determinista || !deps.escalador) return null;
   let receta: RecetaWeb | null;
   try {
-    receta = await deps.recetas.buscarActiva(job.ownerId, sitio.dominio, firmaDeObjetivo(objetivo));
+    // La firma incorpora el CONJUNTO DE DOMINIOS de la tarea: lo aprendido cruzando dos sitios no
+    // puede confundirse con lo aprendido en uno solo, aunque el objetivo se lea igual.
+    receta = await deps.recetas.buscarActiva(
+      job.ownerId,
+      sitio.dominio,
+      firmaDeObjetivo(objetivo, dominios),
+    );
   } catch (error) {
     deps.logger.warn('tarea web: no se pudo consultar lo aprendido del sitio; se ejecuta con el motor', {
       jobId: job.id,
@@ -1201,6 +1257,8 @@ async function ejecutarPorReceta(
     contexto: string;
     apiKey: string;
     control?: ControlDeTareaWeb | undefined;
+    /** Gestor de sesiones por sitio: es lo unico con lo que una receta multisitio puede cambiar. */
+    gestor?: GestorDeSitios | undefined;
   },
 ): Promise<DesenlaceDelCaminoPorReceta> {
   const recetas = deps.recetas;
@@ -1220,12 +1278,21 @@ async function ejecutarPorReceta(
       // El paso `verificar` de la receta resuelve con la MISMA funcion que el camino con motor. Una
       // verificacion INCOMPLETA aqui SI detiene: la receta repite un flujo cerrado, no tiene con que
       // "seguir llenando campos"; si al llegar a este punto faltan datos, lo aprendido ya no sirve.
-      verificar: async (): Promise<VeredictoDeVerificacion> => {
-        const { veredicto } = await resolverVerificacion(deps, job, sitio, sesionExternaId, {
-          politica: opciones.politica,
-          verboBloqueado: opciones.verboBloqueado,
-          textoParametros: opciones.textoParametros,
-        });
+      verificar: async (activo): Promise<VeredictoDeVerificacion> => {
+        // La verificacion corre contra el DOM del sitio en el que la receta esta AHORA, con el
+        // dominio de ESE sitio (la politica del usuario se aplica por dominio).
+        const sitioActivo = opciones.gestor?.porDominio(activo.dominio) ?? sitio;
+        const { veredicto } = await resolverVerificacion(
+          deps,
+          job,
+          sitioActivo,
+          activo.sesionExternaId,
+          {
+            politica: opciones.politica,
+            verboBloqueado: opciones.verboBloqueado,
+            textoParametros: opciones.textoParametros,
+          },
+        );
         if (veredicto.tipo === 'ejecutar') return { tipo: 'ejecutar' };
         return {
           tipo: 'detener',
@@ -1238,6 +1305,23 @@ async function ejecutarPorReceta(
       sesionExternaId,
       apiKey: opciones.apiKey,
       dominio: sitio.dominio,
+      // CAMBIO DE SITIO DE UNA RECETA: solo hacia un sitio que ESTE job autorizo. Sin gestor (o con
+      // un dominio que no esta en la lista) devuelve null y la receta se abandona: una receta
+      // manipulada no puede llevar la sesion del usuario a un sitio que la tarea no autorizo.
+      cambiarASitio: async (dominio: string): Promise<string | null> => {
+        const destino = opciones.gestor?.porDominio(dominio);
+        if (destino === undefined || opciones.gestor === undefined) return null;
+        try {
+          return (await opciones.gestor.abrir(destino)).sesionExternaId;
+        } catch (error) {
+          deps.logger.warn('tarea web: no se pudo abrir el otro sitio de lo aprendido; se sigue con el motor', {
+            jobId: job.id,
+            dominio,
+            err: describir(error),
+          });
+          return null;
+        }
+      },
       signal: opciones.control?.signal,
     },
   );
@@ -1352,6 +1436,7 @@ async function promoverRecetaBestEffort(
   objetivo: string,
   pasos: PasoCensurado[],
   verboBloqueado: string | null,
+  dominios: readonly string[],
 ): Promise<void> {
   const recetas = deps.recetas;
   if (!recetas || !deps.determinista || !deps.escalador) return;
@@ -1374,7 +1459,7 @@ async function promoverRecetaBestEffort(
     const receta = await recetas.promover({
       ownerId: job.ownerId,
       dominio: sitio.dominio,
-      firmaObjetivo: firmaDeObjetivo(objetivo),
+      firmaObjetivo: firmaDeObjetivo(objetivo, dominios),
       pasos: promocion.pasos,
       creadaDesdeTrayectoria: null,
     });
@@ -1391,6 +1476,170 @@ async function promoverRecetaBestEffort(
       err: describir(error),
     });
   }
+}
+
+/** Un sitio de la tarea con su sesion YA abierta, verificada e inyectada. */
+interface SitioAbierto {
+  sitio: SitioConectado;
+  /** Contexto DESCIFRADO de ESE sitio. Vive solo en memoria y JAMAS se comparte con otro sitio. */
+  contexto: string;
+  sesionExternaId: string;
+  urlInicial: string;
+}
+
+/**
+ * GESTOR DE SESIONES POR SITIO (multisitio). Una sesion de navegador POR SITIO, abierta LA PRIMERA
+ * VEZ que el agente la necesita y cerrada al terminar la tarea.
+ *
+ * LO QUE NO HACE, y es el invariante central de este cambio: NO comparte nada entre sitios. Cada
+ * sitio abre su propia sesion contra SU contexto externo, con SU proxy y SU pais pineado, y recibe
+ * SOLO su propio contexto descifrado. Las cookies de un sitio no entran nunca en la sesion de otro:
+ * no hay un unico navegador con varias pestanas, hay N sesiones aisladas en el proveedor.
+ *
+ * APERTURA BAJO DEMANDA: una tarea que autoriza tres sitios y termina usando uno paga UNA sesion. Es
+ * la diferencia entre ofrecer sitios de mas y cobrarlos de mas.
+ *
+ * CIERRE: `cerrarTodas` corre en el finally del handler, con la MISMA ruta de cierre de siempre
+ * (cerrarSesionBestEffort, un cierre por sesion, sin propagar). Una sesion queda registrada en cuanto
+ * el proveedor la crea -- ANTES de verificar el pais y de inyectar el contexto -- para que un fallo
+ * de verificacion no deje una sesion viva sin dueno.
+ */
+interface GestorDeSitios {
+  /** Abre (o reutiliza) la sesion del sitio. Lanza igual que el camino de un solo sitio. */
+  abrir(sitio: SitioConectado): Promise<SitioAbierto>;
+  /** El sitio autorizado con ese dominio, o undefined. */
+  porDominio(dominio: string): SitioConectado | undefined;
+  /** Los sitios cuya sesion llego a abrirse, en el orden en que se abrieron. */
+  abiertos(): SitioAbierto[];
+  /** Cierra TODAS las sesiones abiertas de la tarea. Best-effort, nunca lanza. */
+  cerrarTodas(): Promise<void>;
+}
+
+function crearGestorDeSitios(
+  deps: TareaWebDeps,
+  job: Job,
+  autorizados: readonly SitioConectado[],
+  control?: ControlDeTareaWeb,
+): GestorDeSitios {
+  const abiertos = new Map<string, SitioAbierto>();
+  return {
+    porDominio: (dominio) => autorizados.find((sitio) => sitio.dominio === dominio),
+    abiertos: () => [...abiertos.values()],
+    abrir: async (sitio: SitioConectado): Promise<SitioAbierto> => {
+      const yaAbierto = abiertos.get(sitio.id);
+      if (yaAbierto !== undefined) {
+        // REUTILIZACION: volver a un sitio ya visitado NO reabre su sesion (perderia el estado de la
+        // pagina y volveria a pagar la apertura). La sesion sigue viva desde la primera vez.
+        control?.alCambiarSesion?.(yaAbierto.sesionExternaId);
+        return yaAbierto;
+      }
+      if (!sitio.contextoExternoId || !sitio.proxyRef || !sitio.proxyCountry) {
+        throw new PermanentExecutionError(MENSAJE_RECONECTAR);
+      }
+      // El contexto se descifra RECIEN AQUI y solo el de este sitio: el claro vive en memoria entre
+      // el descifrado y la inyeccion, y no hay un momento en que convivan los de todos los sitios.
+      const contexto = await deps.repo.obtenerContextoDescifrado(sitio.id, job.ownerId, deps.vaultSecret);
+      if (contexto === null) {
+        throw new PermanentExecutionError(MENSAJE_RECONECTAR);
+      }
+      const sesion = await deps.navegador.abrirSesionParaTarea({
+        contextoExternoId: sitio.contextoExternoId,
+        proxyRef: sitio.proxyRef,
+        proxyCountry: sitio.proxyCountry,
+      });
+      const abierto: SitioAbierto = {
+        sitio,
+        contexto,
+        sesionExternaId: sesion.sesionExternaId,
+        urlInicial: `https://${sitio.dominio}/`,
+      };
+      // Se registra ANTES de verificar el pais: si la verificacion aborta, el finally del handler
+      // tiene que poder cerrar esta sesion igual.
+      abiertos.set(sitio.id, abierto);
+      control?.alCambiarSesion?.(sesion.sesionExternaId);
+      deps.logger.info('tarea web: sesion abierta con el pais pineado', {
+        jobId: job.id,
+        connectionId: sitio.id,
+        dominio: sitio.dominio,
+        sesionExternaId: sesion.sesionExternaId,
+        pais: sesion.egressCountry,
+        egressIp: sesion.egressIp,
+      });
+
+      // PAIS de salida ANTES de navegar: el pin es POR SITIO y se verifica POR SITIO. Un sitio con
+      // pais distinto al pineado aborta la tarea entera y queda marcado para reconectar.
+      if (sesion.egressCountry !== sitio.proxyCountry) {
+        await marcarSitioBestEffort(deps, sitio, job.ownerId, 'error');
+        throw new SalidaDeRedNoDisponibleError(
+          `no hay ruta de red disponible para tu region (pais pineado al dominio ${sitio.dominio}: ` +
+            `${sitio.proxyCountry}; pais observado: ${sesion.egressCountry ?? 'ninguno'}); la tarea NO ` +
+            'se ejecuto y no se degrada a otro pais. Reintenta mas tarde o reconecta el sitio.',
+        );
+      }
+
+      // Contexto (cookies) del sitio en SU sesion, y pre-chequeo de caducidad SIN modelo.
+      await deps.navegador.inyectarContexto(sesion.sesionExternaId, contexto);
+      const pantallaDeLogin = await deps.navegador.detectarPantallaDeLogin(
+        sesion.sesionExternaId,
+        abierto.urlInicial,
+      );
+      if (pantallaDeLogin) {
+        await marcarSitioBestEffort(deps, sitio, job.ownerId, 'caducado');
+        throw new PermanentExecutionError(
+          `la sesion del sitio ${sitio.dominio} caduco (el sitio pide login de nuevo); ` +
+            'vuelve a conectarlo desde la consola para reanudar las tareas',
+        );
+      }
+      return abierto;
+    },
+    cerrarTodas: async (): Promise<void> => {
+      for (const abierto of abiertos.values()) {
+        await cerrarSesionBestEffort(deps, abierto.sesionExternaId);
+      }
+      abiertos.clear();
+    },
+  };
+}
+
+/**
+ * SITIOS AUTORIZADOS de la tarea, cargados y validados ANTES de abrir una sola sesion.
+ *
+ * El PRIMERO es donde arranca la tarea y es innegociable: si no existe, no es del owner o no esta
+ * 'activo', la tarea falla con el mensaje accionable de siempre. Los DEMAS que no esten en
+ * condiciones se EXCLUYEN de la lista con un aviso, en vez de tumbar la tarea: la lista de sitios que
+ * el agente ve en su prompt y la lista contra la que se autoriza un cambio tienen que ser LA MISMA, y
+ * ofrecerle un sitio que no se va a poder abrir solo produce pasos tirados.
+ */
+async function cargarSitiosAutorizados(
+  deps: TareaWebDeps,
+  job: Job,
+  connectionIds: readonly string[],
+): Promise<SitioConectado[]> {
+  const sitios: SitioConectado[] = [];
+  for (const connectionId of connectionIds) {
+    const sitio = await deps.repo.obtenerPorId(connectionId, job.ownerId);
+    const usable =
+      sitio !== null &&
+      sitio.estado === 'activo' &&
+      Boolean(sitio.contextoExternoId) &&
+      Boolean(sitio.proxyRef) &&
+      Boolean(sitio.proxyCountry);
+    if (usable && sitio !== null) {
+      // Un mismo dominio autorizado dos veces por conexiones distintas volveria ambiguo el destino de
+      // un cambio de sitio: se queda la primera conexion, que es la que el usuario puso primero.
+      if (!sitios.some((previo) => previo.dominio === sitio.dominio)) sitios.push(sitio);
+      continue;
+    }
+    if (sitios.length === 0) {
+      // Es el sitio de arranque: sin el no hay tarea.
+      throw new PermanentExecutionError(MENSAJE_RECONECTAR);
+    }
+    deps.logger.warn('tarea web: un sitio autorizado no esta en condiciones y queda fuera de la tarea', {
+      jobId: job.id,
+      connectionId,
+    });
+  }
+  return sitios;
 }
 
 /**
@@ -1415,6 +1664,9 @@ export async function procesarTareaWeb(
     throw new PermanentExecutionError(`payload de tarea web invalido: ${parsed.error}`);
   }
   const { connectionId, objetivo, textoUsuario } = parsed.data;
+  // SITIOS AUTORIZADOS de esta tarea, en orden (el primero es donde arranca). Un payload sin lista
+  // autoriza exactamente uno: el de siempre.
+  const connectionIds = sitiosAutorizadosDePayload(parsed.data);
 
   // 0.5. EL TEXTO LITERAL DEL USUARIO (CAMBIO 3). `objetivo` lo REDACTA el modelo conversacional al
   //      llamar a su tool, y en produccion parafraseo lo que el usuario habia escrito: los rotulos y
@@ -1444,6 +1696,7 @@ export async function procesarTareaWeb(
   deps.logger.info('tarea web: objetivo recibido', {
     jobId: job.id,
     connectionId,
+    sitiosAutorizados: connectionIds.length,
     objetivo: censurarObjetivo(objetivo),
     // De donde salieron los parametros: sin esto, un extractor que devuelve menos de lo que el
     // usuario declaro es indistinguible de un usuario que declaro menos.
@@ -1452,23 +1705,14 @@ export async function procesarTareaWeb(
     parametros: nombresDeParametrosDeclarados(extraerParametrosDeclarados(textoParametros)),
   });
 
-  // 1. La conexion debe existir, ser del owner del job y estar 'activo'. Cualquier otra cosa falla
-  //    con el mensaje accionable ANTES de crear sesion alguna (no se gasta ni un minuto de navegador).
-  const sitio = await deps.repo.obtenerPorId(connectionId, job.ownerId);
-  if (!sitio || sitio.estado !== 'activo') {
-    throw new PermanentExecutionError(MENSAJE_RECONECTAR);
-  }
-  if (!sitio.contextoExternoId || !sitio.proxyRef || !sitio.proxyCountry) {
-    // Sin contexto, sin salida pineada o sin PAIS pineado (fila legada anterior a V028) no hay
-    // sesion que reanudar ni pin que verificar: reconectar el sitio pinea el pais.
-    throw new PermanentExecutionError(MENSAJE_RECONECTAR);
-  }
-
-  // 2. Descifrar el contexto (VAULT_SECRET). El claro vive SOLO en memoria hasta inyectarContexto.
-  const contexto = await deps.repo.obtenerContextoDescifrado(connectionId, job.ownerId, deps.vaultSecret);
-  if (contexto === null) {
-    throw new PermanentExecutionError(MENSAJE_RECONECTAR);
-  }
+  // 1. Las conexiones deben existir, ser del owner del job y estar 'activo'. Cualquier otra cosa en
+  //    la de ARRANQUE falla con el mensaje accionable ANTES de crear sesion alguna (no se gasta ni un
+  //    minuto de navegador); las demas simplemente quedan fuera de la lista autorizada. Sin contexto,
+  //    sin salida pineada o sin PAIS pineado (fila legada anterior a V028) no hay sesion que reanudar
+  //    ni pin que verificar: reconectar el sitio pinea el pais.
+  const sitiosAutorizados = await cargarSitiosAutorizados(deps, job, connectionIds);
+  const sitio = sitiosAutorizados[0] as SitioConectado;
+  const dominiosAutorizados = sitiosAutorizados.map((s) => s.dominio);
 
   // La key del modelo sale de la boveda del owner (misma via que todo job). La navegacion usa un
   // modelo Claude (TAREA_WEB_MODEL): la credencial debe ser de anthropic.
@@ -1489,6 +1733,12 @@ export async function procesarTareaWeb(
   //      y sigue el camino de siempre.
   const aprobacion = await deps.aprobaciones.obtenerVigentePorJob(job.id, job.ownerId);
   if (aprobacion !== null && aprobacion.estado !== 'expirada') {
+    // La reanudacion es SIEMPRE de un solo sitio: el checkpoint guarda UNA sesion y esa sesion es de
+    // UN sitio. Su contexto se descifra aqui, igual que antes.
+    const contexto = await deps.repo.obtenerContextoDescifrado(sitio.id, job.ownerId, deps.vaultSecret);
+    if (contexto === null) {
+      throw new PermanentExecutionError(MENSAJE_RECONECTAR);
+    }
     return reanudarTrasDecision(deps, job, sitio, objetivo, credential, contexto, aprobacion, control);
   }
 
@@ -1518,83 +1768,65 @@ export async function procesarTareaWeb(
   //      ocurrio, para que la receta aprenda a volver a comparar justo antes de la accion (D7).
   const pasosDelJob: PasoCensurado[] = [];
 
-  // 3. Abrir la sesion RECONECTANDO el contexto guardado y FORZANDO el proxy pineado con la
-  //    geolocalizacion del PAIS pineado. El adaptador lanza SalidaDeRedNoDisponibleError
-  //    (permanente) si el pin no es reconstruible.
-  const sesion = await deps.navegador.abrirSesionParaTarea({
-    contextoExternoId: sitio.contextoExternoId,
-    proxyRef: sitio.proxyRef,
-    proxyCountry: sitio.proxyCountry,
-  });
-  control?.alCambiarSesion?.(sesion.sesionExternaId);
-  deps.logger.info('tarea web: sesion abierta con el pais pineado', {
-    jobId: job.id,
-    connectionId: sitio.id,
-    dominio: sitio.dominio,
-    // El id de la sesion del proveedor es lo que permite localizar DESPUES la grabacion de esta
-    // corrida. Sin el, el log decia por donde salio la conexion pero no cual fue la sesion.
-    sesionExternaId: sesion.sesionExternaId,
-    pais: sesion.egressCountry,
-    egressIp: sesion.egressIp,
-  });
+  // 3. GESTOR DE SESIONES POR SITIO: una sesion por sitio, abierta LA PRIMERA VEZ que hace falta.
+  //    La del sitio de ARRANQUE se abre ya (es donde corre el primer tramo); las de los demas sitios
+  //    autorizados NO se abren hasta que el agente pida cambiar a ellos, asi una tarea que termina
+  //    usando un solo sitio no paga por los otros. Cada apertura reconecta el contexto de SU sitio y
+  //    fuerza SU proxy con SU pais pineado (SalidaDeRedNoDisponibleError si el pin no es reconstruible).
+  const gestor = crearGestorDeSitios(deps, job, sitiosAutorizados, control);
+  // ESTADO POR SITIO del cupo de accion irreversible. Vive fuera de las guardias porque una tarea
+  // multisitio crea una guardia por tramo y el cupo NO se reabre al volver a un sitio ya visitado.
+  const registro: RegistroDeSitios = crearRegistroDeSitios();
 
-  // La sesion de la corrida INICIAL se cierra SIEMPRE: la verificacion determinista resuelve en la
-  // misma corrida (ejecuta o detiene) y ya no queda nadie esperando para decidir sobre esta pagina.
-  // La sesion que SI sobrevive es la de un checkpoint de aprobacion humana, y esa la abre y la cierra
-  // el camino de reanudacion (reanudarTrasDecision).
+  // Las sesiones de la corrida INICIAL se cierran SIEMPRE: la verificacion determinista resuelve en
+  // la misma corrida (ejecuta o detiene) y ya no queda nadie esperando para decidir sobre esas
+  // paginas. La sesion que SI sobrevive es la de un checkpoint de aprobacion humana, y esa la abre y
+  // la cierra el camino de reanudacion (reanudarTrasDecision).
   try {
-    // 4. VERIFICAR el PAIS de salida ANTES de navegar: si el observado difiere del pineado (o no se
-    //    pudo observar), se ABORTA sin ejecutar nada, el sitio queda 'error' (marcado para
-    //    reconectar) y se notifica. Un salto de pais puede costarle la sesion al usuario; un cambio
-    //    de IP dentro del MISMO pais es rotacion normal del pool y NO aborta. JAMAS se degrada.
-    if (sesion.egressCountry !== sitio.proxyCountry) {
-      await marcarSitioBestEffort(deps, sitio, job.ownerId, 'error');
-      throw new SalidaDeRedNoDisponibleError(
-        `no hay ruta de red disponible para tu region (pais pineado al dominio ${sitio.dominio}: ` +
-          `${sitio.proxyCountry}; pais observado: ${sesion.egressCountry ?? 'ninguno'}); la tarea NO ` +
-          'se ejecuto y no se degrada a otro pais. Reintenta mas tarde o reconecta el sitio.',
-      );
-    }
+    // 4 y 5. Apertura del sitio de arranque: verificacion del PAIS antes de navegar, inyeccion del
+    //        contexto y PRE-CHEQUEO de caducidad sin modelo (todo dentro del gestor, y por sitio).
+    let activo = await gestor.abrir(sitio);
 
-    // 5. Inyectar el contexto (cookies) y PRE-CHEQUEAR caducidad SIN modelo: si el sitio ya muestra
-    //    una pantalla de login, se aborta antes de gastar un token. CERO reintentos de login.
-    await deps.navegador.inyectarContexto(sesion.sesionExternaId, contexto);
-    const urlInicial = `https://${sitio.dominio}/`;
-    const pantallaDeLogin = await deps.navegador.detectarPantallaDeLogin(sesion.sesionExternaId, urlInicial);
-    if (pantallaDeLogin) {
-      await marcarSitioBestEffort(deps, sitio, job.ownerId, 'caducado');
-      throw new PermanentExecutionError(
-        `la sesion del sitio ${sitio.dominio} caduco (el sitio pide login de nuevo); ` +
-          'vuelve a conectarlo desde la consola para reanudar las tareas',
-      );
-    }
-
-    // 5.5. CAMINO POR RECETA (CAMBIO 5): si este owner ya hizo esta misma tarea con exito en este
-    //      dominio, se repite lo aprendido SIN llamar al modelo. Si la receta se agota (el sitio
-    //      cambio demasiado, D6), se sigue con el motor en LA MISMA sesion, sin reabrir nada, pero
-    //      NUNCA sobre la pagina que la receta dejo a medio camino: se renavega a la URL de inicio
-    //      antes de arrancar el motor, y si eso no se puede, la tarea se corta.
-    const receta = await buscarRecetaAplicable(deps, job, sitio, objetivo, verboBloqueado);
+    // 5.5. CAMINO POR RECETA (CAMBIO 5): si este owner ya hizo esta misma tarea con exito con este
+    //      mismo CONJUNTO de sitios, se repite lo aprendido SIN llamar al modelo. Si la receta se
+    //      agota (el sitio cambio demasiado, D6), se sigue con el motor en LA MISMA sesion, sin
+    //      reabrir nada, pero NUNCA sobre la pagina que la receta dejo a medio camino: se renavega a
+    //      la URL de inicio antes de arrancar el motor, y si eso no se puede, la tarea se corta.
+    const receta = await buscarRecetaAplicable(
+      deps,
+      job,
+      sitio,
+      objetivo,
+      verboBloqueado,
+      dominiosAutorizados,
+    );
     if (receta !== null) {
-      const porReceta = await ejecutarPorReceta(
-        deps,
-        job,
-        sitio,
-        objetivo,
-        sesion.sesionExternaId,
-        receta,
-        {
-          politica,
-          verboBloqueado,
-          textoParametros,
-          contexto,
-          apiKey: credential.apiKey,
-          control,
-        },
-      );
+      const porReceta = await ejecutarPorReceta(deps, job, sitio, objetivo, activo.sesionExternaId, receta, {
+        politica,
+        verboBloqueado,
+        textoParametros,
+        contexto: activo.contexto,
+        apiKey: credential.apiKey,
+        control,
+        // Una receta multisitio cambia de sesion sola. El destino se resuelve contra la lista
+        // AUTORIZADA de ESTE job: una receta que nombre un sitio que esta tarea no autoriza se
+        // abandona y la tarea la termina el motor.
+        gestor,
+      });
       if (porReceta.tipo === 'completada') return 'completada';
       if (porReceta.paginaTocada) {
-        await renavegarAInicio(deps, job, sitio, sesion.sesionExternaId, urlInicial);
+        // Se devuelven a su inicio TODOS los sitios que la receta llego a tocar, no solo el de
+        // arranque: una receta multisitio pudo dejar a medio camino la pagina de otro sitio, y el
+        // motor terminaria razonando ahi sobre un estado que no pidio.
+        for (const abierto of gestor.abiertos()) {
+          await renavegarAInicio(
+            deps,
+            job,
+            abierto.sitio,
+            abierto.sesionExternaId,
+            abierto.urlInicial,
+          );
+        }
       }
     }
 
@@ -1602,62 +1834,155 @@ export async function procesarTareaWeb(
     //    y el cap DURO de pasos, con la GUARDIA interpuesta: la accion irreversible se verifica
     //    dentro de esta misma corrida, justo antes de llegar al navegador. La ejecucion queda
     //    REGISTRADA como trayectoria (V030) sea cual sea el desenlace.
-    const guardia = crearGuardiaDeAccion(deps, job, sitio, sesion.sesionExternaId, {
-      politica,
-      verboBloqueado,
-      textoParametros,
-      control,
-    });
+    //
+    //    MULTISITIO: el bucle del agente esta atado a la sesion en la que arranca, asi que un cambio
+    //    de sitio TERMINA el tramo y aqui empieza otro sobre la sesion del destino. El presupuesto de
+    //    pasos y el deadline de pared son de la TAREA, no del tramo: repartirlos por tramo
+    //    multiplicaria por el numero de sitios lo que la tarea puede gastar. Con un solo sitio hay un
+    //    solo tramo y el presupuesto entero es suyo, exactamente como antes de este cambio.
+    const cambiador: CambiadorDeSitio | undefined =
+      dominiosAutorizados.length > 1
+        ? {
+            dominios: dominiosAutorizados,
+            solicitar: (dominio: string): ResolucionDeDominio =>
+              resolverDominioAutorizado(dominio, dominiosAutorizados),
+          }
+        : undefined;
+    const systemPrompt = construirSystemPromptTareaWeb(dominiosAutorizados);
+    const finEnMs = Date.now() + deps.runTimeoutMs;
+    let instruccion = objetivo;
+    let pasosRestantes = deps.maxPasos;
+    let cambios = 0;
+    let guardia: GuardiaDeTareaWeb;
     let resultado: ResultadoMotor;
     let desenlace: DesenlaceTareaWeb;
-    try {
-      ({ resultado, desenlace } = await ejecutarMotorConRegistro(
-        deps,
-        job,
-        sitio,
+
+    for (;;) {
+      guardia = crearGuardiaDeAccion(deps, job, activo.sitio, activo.sesionExternaId, {
+        politica,
+        verboBloqueado,
+        textoParametros,
+        control,
+        estado: registro.estadoDe(activo.sitio.id),
+      });
+      const enCurso = activo;
+      try {
+        ({ resultado, desenlace } = await ejecutarMotorConRegistro(
+          deps,
+          job,
+          enCurso.sitio,
+          objetivo,
+          enCurso.sesionExternaId,
+          credential.apiKey,
+          { objetivo: instruccion, systemPrompt },
+          control?.signal,
+          guardia,
+          pasosDelJob,
+          {
+            cambiador,
+            maxPasos: pasosRestantes,
+            timeoutMs: Math.max(0, finEnMs - Date.now()),
+          },
+        ));
+      } catch (error) {
+        // CIERRE ORDENADO DE UN BLOQUEO (CAMBIO 3): la guardia detuvo la accion, asi que la corrida
+        // TERMINA -- pero termina como una tarea que llego a un desenlace, no como una que se cayo a
+        // medias. La trayectoria completa ya quedo guardada (ejecutarMotorConRegistro) y aqui se
+        // escriben el resultado del job y el contexto de la sesion ANTES de propagar el cierre. Sin
+        // esto, el unico rastro del bloqueo era el last_error y la corrida quedaba sin resultado.
+        await cerrarCorridaDetenida(
+          deps,
+          job,
+          enCurso.sitio,
+          enCurso.sesionExternaId,
+          enCurso.contexto,
+          guardia,
+        );
+        throw error;
+      }
+
+      const cambio = resultado.cambioDeSitio ?? null;
+      if (cambio === null) break;
+
+      // El presupuesto de pasos consumido en este tramo NO vuelve: es de la tarea entera.
+      pasosRestantes = Math.max(0, pasosRestantes - resultado.acciones.length);
+      cambios += 1;
+      const destino = gestor.porDominio(cambio.dominio);
+      if (destino === undefined) {
+        // Imposible por construccion (el destino ya se resolvio contra la lista autorizada), pero es
+        // la clase de invariante que no se deja implicita en una superficie de seguridad.
+        throw new PermanentExecutionError(
+          'el agente pidio cambiar a un sitio que esta tarea no autoriza; la tarea NO continua',
+        );
+      }
+      // Los dos topes se nombran POR SEPARADO: decir "agoto los cambios de sitio" cuando lo que se
+      // agoto fueron los pasos manda al usuario a diagnosticar lo que no fue.
+      if (cambios > MAX_CAMBIOS_DE_SITIO_POR_TAREA) {
+        deps.logger.warn('tarea web: la tarea agoto su presupuesto de cambios de sitio', {
+          jobId: job.id,
+          cambios,
+          pasosRestantes,
+        });
+        throw new PermanentExecutionError(
+          `la tarea cambio de sitio ${cambios} veces sin completarse (el tope es ` +
+            `${MAX_CAMBIOS_DE_SITIO_POR_TAREA}) y se corto para no seguir recorriendo las cuentas ` +
+            'del usuario; no se reintenta automaticamente',
+        );
+      }
+      if (pasosRestantes === 0) {
+        deps.logger.warn('tarea web: la tarea agoto su limite de pasos al cambiar de sitio', {
+          jobId: job.id,
+          cambios,
+        });
+        throw new PermanentExecutionError(
+          `la tarea agoto el limite de pasos configurado (${deps.maxPasos}) antes de terminar en el ` +
+            'otro sitio; no se reintenta automaticamente para no repetir acciones sobre la cuenta ' +
+            'del usuario',
+        );
+      }
+      const anterior = activo.sitio.dominio;
+      // APERTURA BAJO DEMANDA (o reutilizacion si ya se visito este sitio).
+      activo = await gestor.abrir(destino);
+      instruccion = construirContinuacionEnOtroSitio({
         objetivo,
-        sesion.sesionExternaId,
-        credential.apiKey,
-        { objetivo, systemPrompt: construirSystemPromptTareaWeb() },
-        control?.signal,
-        guardia,
-        pasosDelJob,
-      ));
-    } catch (error) {
-      // CIERRE ORDENADO DE UN BLOQUEO (CAMBIO 3): la guardia detuvo la accion, asi que la corrida
-      // TERMINA -- pero termina como una tarea que llego a un desenlace, no como una que se cayo a
-      // medias. La trayectoria completa ya quedo guardada (ejecutarMotorConRegistro) y aqui se
-      // escriben el resultado del job y el contexto de la sesion ANTES de propagar el cierre. Sin
-      // esto, el unico rastro del bloqueo era el last_error y la corrida quedaba sin resultado.
-      await cerrarCorridaDetenida(deps, job, sitio, sesion.sesionExternaId, contexto, guardia);
-      throw error;
+        dominioAnterior: anterior,
+        dominioNuevo: activo.sitio.dominio,
+        resumenPrevio: cambio.resumen,
+      });
+      deps.logger.info('tarea web: el agente cambio a otro sitio autorizado de la tarea', {
+        jobId: job.id,
+        connectionId: activo.sitio.id,
+        dominio: activo.sitio.dominio,
+        cambios,
+        pasosRestantes,
+      });
     }
 
     if (desenlace.tipo === 'sesion_caducada') {
-      await marcarSitioBestEffort(deps, sitio, job.ownerId, 'caducado');
+      await marcarSitioBestEffort(deps, activo.sitio, job.ownerId, 'caducado');
       throw new PermanentExecutionError(
-        `la sesion del sitio ${sitio.dominio} caduco a mitad de la tarea (aparecio una pantalla de ` +
-          'login o verificacion); vuelve a conectarlo desde la consola para reanudar las tareas',
+        `la sesion del sitio ${activo.sitio.dominio} caduco a mitad de la tarea (aparecio una ` +
+          'pantalla de login o verificacion); vuelve a conectarlo desde la consola para reanudar las tareas',
       );
     }
 
-    // 7. DONE PREMATURO (CAMBIO 3): el objetivo pedia una accion bloqueada y la corrida termino sin
-    //    que esa accion pasara por la guardia. No se ejecuto y tampoco la detuvo el sistema: el
-    //    agente se paro solo. Causa PROPIA y mensaje propio, distinto del fallo generico del motor.
-    //    Un desenlace 'requiere_aprobacion' cuenta como lo mismo: el prompt ya no pide ese marcador,
-    //    asi que emitirlo es exactamente pararse solo ante la accion.
+    // 7. DONE PREMATURO (CAMBIO 3): el objetivo pedia una accion bloqueada y la tarea termino sin
+    //    que esa accion pasara por la guardia EN NINGUNO de sus sitios. No se ejecuto y tampoco la
+    //    detuvo el sistema: el agente se paro solo. Causa PROPIA y mensaje propio, distinto del fallo
+    //    generico del motor. Un desenlace 'requiere_aprobacion' cuenta como lo mismo: el prompt ya no
+    //    pide ese marcador, asi que emitirlo es exactamente pararse solo ante la accion.
     //    EXCEPCION: si la senal externa ya aborto, el job dejo de ser 'running' porque su dueno lo
     //    TERMINO desde la consola; ahi no hay nada que diagnosticar.
     if (
       verboBloqueado !== null &&
-      !guardia.autorizoAlgo() &&
+      !registro.algunaAutorizada() &&
       (desenlace.tipo === 'requiere_aprobacion' || resultado.completado) &&
       control?.signal?.aborted !== true
     ) {
       const faltantes = guardia.faltantes();
       deps.logger.warn('tarea web: el agente termino sin ejecutar la accion que el objetivo pedia', {
         jobId: job.id,
-        connectionId: sitio.id,
+        connectionId: activo.sitio.id,
         verbo: verboBloqueado,
         faltantes,
       });
@@ -1674,30 +1999,49 @@ export async function procesarTareaWeb(
       throw new PermanentExecutionError(describirFalloDelMotor(resultado, deps.maxPasos));
     }
 
-    // 8. Exito: guardar el contexto ACTUALIZADO (re-cifrado) + refrescar ultimo_uso_en, y devolver
-    //    el resultado al agente via jobs.resultado (V026).
-    await refrescarContextoBestEffort(deps, sitio, job.ownerId, sesion.sesionExternaId, contexto);
+    // 8. Exito: guardar el contexto ACTUALIZADO (re-cifrado) + refrescar ultimo_uso_en de CADA sitio
+    //    que la tarea uso, no solo del ultimo: la sesion de un sitio visitado a mitad de camino
+    //    tambien avanzo y sus cookies nuevas son las que evitan que caduque antes de tiempo.
+    for (const abierto of gestor.abiertos()) {
+      await refrescarContextoBestEffort(
+        deps,
+        abierto.sitio,
+        job.ownerId,
+        abierto.sesionExternaId,
+        abierto.contexto,
+      );
+    }
     // PROMOCION AUTOMATICA (CAMBIO 3): lo que acaba de funcionar queda aprendido para la proxima.
     // La corrida del motor siempre arranca desde la pagina de inicio (una receta que se rindio a
     // medias renavega antes), asi que su traza describe la tarea entera y es promovible.
-    await promoverRecetaBestEffort(deps, job, sitio, objetivo, pasosDelJob, verboBloqueado);
+    await promoverRecetaBestEffort(
+      deps,
+      job,
+      sitio,
+      objetivo,
+      pasosDelJob,
+      verboBloqueado,
+      dominiosAutorizados,
+    );
     // `sesionExternaId` queda EN EL RESULTADO del job: es la unica forma de encontrar despues la
     // grabacion de la sesion en el proveedor a partir de una tarea concreta.
     await deps.guardarResultado(job.id, {
       estado: 'ok',
       resumen: desenlace.resumen,
       via: 'modelo',
-      sesionExternaId: sesion.sesionExternaId,
+      sesionExternaId: activo.sesionExternaId,
     });
     deps.logger.info('tarea web completada dentro de la sesion del sitio', {
       jobId: job.id,
-      connectionId: sitio.id,
-      dominio: sitio.dominio,
+      connectionId: activo.sitio.id,
+      dominio: activo.sitio.dominio,
     });
     return 'completada';
   } finally {
-    await cerrarSesionBestEffort(deps, sesion.sesionExternaId);
-    // La sesion dejo de ser responsabilidad de esta corrida. El corte duro externo ya no debe tocarla.
+    // MISMA ruta de cierre de siempre, una vez por sesion abierta.
+    await gestor.cerrarTodas();
+    // Las sesiones dejaron de ser responsabilidad de esta corrida. El corte duro externo ya no debe
+    // tocarlas.
     control?.alCambiarSesion?.(null);
   }
 }
@@ -1824,7 +2168,10 @@ async function guardarTrayectoriaBestEffort(
       extraerPasosCensurados(resultado.acciones, observaciones),
       verificaciones,
     ),
-  ].map((paso, idx) => ({ ...paso, idx }));
+    // MULTISITIO: TODOS los pasos de un tramo pertenecen al mismo sitio (un cambio de sitio TERMINA
+    // el tramo), asi que el sello es uno solo y sale del sitio sobre el que corrio esta ejecucion.
+    // Es lo que permite promover una receta que cruza sitios sabiendo a cual pertenece cada paso.
+  ].map((paso, idx) => ({ ...paso, idx, dominio: sitio.dominio }));
   acumulador?.push(...pasos);
   if (!deps.trayectorias) return;
   const terminadaEn = new Date();
@@ -1904,6 +2251,13 @@ async function ejecutarMotorConRegistro(
   guardia?: GuardiaDeTareaWeb,
   // Acumulador de los pasos de TODO el job, insumo de la promocion a receta.
   acumulador?: PasoCensurado[],
+  // MULTISITIO: la herramienta de cambio de sitio y el presupuesto que le queda a la TAREA (no al
+  // tramo). Ausente = tarea de un solo sitio, con el presupuesto entero de deps.
+  extra?: {
+    cambiador?: CambiadorDeSitio | undefined;
+    maxPasos?: number | undefined;
+    timeoutMs?: number | undefined;
+  },
 ): Promise<{ resultado: ResultadoMotor; desenlace: DesenlaceTareaWeb }> {
   const iniciadaEn = new Date();
   // OBSERVACION de cada paso mientras el motor corre (CAMBIO 1): lee del DOM las estrategias de
@@ -1930,6 +2284,8 @@ async function ejecutarMotorConRegistro(
       (reporte) => {
         consumo = reporte;
       },
+      extra?.cambiador,
+      { maxPasos: extra?.maxPasos ?? deps.maxPasos, timeoutMs: extra?.timeoutMs ?? deps.runTimeoutMs },
     );
   } catch (error) {
     loguearConsumo(deps, job, sitio, consumo, 'cortada');
@@ -2036,7 +2392,13 @@ async function ejecutarMotor(
   registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined,
   guardia?: GuardiaDeAccion | undefined,
   reportarConsumo?: ((consumo: ConsumoDeCorrida) => void) | undefined,
+  cambiador?: CambiadorDeSitio | undefined,
+  // PRESUPUESTO de ESTE tramo: lo que le queda a la TAREA de pasos y de deadline de pared. Con un
+  // solo sitio hay un solo tramo y son deps.maxPasos y deps.runTimeoutMs enteros.
+  presupuesto?: { maxPasos: number; timeoutMs: number } | undefined,
 ): Promise<ResultadoMotor> {
+  const maxPasos = presupuesto?.maxPasos ?? deps.maxPasos;
+  const timeoutMs = presupuesto?.timeoutMs ?? deps.runTimeoutMs;
   const controller = new AbortController();
   let expiroDeadline = false;
   const alAbortarExterno = (): void => controller.abort();
@@ -2045,7 +2407,7 @@ async function ejecutarMotor(
   const timer = setTimeout(() => {
     expiroDeadline = true;
     controller.abort();
-  }, deps.runTimeoutMs);
+  }, timeoutMs);
   try {
     return await deps.motor.ejecutar({
       sesionExternaId,
@@ -2053,11 +2415,12 @@ async function ejecutarMotor(
       systemPrompt: prompt.systemPrompt,
       apiKey,
       model: deps.model,
-      maxPasos: deps.maxPasos,
+      maxPasos,
       signal: controller.signal,
       observador,
       registrarAccion,
       guardia,
+      ...(cambiador !== undefined ? { cambiador } : {}),
       historialPasos: deps.historialPasos,
       modoScreenshots: deps.modoScreenshots,
       reportarConsumo,

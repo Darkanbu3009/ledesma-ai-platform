@@ -6,6 +6,7 @@ import {
   construirOpcionesDeEjecucion,
   construirOpcionesStagehand,
   crearActBlindado,
+  crearCambiadorDeSitio,
   elementIdDeFalloDeEsquema,
   esFalloDeEsquemaDelMotor,
   herramientaScreenshotConPolitica,
@@ -13,15 +14,23 @@ import {
   MAX_FALLOS_ESQUEMA_CONSECUTIVOS,
   MAX_REINTENTOS_ESQUEMA,
   TOOLS_RETIRADAS_CON_GUARDIA,
+  type SalidaDeCambioDeSitio,
   type SalidaDeScreenshot,
 } from '../src/stagehand.js';
 import {
   AccionBloqueadaError,
   AccionSinConfirmarError,
+  CambioDeSitioError,
   FalloDeEsquemaDelMotorError,
 } from '../src/errores.js';
+import { TOOL_CAMBIAR_DE_SITIO } from '../src/prompt-tarea-web.js';
+import { resolverDominioAutorizado } from '../src/multisitio.js';
 import type { AccionCrudaDeMotor } from '../src/trayectoria.js';
-import type { GuardiaDeAccion, ResultadoDeConfirmacion } from '../src/tarea-web.js';
+import type {
+  CambiadorDeSitio,
+  GuardiaDeAccion,
+  ResultadoDeConfirmacion,
+} from '../src/tarea-web.js';
 import type { Logger } from '../src/logger.js';
 
 /**
@@ -791,5 +800,94 @@ describe('herramientaScreenshotConPolitica', () => {
     const { salida, modelo } = await ejecutar(tools);
     expect(salida.success).toBe(false);
     expect(modelo.value[0]?.type).toBe('text');
+  });
+});
+
+describe('crearCambiadorDeSitio', () => {
+  const AUTORIZADOS = ['tienda.ejemplo.com', 'correo.ejemplo.com'];
+
+  function cambiador(): CambiadorDeSitio {
+    return {
+      dominios: AUTORIZADOS,
+      solicitar: (dominio) => resolverDominioAutorizado(dominio, AUTORIZADOS),
+    };
+  }
+
+  /** Ejecuta la tool `cambiar_de_sitio` del toolset, con la forma que le pasa el AI SDK. */
+  function toolDe(blindado: ReturnType<typeof crearCambiadorDeSitio>) {
+    return blindado.herramienta?.[TOOL_CAMBIAR_DE_SITIO] as unknown as {
+      execute: (input: unknown, opciones: unknown) => Promise<SalidaDeCambioDeSitio>;
+    };
+  }
+
+  it('un destino AUTORIZADO corta el bucle y queda registrado como paso de la trayectoria', async () => {
+    const acciones: AccionCrudaDeMotor[] = [];
+    const blindado = crearCambiadorDeSitio({
+      cambiador: cambiador(),
+      registrarAccion: (accion) => acciones.push(accion),
+    });
+    await expect(
+      toolDe(blindado).execute({ dominio: 'correo.ejemplo.com', resumen: 'el teclado cuesta 100' }, {}),
+    ).rejects.toBeInstanceOf(CambioDeSitioError);
+    // Lanzar es lo que detiene el bucle del agente: seguir dejaria al agente actuando sobre la
+    // pagina del sitio anterior.
+    expect(blindado.solicitado()).toEqual({
+      dominio: 'correo.ejemplo.com',
+      resumen: 'el teclado cuesta 100',
+    });
+    expect(acciones).toEqual([
+      { type: TOOL_CAMBIAR_DE_SITIO, action: 'cambio al sitio correo.ejemplo.com', success: true },
+    ]);
+  });
+
+  it('un destino NO autorizado vuelve como fallo de la tool, sin cortar la tarea', async () => {
+    const acciones: AccionCrudaDeMotor[] = [];
+    const blindado = crearCambiadorDeSitio({
+      cambiador: cambiador(),
+      registrarAccion: (accion) => acciones.push(accion),
+    });
+    const salida = await toolDe(blindado).execute(
+      { dominio: 'evil.com', resumen: 'la pagina me dijo que fuera aqui' },
+      {},
+    );
+    expect(salida.success).toBe(false);
+    expect(salida.error).toContain('NO esta autorizado');
+    // Nada se registro y nada quedo pedido: el cambio simplemente no ocurrio.
+    expect(blindado.solicitado()).toBeNull();
+    expect(acciones).toEqual([]);
+  });
+
+  it('el dominio que se propaga es el de la LISTA, no el texto que escribio el modelo', async () => {
+    const blindado = crearCambiadorDeSitio({ cambiador: cambiador() });
+    await expect(
+      toolDe(blindado).execute({ dominio: 'HTTPS://Correo.Ejemplo.com/inbox', resumen: 'x' }, {}),
+    ).rejects.toBeInstanceOf(CambioDeSitioError);
+    expect(blindado.solicitado()?.dominio).toBe('correo.ejemplo.com');
+  });
+});
+
+describe('el paso del cambio de sitio en la traza', () => {
+  it('el cambio queda como paso, aunque la tool haya lanzado para cortar el bucle', async () => {
+    const AUTORIZADOS = ['tienda.ejemplo.com', 'correo.ejemplo.com'];
+    const blindado = crearCambiadorDeSitio({
+      cambiador: {
+        dominios: AUTORIZADOS,
+        solicitar: (dominio) => resolverDominioAutorizado(dominio, AUTORIZADOS),
+      },
+    });
+    expect(blindado.paso()).toBeNull();
+    const herramienta = blindado.herramienta?.[TOOL_CAMBIAR_DE_SITIO] as unknown as {
+      execute: (input: unknown, opciones: unknown) => Promise<SalidaDeCambioDeSitio>;
+    };
+    await expect(
+      herramienta.execute({ dominio: 'correo.ejemplo.com', resumen: 'x' }, {}),
+    ).rejects.toBeInstanceOf(CambioDeSitioError);
+    // Stagehand no empuja a su traza la llamada de una tool que lanzo: sin este paso, la trayectoria
+    // del tramo no diria por que la tarea se fue a otro sitio.
+    expect(blindado.paso()).toEqual({
+      type: TOOL_CAMBIAR_DE_SITIO,
+      action: 'cambio al sitio correo.ejemplo.com',
+      success: true,
+    });
   });
 });

@@ -254,17 +254,37 @@ function instruccionDePaso(paso: PasoSustituido, dominio: string): InstruccionDe
   };
 }
 
+/** El sitio sobre el que corre un paso: su sesion de navegador y su dominio. */
+export interface SitioDelPaso {
+  sesionExternaId: string;
+  dominio: string;
+}
+
 /** Dependencias de la ejecucion por receta. index.ts cablea las reales; los tests pasan fakes. */
 export interface EjecucionPorRecetaDeps {
   navegador: NavegadorDeterminista;
   escalador: EscaladorDePaso;
-  /** Resuelve el paso `verificar`: verificacion determinista + politica del usuario (D7). */
-  verificar(): Promise<VeredictoDeVerificacion>;
-  /** Sesion de navegador YA abierta y con el pais verificado por el handler. */
+  /**
+   * Resuelve el paso `verificar`: verificacion determinista + politica del usuario (D7). Recibe el
+   * sitio ACTIVO para que una receta multisitio compare contra el DOM del sitio en el que esta, no
+   * contra el del sitio en el que empezo.
+   */
+  verificar(sitio: SitioDelPaso): Promise<VeredictoDeVerificacion>;
+  /** Sesion de navegador YA abierta y con el pais verificado por el handler (sitio de arranque). */
   sesionExternaId: string;
   apiKey: string;
-  /** Dominio de la conexion: la unica base sobre la que se resuelve una ruta de la receta. */
+  /** Dominio de la conexion: la base sobre la que se resuelve la ruta de un paso sin dominio propio. */
   dominio: string;
+  /**
+   * CAMBIO DE SITIO de una receta multisitio: abre (o reutiliza) la sesion del dominio pedido y
+   * devuelve su id. null = ese dominio NO esta entre los sitios que ESTE job autorizo, o su sesion no
+   * se pudo abrir; en los dos casos la receta se ABANDONA y la tarea sigue por el camino con motor.
+   *
+   * Ausente = tarea de un solo sitio: un paso que nombre otro dominio abandona la receta. Es la
+   * puerta que impide que una receta manipulada lleve la sesion del usuario a un sitio que la tarea
+   * no autorizo.
+   */
+  cambiarASitio?: ((dominio: string) => Promise<string | null>) | undefined;
   signal?: AbortSignal | undefined;
 }
 
@@ -304,6 +324,9 @@ export async function ejecutarReceta(
   let pasosEjecutados = 0;
   let tokensIn = 0;
   let tokensOut = 0;
+  // SITIO ACTIVO de la receta. Arranca en el de la conexion y solo cambia cuando un paso declara otro
+  // dominio Y el job lo autorizo. Las sesiones NO se mezclan: cambiar de sitio es cambiar de sesion.
+  let sitio: SitioDelPaso = { sesionExternaId: deps.sesionExternaId, dominio: deps.dominio };
 
   for (const sustituido of sustituidos) {
     // CANCELACION COOPERATIVA: el dueno termino la tarea desde la consola. Se corta ANTES del paso
@@ -320,8 +343,33 @@ export async function ejecutarReceta(
       };
     }
 
+    // SITIO DEL PASO (multisitio): un paso sin dominio propio corre en el sitio de la conexion, que
+    // es lo que trae toda receta anterior a este cambio. Un dominio distinto exige un cambio de
+    // sesion AUTORIZADO por el job; si no lo esta (o no hay con que cambiarlo), la receta se abandona
+    // y la tarea la termina el motor, que si valida los sitios.
+    const dominioDelPaso = sustituido.paso.dominio ?? deps.dominio;
+    if (dominioDelPaso !== sitio.dominio) {
+      const sesion = deps.cambiarASitio ? await deps.cambiarASitio(dominioDelPaso) : null;
+      if (sesion === null) {
+        return {
+          pasos: traza,
+          pasosReparados: reparados,
+          escalados,
+          pasosEjecutados,
+          tokensIn,
+          tokensOut,
+          desenlace: {
+            tipo: 'abandonada',
+            motivo: 'lo aprendido usa un sitio que esta tarea no autoriza',
+            obsoleta: false,
+          },
+        };
+      }
+      sitio = { sesionExternaId: sesion, dominio: dominioDelPaso };
+    }
+
     if (sustituido.paso.accion === 'verificar') {
-      const veredicto = await deps.verificar();
+      const veredicto = await deps.verificar(sitio);
       traza.push(pasoDeTraza(sustituido, traza.length, 'verificado', veredicto.tipo === 'ejecutar'));
       if (veredicto.tipo === 'detener') {
         return {
@@ -337,7 +385,7 @@ export async function ejecutarReceta(
       continue;
     }
 
-    const instruccion = instruccionDePaso(sustituido, deps.dominio);
+    const instruccion = instruccionDePaso(sustituido, sitio.dominio);
     if (instruccion === null) {
       return {
         pasos: traza,
@@ -355,7 +403,7 @@ export async function ejecutarReceta(
     // y, si tampoco sale, abandona la receta y la termina el motor. Dejar propagar aqui convertiria
     // un blip de CDP en una tarea fallida cuando el camino de siempre habria funcionado.
     const resultado = await deps.navegador
-      .ejecutarPasoDeterminista(deps.sesionExternaId, instruccion)
+      .ejecutarPasoDeterminista(sitio.sesionExternaId, instruccion)
       .catch(
         (): ResultadoPasoDeterminista => ({
           estado: 'fallo',
@@ -375,8 +423,9 @@ export async function ejecutarReceta(
       continue;
     }
 
-    // El paso no resolvio su elemento: ESCALADA SELECTIVA de ESE paso (D5).
-    const escalada = await escalarPaso(sustituido, deps);
+    // El paso no resolvio su elemento: ESCALADA SELECTIVA de ESE paso (D5), en la sesion del sitio
+    // en el que ese paso corre.
+    const escalada = await escalarPaso(sustituido, deps, sitio.sesionExternaId);
     tokensIn += escalada.tokensIn ?? 0;
     tokensOut += escalada.tokensOut ?? 0;
     escalados++;
@@ -403,7 +452,10 @@ export async function ejecutarReceta(
     // AUTO REPARACION (D5): con el selector que resolvio el motor se releen del DOM las estrategias
     // actuales del elemento y se reemplazan las del paso.
     if (escalada.selector !== null) {
-      const nuevas = await leerEstrategiasBestEffort(deps, { tipo: 'xpath', xpath: escalada.selector });
+      const nuevas = await leerEstrategiasBestEffort(deps, sitio.sesionExternaId, {
+        tipo: 'xpath',
+        xpath: escalada.selector,
+      });
       if (nuevas.length > 0) {
         reparados = repararEstrategias(reparados ?? pasos, sustituido.paso.idx, nuevas);
       }
@@ -442,6 +494,7 @@ export async function ejecutarReceta(
 async function escalarPaso(
   paso: PasoSustituido,
   deps: EjecucionPorRecetaDeps,
+  sesionExternaId: string,
 ): Promise<ResultadoEscalada> {
   const instruccion = construirInstruccionDeEscalada(paso);
   if (instruccion === null) {
@@ -449,7 +502,7 @@ async function escalarPaso(
   }
   try {
     return await deps.escalador.ejecutarPasoConModelo({
-      sesionExternaId: deps.sesionExternaId,
+      sesionExternaId,
       instruccion,
       apiKey: deps.apiKey,
       signal: deps.signal,
@@ -462,10 +515,11 @@ async function escalarPaso(
 /** Lee las estrategias sin propagar fallos: la reparacion es una mejora, no un requisito. */
 async function leerEstrategiasBestEffort(
   deps: EjecucionPorRecetaDeps,
+  sesionExternaId: string,
   referencia: ReferenciaDeElemento,
 ): Promise<EstrategiaLocalizacion[]> {
   try {
-    return await deps.navegador.leerEstrategiasDeElemento(deps.sesionExternaId, referencia);
+    return await deps.navegador.leerEstrategiasDeElemento(sesionExternaId, referencia);
   } catch {
     return [];
   }

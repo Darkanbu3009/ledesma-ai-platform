@@ -9,6 +9,7 @@ import {
   type ValorDePaso,
 } from '@ledesma-platform/shared';
 import { VALOR_CENSURADO } from './censura.js';
+import { TOOL_CAMBIAR_DE_SITIO } from './prompt-tarea-web.js';
 import {
   extraerParametrosDeclarados,
   normalizarTexto,
@@ -55,7 +56,21 @@ const PUNTUACION = /[.,;:!?"'`()[\]{}<>|/\\*_~#$%^&+=@-]+/g;
  * Los parametros se sustituyen del MAS LARGO al mas corto para que un valor contenido dentro de otro
  * (el "2400" de "2400 MXN") no rompa el reemplazo del que lo contiene.
  */
-export function firmaDeObjetivo(objetivo: string): string {
+/**
+ * SUFIJO de la firma con el CONJUNTO DE DOMINIOS de la tarea. Ordenado y deduplicado para que el
+ * conjunto {tienda, correo} firme igual sin importar por cual se empezo.
+ *
+ * Vacio con CERO O UN dominio, a proposito: la firma de una tarea de un solo sitio queda EXACTAMENTE
+ * como antes de este cambio, asi que lo que el usuario ya tenia aprendido sigue sirviendo. Y no hay
+ * colision posible: una tarea de un sitio jamas lleva sufijo y una de dos siempre lo lleva, asi que
+ * "envia el correo" en un sitio y "envia el correo" cruzando dos sitios NO comparten receta.
+ */
+function sufijoDeDominios(dominios: readonly string[]): string {
+  const unicos = [...new Set(dominios.map((dominio) => dominio.toLowerCase()))].sort();
+  return unicos.length > 1 ? ` @${unicos.join('+')}` : '';
+}
+
+export function firmaDeObjetivo(objetivo: string, dominios: readonly string[] = []): string {
   const parametros = extraerParametrosDeclarados(objetivo);
   const sustituciones: Array<{ texto: string; marcador: string }> = [];
   for (const destinatario of parametros.destinatarios) {
@@ -92,7 +107,7 @@ export function firmaDeObjetivo(objetivo: string): string {
     const desnudo = reemplazo.slice(1, -1);
     firma = firma.split(` ${desnudo} `).join(` ${reemplazo} `);
   }
-  return firma.replace(/\s+/g, ' ').trim();
+  return `${firma.replace(/\s+/g, ' ').trim()}${sufijoDeDominios(dominios)}`;
 }
 
 /**
@@ -169,7 +184,14 @@ const ACCION_POR_METODO: Readonly<Record<string, 'click' | 'escribir'>> = {
   setValue: 'escribir',
 };
 
-/** Tipos de accion de la traza que NO cambian la pagina: se saltan al promover, no la invalidan. */
+/**
+ * Tipos de accion de la traza que NO cambian la pagina: se saltan al promover, no la invalidan.
+ *
+ * El CAMBIO DE SITIO entra aqui a proposito: no es un paso que haya que repetir, es un cambio de
+ * tramo. Lo que la receta guarda de el es el `dominio` de cada paso; el ejecutor cambia de sesion
+ * cuando el dominio del paso siguiente es otro. Promoverlo como paso ademas duplicaria la
+ * informacion y abriria la puerta a una receta con un cambio de sitio "suelto".
+ */
 const TIPOS_SIN_EFECTO = new Set([
   'extract',
   'ariatree',
@@ -180,6 +202,7 @@ const TIPOS_SIN_EFECTO = new Set([
   'search',
   'navback',
   'scroll',
+  TOOL_CAMBIAR_DE_SITIO,
 ]);
 
 /**
@@ -250,14 +273,25 @@ function rutaDelPaso(url: string | null, dominio: string): string | null {
 
 function convertirPaso(
   paso: PasoCensurado,
-  dominio: string,
+  dominioDeLaReceta: string,
   valores: ValoresDeParametros,
   idx: number,
 ): Conversion {
   const tipo = paso.accion.tipo;
   if (TIPOS_SIN_EFECTO.has(tipo)) return { omitible: true };
 
-  const base = { idx, valor: null, teclas: null, ruta: null, esperaMs: null } as const;
+  // SITIO del paso (multisitio): el que el handler estampo al cerrar el tramo. Se guarda SOLO cuando
+  // difiere del dominio de la receta, para que una receta de un solo sitio quede identica a las que
+  // ya existen (dominio null en todos sus pasos).
+  const dominioDelPaso = paso.dominio ?? dominioDeLaReceta;
+  const base = {
+    idx,
+    dominio: dominioDelPaso === dominioDeLaReceta ? null : dominioDelPaso,
+    valor: null,
+    teclas: null,
+    ruta: null,
+    esperaMs: null,
+  } as const;
 
   // El paso sintetico de la verificacion determinista se promueve como tal: la receta aprende DONDE
   // hay que volver a comparar antes de ejecutar la accion irreversible (D7).
@@ -266,9 +300,9 @@ function convertirPaso(
   }
 
   if (tipo === 'goto' || tipo === 'navigate') {
-    const ruta = rutaDelPaso(paso.url, dominio);
-    // Una navegacion fuera del dominio de la conexion no se promueve NUNCA: una receta solo sabe
-    // operar dentro del sitio que el usuario conecto.
+    const ruta = rutaDelPaso(paso.url, dominioDelPaso);
+    // Una navegacion fuera del dominio DEL PASO no se promueve NUNCA: una receta solo sabe operar
+    // dentro de los sitios que el usuario conecto y que la tarea autorizo.
     if (ruta === null) return { omitible: false, motivo: 'navegacion fuera del dominio' };
     return { promovido: { ...base, accion: 'navegar', estrategias: [], ruta } };
   }

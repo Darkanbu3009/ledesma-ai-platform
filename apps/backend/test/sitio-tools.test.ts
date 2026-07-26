@@ -487,3 +487,151 @@ describe('assembleAgentRun con tools de sitios (7.1d)', () => {
     expect(sitioToolsToDefinitions()).toHaveLength(3);
   });
 });
+
+/**
+ * VARIOS SITIOS EN UNA MISMA TAREA. La tool es la puerta por la que el agente conversacional AUTORIZA
+ * sobre que cuentas del usuario va a actuar una tarea: el owner sale SIEMPRE del contexto del run
+ * (el JWT), el tope es server-side y basta con que UNO de los sitios no este operativo para que no se
+ * encole nada.
+ */
+describe('platform_ejecutar_tarea_en_sitio con varios sitios', () => {
+  const OTRO_ID = '88888888-8888-4888-8888-888888888888';
+  const TERCERO_ID = '77777777-7777-4777-8777-777777777777';
+
+  /** Deps con un mapa de sitios por id (los tests multisitio necesitan mas de uno). */
+  function makeDepsPorId(porId: Record<string, SitioConectado | null>): SitioToolsDeps {
+    const deps = makeDeps();
+    (deps.sitios.obtenerPorId as ReturnType<typeof vi.fn>).mockImplementation(
+      async (id: string) => porId[id] ?? null,
+    );
+    return deps;
+  }
+
+  it('encola con la lista completa, valida TODOS contra el owner del JWT y arranca por el primero', async () => {
+    const deps = makeDepsPorId({
+      [CONNECTION_ID]: makeSitio(),
+      [OTRO_ID]: makeSitio({ id: OTRO_ID, dominio: 'correo.ejemplo.com' }),
+    });
+    const exec = createSitioToolsExecutor(CTX, deps);
+    const res = await exec(
+      call(SITIO_TOOL_EJECUTAR, {
+        connection_ids: [CONNECTION_ID, OTRO_ID],
+        objetivo: 'busca el precio y mandalo por correo',
+      }),
+    );
+    expect(res.isError).toBe(false);
+    expect(deps.jobs.createJob).toHaveBeenCalledWith({
+      agentId: 'agent-1',
+      ownerId: 'user-1',
+      credentialId: 'cred-1',
+      payload: {
+        kind: 'tarea_web',
+        connectionId: CONNECTION_ID,
+        sitios: [CONNECTION_ID, OTRO_ID],
+        objetivo: 'busca el precio y mandalo por correo',
+      },
+    });
+    // La validacion de pertenencia corre por CADA sitio, siempre con el owner del run.
+    expect(deps.sitios.obtenerPorId).toHaveBeenCalledWith(CONNECTION_ID, 'user-1');
+    expect(deps.sitios.obtenerPorId).toHaveBeenCalledWith(OTRO_ID, 'user-1');
+    expect(JSON.parse(res.content).nota).toContain('app.ejemplo.com, correo.ejemplo.com');
+  });
+
+  it('connection_id y connection_ids se combinan: el de arranque va primero y sin repetir', async () => {
+    const deps = makeDepsPorId({
+      [CONNECTION_ID]: makeSitio(),
+      [OTRO_ID]: makeSitio({ id: OTRO_ID, dominio: 'correo.ejemplo.com' }),
+    });
+    const exec = createSitioToolsExecutor(CTX, deps);
+    await exec(
+      call(SITIO_TOOL_EJECUTAR, {
+        connection_id: CONNECTION_ID,
+        connection_ids: [OTRO_ID, CONNECTION_ID],
+        objetivo: 'x',
+      }),
+    );
+    expect(deps.jobs.createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          connectionId: CONNECTION_ID,
+          sitios: [CONNECTION_ID, OTRO_ID],
+        }),
+      }),
+    );
+  });
+
+  it('un solo sitio en la lista encola el payload de siempre (sin campo de sitios)', async () => {
+    const deps = makeDepsPorId({ [CONNECTION_ID]: makeSitio() });
+    const exec = createSitioToolsExecutor(CTX, deps);
+    await exec(call(SITIO_TOOL_EJECUTAR, { connection_ids: [CONNECTION_ID], objetivo: 'lee mi panel' }));
+    expect(deps.jobs.createJob).toHaveBeenCalledWith({
+      agentId: 'agent-1',
+      ownerId: 'user-1',
+      credentialId: 'cred-1',
+      payload: { kind: 'tarea_web', connectionId: CONNECTION_ID, objetivo: 'lee mi panel' },
+    });
+  });
+
+  it('si UNO de los sitios no esta activo (o es ajeno) no se encola nada', async () => {
+    const deps = makeDepsPorId({
+      [CONNECTION_ID]: makeSitio(),
+      [OTRO_ID]: makeSitio({ id: OTRO_ID, estado: 'caducado' }),
+    });
+    const exec = createSitioToolsExecutor(CTX, deps);
+    const res = await exec(
+      call(SITIO_TOOL_EJECUTAR, { connection_ids: [CONNECTION_ID, OTRO_ID], objetivo: 'x' }),
+    );
+    expect(res.isError).toBe(true);
+    expect(deps.jobs.createJob).not.toHaveBeenCalled();
+  });
+
+  it('un sitio ajeno (el repo no lo resuelve para este owner) tampoco encola', async () => {
+    const deps = makeDepsPorId({ [CONNECTION_ID]: makeSitio(), [OTRO_ID]: null });
+    const exec = createSitioToolsExecutor(CTX, deps);
+    const res = await exec(
+      call(SITIO_TOOL_EJECUTAR, { connection_ids: [CONNECTION_ID, OTRO_ID], objetivo: 'x' }),
+    );
+    expect(res.isError).toBe(true);
+    expect(deps.jobs.createJob).not.toHaveBeenCalled();
+  });
+
+  it('por encima del tope se rechaza server-side, sin tocar la base', async () => {
+    const deps = makeDepsPorId({});
+    const exec = createSitioToolsExecutor(CTX, deps);
+    const res = await exec(
+      call(SITIO_TOOL_EJECUTAR, {
+        connection_ids: [CONNECTION_ID, OTRO_ID, TERCERO_ID, 'conn-d'],
+        objetivo: 'x',
+      }),
+    );
+    expect(res.isError).toBe(true);
+    expect(res.content).toContain('no puede usar mas de 3 sitios');
+    expect(deps.sitios.obtenerPorId).not.toHaveBeenCalled();
+    expect(deps.jobs.createJob).not.toHaveBeenCalled();
+  });
+
+  it('la barrera anti relanzamiento se consulta para CADA sitio de la tarea', async () => {
+    const deps = makeDepsPorId({
+      [CONNECTION_ID]: makeSitio(),
+      [OTRO_ID]: makeSitio({ id: OTRO_ID, dominio: 'correo.ejemplo.com' }),
+    });
+    (deps.jobs.existeFalloPermanenteReciente as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_owner: string, connectionId: string) => connectionId === OTRO_ID,
+    );
+    const exec = createSitioToolsExecutor(CTX, deps);
+    const res = await exec(
+      call(SITIO_TOOL_EJECUTAR, { connection_ids: [CONNECTION_ID, OTRO_ID], objetivo: 'x' }),
+    );
+    expect(res.isError).toBe(true);
+    expect(res.content).toMatch(/fallo de forma permanente/);
+    expect(deps.jobs.createJob).not.toHaveBeenCalled();
+  });
+
+  it('sin ningun id la tool responde accionable, no encola', async () => {
+    const deps = makeDepsPorId({});
+    const exec = createSitioToolsExecutor(CTX, deps);
+    const res = await exec(call(SITIO_TOOL_EJECUTAR, { objetivo: 'x' }));
+    expect(res.isError).toBe(true);
+    expect(deps.jobs.createJob).not.toHaveBeenCalled();
+  });
+});
