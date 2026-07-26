@@ -9,7 +9,8 @@
     "actividad": "Actividad",
     "credenciales": "Credenciales",
     "privacidad": "Privacidad",
-    "admin": "Admin"
+    "admin": "Admin",
+    "ensenadas": "Ya sabe hacer"
   },
   "language": {
     "sectionTitle": "Idioma",
@@ -1977,6 +1978,34 @@
     "cerrarAria": "Cerrar",
     "iframeTitulo": "Navegador seguro para hacer la tarea en {{dominio}}",
     "pie": "Se abre en un navegador seguro con tu sesión ya iniciada. Nunca te pedimos tu contraseña.",
+    "tipos": {
+      "destinatario": "Para quién es",
+      "asunto": "El asunto",
+      "cuerpo": "El mensaje",
+      "monto": "El monto",
+      "producto": "El producto",
+      "cantidad": "La cantidad"
+    }
+  },
+  "ensenadas": {
+    "titulo": "Tareas que ya sabe hacer",
+    "subtitulo": "Lo que le enseñaste haciéndolo tú una vez. Cuando se lo pidas, lo hace solo.",
+    "vacio": "Todavía no le has enseñado ninguna tarea.",
+    "vacioAyuda": "Ve a Sitios, entra al sitio que quieras y enséñale una tarea haciéndola tú una vez.",
+    "usos": "La ha hecho {{n}} veces",
+    "sinUsos": "Todavía no la ha hecho",
+    "ensenadaEn": "Se la enseñaste el {{fecha}}",
+    "aprendidaEn": "La aprendió sola el {{fecha}}",
+    "borrar": "Que la olvide",
+    "borrando": "Borrando",
+    "confirmarTitulo": "¿Que olvide esta tarea?",
+    "confirmarTexto": "Dejará de saber hacerla. Si la vuelves a necesitar, tendrás que enseñársela otra vez.",
+    "confirmarCancelar": "Mejor no",
+    "datosQueNecesita": "Datos que le tienes que dar",
+    "sinDatos": "No necesita que le des ningún dato",
+    "sinDescripcion": "Una tarea que aprendió sola en este sitio",
+    "error": "No pudimos cargar tus tareas. Inténtalo de nuevo.",
+    "errorBorrar": "No pudimos borrarla. Inténtalo de nuevo.",
     "tipos": {
       "destinatario": "Para quién es",
       "asunto": "El asunto",

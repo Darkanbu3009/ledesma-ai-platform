@@ -452,7 +452,24 @@ export function useGuardarGrabacion() {
         method: 'POST',
         body: JSON.stringify({ variables: input.variables }),
       }),
-    onSuccess: (_data, input) => void qc.invalidateQueries({ queryKey: ['grabaciones', input.id] }),
+    onSuccess: (_data, input) => {
+      void qc.invalidateQueries({ queryKey: ['grabaciones', input.id] });
+      // Guardar una grabacion agrega una tarea a las que el sistema ya sabe hacer.
+      void qc.invalidateQueries({ queryKey: ['tareas-ensenadas'] });
+    },
+  });
+}
+
+/**
+ * "QUE LA OLVIDE" (DELETE /v1/tareas-ensenadas/:id): el sistema deja de saber hacer esa tarea. La
+ * pantalla siempre lo pregunta antes: es una accion que no se puede deshacer (habria que volver a
+ * ensenarsela).
+ */
+export function useOlvidarTareaEnsenada() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/v1/tareas-ensenadas/${id}`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['tareas-ensenadas'] }),
   });
 }
 
