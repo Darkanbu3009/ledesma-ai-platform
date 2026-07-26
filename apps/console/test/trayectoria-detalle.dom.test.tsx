@@ -133,3 +133,38 @@ describe('JobActivityCard (tarea web) + TrayectoriaDetalle', () => {
     expect(screen.getByText(/\[CENSURADO\]/)).toBeInTheDocument();
   });
 });
+
+/**
+ * Una tarea puede trabajar en VARIOS sitios del usuario. Cuando eso pasa, /actividad los muestra
+ * TODOS: cada tramo de la tarea deja su propia ejecucion registrada, con el sitio en el que corrio.
+ * El texto es el del usuario final, sin terminos tecnicos.
+ */
+describe('sitios usados en una tarea', () => {
+  it('una tarea que uso varios sitios los muestra todos', () => {
+    useTrayectoriasDeJob.mockReturnValue({
+      data: [
+        makeTrayectoria({ id: 'tray-1', connectionId: 'conn-1', dominio: 'tienda.ejemplo.com' }),
+        makeTrayectoria({ id: 'tray-2', connectionId: 'conn-2', dominio: 'correo.ejemplo.com' }),
+      ],
+      isLoading: false,
+      isError: false,
+    });
+    render(<JobActivityCard job={makeJob()} agentName={null} />);
+    fireEvent.click(screen.getByRole('button', { name: /ver pasos/i }));
+
+    expect(screen.getByText('Sitios usados en esta tarea')).toBeInTheDocument();
+    expect(screen.getByText('tienda.ejemplo.com')).toBeInTheDocument();
+    expect(screen.getByText('correo.ejemplo.com')).toBeInTheDocument();
+  });
+
+  it('una tarea de un solo sitio no muestra la lista (no hay nada que aclarar)', () => {
+    useTrayectoriasDeJob.mockReturnValue({
+      data: [makeTrayectoria(), makeTrayectoria({ id: 'tray-2' })],
+      isLoading: false,
+      isError: false,
+    });
+    render(<JobActivityCard job={makeJob()} agentName={null} />);
+    fireEvent.click(screen.getByRole('button', { name: /ver pasos/i }));
+    expect(screen.queryByText('Sitios usados en esta tarea')).not.toBeInTheDocument();
+  });
+});

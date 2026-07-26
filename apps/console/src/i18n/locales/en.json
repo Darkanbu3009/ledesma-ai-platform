@@ -1769,6 +1769,9 @@
       "tareaWeb": "Web task"
     }
   },
+  "multisitio": {
+    "sitiosUsados": "Sites used in this task"
+  },
   "sitios": {
     "titulo": "Connected sites",
     "subtitulo": "Connect sites where you sign in yourself so your agents can work inside your account.",

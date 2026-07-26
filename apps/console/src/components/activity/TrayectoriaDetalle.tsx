@@ -1,8 +1,9 @@
 import { useTranslation } from 'react-i18next';
-import { CheckCircle2, Loader2, XCircle } from 'lucide-react';
+import { CheckCircle2, Globe, Loader2, XCircle } from 'lucide-react';
 import { useTrayectoriasDeJob } from '../../lib/queries';
 import {
   formatearDuracion,
+  sitiosUsados,
   tituloDePaso,
   trayectoriaEstadoLabel,
   type PasoDeTrayectoria,
@@ -126,8 +127,27 @@ export function TrayectoriaDetalle({ jobId }: { jobId: string }) {
   if (!trayectorias || trayectorias.length === 0) {
     return <p className="py-2 text-[12px] text-muted">{t('actividad.trayectoria.vacia')}</p>;
   }
+  const sitios = sitiosUsados(trayectorias);
   return (
     <div className="space-y-2.5">
+      {/* Una tarea puede trabajar en varios sitios del usuario (buscar en uno, escribir en otro).
+          Cuando eso pasa, se listan TODOS: es la unica forma de que se vea donde estuvo la tarea. */}
+      {sitios.length > 1 && (
+        <div className="rounded-xl border border-line bg-line-soft/40 px-3 py-2">
+          <p className="text-[11.5px] font-semibold text-ink">{t('multisitio.sitiosUsados')}</p>
+          <ul className="mt-1 flex flex-wrap gap-1.5">
+            {sitios.map((sitio) => (
+              <li
+                key={sitio}
+                className="inline-flex items-center gap-1 rounded-full border border-line bg-surface px-2 py-0.5 text-[11px] text-muted"
+              >
+                <Globe className="h-3 w-3 flex-none" />
+                {sitio}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {trayectorias.map((trayectoria, i) => (
         <TrayectoriaBloque key={trayectoria.id} trayectoria={trayectoria} numero={i + 1} />
       ))}

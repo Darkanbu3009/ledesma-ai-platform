@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatearDuracion,
+  sitiosUsados,
   tituloDePaso,
   trayectoriaEstadoLabel,
   type PasoDeTrayectoria,
+  type Trayectoria,
 } from '../src/lib/trayectorias';
 
 function makePaso(overrides: Partial<PasoDeTrayectoria> = {}): PasoDeTrayectoria {
@@ -53,5 +55,42 @@ describe('tituloDePaso', () => {
       accion: { tipo: 'extract', instruccion: null, metodo: null, argumentos: [] },
     });
     expect(tituloDePaso(paso)).toBe('extract');
+  });
+});
+
+describe('sitiosUsados', () => {
+  function makeTrayectoria(dominio: string, id: string): Trayectoria {
+    return {
+      id,
+      jobId: 'job-1',
+      connectionId: `conn-${id}`,
+      dominio,
+      objetivo: 'x',
+      estado: 'exitosa',
+      iniciadaEn: '2026-07-20T00:00:00.000Z',
+      terminadaEn: '2026-07-20T00:00:01.000Z',
+      duracionMs: 1000,
+      tokensIn: null,
+      tokensOut: null,
+      pasos: [],
+    };
+  }
+
+  it('lista los sitios en el orden en que se usaron, sin repetir', () => {
+    expect(
+      sitiosUsados([
+        makeTrayectoria('tienda.ejemplo.com', 'a'),
+        makeTrayectoria('correo.ejemplo.com', 'b'),
+        makeTrayectoria('tienda.ejemplo.com', 'c'),
+      ]),
+    ).toEqual(['tienda.ejemplo.com', 'correo.ejemplo.com']);
+  });
+
+  it('una tarea de un solo sitio devuelve ese sitio', () => {
+    expect(sitiosUsados([makeTrayectoria('tienda.ejemplo.com', 'a')])).toEqual(['tienda.ejemplo.com']);
+  });
+
+  it('sin ejecuciones registradas no hay sitios que mostrar', () => {
+    expect(sitiosUsados([])).toEqual([]);
   });
 });

@@ -83,3 +83,16 @@ export function formatearDuracion(duracionMs: number): string {
 export function tituloDePaso(paso: PasoDeTrayectoria): string {
   return paso.accion.instruccion ?? paso.accion.tipo;
 }
+
+/**
+ * SITIOS que una tarea uso, en el orden en que los uso y sin repetir. Una tarea puede trabajar en
+ * varios sitios del usuario: cada tramo deja su propia ejecucion registrada, con el sitio en el que
+ * corrio, asi que la lista sale de ahi y no de una suposicion.
+ */
+export function sitiosUsados(trayectorias: Trayectoria[]): string[] {
+  const sitios: string[] = [];
+  for (const trayectoria of trayectorias) {
+    if (!sitios.includes(trayectoria.dominio)) sitios.push(trayectoria.dominio);
+  }
+  return sitios;
+}
