@@ -7,7 +7,11 @@ import type {
   NormalizedMessage,
   TextBlock,
 } from '@ledesma-platform/shared';
-import { TAREA_WEB_JOB_KIND, TAREA_WEB_OBJETIVO_MAX_CHARS } from '@ledesma-platform/shared';
+import {
+  MAX_SITIOS_POR_TAREA,
+  TAREA_WEB_JOB_KIND,
+  TAREA_WEB_OBJETIVO_MAX_CHARS,
+} from '@ledesma-platform/shared';
 import type { SitioConectado } from '../sitios/sitios-conectados-repository.js';
 import type { ToolCall, ToolExecutionResult, ToolExecutor } from '../agent/index.js';
 
@@ -40,7 +44,16 @@ const ejecutarSchema: JsonSchema = {
   properties: {
     connection_id: {
       type: 'string',
-      description: 'Id de la conexion del sitio (sitios conectados) sobre cuya sesion activa se ejecuta la tarea.',
+      description:
+        'Id de la conexion del sitio (sitios conectados) donde ARRANCA la tarea, sobre cuya sesion activa se ejecuta.',
+    },
+    connection_ids: {
+      type: 'array',
+      items: { type: 'string' },
+      description:
+        'Opcional. Todos los sitios conectados que la tarea puede usar, en orden, cuando la tarea cruza ' +
+        `mas de uno (por ejemplo buscar en una tienda y mandar el resultado por correo). Maximo ${MAX_SITIOS_POR_TAREA}. ` +
+        'El primero es donde arranca. Usa solo los sitios que el usuario pidio: no agregues sitios por tu cuenta.',
     },
     objetivo: {
       type: 'string',
@@ -48,7 +61,7 @@ const ejecutarSchema: JsonSchema = {
         'La tarea en lenguaje natural a ejecutar dentro de la cuenta del usuario en ese sitio, con criterio claro de cuando termina.',
     },
   },
-  required: ['connection_id', 'objetivo'],
+  required: ['objetivo'],
 };
 
 const revisarSchema: JsonSchema = {
@@ -72,8 +85,9 @@ export const SITIO_TOOLS: readonly ToolDefinition[] = [
   {
     name: SITIO_TOOL_EJECUTAR,
     description:
-      'Ejecuta una tarea en lenguaje natural DENTRO de la sesion ya iniciada del usuario en un sitio conectado ' +
-      '(el usuario conecto el sitio antes y su sesion quedo activa). Si no conoces el connection_id, obtenlo ' +
+      'Ejecuta una tarea en lenguaje natural DENTRO de la sesion ya iniciada del usuario en uno o varios sitios ' +
+      'conectados (el usuario los conecto antes y sus sesiones quedaron activas). Si la tarea cruza varios sitios, ' +
+      'pasalos en connection_ids con el de arranque primero. Si no conoces los ids, obtenlos ' +
       'primero con platform_listar_sitios_conectados. Encola la tarea en segundo plano y devuelve ' +
       'un job_id: la tarea NO es inmediata, usa platform_revisar_tarea_en_sitio con ese job_id para obtener el ' +
       'resultado. Solo sirve para sitios que el usuario ya conecto; no inicia sesion ni maneja credenciales. Las ' +
@@ -240,6 +254,26 @@ function inputString(input: Record<string, unknown>, key: string): string | null
 }
 
 /**
+ * IDS DE CONEXION que el modelo pidio, normalizados: `connection_id` primero (si vino) y despues los
+ * de `connection_ids`, sin repetidos y en el orden en que llegaron. Ignora entradas que no sean
+ * strings no vacios: el modelo escribe este input y una entrada basura no debe tumbar la llamada, la
+ * validacion real (owner + activo) viene despues y es la que decide.
+ */
+export function idsDeConexionPedidos(input: Record<string, unknown>): string[] {
+  const crudos = [inputString(input, 'connection_id')];
+  const lista = input['connection_ids'];
+  if (Array.isArray(lista)) {
+    for (const id of lista) crudos.push(typeof id === 'string' && id.trim() !== '' ? id : null);
+  }
+  const ids: string[] = [];
+  for (const id of crudos) {
+    if (id === null || ids.includes(id)) continue;
+    ids.push(id);
+  }
+  return ids;
+}
+
+/**
  * Ejecutor in-process de las tools de sitios. NUNCA lanza: todo desenlace vuelve como
  * { content, isError } (mismo contrato que createWebhookExecutor/createNativeExecutor). No loguea
  * ni devuelve nada sensible: solo ids, estados y el resultado ya saneado que guardo el worker.
@@ -271,10 +305,13 @@ export function createSitioToolsExecutor(
   };
 
   const ejecutar = async (input: Record<string, unknown>): Promise<ToolExecutionResult> => {
-    const connectionId = inputString(input, 'connection_id');
+    const connectionIds = idsDeConexionPedidos(input);
     const objetivo = inputString(input, 'objetivo');
-    if (!connectionId || !objetivo) {
-      return { content: 'Faltan connection_id y/u objetivo (ambos strings no vacios).', isError: true };
+    if (connectionIds.length === 0 || !objetivo) {
+      return {
+        content: 'Faltan connection_id (o connection_ids) y/u objetivo (strings no vacios).',
+        isError: true,
+      };
     }
     if (objetivo.length > TAREA_WEB_OBJETIVO_MAX_CHARS) {
       return {
@@ -282,40 +319,62 @@ export function createSitioToolsExecutor(
         isError: true,
       };
     }
-    // Chequeo TEMPRANO y acotado por owner: si la conexion no existe / es ajena / no esta activa,
-    // se responde accionable SIN encolar nada (el worker re-verifica igual: defensa en profundidad).
-    const sitio = await deps.sitios.obtenerPorId(connectionId, ctx.ownerId);
-    if (!sitio || sitio.estado !== 'activo') {
-      return { content: MENSAJE_RECONECTAR, isError: true };
-    }
-    // BARRERA ANTI RELANZAMIENTO (BUG A, server-side): tras un fallo PERMANENTE reciente sobre esta
-    // conexion, el modelo no puede reencolar por su cuenta (repetir una navegacion a medias duplica
-    // efectos sobre la cuenta real). No aplica a jobs pausados por aprobacion, completados, ni
-    // terminados por cancelacion del usuario o del sistema (el repositorio excluye esos casos).
-    const falloReciente = await deps.jobs.existeFalloPermanenteReciente(
-      ctx.ownerId,
-      connectionId,
-      VENTANA_ANTI_RELANZAMIENTO_MS,
-    );
-    if (falloReciente) {
+    // LIMITE DURO de sitios por tarea (server-side, no negociable): mas alla de esto ya no es una
+    // tarea, es un barrido por las cuentas del usuario. Se RECHAZA, no se recorta: recortar
+    // ejecutaria una tarea distinta de la que el usuario pidio.
+    if (connectionIds.length > MAX_SITIOS_POR_TAREA) {
       return {
         content:
-          'La tarea anterior en este sitio fallo de forma permanente hace menos de ' +
-          `${Math.round(VENTANA_ANTI_RELANZAMIENTO_MS / 60_000)} minutos. NO vuelvas a encolarla ` +
-          'por tu cuenta: se requiere una decision explicita del usuario antes de reintentar. ' +
-          'Informale al usuario que fallo y que el puede pedirla de nuevo si lo desea.',
+          `Una tarea no puede usar mas de ${MAX_SITIOS_POR_TAREA} sitios conectados. ` +
+          'Pidele al usuario que la divida en varias tareas.',
         isError: true,
       };
     }
+    // Chequeo TEMPRANO y acotado por owner de TODOS los sitios: si alguna conexion no existe / es
+    // ajena / no esta activa, se responde accionable SIN encolar nada (el worker re-verifica igual:
+    // defensa en profundidad). El owner sale SIEMPRE del contexto del run (el JWT), jamas del modelo:
+    // un connection_id ajeno no resuelve y la tarea no se encola.
+    const sitios: SitioConectado[] = [];
+    for (const connectionId of connectionIds) {
+      const sitio = await deps.sitios.obtenerPorId(connectionId, ctx.ownerId);
+      if (!sitio || sitio.estado !== 'activo') {
+        return { content: MENSAJE_RECONECTAR, isError: true };
+      }
+      sitios.push(sitio);
+    }
+    // BARRERA ANTI RELANZAMIENTO (BUG A, server-side): tras un fallo PERMANENTE reciente sobre
+    // CUALQUIERA de estas conexiones, el modelo no puede reencolar por su cuenta (repetir una
+    // navegacion a medias duplica efectos sobre la cuenta real). No aplica a jobs pausados por
+    // aprobacion, completados, ni terminados por cancelacion del usuario o del sistema (el
+    // repositorio excluye esos casos).
+    for (const connectionId of connectionIds) {
+      const falloReciente = await deps.jobs.existeFalloPermanenteReciente(
+        ctx.ownerId,
+        connectionId,
+        VENTANA_ANTI_RELANZAMIENTO_MS,
+      );
+      if (falloReciente) {
+        return {
+          content:
+            'La tarea anterior en este sitio fallo de forma permanente hace menos de ' +
+            `${Math.round(VENTANA_ANTI_RELANZAMIENTO_MS / 60_000)} minutos. NO vuelvas a encolarla ` +
+            'por tu cuenta: se requiere una decision explicita del usuario antes de reintentar. ' +
+            'Informale al usuario que fallo y que el puede pedirla de nuevo si lo desea.',
+          isError: true,
+        };
+      }
+    }
     // El objetivo lo redacta el MODELO; `textoUsuario` es lo que el usuario escribio, tal cual, y
     // viaja como campo SEPARADO. El worker compara contra el segundo y le da al motor el primero.
+    // `sitios` solo viaja cuando hay mas de uno: un payload de un solo sitio queda igual que antes.
     const job = await deps.jobs.createJob({
       agentId: ctx.agentId,
       ownerId: ctx.ownerId,
       credentialId: ctx.credentialId,
       payload: {
         kind: TAREA_WEB_JOB_KIND,
-        connectionId,
+        connectionId: connectionIds[0] as string,
+        ...(connectionIds.length > 1 ? { sitios: connectionIds } : {}),
         objetivo,
         ...(ctx.textoUsuario !== undefined ? { textoUsuario: ctx.textoUsuario } : {}),
       },
@@ -324,7 +383,9 @@ export function createSitioToolsExecutor(
       content: JSON.stringify({
         job_id: job.id,
         estado: 'encolada',
-        nota: `Tarea encolada en el sitio ${sitio.dominio}. Consulta el resultado con ${SITIO_TOOL_REVISAR}.`,
+        nota:
+          `Tarea encolada en ${sitios.map((sitio) => sitio.dominio).join(', ')}. ` +
+          `Consulta el resultado con ${SITIO_TOOL_REVISAR}.`,
       }),
       isError: false,
     };
