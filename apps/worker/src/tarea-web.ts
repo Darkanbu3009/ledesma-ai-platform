@@ -28,7 +28,12 @@ import {
   type NotificadorAprobaciones,
   type RepositorioAprobacionesParaWorker,
 } from './aprobaciones.js';
-import { contarParametrosDeclarados, extraerParametrosDeclarados } from './parametros-objetivo.js';
+import {
+  contarParametrosDeclarados,
+  extraerParametrosDeclarados,
+  nombresDeParametrosDeclarados,
+} from './parametros-objetivo.js';
+import type { ConsumoDeCorrida, ModoScreenshots } from './costo-modelo.js';
 import {
   accionSurtioEfecto,
   construirPasoDeVerificacion,
@@ -258,6 +263,17 @@ export interface MotorDeTareaWeb {
      * humana que ya autorizo la accion, escalada de UN paso de receta).
      */
     guardia?: GuardiaDeAccion | undefined;
+    /** Ventana de historial que se reenvia al modelo en cada llamada (TAREA_WEB_HISTORIAL_PASOS). */
+    historialPasos: number;
+    /** Cuando se toma una captura de pantalla durante la corrida (TAREA_WEB_SCREENSHOTS). */
+    modoScreenshots: ModoScreenshots;
+    /**
+     * REPORTE DE CONSUMO de la corrida (tokens de entrada, de salida, leidos de cache y creados en
+     * cache, mas el numero de llamadas al modelo). El motor lo emite SIEMPRE al terminar, tambien
+     * cuando la corrida lanza: una tarea cortada por deadline es justo donde hace falta saber
+     * cuanto se gasto antes del corte.
+     */
+    reportarConsumo?: ((consumo: ConsumoDeCorrida) => void) | undefined;
   }): Promise<ResultadoMotor>;
 }
 
@@ -381,6 +397,13 @@ export interface TareaWebDeps {
   model: string;
   /** Cap DURO de iteraciones (pasos del agente de navegacion) por corrida (TAREA_WEB_MAX_STEPS). */
   maxPasos: number;
+  /**
+   * Ventana de historial que se le reenvia al modelo en cada llamada (TAREA_WEB_HISTORIAL_PASOS).
+   * El objetivo original viaja SIEMPRE; esto acota solo la conversacion posterior.
+   */
+  historialPasos: number;
+  /** Cuando se toma una captura de pantalla durante la corrida (TAREA_WEB_SCREENSHOTS). */
+  modoScreenshots: ModoScreenshots;
   /** Deadline de pared de la tarea, en ms (TAREA_WEB_TIMEOUT_SECONDS * 1000). */
   runTimeoutMs: number;
   /** Resuelve y descifra la credencial del owner (la key del modelo sale de la boveda). */
@@ -1245,6 +1268,7 @@ async function ejecutarPorReceta(
     reparada: resultado.escalados > 0,
     tokensIn: resultado.tokensIn,
     tokensOut: resultado.tokensOut,
+    sesionExternaId,
   });
   deps.logger.info('tarea web completada con lo aprendido, sin llamadas al modelo por paso', {
     jobId: job.id,
@@ -1363,6 +1387,19 @@ export async function procesarTareaWeb(
   }
   const { connectionId, objetivo } = parsed.data;
 
+  // 0. EL OBJETIVO, TAL COMO LLEGO. Hasta ahora no se logueaba en ningun punto, asi que una tarea
+  //    que terminaba mal no se podia ni empezar a diagnosticar: no habia forma de saber que se
+  //    habia pedido. Va por la CENSURA que ya se le aplica antes de persistirlo en la trayectoria
+  //    (censurarObjetivo: tarjetas y credenciales dictadas quedan como [CENSURADO]). De los
+  //    parametros declarados se loguean solo los NOMBRES: cuales extrajo el sistema es lo que
+  //    explica un veredicto de la verificacion, y los valores no hacen falta para eso.
+  deps.logger.info('tarea web: objetivo recibido', {
+    jobId: job.id,
+    connectionId,
+    objetivo: censurarObjetivo(objetivo),
+    parametros: nombresDeParametrosDeclarados(extraerParametrosDeclarados(objetivo)),
+  });
+
   // 1. La conexion debe existir, ser del owner del job y estar 'activo'. Cualquier otra cosa falla
   //    con el mensaje accionable ANTES de crear sesion alguna (no se gasta ni un minuto de navegador).
   const sitio = await deps.repo.obtenerPorId(connectionId, job.ownerId);
@@ -1439,6 +1476,9 @@ export async function procesarTareaWeb(
     jobId: job.id,
     connectionId: sitio.id,
     dominio: sitio.dominio,
+    // El id de la sesion del proveedor es lo que permite localizar DESPUES la grabacion de esta
+    // corrida. Sin el, el log decia por donde salio la conexion pero no cual fue la sesion.
+    sesionExternaId: sesion.sesionExternaId,
     pais: sesion.egressCountry,
     egressIp: sesion.egressIp,
   });
@@ -1584,7 +1624,14 @@ export async function procesarTareaWeb(
     // La corrida del motor siempre arranca desde la pagina de inicio (una receta que se rindio a
     // medias renavega antes), asi que su traza describe la tarea entera y es promovible.
     await promoverRecetaBestEffort(deps, job, sitio, objetivo, pasosDelJob, verboBloqueado);
-    await deps.guardarResultado(job.id, { estado: 'ok', resumen: desenlace.resumen, via: 'modelo' });
+    // `sesionExternaId` queda EN EL RESULTADO del job: es la unica forma de encontrar despues la
+    // grabacion de la sesion en el proveedor a partir de una tarea concreta.
+    await deps.guardarResultado(job.id, {
+      estado: 'ok',
+      resumen: desenlace.resumen,
+      via: 'modelo',
+      sesionExternaId: sesion.sesionExternaId,
+    });
     deps.logger.info('tarea web completada dentro de la sesion del sitio', {
       jobId: job.id,
       connectionId: sitio.id,
@@ -1624,7 +1671,11 @@ async function cerrarCorridaDetenida(
   // La sesion se uso legitimamente hasta el bloqueo: mismo refresco que un checkpoint de aprobacion.
   await refrescarContextoBestEffort(deps, sitio, job.ownerId, sesionExternaId, contexto);
   try {
-    await deps.guardarResultado(job.id, { estado: 'detenida', detalle: bloqueo });
+    await deps.guardarResultado(job.id, {
+      estado: 'detenida',
+      detalle: bloqueo,
+      sesionExternaId,
+    });
   } catch (error) {
     deps.logger.error('tarea web: no se pudo guardar el resultado de la accion detenida', {
       jobId: job.id,
@@ -1747,6 +1798,34 @@ async function guardarTrayectoriaBestEffort(
 }
 
 /**
+ * REPORTE DE CONSUMO de una corrida del motor. Solo cifras: ni objetivo, ni URLs, ni contenido de la
+ * pagina. `tokensEntrada` son los tokens de entrada NUEVOS (no incluyen los de cache), asi que la
+ * relacion entre esa cifra y `tokensLeidosDeCache` es la medida directa de si el cache de prompt
+ * esta funcionando: leidos en cero significa que cada paso volvio a pagar el prefijo entero.
+ */
+function loguearConsumo(
+  deps: TareaWebDeps,
+  job: Job,
+  sitio: SitioConectado,
+  consumo: ConsumoDeCorrida | null,
+  desenlace: 'terminada' | 'cortada',
+): void {
+  if (consumo === null) return;
+  deps.logger.info('tarea web: consumo de la corrida del motor', {
+    jobId: job.id,
+    connectionId: sitio.id,
+    desenlace,
+    pasos: consumo.pasos,
+    tokensEntrada: consumo.tokensEntrada,
+    tokensSalida: consumo.tokensSalida,
+    tokensLeidosDeCache: consumo.tokensLeidosDeCache,
+    tokensCreadosEnCache: consumo.tokensCreadosEnCache,
+    historialPasos: deps.historialPasos,
+    modoScreenshots: deps.modoScreenshots,
+  });
+}
+
+/**
  * Corre el motor y REGISTRA la trayectoria de la ejecucion (exitosa, fallida o pausada) antes de
  * devolver el desenlace. Si el motor LANZA (deadline de pared, cancelacion o corte por fallo de
  * esquema del motor), la trayectoria fallida se guarda con las acciones que el motor alcanzo a
@@ -1776,6 +1855,10 @@ async function ejecutarMotorConRegistro(
   const observador = crearObservadorDePasos(deps, sesionExternaId, observaciones);
   // Traza EN VIVO de la corrida: es la unica que queda si el motor lanza (CAMBIO 7).
   const accionesEnVivo: AccionCrudaDeMotor[] = [];
+  // CONSUMO DE LA CORRIDA: el motor lo emite en su cierre, haya devuelto o haya lanzado. Se loguea
+  // en los dos caminos porque es lo que permite medir si el ahorro (cache de prompt, ventana de
+  // historial, capturas bajo politica) esta funcionando de verdad en produccion.
+  let consumo: ConsumoDeCorrida | null = null;
   let resultado: ResultadoMotor;
   try {
     resultado = await ejecutarMotor(
@@ -1787,8 +1870,12 @@ async function ejecutarMotorConRegistro(
       observador,
       (accion) => accionesEnVivo.push(accion),
       guardia,
+      (reporte) => {
+        consumo = reporte;
+      },
     );
   } catch (error) {
+    loguearConsumo(deps, job, sitio, consumo, 'cortada');
     // Incluye el caso en que la GUARDIA bloqueo la accion: la trayectoria fallida conserva lo que el
     // agente alcanzo a hacer MAS el paso de verificacion que explica por que se corto.
     await guardarTrayectoriaBestEffort(
@@ -1805,6 +1892,7 @@ async function ejecutarMotorConRegistro(
     );
     throw error;
   }
+  loguearConsumo(deps, job, sitio, consumo, 'terminada');
   const desenlace = clasificarDesenlace(resultado.mensaje);
   const estado: EstadoTrayectoria =
     desenlace.tipo === 'requiere_aprobacion'
@@ -1890,6 +1978,7 @@ async function ejecutarMotor(
   observador?: ((paso: PasoObservado) => Promise<void>) | undefined,
   registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined,
   guardia?: GuardiaDeAccion | undefined,
+  reportarConsumo?: ((consumo: ConsumoDeCorrida) => void) | undefined,
 ): Promise<ResultadoMotor> {
   const controller = new AbortController();
   let expiroDeadline = false;
@@ -1912,6 +2001,9 @@ async function ejecutarMotor(
       observador,
       registrarAccion,
       guardia,
+      historialPasos: deps.historialPasos,
+      modoScreenshots: deps.modoScreenshots,
+      reportarConsumo,
     });
   } catch (error) {
     // Fallo del motor con la sesion ya abierta: PERMANENTE (no se re-ejecuta una navegacion a

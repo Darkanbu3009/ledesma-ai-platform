@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import {
+  HISTORIAL_PASOS_DEFAULT,
+  HISTORIAL_PASOS_MAX,
+  HISTORIAL_PASOS_MIN,
+} from './costo-modelo.js';
 
 /**
  * Config del WORKER de ejecucion autonoma (Fase 5). Comparte env vars con el backend a proposito:
@@ -104,6 +109,23 @@ const EnvSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((valor) => valor === 'true'),
+  //   TAREA_WEB_SCREENSHOTS: CUANDO se toma una captura de pantalla durante la corrida. Una imagen
+  //   es lo mas caro que entra al contexto del modelo y, paso a paso, suele ser la MISMA pagina.
+  //     'cambios' (default): solo si la URL o el titulo cambiaron desde la observacion anterior.
+  //     'minimo':  solo la primera de la corrida y las que preceden a una accion irreversible.
+  //     'siempre': cada vez que el agente la pide (comportamiento historico, sin intervencion).
+  TAREA_WEB_SCREENSHOTS: z.enum(['siempre', 'cambios', 'minimo']).default('cambios'),
+  //   TAREA_WEB_HISTORIAL_PASOS: cuantos pasos de ida y vuelta se reenvian al modelo en cada
+  //   llamada. El objetivo original va SIEMPRE, este numero acota solo la conversacion posterior.
+  //   Sin la ventana, el bucle reenvia la corrida entera en cada paso y el costo crece con el
+  //   cuadrado de los pasos. Acotado a 3..40: con menos de 3 el agente pierde el hilo de lo que
+  //   acaba de hacer y con mas de 40 la ventana ya no acota nada dentro de TAREA_WEB_MAX_STEPS.
+  TAREA_WEB_HISTORIAL_PASOS: z.coerce
+    .number()
+    .int()
+    .min(HISTORIAL_PASOS_MIN)
+    .max(HISTORIAL_PASOS_MAX)
+    .default(HISTORIAL_PASOS_DEFAULT),
 });
 
 export type WorkerEnv = z.infer<typeof EnvSchema>;

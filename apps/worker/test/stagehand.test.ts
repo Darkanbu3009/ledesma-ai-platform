@@ -8,10 +8,12 @@ import {
   crearActBlindado,
   elementIdDeFalloDeEsquema,
   esFalloDeEsquemaDelMotor,
+  herramientaScreenshotConPolitica,
   ESPERA_ENTRE_REINTENTOS_ESQUEMA_MS,
   MAX_FALLOS_ESQUEMA_CONSECUTIVOS,
   MAX_REINTENTOS_ESQUEMA,
   TOOLS_RETIRADAS_CON_GUARDIA,
+  type SalidaDeScreenshot,
 } from '../src/stagehand.js';
 import {
   AccionBloqueadaError,
@@ -545,10 +547,36 @@ describe('construirOpcionesDeEjecucion', () => {
       objetivo: 'abre el ultimo correo',
       maxPasos: 120,
       toolTimeoutMs: 90_000,
+      historialPasos: 8,
     });
-    expect(opciones.callbacks).toBeUndefined();
+    expect(opciones.callbacks?.onEvidence).toBeUndefined();
+    expect(opciones.callbacks?.onStepFinish).toBeUndefined();
+    // prepareStep va SIEMPRE: es el punto desde el que el worker acota el historial, manda las
+    // instrucciones de sistema por su canal y marca el prefijo cacheable.
+    expect(opciones.callbacks?.prepareStep).toBeDefined();
     expect(opciones.toolTimeout).toBe(90_000);
     expect(opciones.maxSteps).toBe(120);
+  });
+
+  it('con registro de consumo se pasa onStepFinish y cada paso suma sus tokens', async () => {
+    const pasos: Array<{ tokensLeidosDeCache?: number | undefined }> = [];
+    const opciones = construirOpcionesDeEjecucion({
+      objetivo: 'abre el ultimo correo',
+      maxPasos: 120,
+      toolTimeoutMs: 90_000,
+      historialPasos: 8,
+      registrarConsumo: (paso) => void pasos.push(paso),
+    });
+    // El callback recibe un StepResult del AI SDK; aca solo importan los campos que se leen.
+    await (
+      opciones.callbacks?.onStepFinish as unknown as (paso: unknown) => Promise<void> | void
+    )?.({
+      usage: { inputTokens: 100, outputTokens: 20, cachedInputTokens: 4000 },
+      providerMetadata: { anthropic: { cacheCreationInputTokens: 7 } },
+    });
+    expect(pasos).toEqual([
+      { tokensEntrada: 100, tokensSalida: 20, tokensLeidosDeCache: 4000, tokensCreadosEnCache: 7 },
+    ]);
   });
 
   /**
@@ -563,6 +591,7 @@ describe('construirOpcionesDeEjecucion', () => {
       objetivo: 'abre el ultimo correo',
       maxPasos: 120,
       toolTimeoutMs: 90_000,
+      historialPasos: 8,
       registrarAccion: (accion) => void acciones.push(accion),
     });
     expect(opciones.callbacks?.onEvidence).toBeDefined();
@@ -584,6 +613,7 @@ describe('construirOpcionesDeEjecucion', () => {
       objetivo: 'abre el ultimo correo',
       maxPasos: 120,
       toolTimeoutMs: 90_000,
+      historialPasos: 8,
       registrarAccion: (accion) => void acciones.push(accion),
     });
 
@@ -604,6 +634,7 @@ describe('construirOpcionesDeEjecucion', () => {
       objetivo: 'abre el ultimo correo',
       maxPasos: 120,
       toolTimeoutMs: 90_000,
+      historialPasos: 8,
       observador: async (paso) => void pasos.push(paso),
     });
     expect(opciones.callbacks?.onEvidence).toBeDefined();
@@ -626,6 +657,7 @@ describe('construirOpcionesDeEjecucion', () => {
       objetivo: 'abre el ultimo correo',
       maxPasos: 120,
       toolTimeoutMs: 90_000,
+      historialPasos: 8,
     });
     expect(opciones.excludeTools).toBeUndefined();
   });
@@ -635,6 +667,7 @@ describe('construirOpcionesDeEjecucion', () => {
       objetivo: 'envia el resumen a juan@ejemplo.com',
       maxPasos: 120,
       toolTimeoutMs: 90_000,
+      historialPasos: 8,
       conGuardia: true,
     });
     // `keys` manda un Control+Enter a donde este el foco y `fillForm` actua sobre cualquier elemento
@@ -683,5 +716,80 @@ describe('accionCrudaDeEvidencia', () => {
       describe: 'el campo Para',
       text: 'juan@ejemplo.com',
     });
+  });
+});
+
+/**
+ * CAPTURAS BAJO POLITICA (TAREA_WEB_SCREENSHOTS). La tool del worker reemplaza a la nativa por el
+ * mismo mecanismo que `act`. Lo que estos tests fijan es que, cuando la captura SI se toma, el
+ * modelo recibe exactamente lo que recibiria de la nativa (una imagen PNG), y que cuando se omite
+ * recibe un texto con el motivo y NUNCA se llega a llamar a screenshot() del navegador.
+ */
+describe('herramientaScreenshotConPolitica', () => {
+  function makePagina(overrides: { url?: string; titulo?: string } = {}) {
+    const capturas: number[] = [];
+    return {
+      capturas,
+      pagina: {
+        url: () => overrides.url ?? 'https://app.ejemplo.com/bandeja',
+        title: async () => overrides.titulo ?? 'Bandeja',
+        screenshot: async (): Promise<Buffer> => {
+          capturas.push(1);
+          return Buffer.from('png-falso');
+        },
+      },
+    };
+  }
+
+  /** Ejecuta la tool `screenshot` del toolset devuelto, con la forma que le pasa el AI SDK. */
+  async function ejecutar(tools: ReturnType<typeof herramientaScreenshotConPolitica>) {
+    const herramienta = tools?.['screenshot'] as unknown as {
+      execute: (input: unknown, opciones: unknown) => Promise<SalidaDeScreenshot>;
+      toModelOutput: (salida: SalidaDeScreenshot) => { value: Array<{ type: string }> };
+    };
+    const salida = await herramienta.execute({}, {});
+    return { salida, modelo: herramienta.toModelOutput(salida) };
+  }
+
+  it('permitida: captura y la entrega al modelo como imagen, igual que la nativa', async () => {
+    const { capturas, pagina } = makePagina();
+    const tools = herramientaScreenshotConPolitica({
+      politica: { permitir: () => true },
+      pagina: async () => pagina,
+    });
+    const { salida, modelo } = await ejecutar(tools);
+    expect(capturas).toHaveLength(1);
+    expect(salida.success).toBe(true);
+    expect(salida.base64).toBe(Buffer.from('png-falso').toString('base64'));
+    expect(modelo.value[0]).toEqual({
+      type: 'media',
+      mediaType: 'image/png',
+      data: Buffer.from('png-falso').toString('base64'),
+    });
+  });
+
+  it('omitida: NO toca el navegador y el modelo recibe el motivo en texto', async () => {
+    const { capturas, pagina } = makePagina();
+    const tools = herramientaScreenshotConPolitica({
+      politica: { permitir: () => false },
+      pagina: async () => pagina,
+    });
+    const { salida, modelo } = await ejecutar(tools);
+    expect(capturas).toHaveLength(0);
+    expect(salida.omitido).toBe(true);
+    expect(salida.base64).toBeUndefined();
+    expect(modelo.value[0]?.type).toBe('text');
+  });
+
+  it('un fallo del navegador vuelve como fallo de la tool, no como excepcion', async () => {
+    const tools = herramientaScreenshotConPolitica({
+      politica: { permitir: () => true },
+      pagina: async () => {
+        throw new Error('la pestana se cerro');
+      },
+    });
+    const { salida, modelo } = await ejecutar(tools);
+    expect(salida.success).toBe(false);
+    expect(modelo.value[0]?.type).toBe('text');
   });
 });

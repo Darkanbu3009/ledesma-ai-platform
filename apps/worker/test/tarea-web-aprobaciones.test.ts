@@ -131,6 +131,8 @@ function makeDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
     vaultSecret: '0123456789abcdef0123456789abcdef',
     model: 'anthropic/claude-sonnet-4-6',
     maxPasos: 120,
+    historialPasos: 8,
+    modoScreenshots: 'cambios',
     runTimeoutMs: 600_000,
     resolveCredential: vi.fn(async () => ({
       id: 'cred-1',

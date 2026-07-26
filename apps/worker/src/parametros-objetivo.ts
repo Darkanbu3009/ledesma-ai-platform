@@ -262,6 +262,24 @@ export function extraerParametrosDeclarados(objetivo: string): ParametrosDeclara
 }
 
 /**
+ * NOMBRES de los parametros que el objetivo declara, en orden fijo. Existe para el diagnostico: es
+ * lo que se loguea al empezar la tarea (que datos concretos extrajo el sistema del texto del
+ * usuario) SIN los valores, que son justamente lo que puede ser sensible. Un veredicto de la
+ * verificacion se explica con esta lista; los valores no hacen falta para explicarlo.
+ */
+export function nombresDeParametrosDeclarados(parametros: ParametrosDeclarados): string[] {
+  const declarados: Array<[string, boolean]> = [
+    ['destinatarios', parametros.destinatarios.length > 0],
+    ['monto', parametros.monto !== null],
+    ['producto', parametros.producto !== null],
+    ['cantidad', parametros.cantidad !== null],
+    ['asunto', parametros.asunto !== null],
+    ['cuerpo', parametros.cuerpo !== null],
+  ];
+  return declarados.filter(([, presente]) => presente).map(([nombre]) => nombre);
+}
+
+/**
  * CUANTOS parametros DECLARA el objetivo (CAMBIO 1). Es el numero contra el que la verificacion mide
  * si comparo TODO lo que el usuario pidio: superarla con menos comparaciones que parametros
  * declarados fue exactamente lo que dejo pasar una accion con el formulario a medio llenar.
