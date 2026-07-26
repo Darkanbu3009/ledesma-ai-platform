@@ -39,14 +39,19 @@ function makeLogger(): Logger {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 }
 
-function makeJob(objetivo: string): Job {
+function makeJob(objetivo: string, textoUsuario?: string): Job {
   return {
     id: 'job-1',
     agentId: null,
     ownerId: 'user-1',
     credentialId: 'cred-1',
     status: 'running',
-    payload: { kind: 'tarea_web', connectionId: CONNECTION_ID, objetivo },
+    payload: {
+      kind: 'tarea_web',
+      connectionId: CONNECTION_ID,
+      objetivo,
+      ...(textoUsuario !== undefined ? { textoUsuario } : {}),
+    },
     scheduledFor: null,
     attempts: 1,
     lastError: null,
@@ -365,6 +370,118 @@ describe('verificacion prematura y guarda de segunda accion (CAMBIOS 1 y 2)', ()
   });
 });
 
+/**
+ * CAMBIO 1: la guardia vigila el verbo del OBJETIVO DEL USUARIO, no la palabra que el agente elija
+ * para describir cada paso. En produccion, un act descrito con "confirmar" consumio el unico cupo de
+ * accion irreversible de la corrida y el clic de Enviar posterior -- el envio de verdad -- se
+ * bloqueo como si fuera un segundo envio.
+ */
+describe('la guardia vigila el verbo del objetivo (CAMBIO 1)', () => {
+  const OBJETIVO = 'envia el resumen mensual a juan@ejemplo.com';
+  const CONFIRMAR = 'haz clic en Confirmar la direccion del destinatario';
+  const ENVIAR = 'haz clic en el boton Enviar';
+
+  it('un act descrito como "confirmar" NO consume cupo ni se bloquea: el envio real pasa', async () => {
+    const pagina = makePagina([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]);
+    const motor = makeMotor([CONFIRMAR, ENVIAR], 'enviado', pagina);
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina) });
+
+    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
+    // Las DOS llegaron al navegador: la de confirmar como paso intermedio, la de enviar verificada.
+    expect(motor.ejecutadas).toEqual([CONFIRMAR, ENVIAR]);
+    expect(motor.rechazadas).toEqual([]);
+    // El DOM se leyo solo por el envio (comparacion + confirmacion): el paso intermedio no compara.
+    expect(deps.navegador.leerCamposDeLaPagina).toHaveBeenCalledTimes(2);
+    expect(deps.guardarResultado).toHaveBeenCalledWith(
+      'job-1',
+      expect.objectContaining({ estado: 'ok' }),
+    );
+  });
+
+  it('un act con el verbo de OTRA accion irreversible tampoco consume cupo', async () => {
+    const pagina = makePagina([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]);
+    const motor = makeMotor(['haz clic en Eliminar el borrador anterior', ENVIAR], 'enviado', pagina);
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina) });
+
+    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
+    expect(motor.ejecutadas).toEqual(['haz clic en Eliminar el borrador anterior', ENVIAR]);
+  });
+
+  it('la barrera de la SEGUNDA accion sigue intacta: dos envios NO pasan', async () => {
+    const pagina = makePagina([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]);
+    const motor = makeMotor([ENVIAR, 'click the Send button again'], 'enviado', pagina);
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina) });
+
+    // El segundo envio, descrito ademas en el otro idioma, choca con la barrera y corta la corrida.
+    const detencion = await detencionDe(deps, makeJob(OBJETIVO));
+    expect(detencion?.motivo).toBe('otraAccion');
+    expect(motor.ejecutadas).toEqual([ENVIAR]);
+  });
+});
+
+/**
+ * CAMBIO 3: los parametros salen del TEXTO LITERAL del usuario. El objetivo lo redacta el modelo
+ * conversacional y en produccion lo parafraseo: se perdieron los rotulos y las comillas de las que
+ * depende la extraccion determinista, la verificacion comparo 1 dato de 3 y el correo salio a medio
+ * escribir.
+ */
+describe('el texto literal del usuario manda sobre el objetivo del modelo (CAMBIO 3)', () => {
+  const TEXTO_USUARIO =
+    'envia a juan@ejemplo.com un correo con asunto "Reporte de agosto" y cuerpo "Adjunto el reporte"';
+  /** Lo que el modelo escribio en la tool: mismo pedido, sin rotulos ni comillas. */
+  const OBJETIVO_PARAFRASEADO =
+    'enviar un correo a juan@ejemplo.com sobre el reporte de agosto adjuntando el reporte';
+  const DESTINATARIO = { contexto: 'input email para', valor: 'juan@ejemplo.com' };
+  const ASUNTO = { contexto: 'input asunto', valor: 'Reporte de agosto' };
+  const CUERPO = { contexto: 'div contenteditable cuerpo del mensaje', valor: 'Adjunto el reporte' };
+  const ENVIAR = 'haz clic en el boton Enviar';
+
+  it('el texto del usuario declara 3 parametros: con 1 en pantalla la accion NO pasa', async () => {
+    const pagina = makePagina([DESTINATARIO]);
+    const motor = makeMotor([ENVIAR, 'lee la bandeja'], 'segui trabajando', pagina);
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina) });
+
+    await expect(
+      procesarTareaWeb(deps, makeJob(OBJETIVO_PARAFRASEADO, TEXTO_USUARIO)),
+    ).rejects.toThrow(/nunca encontro en la pagina todos los datos.*asunto, cuerpo/s);
+    expect(motor.rechazadas).toEqual([ENVIAR]);
+  });
+
+  it('con los 3 datos del texto del usuario en pantalla, la accion se ejecuta', async () => {
+    const pagina = makePagina([DESTINATARIO, ASUNTO, CUERPO]);
+    const motor = makeMotor([ENVIAR], 'enviado', pagina);
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina) });
+
+    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO_PARAFRASEADO, TEXTO_USUARIO))).resolves.toBe(
+      'completada',
+    );
+    expect(motor.ejecutadas).toEqual([ENVIAR]);
+  });
+
+  it('un texto del usuario SIN datos ("hazlo ya") no deja la verificacion sin nada que comparar', async () => {
+    // Revision adversarial: el ultimo mensaje del usuario puede ser el que cierra un pedido que hizo
+    // antes. Ese texto no declara nada, y usarlo dejaria la comparacion en cero parametros. Ahi
+    // manda el objetivo del modelo, que al menos conserva los datos de la conversacion.
+    const pagina = makePagina([{ contexto: 'input email para', valor: 'otro@atacante.com' }]);
+    const motor = makeMotor([ENVIAR], 'enviado', pagina);
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina) });
+
+    const detencion = await detencionDe(deps, makeJob(OBJETIVO_PARAFRASEADO, 'hazlo ya'));
+    expect(detencion).toMatchObject({ motivo: 'noCoincide', pedido: 'juan@ejemplo.com' });
+    expect(motor.ejecutadas).toEqual([]);
+  });
+
+  it('sin texto del usuario (jobs viejos) se sigue usando el objetivo del modelo', async () => {
+    // El objetivo parafraseado solo declara el destinatario: con el en pantalla, la accion pasa.
+    const pagina = makePagina([DESTINATARIO]);
+    const motor = makeMotor([ENVIAR], 'enviado', pagina);
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina) });
+
+    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO_PARAFRASEADO))).resolves.toBe('completada');
+    expect(motor.ejecutadas).toEqual([ENVIAR]);
+  });
+});
+
 describe('objetivo sin el dato que la accion exige', () => {
   it('accion de envio sin destinatario declarado: NO ejecuta (test 4)', async () => {
     const navegador = makeNavegador([{ contexto: 'input email para', valor: 'quien@sea.com' }]);
@@ -449,6 +566,9 @@ describe('politica de ejecucion del usuario', () => {
 
   it('con el tope por defecto (0), una accion con monto NO se ejecuta', async () => {
     const deps = makeDeps({
+      // El act tiene que ser el del verbo del objetivo ("paga"): la guardia vigila LA ACCION QUE
+      // PIDIO EL USUARIO, no cualquier palabra de la lista (CAMBIO 1).
+      motor: makeMotor(['haz clic en pagar ahora']),
       navegador: makeNavegador([{ contexto: 'input total a pagar', valor: '9900' }]),
       politicas: { obtenerPorOwner: vi.fn(async () => null) },
     });

@@ -151,4 +151,24 @@ describe('extraerParametrosDeclarados', () => {
     expect(p.cantidad).toBe(3);
     expect(p.monto).toMatchObject({ valor: 2400 });
   });
+
+  /**
+   * CAMBIO 3: el extractor SI reconoce lo que el usuario escribe; lo que fallaba era el TEXTO que le
+   * llegaba. El modelo conversacional parafraseaba el pedido al llamar a su tool y se llevaba por
+   * delante los rotulos y las comillas de las que depende esta extraccion.
+   */
+  it('el texto LITERAL del usuario declara 3 parametros; la parafrasis del modelo, 1', () => {
+    const literal = extraerParametrosDeclarados(
+      'envia a juan@ejemplo.com un correo con asunto "Reporte de agosto" y cuerpo "Adjunto el reporte"',
+    );
+    expect(literal.destinatarios).toEqual(['juan@ejemplo.com']);
+    expect(literal.asunto).toBe('Reporte de agosto');
+    expect(literal.cuerpo).toBe('Adjunto el reporte');
+    expect(contarParametrosDeclarados(literal)).toBe(3);
+
+    const parafraseado = extraerParametrosDeclarados(
+      'enviar un correo a juan@ejemplo.com sobre el reporte de agosto adjuntando el reporte',
+    );
+    expect(contarParametrosDeclarados(parafraseado)).toBe(1);
+  });
 });

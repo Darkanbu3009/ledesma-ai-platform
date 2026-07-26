@@ -36,6 +36,7 @@ import {
 import type { ConsumoDeCorrida, ModoScreenshots } from './costo-modelo.js';
 import {
   accionSurtioEfecto,
+  construirPasoDeBloqueo,
   construirPasoDeVerificacion,
   mensajeDeDetencion,
   mensajeDeIncompleto,
@@ -768,9 +769,13 @@ async function resolverVerificacion(
   deps: TareaWebDeps,
   job: Job,
   sitio: SitioConectado,
-  objetivo: string,
   sesionExternaId: string,
-  opciones: { politica: PoliticaVigente | null; verboBloqueado: string | null },
+  opciones: {
+    politica: PoliticaVigente | null;
+    verboBloqueado: string | null;
+    /** Texto del que salen los parametros: el LITERAL del usuario si llego (CAMBIO 3). */
+    textoParametros: string;
+  },
 ): Promise<{ veredicto: Veredicto; pagina: EstadoDeLaPagina | null }> {
   if (opciones.politica === null) {
     return { veredicto: detencionDirecta('politicaNoDisponible'), pagina: null };
@@ -781,7 +786,7 @@ async function resolverVerificacion(
       politica: opciones.politica,
       dominio: sitio.dominio,
       verbo: opciones.verboBloqueado,
-      parametros: extraerParametrosDeclarados(objetivo),
+      parametros: extraerParametrosDeclarados(opciones.textoParametros),
       pagina,
     }),
     pagina,
@@ -837,8 +842,10 @@ function esperarMs(ms: number): Promise<void> {
  *  1. el objetivo del usuario no contiene ningun verbo bloqueado -> no hay nada que verificar;
  *  2. la tarea se termino desde la consola -> se bloquea (ejecutar lo que el usuario acaba de
  *     cancelar es lo peor que puede hacer este camino);
- *  3. la descripcion de la accion no corresponde a una accion bloqueada ni a un cierre de formulario
- *     -> pasa (es un paso intermedio: abrir, escribir, navegar);
+ *  3. la descripcion de la accion no corresponde A LA ACCION QUE PIDIO EL USUARIO (su verbo, o el de
+ *     su familia en el otro idioma) ni a un cierre de formulario -> pasa (es un paso intermedio:
+ *     abrir, escribir, navegar). Que la descripcion nombre el verbo de OTRA accion bloqueada no la
+ *     convierte en la accion del objetivo: no consume cupo y no se bloquea (CAMBIO 1);
  *  4. ya se EJECUTO una accion irreversible en esta corrida -> se bloquea con 'otraAccion': no se
  *     encadenan verificaciones dentro de una misma corrida (seria un bucle sin cota sobre la cuenta
  *     real) y es lo que impide que el agente envie dos veces;
@@ -861,16 +868,21 @@ function crearGuardiaDeAccion(
   deps: TareaWebDeps,
   job: Job,
   sitio: SitioConectado,
-  objetivo: string,
   sesionExternaId: string,
   opciones: {
     politica: PoliticaVigente | null;
+    /**
+     * Verbo irreversible del OBJETIVO DEL USUARIO, resuelto UNA vez al arrancar la corrida. null =
+     * el objetivo no pide ninguna accion bloqueada y la guardia deja pasar todo.
+     */
     verboBloqueado: string | null;
+    /** Texto del que salen los parametros: el LITERAL del usuario si llego (CAMBIO 3). */
+    textoParametros: string;
     control?: ControlDeTareaWeb | undefined;
   },
 ): GuardiaDeTareaWeb {
   const verificaciones: VerificacionEnLaTraza[] = [];
-  const parametros = extraerParametrosDeclarados(objetivo);
+  const parametros = extraerParametrosDeclarados(opciones.textoParametros);
   const declarados = contarParametrosDeclarados(parametros);
   const esperar = deps.esperar ?? esperarMs;
   let acciones = 0;
@@ -909,18 +921,39 @@ function crearGuardiaDeAccion(
         acciones += 1;
         return veredicto;
       };
+      // CAMBIO 4: toda decision de la guardia que NO deja pasar la accion queda como PASO de la
+      // trayectoria, con exito false y su motivo, en el punto exacto de la corrida en que ocurrio.
+      // La descripcion del act pasa por la MISMA censura que el resto de la traza.
+      const registrarRechazo = (motivo: string): void => {
+        verificaciones.push({
+          accionesPrevias,
+          paso: construirPasoDeBloqueo(
+            `guardia: la accion NO se ejecuto (${motivo}): ${censurarTexto(accion)}`,
+          ),
+        });
+      };
+      const bloquearRegistrando = (
+        veredicto: Extract<Veredicto, { tipo: 'detener' }>,
+      ): VeredictoDeGuardia => {
+        registrarRechazo(veredicto.detencion.motivo);
+        return bloquear(veredicto);
+      };
       if (opciones.verboBloqueado === null) return permitir({ tipo: 'permitir' });
       if (opciones.control?.signal?.aborted === true) {
-        // NO se registra como bloqueo de la guardia: no es una detencion de la verificacion, es una
-        // cancelacion del dueno. Su cierre ya lo escribio quien cancelo y esta corrida no escribe
-        // nada encima (ver el cierre ordenado en procesarTareaWeb).
+        // NO cuenta como bloqueo de la guardia (`bloqueo()` sigue en null): no es una detencion de
+        // la verificacion, es una cancelacion del dueno, y su cierre ya lo escribio quien cancelo.
+        // SI queda en la traza: que el act se haya rechazado es parte de lo que paso en la corrida.
+        registrarRechazo('cancelada desde la consola');
         return {
           tipo: 'bloquear',
           mensaje:
             'la tarea se termino desde la consola antes de ejecutar la accion pendiente; no se ejecuto nada',
         };
       }
-      const etiqueta = detectarAccionQueExigeVerificacion(accion);
+      // La accion irreversible es la del OBJETIVO DEL USUARIO, no la que el agente describa
+      // (CAMBIO 1): un act que nombra el verbo de otra familia es un paso intermedio y pasa igual
+      // que abrir el redactor o escribir un campo. No consume cupo ni se bloquea.
+      const etiqueta = detectarAccionQueExigeVerificacion(accion, opciones.verboBloqueado);
       if (etiqueta === null) return permitir({ tipo: 'permitir' });
       // Una accion irreversible que YA salio al navegador cierra la corrida para cualquier otra: es
       // la barrera que impide enviar dos veces.
@@ -932,17 +965,14 @@ function crearGuardiaDeAccion(
           irreversiblesEjecutadas,
           irreversiblesConfirmadas,
         });
-        return bloquear(detencionDirecta('otraAccion'));
+        return bloquearRegistrando(detencionDirecta('otraAccion'));
       }
       try {
-        const { veredicto, pagina } = await resolverVerificacion(
-          deps,
-          job,
-          sitio,
-          objetivo,
-          sesionExternaId,
-          { politica: opciones.politica, verboBloqueado: opciones.verboBloqueado },
-        );
+        const { veredicto, pagina } = await resolverVerificacion(deps, job, sitio, sesionExternaId, {
+          politica: opciones.politica,
+          verboBloqueado: opciones.verboBloqueado,
+          textoParametros: opciones.textoParametros,
+        });
         // El resultado queda como UN PASO de la trayectoria (valores comparados + veredicto), ya
         // censurado, en el punto exacto del flujo en que se comparo.
         verificaciones.push({ accionesPrevias, paso: construirPasoDeVerificacion(veredicto) });
@@ -1000,7 +1030,7 @@ function crearGuardiaDeAccion(
           connectionId: sitio.id,
           err: describir(error),
         });
-        return bloquear(detencionDirecta('politicaNoDisponible'));
+        return bloquearRegistrando(detencionDirecta('politicaNoDisponible'));
       }
     },
     confirmar: async (): Promise<ResultadoDeConfirmacion> => {
@@ -1166,6 +1196,8 @@ async function ejecutarPorReceta(
   opciones: {
     politica: PoliticaVigente | null;
     verboBloqueado: string | null;
+    /** Texto del que salen los parametros: el LITERAL del usuario si llego (CAMBIO 3). */
+    textoParametros: string;
     contexto: string;
     apiKey: string;
     control?: ControlDeTareaWeb | undefined;
@@ -1181,7 +1213,7 @@ async function ejecutarPorReceta(
   const iniciadaEn = new Date();
   const resultado = await ejecutarReceta(
     receta.pasos,
-    valoresDeParametros(extraerParametrosDeclarados(objetivo)),
+    valoresDeParametros(extraerParametrosDeclarados(opciones.textoParametros)),
     {
       navegador: determinista,
       escalador,
@@ -1189,14 +1221,11 @@ async function ejecutarPorReceta(
       // verificacion INCOMPLETA aqui SI detiene: la receta repite un flujo cerrado, no tiene con que
       // "seguir llenando campos"; si al llegar a este punto faltan datos, lo aprendido ya no sirve.
       verificar: async (): Promise<VeredictoDeVerificacion> => {
-        const { veredicto } = await resolverVerificacion(
-          deps,
-          job,
-          sitio,
-          objetivo,
-          sesionExternaId,
-          { politica: opciones.politica, verboBloqueado: opciones.verboBloqueado },
-        );
+        const { veredicto } = await resolverVerificacion(deps, job, sitio, sesionExternaId, {
+          politica: opciones.politica,
+          verboBloqueado: opciones.verboBloqueado,
+          textoParametros: opciones.textoParametros,
+        });
         if (veredicto.tipo === 'ejecutar') return { tipo: 'ejecutar' };
         return {
           tipo: 'detener',
@@ -1385,7 +1414,26 @@ export async function procesarTareaWeb(
   if (!parsed.success) {
     throw new PermanentExecutionError(`payload de tarea web invalido: ${parsed.error}`);
   }
-  const { connectionId, objetivo } = parsed.data;
+  const { connectionId, objetivo, textoUsuario } = parsed.data;
+
+  // 0.5. EL TEXTO LITERAL DEL USUARIO (CAMBIO 3). `objetivo` lo REDACTA el modelo conversacional al
+  //      llamar a su tool, y en produccion parafraseo lo que el usuario habia escrito: los rotulos y
+  //      las comillas del mensaje original desaparecieron y el extractor determinista, que depende
+  //      justo de eso, saco 1 parametro de los 3 declarados. `textoUsuario` es el mensaje del usuario
+  //      TAL CUAL, adjuntado por codigo en el backend (nunca pedido al modelo). Es la fuente de los
+  //      parametros; el objetivo del modelo queda de respaldo para los jobs que no lo traigan (los
+  //      encolados antes de este cambio) y sigue siendo lo unico que viaja al motor como instruccion.
+  //
+  //      EXCEPCION, y es de seguridad: si el texto del usuario no declara NINGUN parametro, manda el
+  //      objetivo del modelo. Pasa cuando el ultimo mensaje del usuario cierra un pedido que el
+  //      hizo antes ("hazlo ya", "si, dale"): ese texto no tiene datos que comparar y usarlo dejaria
+  //      la verificacion con CERO comparaciones, es decir sin comparar nada, justo en los verbos que
+  //      no exigen un dato fijo (comprar, borrar, publicar). Comparar contra la parafrasis del
+  //      modelo es peor que comparar contra el texto del usuario, pero es mucho mejor que no
+  //      comparar. Cuando el usuario SI declaro datos -- el caso de produccion -- manda su texto.
+  const parametrosDelUsuario =
+    textoUsuario === undefined ? 0 : contarParametrosDeclarados(extraerParametrosDeclarados(textoUsuario));
+  const textoParametros = textoUsuario !== undefined && parametrosDelUsuario > 0 ? textoUsuario : objetivo;
 
   // 0. EL OBJETIVO, TAL COMO LLEGO. Hasta ahora no se logueaba en ningun punto, asi que una tarea
   //    que terminaba mal no se podia ni empezar a diagnosticar: no habia forma de saber que se
@@ -1397,7 +1445,11 @@ export async function procesarTareaWeb(
     jobId: job.id,
     connectionId,
     objetivo: censurarObjetivo(objetivo),
-    parametros: nombresDeParametrosDeclarados(extraerParametrosDeclarados(objetivo)),
+    // De donde salieron los parametros: sin esto, un extractor que devuelve menos de lo que el
+    // usuario declaro es indistinguible de un usuario que declaro menos.
+    conTextoDelUsuario: textoUsuario !== undefined,
+    parametrosDelTextoDelUsuario: parametrosDelUsuario,
+    parametros: nombresDeParametrosDeclarados(extraerParametrosDeclarados(textoParametros)),
   });
 
   // 1. La conexion debe existir, ser del owner del job y estar 'activo'. Cualquier otra cosa falla
@@ -1444,7 +1496,10 @@ export async function procesarTareaWeb(
   //      accion bloqueada, la corrida lleva GUARDIA y ninguna accion que corresponda a ese verbo
   //      llega al navegador sin que el worker compare antes. Solo aplica a la corrida INICIAL: en una
   //      reanudacion el humano ya decidio sobre este objetivo.
-  const verboBloqueado = detectarVerboBloqueado(objetivo);
+  //      El texto LITERAL del usuario manda (CAMBIO 3) y el objetivo del modelo queda como red: la
+  //      union de los dos es lo unico seguro, porque perder el verbo por una parafrasis dejaria la
+  //      corrida ENTERA sin guardia, que es el falso negativo inaceptable.
+  const verboBloqueado = detectarVerboBloqueado(textoParametros) ?? detectarVerboBloqueado(objetivo);
   if (verboBloqueado !== null) {
     deps.logger.info('tarea web: el objetivo contiene una accion bloqueada; se verificara antes de ejecutar', {
       jobId: job.id,
@@ -1531,6 +1586,7 @@ export async function procesarTareaWeb(
         {
           politica,
           verboBloqueado,
+          textoParametros,
           contexto,
           apiKey: credential.apiKey,
           control,
@@ -1546,9 +1602,10 @@ export async function procesarTareaWeb(
     //    y el cap DURO de pasos, con la GUARDIA interpuesta: la accion irreversible se verifica
     //    dentro de esta misma corrida, justo antes de llegar al navegador. La ejecucion queda
     //    REGISTRADA como trayectoria (V030) sea cual sea el desenlace.
-    const guardia = crearGuardiaDeAccion(deps, job, sitio, objetivo, sesion.sesionExternaId, {
+    const guardia = crearGuardiaDeAccion(deps, job, sitio, sesion.sesionExternaId, {
       politica,
       verboBloqueado,
+      textoParametros,
       control,
     });
     let resultado: ResultadoMotor;

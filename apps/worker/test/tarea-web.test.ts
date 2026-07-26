@@ -773,6 +773,64 @@ describe('registro de trayectorias (Fase F, V030)', () => {
     expect(deps.navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
   });
 
+  /**
+   * CAMBIO 4: las decisiones de la guardia que NO nacen de comparar tambien quedan en la traza. La
+   * del cupo ya consumido ('otraAccion') cortaba la corrida ANTES de escribir nada: la decision que
+   * mataba la accion era, por diseno, invisible en la trayectoria.
+   */
+  it('bloqueo por CUPO ya consumido: queda como paso con exito false y su motivo', async () => {
+    const trayectorias = makeTrayectorias();
+    const pagina = makePagina([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]);
+    // El agente envia y despues intenta enviar OTRA vez: el segundo intento choca con la barrera.
+    const motor = makeMotorQuePropone(
+      ['haz clic en Enviar', 'haz clic en Enviar de nuevo'],
+      'listo',
+      pagina,
+    );
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina), trayectorias });
+    const job = makeJob({
+      payload: {
+        kind: 'tarea_web',
+        connectionId: CONNECTION_ID,
+        objetivo: 'envia el resumen a juan@ejemplo.com',
+      },
+    });
+
+    await expect(procesarTareaWeb(deps, job)).rejects.toThrow(/DETENIDA_VERIFICACION/);
+
+    const guardada = guardadaEn(trayectorias);
+    expect(guardada.pasos.map((p) => p.accion.tipo)).toEqual(['verificacion', 'act', 'verificacion']);
+    expect(guardada.pasos.map((p) => p.exito)).toEqual([true, true, false]);
+    // El paso dice POR QUE no paso y QUE accion se rechazo (la descripcion ya censurada).
+    expect(guardada.pasos[2]?.accion.instruccion).toContain('otraAccion');
+    expect(guardada.pasos[2]?.accion.instruccion).toContain('haz clic en Enviar de nuevo');
+    expect(motor.ejecutadas).toEqual(['haz clic en Enviar']);
+  });
+
+  it('bloqueo por FALLO de la comprobacion: tambien queda como paso con exito false', async () => {
+    const trayectorias = makeTrayectorias();
+    const motor = makeMotorQuePropone(['haz clic en Enviar']);
+    const politicas = {
+      obtenerPorOwner: vi.fn(async () => {
+        throw new Error('db caida');
+      }),
+    };
+    const deps = makeDeps({ motor, trayectorias, politicas });
+    const job = makeJob({
+      payload: {
+        kind: 'tarea_web',
+        connectionId: CONNECTION_ID,
+        objetivo: 'envia el resumen a juan@ejemplo.com',
+      },
+    });
+
+    await expect(procesarTareaWeb(deps, job)).rejects.toThrow(/DETENIDA_VERIFICACION/);
+    const guardada = guardadaEn(trayectorias);
+    expect(guardada.pasos).toHaveLength(1);
+    expect(guardada.pasos[0]).toMatchObject({ accion: { tipo: 'verificacion' }, exito: false });
+    expect(guardada.pasos[0]?.accion.instruccion).toContain('politicaNoDisponible');
+  });
+
   it('sesion caducada a mitad de tarea: la trayectoria fallida queda igual registrada', async () => {
     const trayectorias = makeTrayectorias();
     const deps = makeDeps({
@@ -1005,33 +1063,57 @@ describe('detectarVerboBloqueado (D2a / D4)', () => {
   });
 });
 
-describe('detectarAccionQueExigeVerificacion (sobre la DESCRIPCION de la accion del agente)', () => {
-  it('usa la MISMA lista centralizada de verbos, en los dos idiomas', () => {
-    expect(detectarAccionQueExigeVerificacion('haz clic en el boton Enviar')).toBe('enviar');
-    expect(detectarAccionQueExigeVerificacion('click the Send button')).toBe('send');
-    expect(detectarAccionQueExigeVerificacion('click the Pay now button')).toBe('pay');
-    expect(detectarAccionQueExigeVerificacion('haz clic en Eliminar el borrador')).toBe('eliminar');
+describe('detectarAccionQueExigeVerificacion (la accion del agente contra el VERBO DEL OBJETIVO)', () => {
+  it('reconoce la accion del objetivo aunque el agente la describa en el OTRO idioma', () => {
+    // Es lo que sostiene el CAMBIO 1: la familia del verbo, no su forma canonica exacta. Sin esto,
+    // un objetivo en espanol no reconoceria el act que el agente escribe en ingles y la accion
+    // irreversible llegaria al navegador SIN verificar.
+    expect(detectarAccionQueExigeVerificacion('haz clic en el boton Enviar', 'enviar')).toBe('enviar');
+    expect(detectarAccionQueExigeVerificacion('click the Send button', 'enviar')).toBe('send');
+    expect(detectarAccionQueExigeVerificacion('haz clic en Enviar', 'send')).toBe('enviar');
+    expect(detectarAccionQueExigeVerificacion('click the Pay now button', 'pagar')).toBe('pay');
+    // Sinonimos de la misma accion dentro del idioma.
+    expect(detectarAccionQueExigeVerificacion('haz clic en Eliminar el borrador', 'borrar')).toBe(
+      'eliminar',
+    );
+    expect(detectarAccionQueExigeVerificacion('click Delete', 'eliminar')).toBe('delete');
+  });
+
+  it('cada verbo de la lista se reconoce cuando ES el verbo del objetivo', () => {
     // La lista es la unica fuente: agregar un verbo alli lo agrega tambien a esta deteccion.
     for (const { verbo } of VERBOS_ACCION_BLOQUEADA) {
       if (verbo.includes(' ')) continue;
-      expect(detectarAccionQueExigeVerificacion(`haz clic en ${verbo}`)).not.toBeNull();
+      expect(detectarAccionQueExigeVerificacion(`haz clic en ${verbo}`, verbo)).not.toBeNull();
     }
   });
 
-  it('cubre los cierres de formulario que no nombran ningun verbo de la lista', () => {
-    expect(detectarAccionQueExigeVerificacion('click the Submit button')).toBe('submit');
-    expect(detectarAccionQueExigeVerificacion('haz clic en Confirmar')).toBe('confirmar');
-    expect(detectarAccionQueExigeVerificacion('click Finalize')).toBe('finalizar');
+  it('un act con el verbo de OTRA accion NO es la accion del objetivo: pasa como paso intermedio', () => {
+    // CAMBIO 1: el objetivo pide enviar; que el agente describa un paso con otro verbo bloqueado no
+    // lo convierte en la accion irreversible de esta tarea.
+    expect(detectarAccionQueExigeVerificacion('haz clic en Eliminar el borrador', 'enviar')).toBeNull();
+    expect(detectarAccionQueExigeVerificacion('click the Pay now button', 'enviar')).toBeNull();
+    expect(detectarAccionQueExigeVerificacion('haz clic en el boton Enviar', 'pagar')).toBeNull();
+  });
+
+  it('"confirmar" ya NO es un cierre de accion: es un verbo de interfaz', () => {
+    // El cierre que dejo un envio real sin ejecutarse en produccion. Los cierres que quedan si
+    // consumen el formulario.
+    expect(detectarAccionQueExigeVerificacion('haz clic en Confirmar', 'enviar')).toBeNull();
+    expect(detectarAccionQueExigeVerificacion('confirm the dialog', 'enviar')).toBeNull();
+    expect(detectarAccionQueExigeVerificacion('click the Submit button', 'enviar')).toBe('submit');
+    expect(detectarAccionQueExigeVerificacion('click Finalize', 'enviar')).toBe('finalizar');
   });
 
   it('los pasos INTERMEDIOS pasan sin comparar nada (si no, la tarea moriria al empezar)', () => {
-    expect(detectarAccionQueExigeVerificacion('haz clic en el boton Redactar')).toBeNull();
-    expect(detectarAccionQueExigeVerificacion('escribe juan@ejemplo.com en el campo Para')).toBeNull();
-    expect(detectarAccionQueExigeVerificacion('click the Compose button')).toBeNull();
+    expect(detectarAccionQueExigeVerificacion('haz clic en el boton Redactar', 'enviar')).toBeNull();
+    expect(
+      detectarAccionQueExigeVerificacion('escribe juan@ejemplo.com en el campo Para', 'enviar'),
+    ).toBeNull();
+    expect(detectarAccionQueExigeVerificacion('click the Compose button', 'enviar')).toBeNull();
     // Los avisos de cookies quedan deliberadamente fuera: bloquearlos detendria toda tarea en su
     // primera accion, contra una pagina todavia vacia.
-    expect(detectarAccionQueExigeVerificacion('haz clic en Aceptar las cookies')).toBeNull();
-    expect(detectarAccionQueExigeVerificacion('click Continue')).toBeNull();
+    expect(detectarAccionQueExigeVerificacion('haz clic en Aceptar las cookies', 'enviar')).toBeNull();
+    expect(detectarAccionQueExigeVerificacion('click Continue', 'enviar')).toBeNull();
   });
 });
 

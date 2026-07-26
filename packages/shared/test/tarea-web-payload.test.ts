@@ -48,6 +48,25 @@ describe('parseTareaWebJobPayload', () => {
     expect(parsed.success).toBe(false);
   });
 
+  /** CAMBIO 3: el texto literal del usuario ACOMPANA al objetivo del modelo, no lo sustituye. */
+  it('conserva textoUsuario cuando llega, y el objetivo del modelo sigue intacto', () => {
+    const parsed = parseTareaWebJobPayload({ ...VALIDO, textoUsuario: 'dime que dice mi panel' });
+    expect(parsed).toEqual({
+      success: true,
+      data: { ...VALIDO, textoUsuario: 'dime que dice mi panel' },
+    });
+  });
+
+  it('un textoUsuario ausente o invalido NO invalida el job: se ignora y el worker cae al objetivo', () => {
+    // Fallar el payload entero por un campo auxiliar dejaria sin ejecutar tareas que antes corrian.
+    for (const textoUsuario of [undefined, '', '   ', 42, null, 'x'.repeat(TAREA_WEB_OBJETIVO_MAX_CHARS + 1)]) {
+      expect(parseTareaWebJobPayload({ ...VALIDO, textoUsuario })).toEqual({
+        success: true,
+        data: VALIDO,
+      });
+    }
+  });
+
   it('el kind exportado coincide con el literal del payload', () => {
     expect(TAREA_WEB_JOB_KIND).toBe('tarea_web');
   });
