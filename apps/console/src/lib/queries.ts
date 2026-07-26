@@ -19,6 +19,7 @@ import type { Trayectoria } from './trayectorias';
 import { JOB_SEGUIMIENTO_REFETCH_MS, SITIOS_REFETCH_MS, haySitiosEnTransicion } from './sitios';
 import type { Grabacion } from './grabaciones';
 import { GRABACION_REFETCH_MS, grabacionEnCurso } from './grabaciones';
+import type { TareaEnsenada } from './tareas-ensenadas';
 import type { ConsentsState, DataRequest } from './privacy';
 import type { AprobacionWeb } from './aprobaciones';
 import { APROBACIONES_REFETCH_MS, obtenerScreenshotUrl } from './aprobaciones';
@@ -193,6 +194,21 @@ export function useJobSeguimiento(jobId: string | null) {
  * al usuario que marque sus datos sobre una lista todavia vacia. La pagina lo pasa en true mientras el
  * job de la grabacion sigue en vuelo.
  */
+/**
+ * TAREAS QUE EL SISTEMA YA SABE HACER (GET /v1/tareas-ensenadas): lo que el usuario le enseno y lo
+ * que aprendio solo. Sin auto-refresh: cambia cuando el usuario ensena o borra algo, y las dos cosas
+ * invalidan esta query.
+ *
+ * NO es useRecipes: aquella es la otra funcionalidad (tabla `recipes`), con su propia pantalla.
+ */
+export function useTareasEnsenadas() {
+  return useQuery({
+    queryKey: ['tareas-ensenadas'],
+    queryFn: () =>
+      apiFetch<{ tareas: TareaEnsenada[] }>('/v1/tareas-ensenadas').then((r) => r.tareas),
+  });
+}
+
 export function useGrabacion(id: string | null, pollingExtra = false) {
   return useQuery({
     queryKey: ['grabaciones', id] as const,

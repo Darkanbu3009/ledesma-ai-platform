@@ -20,6 +20,7 @@ import { parseEnv, type WorkerEnv } from './env.js';
 import { NavegadorBrowserbase } from './browserbase.js';
 import type { SitiosJobDeps } from './sitios.js';
 import { MotorStagehand } from './stagehand.js';
+import { crearElectorDeTareaEnsenada } from './modelo-eleccion.js';
 import type { TareaWebDeps } from './tarea-web.js';
 import type { GrabacionDeps } from './grabacion.js';
 import { createLogger } from './logger.js';
@@ -163,6 +164,10 @@ function main(): void {
       recetas: recetasRepo,
       determinista: navegador,
       escalador: motorStagehand,
+      // ELECCION ENTRE LAS TAREAS YA ENSENADAS (CAMBIO 3): la UNICA consulta al modelo fuera del
+      // motor, y solo cuando la firma exacta del objetivo no encontro nada. Corre con la key del
+      // OWNER (la misma de la corrida) y con el mismo modelo de navegacion.
+      elector: crearElectorDeTareaEnsenada({ model: config.TAREA_WEB_MODEL, logger }),
       // Observador de pasos APAGADO por defecto (TAREA_WEB_OBSERVADOR_PASOS): encendido abre una
       // conexion CDP por paso durante la corrida.
       observadorPasos: config.TAREA_WEB_OBSERVADOR_PASOS,

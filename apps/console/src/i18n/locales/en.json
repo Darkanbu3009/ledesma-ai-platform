@@ -9,7 +9,8 @@
     "actividad": "Activity",
     "credenciales": "Credentials",
     "privacidad": "Privacy",
-    "admin": "Admin"
+    "admin": "Admin",
+    "ensenadas": "Knows how to"
   },
   "language": {
     "sectionTitle": "Language",
@@ -1976,6 +1977,34 @@
     "cerrarAria": "Close",
     "iframeTitulo": "Secure browser to do the task on {{dominio}}",
     "pie": "It opens in a secure browser with your session already signed in. We never ask for your password.",
+    "tipos": {
+      "destinatario": "Who it goes to",
+      "asunto": "The subject",
+      "cuerpo": "The message",
+      "monto": "The amount",
+      "producto": "The product",
+      "cantidad": "The quantity"
+    }
+  },
+  "ensenadas": {
+    "titulo": "Tasks it already knows how to do",
+    "subtitulo": "What you taught it by doing it once yourself. When you ask for it, it does it on its own.",
+    "vacio": "You have not taught it any task yet.",
+    "vacioAyuda": "Go to Sites, open the site you want and teach it a task by doing it once yourself.",
+    "usos": "It has done it {{n}} times",
+    "sinUsos": "It has not done it yet",
+    "ensenadaEn": "You taught it on {{fecha}}",
+    "aprendidaEn": "It learned it on its own on {{fecha}}",
+    "borrar": "Make it forget",
+    "borrando": "Deleting",
+    "confirmarTitulo": "Make it forget this task?",
+    "confirmarTexto": "It will no longer know how to do it. If you need it again, you will have to teach it once more.",
+    "confirmarCancelar": "Never mind",
+    "datosQueNecesita": "Details you have to give it",
+    "sinDatos": "It does not need you to give it any detail",
+    "sinDescripcion": "A task it learned on its own on this site",
+    "error": "We could not load your tasks. Try again.",
+    "errorBorrar": "We could not delete it. Try again.",
     "tipos": {
       "destinatario": "Who it goes to",
       "asunto": "The subject",

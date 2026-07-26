@@ -7,6 +7,7 @@ import {
   type EstrategiaLocalizacion,
 } from '@ledesma-platform/shared';
 import { censurarValor, VALOR_CENSURADO } from './censura.js';
+import { normalizarTexto } from './parametros-objetivo.js';
 
 /**
  * LOCALIZACION DE ELEMENTOS sin modelo (Fase F, paso 2, CAMBIO 1 y 4). Dos mitades:
@@ -328,6 +329,54 @@ export function sanearEstrategias(crudo: string): EstrategiaLocalizacion[] {
     saneadas.push(estrategia);
   }
   return ordenarEstrategias(saneadas).slice(0, MAX_ESTRATEGIAS_POR_PASO);
+}
+
+/**
+ * LARGO MINIMO de un valor para poder decidir que una estrategia DEPENDE de el. Con menos, el valor
+ * aparece dentro de casi cualquier texto por casualidad ("3" esta dentro del xpath `div[3]`) y
+ * descartar estrategias por esa coincidencia destruiria localizaciones buenas. Un valor tan corto
+ * tampoco es un dato personal que haya que proteger.
+ */
+const MIN_VALOR_PARA_DEPENDENCIA = 4;
+
+/**
+ * ¿Esta forma de localizar el elemento DEPENDE de un valor que se tecleo? Es la regla que sostiene
+ * dos cosas a la vez, y por eso vive aqui, junto a la definicion de las estrategias, y no en uno de
+ * los dos caminos que la usan:
+ *
+ *  1. REUTILIZABILIDAD. Un paso cuya unica pista es el texto del dato que se acaba de escribir no
+ *     sirve con otro dato. Medido en produccion: el clic sobre la sugerencia del autocompletado quedo
+ *     localizado por el texto "martin@ejemplo.com martin@ejemplo.com"; con otro destinatario esa
+ *     sugerencia no existe y el paso falla. Un campo tampoco se localiza por lo que contiene: antes
+ *     de escribir esta vacio.
+ *  2. PRIVACIDAD. Una estrategia es un lugar donde un valor queda PERSISTIDO. Un paso parametrizado
+ *     guarda el marcador y jamas el valor; si su localizacion llevara el valor dentro, el dato
+ *     quedaria guardado igual, solo que en otro campo.
+ *
+ * EL XPATH NUNCA DEPENDE DEL VALOR: describe la POSICION en la pagina (la primera fila de la lista de
+ * sugerencias sigue siendo la primera con cualquier otro dato), y es ademas la estrategia que hace
+ * que un paso de confirmacion siga siendo repetible cuando todo lo demas se cae.
+ */
+export function estrategiaDependeDelValor(
+  estrategia: EstrategiaLocalizacion,
+  valor: string,
+): boolean {
+  if (estrategia.tipo === 'xpath') return false;
+  const dato = normalizarTexto(valor);
+  const pista = normalizarTexto(textoDeEstrategia(estrategia));
+  if (dato === '' || pista === '') return false;
+  if (Math.min(dato.length, pista.length) < MIN_VALOR_PARA_DEPENDENCIA) return false;
+  return pista.includes(dato) || dato.includes(pista);
+}
+
+/** Las estrategias que NO dependen de ninguno de esos valores. */
+export function estrategiasIndependientesDelValor(
+  estrategias: EstrategiaLocalizacion[],
+  valores: readonly string[],
+): EstrategiaLocalizacion[] {
+  return estrategias.filter((estrategia) =>
+    valores.every((valor) => !estrategiaDependeDelValor(estrategia, valor)),
+  );
 }
 
 /**

@@ -13,6 +13,7 @@ import { CredentialsPage } from './pages/CredentialsPage';
 import { ScheduledTasksPage } from './pages/ScheduledTasksPage';
 import { TriggersPage } from './pages/TriggersPage';
 import { RecipesPage } from './pages/RecipesPage';
+import { TareasEnsenadasPage } from './pages/TareasEnsenadasPage';
 import { ActivityPage } from './pages/ActivityPage';
 import { SitiosConectadosPage } from './pages/SitiosConectadosPage';
 import { PlaygroundPage } from './pages/PlaygroundPage';
@@ -100,6 +101,11 @@ export function App() {
               <Route path="/tareas" element={<ScheduledTasksPage />} />
               <Route path="/triggers" element={<TriggersPage />} />
               <Route path="/recetas" element={<RecipesPage />} />
+              {/* Tareas que el sistema ya sabe hacer (lo que el usuario enseno haciendolo el mismo
+                  una vez, mas lo que aprendio solo). Es OTRA cosa que /recetas, que son cadenas de
+                  instrucciones para un agente conversacional: tabla distinta, ruta distinta y
+                  pantalla distinta a proposito. */}
+              <Route path="/ya-sabe-hacer" element={<TareasEnsenadasPage />} />
               {/* Sitios conectados (7.1c): conectar un sitio con login (el usuario se autentica EL
                   MISMO en la vista en vivo), listar y eliminar. Ejecutar tareas alli es 7.1d. */}
               <Route path="/sitios" element={<SitiosConectadosPage />} />

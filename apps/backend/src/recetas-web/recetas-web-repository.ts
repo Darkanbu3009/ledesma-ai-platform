@@ -37,6 +37,13 @@ export interface RecetaWeb {
   ownerId: string;
   dominio: string;
   firmaObjetivo: string;
+  /**
+   * Lo que el usuario escribio, en sus palabras, al ensenar la tarea (V037). null en las recetas
+   * que se aprendieron solas de una corrida exitosa y en toda receta anterior a esa migracion: ahi
+   * lo unico que hay es la firma. Es lo que la consola muestra y lo que permite RECONOCER la tarea
+   * cuando el usuario la pide con otras palabras; no interviene en la ejecucion.
+   */
+  descripcion: string | null;
   version: number;
   estado: EstadoReceta;
   origen: OrigenReceta;
@@ -58,6 +65,8 @@ export interface NuevaRecetaWeb {
   creadaDesdeTrayectoria: string | null;
   /** De donde salio. Ausente = 'automatica' (la promocion desde una trayectoria exitosa). */
   origen?: OrigenReceta;
+  /** Lo que el usuario escribio al ensenarla. Ausente/null = no hay texto suyo que copiar. */
+  descripcion?: string | null;
 }
 
 interface RecetaRow {
@@ -65,6 +74,7 @@ interface RecetaRow {
   owner_id: string;
   dominio: string;
   firma_objetivo: string;
+  descripcion: string | null;
   version: number;
   estado: string;
   origen: string | null;
@@ -98,6 +108,10 @@ function rowToReceta(row: RecetaRow): RecetaWeb | null {
     ownerId: row.owner_id,
     dominio: row.dominio,
     firmaObjetivo: row.firma_objetivo,
+    // Una fila anterior a V037 no tiene la columna: no hay texto del usuario que mostrar.
+    descripcion: typeof row.descripcion === 'string' && row.descripcion.trim() !== ''
+      ? row.descripcion.trim()
+      : null,
     version: Number(row.version ?? 1),
     estado: row.estado === 'obsoleta' ? 'obsoleta' : 'activa',
     // Una fila anterior a V036 no tiene la columna: cuenta como 'automatica', que es lo que era.
@@ -125,7 +139,7 @@ export class RecetasWebRepository {
     firmaObjetivo: string,
   ): Promise<RecetaWeb | null> {
     const rows = await this.sql<RecetaRow[]>`
-      select id, owner_id, dominio, firma_objetivo, version, estado, origen, pasos,
+      select id, owner_id, dominio, firma_objetivo, descripcion, version, estado, origen, pasos,
         creada_desde_trayectoria, ejecuciones_exitosas, ejecuciones_fallidas, ultima_ejecucion_en,
         creada_en, actualizada_en
       from recetas_web
@@ -134,6 +148,59 @@ export class RecetasWebRepository {
     `;
     const row = rows[0];
     return row ? rowToReceta(row) : null;
+  }
+
+  /**
+   * TODAS las recetas ACTIVAS del owner en los dominios indicados. Es lo que el worker le ofrece al
+   * modelo para que RECONOZCA la tarea que el usuario acaba de pedir cuando la firma exacta no
+   * coincide, y lo que la consola lista (sin filtro de dominio) como "tareas que ya sabe hacer".
+   *
+   * Las filas cuyos pasos NO validan se DESCARTAN de la lista (no invalidan las demas): una receta
+   * manipulada en la base ni se ofrece ni se muestra, y la tarea corre por el camino normal.
+   * `dominios` vacio devuelve lista vacia sin consultar: pedir "en ninguno" no puede leer todo.
+   */
+  async listarActivas(ownerId: string, dominios?: readonly string[]): Promise<RecetaWeb[]> {
+    if (dominios !== undefined && dominios.length === 0) return [];
+    const rows =
+      dominios === undefined
+        ? await this.sql<RecetaRow[]>`
+            select id, owner_id, dominio, firma_objetivo, descripcion, version, estado, origen, pasos,
+              creada_desde_trayectoria, ejecuciones_exitosas, ejecuciones_fallidas, ultima_ejecucion_en,
+              creada_en, actualizada_en
+            from recetas_web
+            where owner_id = ${ownerId} and estado = 'activa'
+            order by creada_en desc
+          `
+        : await this.sql<RecetaRow[]>`
+            select id, owner_id, dominio, firma_objetivo, descripcion, version, estado, origen, pasos,
+              creada_desde_trayectoria, ejecuciones_exitosas, ejecuciones_fallidas, ultima_ejecucion_en,
+              creada_en, actualizada_en
+            from recetas_web
+            where owner_id = ${ownerId} and estado = 'activa'
+              and dominio in ${this.sql([...dominios])}
+            order by creada_en desc
+          `;
+    const recetas: RecetaWeb[] = [];
+    for (const row of rows) {
+      const receta = rowToReceta(row);
+      if (receta !== null) recetas.push(receta);
+    }
+    return recetas;
+  }
+
+  /**
+   * BORRA una receta ("que la olvide"). Acotada por owner: el id que llega del cliente NUNCA alcanza
+   * para tocar la fila de otro dueno. Devuelve si borro algo, para que la ruta distinga "no era tuya
+   * o no existe" de "listo". Idempotente: borrar dos veces no es un error, la segunda devuelve false.
+   *
+   * Es un DELETE de verdad y no un cambio de estado: lo que el usuario pide es que el sistema OLVIDE
+   * la tarea, y dejar la fila 'obsoleta' la conservaria con sus pasos.
+   */
+  async borrar(id: string, ownerId: string): Promise<boolean> {
+    const borradas = await this.sql<Array<{ id: string }>>`
+      delete from recetas_web where id = ${id} and owner_id = ${ownerId} returning id
+    `;
+    return borradas.length > 0;
   }
 
   /**
@@ -155,13 +222,15 @@ export class RecetasWebRepository {
       const version = Number(anteriores[0]?.version ?? 0) + 1;
       const creadas = await tx<RecetaRow[]>`
         insert into recetas_web
-          (owner_id, dominio, firma_objetivo, version, estado, origen, pasos, creada_desde_trayectoria)
+          (owner_id, dominio, firma_objetivo, descripcion, version, estado, origen, pasos,
+           creada_desde_trayectoria)
         values
-          (${input.ownerId}, ${input.dominio}, ${input.firmaObjetivo}, ${version}, 'activa',
+          (${input.ownerId}, ${input.dominio}, ${input.firmaObjetivo}, ${input.descripcion ?? null},
+           ${version}, 'activa',
            ${input.origen ?? 'automatica'},
            ${tx.json(input.pasos as unknown as Parameters<Sql['json']>[0])},
            ${input.creadaDesdeTrayectoria})
-        returning id, owner_id, dominio, firma_objetivo, version, estado, origen, pasos,
+        returning id, owner_id, dominio, firma_objetivo, descripcion, version, estado, origen, pasos,
           creada_desde_trayectoria, ejecuciones_exitosas, ejecuciones_fallidas, ultima_ejecucion_en,
           creada_en, actualizada_en
       `;

@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   PanelLeft,
   ShieldCheck,
+  Sparkles,
   Users,
   Webhook,
 } from 'lucide-react';
@@ -32,6 +33,9 @@ const navItems = [
   { to: '/tareas', labelKey: 'nav.tareas', icon: CalendarClock },
   { to: '/triggers', labelKey: 'nav.triggers', icon: Webhook },
   { to: '/sitios', labelKey: 'nav.sitios', icon: Globe },
+  // Lo que ya sabe hacer en esos sitios. Va junto a Sitios porque es donde se ensena, y NO junto a
+  // Recetas: son dos funcionalidades distintas que solo se parecen en el nombre coloquial.
+  { to: '/ya-sabe-hacer', labelKey: 'nav.ensenadas', icon: Sparkles },
   { to: '/actividad', labelKey: 'nav.actividad', icon: Activity },
   { to: '/credenciales', labelKey: 'nav.credenciales', icon: KeyRound },
   { to: '/privacidad', labelKey: 'nav.privacidad', icon: ShieldCheck },

@@ -199,3 +199,58 @@ describe('mantenimiento de la receta', () => {
     expect(sqlValues(fallida).slice(0, 2)).toEqual([0, 1]);
   });
 });
+
+describe('listarActivas (lo que ya sabe hacer)', () => {
+  it('sin dominios lista todas las activas del owner', async () => {
+    const sql = makeSql([makeRow(), makeRow({ id: 'rec-2' })]);
+    const recetas = await new RecetasWebRepository(sql).listarActivas('user-1');
+    expect(recetas.map((r) => r.id)).toEqual(['rec-1', 'rec-2']);
+    const texto = sqlText(sql);
+    expect(texto).toContain('where owner_id =');
+    expect(texto).toContain("estado = 'activa'");
+    expect(sqlValues(sql)).toEqual(['user-1']);
+  });
+
+  it('con dominios acota a esos dominios (los sitios que la tarea autorizo)', async () => {
+    const sql = makeSql([makeRow()]);
+    await new RecetasWebRepository(sql).listarActivas('user-1', ['app.ejemplo.com']);
+    // La primera llamada es el fragmento de la lista de dominios; la segunda, la consulta.
+    expect(sqlText(sql, 1)).toContain('and dominio in');
+    expect(sqlValues(sql, 1)[0]).toBe('user-1');
+  });
+
+  it('con la lista de dominios VACIA no consulta nada (pedir "en ninguno" no puede leer todo)', async () => {
+    const sql = makeSql([makeRow()]);
+    expect(await new RecetasWebRepository(sql).listarActivas('user-1', [])).toEqual([]);
+    expect((sql as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(0);
+  });
+
+  it('una fila con pasos manipulados se DESCARTA de la lista, sin tumbar las demas', async () => {
+    const sql = makeSql([makeRow({ id: 'rec-mala', pasos: 'no soy un arreglo' }), makeRow()]);
+    const recetas = await new RecetasWebRepository(sql).listarActivas('user-1');
+    expect(recetas.map((r) => r.id)).toEqual(['rec-1']);
+  });
+
+  it('la descripcion viaja cuando la hay y queda en null cuando no (recetas anteriores a V037)', async () => {
+    const conTexto = makeSql([makeRow({ descripcion: '  enviar un correo  ' })]);
+    const recetas = await new RecetasWebRepository(conTexto).listarActivas('user-1');
+    expect(recetas[0]?.descripcion).toBe('enviar un correo');
+
+    const sinTexto = makeSql([makeRow({ descripcion: '   ' })]);
+    const otras = await new RecetasWebRepository(sinTexto).listarActivas('user-1');
+    expect(otras[0]?.descripcion).toBeNull();
+  });
+});
+
+describe('borrar (que la olvide)', () => {
+  it('acota por id Y por owner, y dice si borro algo', async () => {
+    const sql = makeSql([{ id: 'rec-1' }]);
+    expect(await new RecetasWebRepository(sql).borrar('rec-1', 'user-1')).toBe(true);
+    expect(sqlText(sql)).toContain('delete from recetas_web where id =');
+    expect(sqlValues(sql)).toEqual(['rec-1', 'user-1']);
+  });
+
+  it('una receta ajena o inexistente no borra nada', async () => {
+    expect(await new RecetasWebRepository(makeSql([])).borrar('rec-1', 'otro')).toBe(false);
+  });
+});

@@ -22,6 +22,7 @@ import { aprobacionesRoutes } from './routes/aprobaciones.js';
 import { politicasEjecucionRoutes } from './routes/politicas-ejecucion.js';
 import { trayectoriasRoutes } from './routes/trayectorias.js';
 import { grabacionesRoutes } from './routes/grabaciones.js';
+import { tareasEnsenadasRoutes } from './routes/tareas-ensenadas.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { triggerRoutes } from './routes/triggers.js';
 import { incomingTriggerRoutes } from './routes/incoming-triggers.js';
@@ -121,6 +122,9 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
   // Grabacion de tareas (V036): la via COMPLEMENTARIA para sembrar una receta en los sitios donde el
   // agente falla de forma repetida. Solo encola jobs; el login jamas se graba (exige sitio 'activo').
   await app.register(grabacionesRoutes(config));
+  // Tareas que el sistema ya sabe hacer (recetas_web, V035 + V037): listarlas y borrarlas. NO es
+  // /v1/recipes (V013), que es otra funcionalidad con su propia tabla y su propia pantalla.
+  await app.register(tareasEnsenadasRoutes(config));
   // Resumen AGREGADO del dashboard (solo lectura): los tres ejes (actividad, operaciones, gasto) por
   // owner. Aditivo: lee agent_runs, jobs y los repos de recursos; no escribe nada.
   await app.register(dashboardRoutes(config));

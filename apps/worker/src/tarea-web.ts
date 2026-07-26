@@ -36,6 +36,7 @@ import {
   contarParametrosDeclarados,
   extraerParametrosDeclarados,
   nombresDeParametrosDeclarados,
+  type ParametrosDeclarados,
 } from './parametros-objetivo.js';
 import type { ConsumoDeCorrida, ModoScreenshots } from './costo-modelo.js';
 import {
@@ -72,9 +73,17 @@ import {
 } from './ejecutor-receta.js';
 import {
   firmaDeObjetivo,
+  parametrosDeclaradosDesdeValores,
   promoverTrayectoria,
   valoresDeParametros,
+  type ValoresDeParametros,
 } from './receta-web.js';
+import {
+  construirPeticionDeEleccion,
+  ofrecerTareasEnsenadas,
+  parsearEleccion,
+  type ElectorDeTareaEnsenada,
+} from './eleccion-tarea.js';
 import {
   MAX_CAMBIOS_DE_SITIO_POR_TAREA,
   construirContinuacionEnOtroSitio,
@@ -387,6 +396,11 @@ export interface RepositorioSitiosParaTarea {
  */
 export interface RepositorioRecetasParaWorker {
   buscarActiva(ownerId: string, dominio: string, firmaObjetivo: string): Promise<RecetaWeb | null>;
+  /**
+   * Todas las recetas ACTIVAS del owner en los dominios que ESTA tarea autorizo: la lista de tareas
+   * ya ensenadas entre las que se elige cuando la firma exacta no coincide (CAMBIO 3).
+   */
+  listarActivas(ownerId: string, dominios?: readonly string[]): Promise<RecetaWeb[]>;
   promover(input: NuevaRecetaWeb): Promise<RecetaWeb | null>;
   marcarObsoleta(id: string, ownerId: string): Promise<void>;
   reemplazarPasos(id: string, ownerId: string, pasos: PasoDeReceta[]): Promise<void>;
@@ -430,6 +444,15 @@ export interface TareaWebDeps {
   recetas?: RepositorioRecetasParaWorker | undefined;
   determinista?: NavegadorDeterminista | undefined;
   escalador?: EscaladorDePaso | undefined;
+  /**
+   * ELECCION ENTRE LAS TAREAS YA ENSENADAS (CAMBIO 3): la UNICA consulta al modelo fuera del motor.
+   * Cuando la firma exacta del objetivo no coincide con ninguna receta, se le muestran al modelo las
+   * tareas ensenadas de los sitios autorizados y elige cual corresponde y con que datos.
+   *
+   * OPCIONAL, igual que las tres piezas de arriba: sin ella el camino determinista sigue existiendo
+   * pero SOLO por coincidencia exacta de firma, que es como funcionaba antes de este cambio.
+   */
+  elector?: ElectorDeTareaEnsenada | undefined;
   /**
    * OBSERVADOR DE PASOS (TAREA_WEB_OBSERVADOR_PASOS): apagado por defecto. Encendido, cada paso del
    * motor abre una conexion CDP para leer del DOM las estrategias de localizacion del elemento
@@ -822,6 +845,14 @@ async function resolverVerificacion(
     verboBloqueado: string | null;
     /** Texto del que salen los parametros: el LITERAL del usuario si llego (CAMBIO 3). */
     textoParametros: string;
+    /**
+     * Parametros YA RESUELTOS que reemplazan a los del extractor. Solo los trae el camino por tarea
+     * ensenada (CAMBIO 3), donde los datos salieron de la eleccion del modelo y ya estan ANCLADOS al
+     * texto literal del usuario. Se comparan contra la pagina EXACTAMENTE igual que los extraidos:
+     * son los mismos datos que la tarea va a escribir, asi que verificar contra ellos es verificar
+     * contra lo que se va a hacer. Ausente = el extractor determinista de siempre.
+     */
+    parametros?: ParametrosDeclarados | null | undefined;
   },
 ): Promise<{ veredicto: Veredicto; pagina: EstadoDeLaPagina | null }> {
   if (opciones.politica === null) {
@@ -833,7 +864,7 @@ async function resolverVerificacion(
       politica: opciones.politica,
       dominio: sitio.dominio,
       verbo: opciones.verboBloqueado,
-      parametros: extraerParametrosDeclarados(opciones.textoParametros),
+      parametros: opciones.parametros ?? extraerParametrosDeclarados(opciones.textoParametros),
       pagina,
     }),
     pagina,
@@ -1169,6 +1200,105 @@ async function buscarRecetaAplicable(
   return receta;
 }
 
+/** Una tarea ya ensenada que corresponde al pedido, con los datos con los que se ejecutaria. */
+interface TareaEnsenadaElegida {
+  receta: RecetaWeb;
+  valores: ValoresDeParametros;
+  parametros: ParametrosDeclarados;
+}
+
+/**
+ * ELEGIR ENTRE LAS TAREAS YA ENSENADAS (CAMBIO 3). Corre SOLO cuando la firma exacta del objetivo no
+ * encontro nada, y es UNA sola llamada al modelo: se le muestran las tareas ensenadas de los sitios
+ * que ESTA tarea autorizo (que hacen y que datos necesitan) y contesta cual corresponde y con que
+ * datos. No hay bucle, no hay herramientas y no navega nada.
+ *
+ * POR QUE EXISTE: una tarea ensenada como "enviar un correo" no se encontraba nunca cuando el usuario
+ * pedia "manda un correo a X con el asunto Y y dile Z", porque la firma que se calcula de ese pedido
+ * es otra. Pedir lo mismo con otras palabras es lo normal.
+ *
+ * TODO LO QUE EL MODELO DECIDE SE VUELVE A COMPROBAR, y ninguna comprobacion depende de el:
+ *  - la lista ofrecida ya excluye toda tarea cuya accion irreversible no sea EXACTAMENTE la que pidio
+ *    el usuario (deteccion determinista sobre los dos textos, `ofrecerTareasEnsenadas`);
+ *  - la respuesta tiene que nombrar una tarea de la lista, con TODOS sus datos y ninguno de mas;
+ *  - cada dato tiene que estar escrito en el texto del que salen los parametros de esta corrida -- el
+ *    literal del usuario cuando llego (el ancla; sin ella el modelo podria proponer un destinatario
+ *    que nadie pidio);
+ *  - los datos se traducen a la forma de la verificacion determinista y si alguno no se puede
+ *    interpretar, no hay eleccion;
+ *  - la receta elegida pasa por el MISMO `recetaAplicable` que la del camino rapido: si el objetivo
+ *    pide una accion irreversible y la receta no trae su punto de verificacion, no se usa.
+ * Cualquier fallo -- del modelo, de la base, del formato -- devuelve null y la tarea corre con el
+ * motor, que es el comportamiento de siempre.
+ */
+async function elegirTareaEnsenada(
+  deps: TareaWebDeps,
+  job: Job,
+  textoParametros: string,
+  verboBloqueado: string | null,
+  dominios: readonly string[],
+  apiKey: string,
+  control?: ControlDeTareaWeb,
+): Promise<TareaEnsenadaElegida | null> {
+  const recetas = deps.recetas;
+  const elector = deps.elector;
+  if (!recetas || !elector || !deps.determinista || !deps.escalador) return null;
+
+  let candidatas: RecetaWeb[];
+  try {
+    candidatas = await recetas.listarActivas(job.ownerId, dominios);
+  } catch (error) {
+    deps.logger.warn('tarea web: no se pudieron leer las tareas ya ensenadas; se ejecuta con el motor', {
+      jobId: job.id,
+      err: describir(error),
+    });
+    return null;
+  }
+  const ofrecidas = ofrecerTareasEnsenadas(candidatas, verboBloqueado);
+  if (ofrecidas.length === 0) return null;
+
+  const respuesta = await elector.consultar({
+    peticion: construirPeticionDeEleccion({ texto: textoParametros, tareas: ofrecidas }),
+    // La key es la del OWNER, la MISMA que usa el motor y que sale de su boveda. No se guarda.
+    apiKey,
+    signal: control?.signal,
+  });
+  const eleccion = parsearEleccion(respuesta, ofrecidas, textoParametros);
+  if (eleccion === null) {
+    deps.logger.info('tarea web: ninguna de las tareas ya ensenadas corresponde a lo pedido', {
+      jobId: job.id,
+      ofrecidas: ofrecidas.length,
+    });
+    return null;
+  }
+  const receta = candidatas.find((candidata) => candidata.id === eleccion.id);
+  if (receta === undefined) return null;
+  if (!recetaAplicable(receta.pasos, verboBloqueado)) {
+    deps.logger.warn(
+      'tarea web: la tarea ensenada elegida no incluye el punto de verificacion que este objetivo exige; se ejecuta con el motor',
+      { jobId: job.id, recetaId: receta.id },
+    );
+    return null;
+  }
+  const parametros = parametrosDeclaradosDesdeValores(eleccion.valores);
+  if (parametros === null) {
+    deps.logger.warn(
+      'tarea web: los datos de la tarea ensenada elegida no se pueden comparar; se ejecuta con el motor',
+      { jobId: job.id, recetaId: receta.id },
+    );
+    return null;
+  }
+  deps.logger.info('tarea web: lo pedido corresponde a una tarea que el usuario ya enseno', {
+    jobId: job.id,
+    recetaId: receta.id,
+    dominio: receta.dominio,
+    ofrecidas: ofrecidas.length,
+    // Solo los NOMBRES de los datos: cuales se resolvieron explica la decision; los valores no.
+    datos: nombresDeParametrosDeclarados(parametros),
+  });
+  return { receta, valores: eleccion.valores, parametros };
+}
+
 /** Lo que el camino por receta le devuelve a `procesarTareaWeb`. */
 type DesenlaceDelCaminoPorReceta =
   /** La receta completo la tarea: el job se cierra aqui. */
@@ -1259,6 +1389,14 @@ async function ejecutarPorReceta(
     control?: ControlDeTareaWeb | undefined;
     /** Gestor de sesiones por sitio: es lo unico con lo que una receta multisitio puede cambiar. */
     gestor?: GestorDeSitios | undefined;
+    /**
+     * DATOS YA RESUELTOS de la corrida (CAMBIO 3): los que dio la eleccion entre tareas ensenadas,
+     * anclados al texto literal del usuario. Se usan PARA LOS DOS lados a la vez -- lo que la receta
+     * teclea y lo que la verificacion determinista compara contra la pagina -- justamente para que no
+     * puedan divergir: verificar contra una cosa y escribir otra seria la puerta trasera.
+     * Ausente = el extractor determinista sobre el texto del usuario, como siempre.
+     */
+    datos?: { valores: ValoresDeParametros; parametros: ParametrosDeclarados } | undefined;
   },
 ): Promise<DesenlaceDelCaminoPorReceta> {
   const recetas = deps.recetas;
@@ -1271,7 +1409,8 @@ async function ejecutarPorReceta(
   const iniciadaEn = new Date();
   const resultado = await ejecutarReceta(
     receta.pasos,
-    valoresDeParametros(extraerParametrosDeclarados(opciones.textoParametros)),
+    opciones.datos?.valores ??
+      valoresDeParametros(extraerParametrosDeclarados(opciones.textoParametros)),
     {
       navegador: determinista,
       escalador,
@@ -1291,6 +1430,8 @@ async function ejecutarPorReceta(
             politica: opciones.politica,
             verboBloqueado: opciones.verboBloqueado,
             textoParametros: opciones.textoParametros,
+            // Los datos que la eleccion resolvio son los MISMOS que se comparan contra la pagina.
+            parametros: opciones.datos?.parametros ?? null,
           },
         );
         if (veredicto.tipo === 'ejecutar') return { tipo: 'ejecutar' };
@@ -1792,7 +1933,13 @@ export async function procesarTareaWeb(
     //      agota (el sitio cambio demasiado, D6), se sigue con el motor en LA MISMA sesion, sin
     //      reabrir nada, pero NUNCA sobre la pagina que la receta dejo a medio camino: se renavega a
     //      la URL de inicio antes de arrancar el motor, y si eso no se puede, la tarea se corta.
-    const receta = await buscarRecetaAplicable(
+    //
+    //      LA FIRMA EXACTA ES LA VIA RAPIDA (CAMBIO 3): si coincide, no se consulta a nadie. Solo
+    //      cuando NO coincide se le pregunta al modelo, UNA vez, cual de las tareas que el usuario ya
+    //      enseno corresponde a lo que pidio -- porque pedir lo mismo con otras palabras es lo normal
+    //      y la firma no lo perdona. Los datos que el modelo resuelva se ejecutan y se verifican con
+    //      las MISMAS reglas: no hay un camino privilegiado.
+    const rapida = await buscarRecetaAplicable(
       deps,
       job,
       sitio,
@@ -1800,18 +1947,39 @@ export async function procesarTareaWeb(
       verboBloqueado,
       dominiosAutorizados,
     );
+    const elegida =
+      rapida !== null
+        ? null
+        : await elegirTareaEnsenada(
+            deps,
+            job,
+            textoParametros,
+            verboBloqueado,
+            dominiosAutorizados,
+            credential.apiKey,
+            control,
+          );
+    const receta = rapida ?? elegida?.receta ?? null;
     if (receta !== null) {
-      const porReceta = await ejecutarPorReceta(deps, job, sitio, objetivo, activo.sesionExternaId, receta, {
+      // La tarea ensenada puede vivir en OTRO de los sitios autorizados: alli es donde hay que
+      // ejecutarla, con su propia sesion. El sitio de arranque sigue siendo el del camino rapido.
+      const sitioDeLaReceta = gestor.porDominio(receta.dominio) ?? sitio;
+      const abierto =
+        sitioDeLaReceta.id === activo.sitio.id ? activo : await gestor.abrir(sitioDeLaReceta);
+      const porReceta = await ejecutarPorReceta(deps, job, abierto.sitio, objetivo, abierto.sesionExternaId, receta, {
         politica,
         verboBloqueado,
         textoParametros,
-        contexto: activo.contexto,
+        contexto: abierto.contexto,
         apiKey: credential.apiKey,
         control,
         // Una receta multisitio cambia de sesion sola. El destino se resuelve contra la lista
         // AUTORIZADA de ESTE job: una receta que nombre un sitio que esta tarea no autoriza se
         // abandona y la tarea la termina el motor.
         gestor,
+        ...(elegida !== null
+          ? { datos: { valores: elegida.valores, parametros: elegida.parametros } }
+          : {}),
       });
       if (porReceta.tipo === 'completada') return 'completada';
       if (porReceta.paginaTocada) {

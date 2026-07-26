@@ -9,8 +9,10 @@ import {
   type ValorDePaso,
 } from '@ledesma-platform/shared';
 import { VALOR_CENSURADO } from './censura.js';
+import { estrategiasIndependientesDelValor } from './localizacion.js';
 import { TOOL_CAMBIAR_DE_SITIO } from './prompt-tarea-web.js';
 import {
+  extraerMontos,
   extraerParametrosDeclarados,
   normalizarTexto,
   type ParametrosDeclarados,
@@ -132,6 +134,43 @@ export function valoresDeParametros(parametros: ParametrosDeclarados): ValoresDe
   return valores;
 }
 
+/**
+ * LOS MISMOS PARAMETROS, en la forma que consume la VERIFICACION DETERMINISTA (CAMBIO 3). Cuando los
+ * datos de la corrida no salieron del extractor sino de la eleccion entre tareas ya ensenadas, tienen
+ * que pasar por la MISMA comparacion contra la pagina que cualquier otra corrida: para eso hay que
+ * devolverlos a la forma que `verificarAccion` espera.
+ *
+ * FALLA CERRADA: devuelve null si un valor no se puede interpretar como lo que dice ser (un monto que
+ * no es un monto, una cantidad que no es un entero positivo). Sin poder comparar ese dato, la tarea no
+ * se ejecuta por este camino y corre con el motor, que verifica igual.
+ *
+ * Los valores ya vienen anclados al texto del usuario (`valorAncladoAlTexto`, eleccion-tarea.ts): esta
+ * funcion NO es la que decide si son legitimos, solo los traduce.
+ */
+export function parametrosDeclaradosDesdeValores(
+  valores: ValoresDeParametros,
+): ParametrosDeclarados | null {
+  const montos = valores.monto === undefined ? [] : extraerMontos(valores.monto);
+  const monto = montos.length === 1 ? (montos[0] ?? null) : null;
+  if (valores.monto !== undefined && monto === null) return null;
+
+  let cantidad: number | null = null;
+  if (valores.cantidad !== undefined) {
+    const numero = Number(valores.cantidad.trim());
+    if (!Number.isInteger(numero) || numero <= 0) return null;
+    cantidad = numero;
+  }
+
+  return {
+    destinatarios: valores.destinatario === undefined ? [] : [valores.destinatario.toLowerCase()],
+    monto,
+    producto: valores.producto ?? null,
+    cantidad,
+    asunto: valores.asunto ?? null,
+    cuerpo: valores.cuerpo ?? null,
+  };
+}
+
 /** Un paso listo para ejecutar: el paso de la receta con su valor ya resuelto a texto. */
 export interface PasoSustituido {
   paso: PasoDeReceta;
@@ -215,6 +254,11 @@ const TIPO_VERIFICACION = 'verificacion';
 /** ¿El texto de este argumento es un valor que la censura ya marco como sensible? */
 function esCensurado(texto: string): boolean {
   return texto.includes(VALOR_CENSURADO);
+}
+
+/** Los valores CONCRETOS de esta corrida, que no pueden quedar dentro de ninguna localizacion. */
+function valoresConcretos(valores: ValoresDeParametros): string[] {
+  return Object.values(valores).filter((valor): valor is string => valor !== undefined);
 }
 
 /**
@@ -313,8 +357,14 @@ function convertirPaso(
     return { promovido: { ...base, accion: 'teclas', estrategias: [], teclas } };
   }
 
-  // El resto exige un elemento: sin estrategias de localizacion no hay forma de repetirlo (D4).
-  const estrategias = ordenarEstrategias(paso.estrategias ?? []);
+  // El resto exige un elemento: sin estrategias de localizacion no hay forma de repetirlo (D4). Las
+  // que DEPENDEN de un dato concreto de esta corrida se descartan antes de contarlas: localizar por
+  // el valor tecleado no sirve con otro valor, y ademas dejaria ese dato persistido dentro de la
+  // localizacion, que es exactamente lo que un paso parametrizado no puede hacer (D8).
+  const estrategias = estrategiasIndependientesDelValor(
+    ordenarEstrategias(paso.estrategias ?? []),
+    valoresConcretos(valores),
+  );
   if (estrategias.length === 0) {
     return { omitible: false, motivo: `paso ${tipo} sin ninguna estrategia de localizacion` };
   }
@@ -405,15 +455,25 @@ export function promoverTrayectoria(entrada: {
 /**
  * Reemplaza las estrategias del paso `idx` por las que devolvio la escalada (AUTO REPARACION, D5).
  * Devuelve una copia: los pasos de la receta en memoria no se mutan a mitad de una corrida.
+ *
+ * `tecleado` es el texto que ESE paso acaba de escribir en la pagina, cuando es un paso de escritura.
+ * Se descartan las estrategias que dependan de el: las nuevas se leen del DOM DESPUES de escribir, o
+ * sea con el campo ya lleno, asi que el dato concreto de esta corrida aparece dentro de ellas. Sin
+ * este filtro, reparar una receta le guardaria el valor del usuario en la localizacion -- y ademas la
+ * dejaria localizando por un dato que la proxima corrida no va a tener.
  */
 export function repararEstrategias(
   pasos: PasoDeReceta[],
   idx: number,
   estrategias: EstrategiaLocalizacion[],
+  tecleado: string | null = null,
 ): PasoDeReceta[] {
-  return pasos.map((paso) =>
-    paso.idx === idx ? { ...paso, estrategias: ordenarEstrategias(estrategias) } : paso,
+  const limpias = ordenarEstrategias(
+    estrategiasIndependientesDelValor(estrategias, tecleado === null ? [] : [tecleado]),
   );
+  // Sin ninguna estrategia utilizable no hay reparacion posible: se conserva la que la receta tenia.
+  if (limpias.length === 0) return pasos;
+  return pasos.map((paso) => (paso.idx === idx ? { ...paso, estrategias: limpias } : paso));
 }
 
 /**

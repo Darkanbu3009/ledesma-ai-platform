@@ -162,7 +162,7 @@ describe('UserMenu (menu de usuario del footer del sidebar)', () => {
 });
 
 describe('Sidebar (lista principal sin Configuracion ni Mejorar Plan)', () => {
-  it('la lista de navegacion tiene solo las 9 secciones de la app', () => {
+  it('la lista de navegacion tiene solo las 10 secciones de la app', () => {
     useMeMock.mockReturnValue({ data: undefined });
     renderSidebar('/dashboard');
 
@@ -174,6 +174,7 @@ describe('Sidebar (lista principal sin Configuracion ni Mejorar Plan)', () => {
       'Tareas',
       'Triggers',
       'Sitios',
+      'Ya sabe hacer',
       'Actividad',
       'Credenciales',
       'Privacidad',

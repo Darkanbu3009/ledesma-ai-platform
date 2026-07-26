@@ -62,3 +62,10 @@ export { resolveStoredCredential } from '../credentials/resolve-stored-credentia
 // Gate por tier: el modo autonomo (correr jobs sin humano) exige tier 'autonomous'.
 export { RegistrationRepository } from '../registration/registration-repository.js';
 export type { ProfileTier } from '../registration/types.js';
+
+// Puerta de entrada UNICA a la capa de modelo (BYOK por llamada), la MISMA que usa la ruta sincrona.
+// La reusa el worker para la UNICA consulta puntual que hace fuera del motor de navegacion: elegir,
+// entre las tareas que el usuario ya enseno, cual corresponde a lo que acaba de pedir. Es una sola
+// llamada sin tools y sin bucle; el motor de navegacion sigue siendo el unico camino con agente.
+export { runModel } from '../providers/run-model.js';
+export type { ModelCallInput } from '../providers/run-model.js';

@@ -416,9 +416,16 @@ export async function ejecutarReceta(
     if (resultado.estado === 'ok') {
       traza.push(pasoDeTraza(sustituido, traza.length, 'determinista', true));
       // AUTO ENRIQUECIMIENTO: el elemento sigue ahi y hoy expone estrategias que la receta no tenia
-      // (o que cambiaron). Se guardan para la proxima corrida.
+      // (o que cambiaron). Se guardan para la proxima corrida. El texto que este paso acaba de
+      // teclear viaja para que NINGUNA de las nuevas dependa de el: se leyeron del DOM con el campo
+      // ya lleno, asi que llevan el dato de ESTA corrida dentro.
       if (resultado.estrategias.length > 0) {
-        reparados = repararEstrategias(reparados ?? pasos, sustituido.paso.idx, resultado.estrategias);
+        reparados = repararEstrategias(
+          reparados ?? pasos,
+          sustituido.paso.idx,
+          resultado.estrategias,
+          sustituido.texto,
+        );
       }
       continue;
     }
@@ -457,7 +464,7 @@ export async function ejecutarReceta(
         xpath: escalada.selector,
       });
       if (nuevas.length > 0) {
-        reparados = repararEstrategias(reparados ?? pasos, sustituido.paso.idx, nuevas);
+        reparados = repararEstrategias(reparados ?? pasos, sustituido.paso.idx, nuevas, sustituido.texto);
       }
     }
 
