@@ -130,19 +130,88 @@ const EXPRESION_TEXTO_BODY =
 /**
  * Expresion de SOLO LECTURA que recolecta los campos del formulario con su valor ACTUAL y el
  * contexto que los identifica. Va como String.raw para que las expresiones regulares de adentro
- * lleguen intactas al navegador.
+ * lleguen intactas al navegador. Exportada SOLO para el test de DOM (lector-campos-dom.test.ts),
+ * que la ejecuta tal cual sobre una pagina real.
  *
  * Decisiones que importan para la seguridad de la verificacion:
  *  - input[type=password] se OMITE entero: su valor no hace falta para verificar nada.
  *  - los campos OCULTOS y los de tipo hidden SI se incluyen: un destinatario o un monto colado en un
  *    campo invisible es precisamente lo que hay que detectar.
  *  - contenteditable se incluye porque los redactores de correo modernos no usan <textarea>.
- *  - todo va acotado (60 campos, 200 caracteres por valor y por contexto): la verificacion compara
- *    datos concretos, no vuelca la pagina.
+ *  - un campo VACIO busca su valor en los CHIPS de su contenedor (ver abajo): un sitio como Gmail
+ *    vacia el input al confirmar el destinatario y el dato pasa a vivir en un elemento con
+ *    atributos; sin esta lectura el sistema leia cadena vacia donde el usuario veia el correo.
+ *  - un campo con chips de los que NO se pudo extraer ningun valor sale marcado noLeible: "no se
+ *    pudo leer" y "esta vacio" son estados distintos y la verificacion los trata distinto.
+ *  - todo va acotado (60 campos, 200 caracteres por valor y por contexto, 20 chips por campo): la
+ *    verificacion compara datos concretos, no vuelca la pagina.
+ *
+ * COMO SE LEE UN CHIP: solo dentro del contenedor (rol listbox, list o group) al que el campo
+ * pertenece (closest desde el PADRE del campo, jamas un popup suelto del documento), y solo
+ * elementos que ESTRUCTURALMENTE representan un valor comprometido (data-hovercard-id / data-name /
+ * data-value, o rol option / listitem). El valor sale de los atributos en este orden --
+ * data-hovercard-id, data-name, data-value, title, aria-label -- y, si ninguno trae nada, del texto
+ * visible del chip. El valor leido queda asociado AL CAMPO del contenedor, nunca suelto.
+ *
+ * POR QUE combobox NO es un contenedor de chips (revision adversarial): en el patron ARIA de
+ * combobox el envoltorio contiene el POPUP de sugerencias, y una sugerencia es un dato que NADIE
+ * confirmo. Leerla como valor del campo haria pasar la verificacion con un destinatario no
+ * comprometido, que es exactamente el falso positivo que este lector no puede introducir. Ademas
+ * el arranque en el PADRE impide que un campo que a su vez tiene rol de contenedor se lea a si
+ * mismo. Un popup que viva FUERA del contenedor del campo queda excluido por construccion.
  */
-const EXPRESION_LEER_CAMPOS = String.raw`(() => {
-  const MAX_CAMPOS = 60, MAX_VALOR = 200, MAX_CONTEXTO = 200;
+export const EXPRESION_LEER_CAMPOS = String.raw`(() => {
+  const MAX_CAMPOS = 60, MAX_VALOR = 200, MAX_CONTEXTO = 200, MAX_CHIPS_POR_CAMPO = 20;
   const salida = [];
+  const CONTENEDOR_DE_CHIPS = '[role="listbox"], [role="list"], [role="group"]';
+  const CHIP_POR_ATRIBUTO = '[data-hovercard-id], [data-name], [data-value]';
+  const CHIP_POR_ROL = '[role="option"], [role="listitem"]';
+  const ATRIBUTOS_DE_CHIP = ['data-hovercard-id', 'data-name', 'data-value', 'title', 'aria-label'];
+  const valorDeChip = (chip) => {
+    for (const atributo of ATRIBUTOS_DE_CHIP) {
+      const crudo = chip.getAttribute(atributo);
+      if (crudo && crudo.trim() !== '') return crudo.trim();
+    }
+    return String(chip.innerText || chip.textContent || '').trim();
+  };
+  // Un boton (el de quitar el chip), un control o un elemento oculto a la accesibilidad no es un
+  // valor comprometido: leerlo meteria "Quitar" o una tooltip como si fuera el dato.
+  const noEsChip = (chip, nodo) => {
+    const rolDeChip = (chip.getAttribute('role') || '').toLowerCase();
+    const tagDeChip = (chip.tagName || '').toLowerCase();
+    return (
+      rolDeChip === 'button' ||
+      tagDeChip === 'button' || tagDeChip === 'input' || tagDeChip === 'textarea' || tagDeChip === 'select' ||
+      chip.getAttribute('aria-hidden') === 'true' ||
+      chip.contains(nodo) || nodo.contains(chip)
+    );
+  };
+  // Chips del campo: valores YA COMPROMETIDOS que viven en el contenedor del campo. Devuelve los
+  // valores legibles y cuantos chips estructurales NO entregaron ningun valor (para noLeible).
+  const leerChipsDelCampo = (nodo) => {
+    const padre = nodo.parentElement;
+    const contenedor = padre && padre.closest ? padre.closest(CONTENEDOR_DE_CHIPS) : null;
+    if (!contenedor) return { valores: [], ilegibles: 0 };
+    let candidatos = contenedor.querySelectorAll(CHIP_POR_ATRIBUTO);
+    if (candidatos.length === 0) candidatos = contenedor.querySelectorAll(CHIP_POR_ROL);
+    const valores = [];
+    const leidos = [];
+    let ilegibles = 0;
+    for (const chip of candidatos) {
+      if (leidos.length >= MAX_CHIPS_POR_CAMPO) break;
+      if (noEsChip(chip, nodo)) continue;
+      // Un chip anidado dentro de otro ya leido es el mismo dato dos veces.
+      if (leidos.some((previo) => previo.contains(chip))) continue;
+      leidos.push(chip);
+      const valor = valorDeChip(chip);
+      if (valor === '') {
+        ilegibles += 1;
+      } else if (!valores.includes(valor)) {
+        valores.push(valor);
+      }
+    }
+    return { valores, ilegibles };
+  };
   const nodos = document.querySelectorAll('input, textarea, select, [contenteditable="true"], [contenteditable=""]');
   for (const nodo of nodos) {
     if (salida.length >= MAX_CAMPOS) break;
@@ -161,7 +230,19 @@ const EXPRESION_LEER_CAMPOS = String.raw`(() => {
       valor = nodo.innerText || nodo.textContent || '';
     }
     valor = String(valor).trim();
-    if (valor === '') continue;
+    let noLeible = false;
+    // Solo un campo de TEXTO vacio delega en sus chips: un checkbox sin marcar o un select sin
+    // seleccion estan legitimamente vacios y no tienen chips que leer.
+    const esCampoDeTexto = tag !== 'select' && tipo !== 'checkbox' && tipo !== 'radio';
+    if (valor === '' && esCampoDeTexto) {
+      const chips = leerChipsDelCampo(nodo);
+      if (chips.valores.length > 0) {
+        valor = chips.valores.join(', ');
+      } else if (chips.ilegibles > 0) {
+        noLeible = true;
+      }
+    }
+    if (valor === '' && !noLeible) continue;
     let etiqueta = '';
     try {
       const id = nodo.getAttribute('id');
@@ -185,7 +266,9 @@ const EXPRESION_LEER_CAMPOS = String.raw`(() => {
       nodo.getAttribute('aria-label') || '',
       etiqueta,
     ].join(' ').replace(/\s+/g, ' ').trim();
-    salida.push({ contexto: contexto.slice(0, MAX_CONTEXTO), valor: valor.slice(0, MAX_VALOR) });
+    const campo = { contexto: contexto.slice(0, MAX_CONTEXTO), valor: valor.slice(0, MAX_VALOR) };
+    if (noLeible) campo.noLeible = true;
+    salida.push(campo);
   }
   return JSON.stringify(salida);
 })()`;
@@ -749,7 +832,9 @@ export class NavegadorBrowserbase
    * Es de SOLO LECTURA (Runtime.evaluate sobre el DOM, sin tocar la pagina) y JAMAS lee un campo de
    * contrasena: su valor no se necesita para verificar nada y no debe salir del navegador. Incluye
    * los campos OCULTOS a proposito: un destinatario agregado en un input hidden es exactamente el
-   * caso que la verificacion tiene que atrapar.
+   * caso que la verificacion tiene que atrapar. Un campo vacio cuyo valor vive en un CHIP (Gmail
+   * convierte el destinatario confirmado en uno) vuelve con el valor del chip; un campo cuyos chips
+   * no entregaron ningun valor vuelve marcado noLeible, nunca como vacio.
    */
   async leerCamposDeLaPagina(sesionExternaId: string): Promise<CampoDeLaPagina[]> {
     const crudo = await this.evaluarEnLaPagina(sesionExternaId, EXPRESION_LEER_CAMPOS);
@@ -759,9 +844,13 @@ export class NavegadorBrowserbase
       if (!Array.isArray(parsed)) return [];
       return parsed.flatMap((item): CampoDeLaPagina[] => {
         if (typeof item !== 'object' || item === null) return [];
-        const { contexto, valor } = item as { contexto?: unknown; valor?: unknown };
+        const { contexto, valor, noLeible } = item as {
+          contexto?: unknown;
+          valor?: unknown;
+          noLeible?: unknown;
+        };
         if (typeof contexto !== 'string' || typeof valor !== 'string') return [];
-        return [{ contexto, valor }];
+        return [{ contexto, valor, ...(noLeible === true ? { noLeible: true } : {}) }];
       });
     } catch {
       return [];

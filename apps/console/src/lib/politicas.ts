@@ -63,6 +63,16 @@ export function textoDeDetencion(detencion: DetencionDeVerificacion): TextoDeDet
           encontrado: oNada(detencion.encontrado),
         }),
       };
+    case 'noLeible':
+      // El dato no se pudo LEER del sitio: se dice eso, jamas "en el sitio aparecia nada" (ese
+      // era el diagnostico falso de la evidencia de produccion). Sin campo (la pagina entera no
+      // se pudo leer y el objetivo no declaro datos), se nombran "los datos" en generico.
+      return {
+        titulo,
+        detalle: i18n.t('verificacion.noLeible.detalle', {
+          campo: i18n.t(`verificacion.campos.${detencion.campo ?? 'datos'}`),
+        }),
+      };
     case 'faltaDato':
       return {
         titulo,

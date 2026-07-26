@@ -195,6 +195,21 @@ describe('platform_ejecutar_tarea_en_sitio', () => {
     expect(res.isError).toBe(false);
     expect(deps.jobs.createJob).toHaveBeenCalledTimes(1);
   });
+
+  it('una tarea DETENIDA POR LA VERIFICACION no puede relanzarse desde el modelo dentro de la ventana', async () => {
+    // El caso de la evidencia: la verificacion detuvo la tarea ("Voy a intentarlo nuevamente" no es
+    // una decision del usuario) y el modelo mando un segundo ejecutar. El repositorio cuenta el job
+    // detenido como fallo permanente (su last_error DETENIDA_VERIFICACION no esta exento) y el
+    // ejecutor rechaza sin encolar: relanzar exige una decision explicita del usuario.
+    const deps = makeDeps({ falloReciente: true });
+    const exec = createSitioToolsExecutor(CTX, deps);
+    const res = await exec(
+      call(SITIO_TOOL_EJECUTAR, { connection_id: CONNECTION_ID, objetivo: 'envia el correo de nuevo' }),
+    );
+    expect(res.isError).toBe(true);
+    expect(res.content).toMatch(/NO vuelvas a encolarla/);
+    expect(deps.jobs.createJob).not.toHaveBeenCalled();
+  });
 });
 
 // Ventana corta para los tests del long-poll: mismas rutas de codigo, sin esperas reales largas.
