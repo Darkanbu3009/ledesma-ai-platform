@@ -51,8 +51,10 @@ export const DETENIDA_VERIFICACION_PREFIX = 'DETENIDA_VERIFICACION: ';
 
 /**
  * Por que se detuvo la accion. Cada motivo tiene UN texto i18n propio en la consola:
- *  - noCoincide: lo que el objetivo pedia y lo que habia en el sitio no son lo mismo (o no se pudo
- *    leer del sitio el dato pedido).
+ *  - noCoincide: lo que el objetivo pedia y lo que habia en el sitio no son lo mismo.
+ *  - noLeible: el dato pedido no se pudo LEER del sitio para comprobarlo (el campo existe pero su
+ *    valor no se pudo determinar, o la pagina entera no se pudo leer). Distinto de "esta vacio":
+ *    vacio significa que falta escribir el dato y la tarea sigue; no leible detiene y lo dice.
  *  - faltaDato: la accion necesitaba un dato que el objetivo nunca declaro.
  *  - topeExcedido: el monto supera el limite que el usuario configuro una sola vez.
  *  - sitioExcluido: el usuario excluyo ese dominio de las acciones irreversibles.
@@ -64,6 +66,7 @@ export const DETENIDA_VERIFICACION_PREFIX = 'DETENIDA_VERIFICACION: ';
  */
 export type MotivoDetencion =
   | 'noCoincide'
+  | 'noLeible'
   | 'faltaDato'
   | 'topeExcedido'
   | 'sitioExcluido'
@@ -73,6 +76,7 @@ export type MotivoDetencion =
 
 const MOTIVOS: readonly MotivoDetencion[] = [
   'noCoincide',
+  'noLeible',
   'faltaDato',
   'topeExcedido',
   'sitioExcluido',
@@ -84,6 +88,26 @@ const MOTIVOS: readonly MotivoDetencion[] = [
 /** Dato que la accion necesitaba y el objetivo no declaro. Nombres de NEGOCIO, no de campo del DOM. */
 export type CampoFaltante = 'destinatario' | 'monto';
 
+/**
+ * Dato al que refiere una detencion (faltaDato usa solo los dos de CampoFaltante; noLeible puede
+ * referir a cualquiera de los que la verificacion compara). Nombres de NEGOCIO, no del DOM.
+ */
+export type CampoDeDetencion =
+  | CampoFaltante
+  | 'producto'
+  | 'cantidad'
+  | 'asunto'
+  | 'cuerpo';
+
+const CAMPOS: readonly CampoDeDetencion[] = [
+  'destinatario',
+  'monto',
+  'producto',
+  'cantidad',
+  'asunto',
+  'cuerpo',
+];
+
 /** Detencion serializable. Todos los valores son texto ya CENSURADO por el worker. */
 export interface DetencionDeVerificacion {
   motivo: MotivoDetencion;
@@ -91,8 +115,8 @@ export interface DetencionDeVerificacion {
   pedido?: string;
   /** noCoincide: lo que habia en el sitio. Cadena vacia = no habia nada legible. */
   encontrado?: string;
-  /** faltaDato: que dato falto. */
-  campo?: CampoFaltante;
+  /** faltaDato: que dato falto en el objetivo. noLeible: que dato no se pudo leer del sitio. */
+  campo?: CampoDeDetencion;
   /** topeExcedido: monto detectado y limite configurado, ya formateados. */
   monto?: string;
   tope?: string;
@@ -144,6 +168,8 @@ export function parsearDetencion(lastError: string | null | undefined): Detencio
     const valor = objeto[clave];
     if (typeof valor === 'string') detencion[clave] = valor;
   }
-  if (objeto.campo === 'destinatario' || objeto.campo === 'monto') detencion.campo = objeto.campo;
+  if (typeof objeto.campo === 'string' && CAMPOS.includes(objeto.campo as CampoDeDetencion)) {
+    detencion.campo = objeto.campo as CampoDeDetencion;
+  }
   return detencion;
 }
