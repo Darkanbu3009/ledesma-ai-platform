@@ -16,6 +16,8 @@ declare module 'jsdom' {
     /** Solo en los campos que lo exponen (input, textarea). */
     value?: string;
     dispatchEvent(evento: unknown): boolean;
+    setAttribute(nombre: string, valor: string): void;
+    appendChild(hijo: ElementoJsdom): ElementoJsdom;
   }
 
   /** Constructor de evento tal como lo expone la ventana (Event, MouseEvent, KeyboardEvent). */
@@ -25,7 +27,11 @@ declare module 'jsdom' {
   ) => unknown;
 
   export interface VentanaJsdom {
-    document: { getElementById(id: string): ElementoJsdom | null };
+    document: {
+      getElementById(id: string): ElementoJsdom | null;
+      createElement(tag: string): ElementoJsdom;
+      body: ElementoJsdom;
+    };
     /** Ejecuta un guion DENTRO de la ventana (requiere runScripts: 'outside-only'). */
     eval(codigo: string): unknown;
     /** Cierra la ventana y detiene sus temporizadores. */

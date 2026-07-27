@@ -2,6 +2,7 @@ import { useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CheckCircle2, GraduationCap, Loader2, ShieldCheck, X } from 'lucide-react';
 import { useDialog } from '../ui/useDialog';
+import { RelayTecladoMovil } from './RelayTecladoMovil';
 import {
   TIPOS_DE_DATO,
   pasosConDatos,
@@ -78,6 +79,13 @@ export function GrabarTareaDialog({
   const [descripcionError, setDescripcionError] = useState<string | null>(null);
   /** Marcado del usuario: indice del paso -> tipo de dato. Ausente = el dato es siempre el mismo. */
   const [marcado, setMarcado] = useState<Record<number, TipoDeDato | undefined>>({});
+
+  // Dispositivo tactil sin puntero fino ni hover (telefono/tablet): la vista en vivo no levanta el
+  // teclado nativo, asi que ahi se monta el relay de teclado movil. MISMO criterio y mismo guard de
+  // matchMedia que LoginEnVivoDialog (se evalua en el render: el medio no cambia durante el modal).
+  const esDispositivoTactil =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(hover: none) and (pointer: coarse)').matches;
 
   const enVivo = grabacion?.estado === 'grabando' && grabacion.vistaEnVivoUrl !== null;
   const detenidaPorContrasena =
@@ -197,6 +205,12 @@ export function GrabarTareaDialog({
             adjunta ningun listener sobre el, igual que en el inicio de sesion. */}
         {enVivo && grabacion?.vistaEnVivoUrl && (
           <>
+            {/* SOLO en dispositivos tactiles: el MISMO relay de teclado movil del login, con el token
+                acunado sobre la sesion de ESTA grabacion. Las teclas relevadas llegan a la pagina por
+                CDP (igual que las de desktop) y el grabador las captura por los mismos eventos DOM. */}
+            {esDispositivoTactil && (
+              <RelayTecladoMovil fuente={{ tipo: 'grabacion', id: grabacion.id }} />
+            )}
             <iframe
               src={grabacion.vistaEnVivoUrl}
               title={t('grabacion.iframeTitulo', { dominio })}

@@ -42,6 +42,7 @@ const obtener = vi.fn();
 const terminar = vi.fn();
 const obtenerPorId = vi.fn();
 const createJob = vi.fn();
+const obtenerSesionDeGrabacion = vi.fn();
 const getProfileTier = vi.fn();
 
 function makeGrabacion(overrides: Partial<Grabacion> = {}): Grabacion {
@@ -70,7 +71,7 @@ async function makeApp(): Promise<FastifyInstance> {
       verifier,
       grabacionesRepo: { crear, obtener, terminar },
       sitiosRepo: { obtenerPorId },
-      jobsRepo: { createJob },
+      jobsRepo: { createJob, obtenerSesionDeGrabacion },
       registrationRepo: { getProfileTier },
     }),
   );

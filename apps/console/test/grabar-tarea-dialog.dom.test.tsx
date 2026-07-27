@@ -13,7 +13,29 @@ import type { Grabacion } from '../src/lib/grabaciones';
  *  - si la grabacion se detuvo por un campo de contrasena, se dice con todas sus letras.
  */
 
-afterEach(cleanup);
+// Se mockea el relay de teclado movil: su montaje real hace fetch + WebCrypto. Aca solo verificamos
+// que el modal lo monta SOLO en tactil y solo durante la vista en vivo (mismo criterio que el login).
+vi.mock('../src/components/sitios/RelayTecladoMovil', () => ({
+  RelayTecladoMovil: ({ fuente }: { fuente: { tipo: string; id: string } }) => (
+    <div data-testid="relay-movil">{`${fuente.tipo}:${fuente.id}`}</div>
+  ),
+}));
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+/** Simula el medio: `matches` responde true solo si el media query coincide con `tactil`. */
+function stubMatchMedia(tactil: boolean) {
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn((query: string) => ({
+      matches: tactil && query === '(hover: none) and (pointer: coarse)',
+      media: query,
+    })),
+  );
+}
 
 function makeGrabacion(overrides: Partial<Grabacion> = {}): Grabacion {
   return {
@@ -102,6 +124,30 @@ describe('momento 2: la vista en vivo', () => {
     setup({ abriendo: true });
     expect(screen.getByRole('status')).toHaveTextContent(/Estamos abriendo correo.ejemplo.com/);
     expect(screen.queryByTitle(/Navegador seguro/)).not.toBeInTheDocument();
+  });
+
+  it('en dispositivo tactil monta el relay de teclado movil sobre LA GRABACION, junto a la vista', () => {
+    stubMatchMedia(true);
+    setup({
+      grabacion: makeGrabacion({ estado: 'grabando', vistaEnVivoUrl: 'https://vista-en-vivo' }),
+    });
+    expect(screen.getByTestId('relay-movil')).toHaveTextContent('grabacion:gra-1');
+    expect(screen.getByTitle(/Navegador seguro/)).toBeInTheDocument();
+  });
+
+  it('en desktop (puntero fino) NO monta el relay: entrada directa al iframe, sin cambios', () => {
+    stubMatchMedia(false);
+    setup({
+      grabacion: makeGrabacion({ estado: 'grabando', vistaEnVivoUrl: 'https://vista-en-vivo' }),
+    });
+    expect(screen.queryByTestId('relay-movil')).not.toBeInTheDocument();
+    expect(screen.getByTitle(/Navegador seguro/)).toBeInTheDocument();
+  });
+
+  it('fuera de la vista en vivo el relay no se monta ni en tactil', () => {
+    stubMatchMedia(true);
+    setup({ grabacion: makeGrabacion() });
+    expect(screen.queryByTestId('relay-movil')).not.toBeInTheDocument();
   });
 });
 

@@ -8,8 +8,8 @@ import type { SitioConectado } from '../src/lib/sitios';
 // Se mockea el relay de teclado movil: su montaje real hace fetch + WebCrypto. Aca solo verificamos
 // que el modal lo monta SOLO en tactil y jamas en desktop (el flujo directo del iframe queda intacto).
 vi.mock('../src/components/sitios/RelayTecladoMovil', () => ({
-  RelayTecladoMovil: ({ sitioId }: { sitioId: string }) => (
-    <div data-testid="relay-movil">{sitioId}</div>
+  RelayTecladoMovil: ({ fuente }: { fuente: { tipo: string; id: string } }) => (
+    <div data-testid="relay-movil">{`${fuente.tipo}:${fuente.id}`}</div>
   ),
 }));
 
@@ -54,7 +54,7 @@ describe('LoginEnVivoDialog: desktop directo vs relay de teclado movil', () => {
   it('en dispositivo tactil monta el relay de teclado movil, con la vista en vivo embebida', () => {
     stubMatchMedia(true);
     setup();
-    expect(screen.getByTestId('relay-movil')).toHaveTextContent('sit_1');
+    expect(screen.getByTestId('relay-movil')).toHaveTextContent('sitio:sit_1');
     expect(screen.getByTitle(/en\.wikipedia\.org/)).toHaveAttribute(
       'src',
       'https://proveedor.example/vista-en-vivo/abc',

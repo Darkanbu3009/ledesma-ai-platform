@@ -1,98 +1,46 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, ShieldCheck, TriangleAlert } from 'lucide-react';
-import { soportaRelay } from '../../lib/relay-crypto';
-import {
-  ConexionRelayTeclado,
-  solicitarTokenRelay,
-  type EstadoConexionRelay,
-  type TeclaControl,
-} from '../../lib/relay-teclado';
+import type { TeclaControl } from '../../lib/relay-teclado';
+import { useTecladoRelay, type FuenteRelay } from './useTecladoRelay';
 
 /**
- * RELAY DE TECLADO MOVIL (conocimiento minimo). SOLO se monta en dispositivos tactiles (lo decide
- * LoginEnVivoDialog): la vista en vivo del proveedor no levanta el teclado nativo, asi que el usuario
- * teclea en ESTE campo propio y las pulsaciones se transmiten CIFRADAS por nuestra infraestructura
- * hacia el navegador seguro. El desktop no usa nada de esto (entrada directa al iframe).
+ * RELAY DE TECLADO MOVIL (conocimiento minimo). SOLO se monta en dispositivos tactiles (lo deciden
+ * LoginEnVivoDialog y GrabarTareaDialog): la vista en vivo del proveedor no levanta el teclado nativo,
+ * asi que el usuario teclea en ESTE campo propio y las pulsaciones se transmiten CIFRADAS por nuestra
+ * infraestructura hacia el navegador seguro. El desktop no usa nada de esto (entrada directa al iframe).
+ *
+ * La integracion del canal (soporte, token, handshake ECDH autenticado, reenvio cifrado) vive en el
+ * hook compartido useTecladoRelay; la FUENTE dice si el token se acuna sobre la sesion del login de un
+ * sitio o sobre la de una grabacion en curso. Los textos del campo cambian con la fuente (en el login
+ * se teclea el inicio de sesion; en la grabacion, los datos de la tarea y JAMAS una contrasena).
  *
  * El campo se limpia tras cada pulsacion (no acumula texto), no tiene autocompletado/autocorreccion ni
- * queda en el historial, y las teclas de control (Tab/Enter/Backspace) tienen botones propios para un
- * login real. La divulgacion al usuario se muestra ANTES de escribir, en lenguaje simple.
+ * queda en el historial, y las teclas de control (Tab/Enter/Backspace) tienen botones propios. La
+ * divulgacion al usuario se muestra ANTES de escribir, en lenguaje simple.
  */
 
-type EstadoUI = 'preparando' | 'conectando' | 'listo' | 'no_disponible' | 'error';
+/** Keys i18n que dependen de la fuente (el resto del bloque es identico en ambas pantallas). */
+const TEXTOS_POR_FUENTE: Record<FuenteRelay['tipo'], { aviso: string; campoAria: string; placeholder: string; divulgacion: string }> = {
+  sitio: {
+    aviso: 'sitios.modal.avisoMovil',
+    campoAria: 'sitios.relayMovil.campoAria',
+    placeholder: 'sitios.relayMovil.placeholder',
+    divulgacion: 'sitios.relayMovil.divulgacion',
+  },
+  grabacion: {
+    aviso: 'grabacion.relayMovil.avisoMovil',
+    campoAria: 'grabacion.relayMovil.campoAria',
+    placeholder: 'grabacion.relayMovil.placeholder',
+    divulgacion: 'grabacion.relayMovil.divulgacion',
+  },
+};
 
-function mapear(estado: EstadoConexionRelay): EstadoUI {
-  if (estado === 'listo') return 'listo';
-  if (estado === 'conectando') return 'conectando';
-  return 'error'; // 'error' | 'cerrado' inesperado
-}
-
-function useRelayTeclado(sitioId: string): {
-  estado: EstadoUI;
-  enviarTexto: (texto: string) => void;
-  enviarTecla: (tecla: TeclaControl) => void;
-} {
-  const [estado, setEstado] = useState<EstadoUI>('preparando');
-  const conexionRef = useRef<ConexionRelayTeclado | null>(null);
-
-  useEffect(() => {
-    let cancelado = false;
-    // Toda la mutacion de estado ocurre DENTRO de esta funcion async (tras awaits) o en el callback
-    // onEstado: nunca hay setState sincrono en el cuerpo del efecto.
-    const iniciar = async (): Promise<void> => {
-      const soporta = await soportaRelay();
-      if (cancelado) return;
-      if (!soporta) {
-        setEstado('no_disponible');
-        return;
-      }
-      let tk;
-      try {
-        tk = await solicitarTokenRelay(sitioId);
-      } catch (error) {
-        if (cancelado) return;
-        // 501 (RELAY_NO_DISPONIBLE): feature apagada -> aviso de siempre. Se lee el status de forma
-        // estructural (ApiError lo expone) para no arrastrar lib/api ni supabase al arbol del componente.
-        const status = (error as { status?: number }).status;
-        setEstado(status === 501 ? 'no_disponible' : 'error');
-        return;
-      }
-      if (cancelado) return;
-      const conexion = new ConexionRelayTeclado({
-        relayUrl: tk.relayUrl,
-        token: tk.token,
-        hs: tk.hs,
-        onEstado: (e) => {
-          if (!cancelado) setEstado(mapear(e));
-        },
-      });
-      conexionRef.current = conexion;
-      setEstado('conectando');
-      await conexion.conectar();
-    };
-    void iniciar();
-    return () => {
-      cancelado = true;
-      conexionRef.current?.cerrar();
-      conexionRef.current = null;
-    };
-  }, [sitioId]);
-
-  const enviarTexto = useCallback((texto: string) => {
-    void conexionRef.current?.enviarTexto(texto);
-  }, []);
-  const enviarTecla = useCallback((tecla: TeclaControl) => {
-    void conexionRef.current?.enviarTecla(tecla);
-  }, []);
-
-  return { estado, enviarTexto, enviarTecla };
-}
-
-export function RelayTecladoMovil({ sitioId }: { sitioId: string }) {
+export function RelayTecladoMovil({ fuente }: { fuente: FuenteRelay }) {
   const { t } = useTranslation();
-  const { estado, enviarTexto, enviarTecla } = useRelayTeclado(sitioId);
+  const { estado, enviarTexto, enviarTecla } = useTecladoRelay(fuente);
   const [valor, setValor] = useState('');
+  const textos = TEXTOS_POR_FUENTE[fuente.tipo];
 
   // Cada cambio del campo se reenvia y el campo se LIMPIA de inmediato: jamas acumula texto.
   function alCambiar(nuevo: string): void {
@@ -120,7 +68,7 @@ export function RelayTecladoMovil({ sitioId }: { sitioId: string }) {
       <div role="note" className="flex-none border-b border-brasa-line bg-brasa-soft px-6 py-3">
         <p className="flex items-start gap-1.5 text-sm font-medium text-brasa">
           <TriangleAlert className="mt-0.5 h-4 w-4 flex-none" aria-hidden="true" />
-          <span>{t('sitios.modal.avisoMovil')}</span>
+          <span>{t(textos.aviso)}</span>
         </p>
       </div>
     );
@@ -143,8 +91,8 @@ export function RelayTecladoMovil({ sitioId }: { sitioId: string }) {
             autoCapitalize="off"
             spellCheck={false}
             name="relay-teclado-efimero"
-            aria-label={t('sitios.relayMovil.campoAria')}
-            placeholder={t('sitios.relayMovil.placeholder')}
+            aria-label={t(textos.campoAria)}
+            placeholder={t(textos.placeholder)}
             value={valor}
             disabled={estado !== 'listo'}
             onChange={(e) => alCambiar(e.target.value)}
@@ -189,7 +137,7 @@ export function RelayTecladoMovil({ sitioId }: { sitioId: string }) {
         {/* DIVULGACION explicita en lenguaje simple (ES/EN), visible antes de escribir. */}
         <p className="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-muted">
           <ShieldCheck className="mt-0.5 h-4 w-4 flex-none text-ok" aria-hidden="true" />
-          <span>{t('sitios.relayMovil.divulgacion')}</span>
+          <span>{t(textos.divulgacion)}</span>
         </p>
       </div>
     </div>

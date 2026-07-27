@@ -100,7 +100,7 @@ export function LoginEnVivoDialog({
             desktop este bloque no existe y el flujo es entrada directa al iframe, sin relay. El propio
             RelayTecladoMovil cae al aviso de "hazlo desde una computadora" si el canal no esta
             disponible. */}
-        {esDispositivoTactil && <RelayTecladoMovil sitioId={sitio.id} />}
+        {esDispositivoTactil && <RelayTecladoMovil fuente={{ tipo: 'sitio', id: sitio.id }} />}
 
         {/* La vista en vivo EMBEBIDA: apunta directo al proveedor. Sin listeners, por diseno.
             flex-1: llena TODO el alto que el modal (de altura fija) deja entre la cabecera y el

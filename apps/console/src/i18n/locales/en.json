@@ -1985,6 +1985,12 @@
     "cerrarAria": "Close",
     "iframeTitulo": "Secure browser to do the task on {{dominio}}",
     "pie": "It opens in a secure browser with your session already signed in. We never ask for your password.",
+    "relayMovil": {
+      "avisoMovil": "Typing inside this view is not available on phones and tablets yet: the secure browser does not support the mobile keyboard. Open this page on a computer to teach the task.",
+      "campoAria": "Field to type the task details; keystrokes travel encrypted to Ledesma's infrastructure, which decrypts and forwards them to the secure browser",
+      "placeholder": "Type the task details here",
+      "divulgacion": "On your phone, what you type here travels encrypted to Ledesma's infrastructure, where it is decrypted to be forwarded to the secure browser where you do the task. It is never stored or logged. Never type a password here: if a password field appears, the recording stops and nothing is saved."
+    },
     "tipos": {
       "destinatario": "Who it goes to",
       "asunto": "The subject",

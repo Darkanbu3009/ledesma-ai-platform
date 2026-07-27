@@ -12,7 +12,7 @@ import type {
 import { RECIPE_JOB_KIND } from './recipe-payload.js';
 import { SITIO_JOB_KINDS } from './sitio-payload.js';
 import { TAREA_WEB_JOB_KIND } from './tarea-web-payload.js';
-import { GRABACION_JOB_KINDS } from './grabacion-payload.js';
+import { GRABACION_JOB_KINDS, GRABAR_TAREA_JOB_KIND } from './grabacion-payload.js';
 
 /**
  * Cliente postgres (tagged template) que el repositorio recibe por inyeccion, IGUAL que los
@@ -411,6 +411,30 @@ export class JobsRepository {
       resultado: row.resultado ?? null,
       lastError: row.last_error,
     };
+  }
+
+  /**
+   * SESION DE NAVEGADOR VIVA de una grabacion EN CURSO, para acunar el token del relay de teclado
+   * movil sobre ella. La tabla `grabaciones` (V036) no guarda la sesion del proveedor; el worker la
+   * publica como resultado INTERMEDIO del job kind:'grabar_tarea' (jobs.resultado, V026) al abrir la
+   * vista en vivo, y este metodo la lee SIEMPRE acotada por owner_id y SOLO mientras el job sigue
+   * 'running' (la captura instalada): un job cerrado o ajeno devuelve null y no se acuna nada.
+   */
+  async obtenerSesionDeGrabacion(grabacionId: string, ownerId: string): Promise<string | null> {
+    const rows = await this.sql<Array<{ resultado: unknown }>>`
+      select resultado
+      from jobs
+      where owner_id = ${ownerId}
+        and status = 'running'
+        and payload->>'kind' = ${GRABAR_TAREA_JOB_KIND}
+        and payload->>'grabacionId' = ${grabacionId}
+      order by created_at desc
+      limit 1
+    `;
+    const resultado = rows[0]?.resultado;
+    if (typeof resultado !== 'object' || resultado === null) return null;
+    const sesion = (resultado as { sesionExternaId?: unknown }).sesionExternaId;
+    return typeof sesion === 'string' && sesion.length > 0 ? sesion : null;
   }
 
   /**

@@ -27,6 +27,8 @@ const CORREO = 'martin@ejemplo.com';
 interface PaginaDePrueba {
   ventana: VentanaJsdom;
   pasos: () => PasoGrabado[];
+  /** El motivo de corte que el handler de produccion registraria ('contrasena'), o null. */
+  corte: () => string | null;
   cerrar: () => void;
 }
 
@@ -44,15 +46,21 @@ function abrirPaginaGrabada(cuerpoHtml: string): PaginaDePrueba {
   global.CSS = { escape: (valor: string) => valor };
 
   const acumulador = new AcumuladorDeGrabacion(DOMINIO);
+  // Mismo criterio que el handler real (grabarTarea): el primer 'contrasena' fija el corte y todo lo
+  // posterior se ignora.
+  let corte: string | null = null;
   global[ENLACE_DE_GRABACION] = (crudo: string): void => {
+    if (corte !== null) return;
     const evento = parsearEventoCapturado(crudo);
-    if (evento !== null) acumulador.agregar(evento);
+    if (evento === null) return;
+    if (acumulador.agregar(evento) === 'contrasena') corte = 'contrasena';
   };
   ventana.eval(GUION_GRABADOR);
 
   return {
     ventana,
     pasos: () => acumulador.pasos(),
+    corte: () => corte,
     cerrar: () => ventana.close(),
   };
 }
@@ -156,6 +164,41 @@ describe('el grabador captura la escritura en campos que no son input', () => {
       // no existe. Le queda la posicion en la lista (y el atributo estable de la fila).
       expect(textoDeLasEstrategias(pasos[2] as PasoGrabado)).not.toContain(CORREO);
       expect(pasos[2]?.estrategias.length).toBeGreaterThan(0);
+    } finally {
+      pagina.cerrar();
+    }
+  });
+
+  it('la guardia corta igual cuando el input llega por el RELAY DE TECLADO MOVIL', () => {
+    // Las teclas del relay entran por CDP (Input.insertText / dispatchKeyEvent) y en la pagina se ven
+    // como los MISMOS eventos DOM que el teclado de desktop: insertText dispara 'input' sin keydown
+    // previo. La guardia opera sobre el DOM (hay un campo de contrasena o no), NUNCA sobre el origen
+    // del input, asi que este flujo tiene que cortarse exactamente igual.
+    const pagina = abrirPaginaGrabada('<input id="buscar" aria-label="Buscar">');
+    try {
+      const buscar = elemento(pagina, 'buscar');
+      // Tecleo por relay: solo el evento 'input' (asi se ve un Input.insertText), sin keydown.
+      buscar.value = 'factura marzo';
+      disparar(pagina, buscar, 'input');
+      // Confirmacion con la tecla de control del relay (dispatchKeyEvent -> 'keydown').
+      pulsar(pagina, buscar, 'Enter');
+      expect(pagina.pasos().map((paso) => paso.accion)).toEqual(['navegar', 'escribir', 'teclas']);
+      expect(pagina.corte()).toBeNull();
+
+      // La sesion del sitio expira A MITAD de la grabacion: aparece una pantalla de login.
+      const clave = pagina.ventana.document.createElement('input');
+      clave.setAttribute('type', 'password');
+      pagina.ventana.document.body.appendChild(clave);
+
+      // La siguiente pulsacion por relay dispara la guardia: corte inmediato y nada mas se graba.
+      buscar.value = 'otra cosa';
+      disparar(pagina, buscar, 'input');
+      pulsar(pagina, buscar, 'Enter');
+
+      expect(pagina.corte()).toBe('contrasena');
+      const pasos = pagina.pasos();
+      expect(pasos.map((paso) => paso.accion)).toEqual(['navegar', 'escribir', 'teclas']);
+      expect(JSON.stringify(pasos)).not.toContain('otra cosa');
     } finally {
       pagina.cerrar();
     }
