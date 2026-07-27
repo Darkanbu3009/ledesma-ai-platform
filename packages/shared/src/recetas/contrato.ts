@@ -50,7 +50,13 @@ export type EstrategiaLocalizacion =
   | { tipo: 'texto'; texto: string }
   | { tipo: 'xpath'; xpath: string };
 
-/** Orden de INTENTO de las estrategias (D1). El ejecutor no admite otro orden. */
+/**
+ * Orden de INTENTO de las estrategias al CREAR un paso (D1). Es el orden con el que se promueve una
+ * trayectoria y con el que se leen estrategias frescas del DOM. NO es un invariante de lectura: la
+ * auto reparacion puede PROMOVER a primaria la estrategia que viene ganando cuando la primaria viene
+ * fallando (promocion-estrategias.ts, worker), y ese reordenamiento queda persistido; por eso el
+ * parser respeta el orden guardado en vez de reimponer este.
+ */
 export const ORDEN_DE_ESTRATEGIAS: readonly EstrategiaLocalizacion['tipo'][] = [
   'atributo',
   'rol',
@@ -152,8 +158,10 @@ export interface PasoDeReceta {
    */
   dominio?: string | null;
   /**
-   * Formas de localizar el elemento, ya ordenadas por `ORDEN_DE_ESTRATEGIAS`. Vacia SOLO en las
-   * acciones que no tocan un elemento ('navegar', 'esperar', y 'teclas' sin foco previo).
+   * Formas de localizar el elemento, EN ORDEN DE INTENTO. Al crearse el paso vienen ordenadas por
+   * `ORDEN_DE_ESTRATEGIAS`; la auto reparacion puede haber promovido a primaria otra estrategia y
+   * ese orden persistido es el que vale. Vacia SOLO en las acciones que no tocan un elemento
+   * ('navegar', 'esperar', y 'teclas' sin foco previo).
    */
   estrategias: EstrategiaLocalizacion[];
   /** Solo 'escribir': que teclear. */
@@ -360,7 +368,9 @@ function parsearPaso(crudo: unknown, idxEsperado: number): PasoDeReceta | null {
     idx: idxEsperado,
     accion: accion as AccionDeReceta,
     dominio,
-    estrategias: ordenarEstrategias(estrategias),
+    // El orden PERSISTIDO se respeta: si la auto reparacion promovio un fallback a primaria,
+    // reordenar aqui desharia esa promocion en cada lectura.
+    estrategias,
     valor: null,
     teclas: null,
     ruta: null,

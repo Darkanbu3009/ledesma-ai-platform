@@ -205,6 +205,7 @@ function makeTareaEnsenada(descripcion: string | null = 'enviar un correo'): Rec
     creadaDesdeTrayectoria: null,
     ejecucionesExitosas: 1,
     ejecucionesFallidas: 0,
+    ajustesAutomaticos: 0,
     ultimaEjecucionEn: null,
     creadaEn: '2026-07-25T00:00:00.000Z',
     actualizadaEn: '2026-07-25T00:00:00.000Z',

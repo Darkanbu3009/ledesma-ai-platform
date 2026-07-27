@@ -2007,6 +2007,7 @@
     "vacioAyuda": "Go to Sites, open the site you want and teach it a task by doing it once yourself.",
     "usos": "It has done it {{n}} times",
     "sinUsos": "It has not done it yet",
+    "ajustes": "Adjusted itself {{n}} times",
     "ensenadaEn": "You taught it on {{fecha}}",
     "aprendidaEn": "It learned it on its own on {{fecha}}",
     "borrar": "Make it forget",

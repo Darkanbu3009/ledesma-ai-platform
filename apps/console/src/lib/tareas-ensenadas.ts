@@ -30,6 +30,11 @@ export interface TareaEnsenada {
   ensenadaEn: string;
   usos: number;
   ultimoUsoEn: string | null;
+  /**
+   * Cuantas veces se ajusto sola (cuando el sitio cambio, aprendio a encontrar sus botones de otra
+   * forma). Opcional para tolerar un backend anterior a este campo: ausente cuenta como 0.
+   */
+  ajustes?: number;
   datosQueNecesita: TipoDeDato[];
 }
 

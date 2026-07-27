@@ -51,6 +51,11 @@ export interface RecetaWeb {
   creadaDesdeTrayectoria: string | null;
   ejecucionesExitosas: number;
   ejecucionesFallidas: number;
+  /**
+   * Cuantas veces la AUTO REPARACION promovio a primaria una estrategia de fallback (V038). Es lo
+   * que la consola muestra como "Se ajusto sola N veces". 0 en toda receta anterior a la migracion.
+   */
+  ajustesAutomaticos: number;
   ultimaEjecucionEn: string | null;
   creadaEn: string;
   actualizadaEn: string;
@@ -82,6 +87,7 @@ interface RecetaRow {
   creada_desde_trayectoria: string | null;
   ejecuciones_exitosas: number;
   ejecuciones_fallidas: number;
+  ajustes_automaticos?: number | null;
   ultima_ejecucion_en: Date | string | null;
   creada_en: Date | string;
   actualizada_en: Date | string;
@@ -120,6 +126,7 @@ function rowToReceta(row: RecetaRow): RecetaWeb | null {
     creadaDesdeTrayectoria: row.creada_desde_trayectoria,
     ejecucionesExitosas: Number(row.ejecuciones_exitosas ?? 0),
     ejecucionesFallidas: Number(row.ejecuciones_fallidas ?? 0),
+    ajustesAutomaticos: Number(row.ajustes_automaticos ?? 0),
     ultimaEjecucionEn: toIso(row.ultima_ejecucion_en),
     creadaEn: toIso(row.creada_en) ?? EPOCH_ISO,
     actualizadaEn: toIso(row.actualizada_en) ?? EPOCH_ISO,
@@ -140,8 +147,8 @@ export class RecetasWebRepository {
   ): Promise<RecetaWeb | null> {
     const rows = await this.sql<RecetaRow[]>`
       select id, owner_id, dominio, firma_objetivo, descripcion, version, estado, origen, pasos,
-        creada_desde_trayectoria, ejecuciones_exitosas, ejecuciones_fallidas, ultima_ejecucion_en,
-        creada_en, actualizada_en
+        creada_desde_trayectoria, ejecuciones_exitosas, ejecuciones_fallidas, ajustes_automaticos,
+        ultima_ejecucion_en, creada_en, actualizada_en
       from recetas_web
       where owner_id = ${ownerId} and dominio = ${dominio} and firma_objetivo = ${firmaObjetivo}
         and estado = 'activa'
@@ -165,16 +172,16 @@ export class RecetasWebRepository {
       dominios === undefined
         ? await this.sql<RecetaRow[]>`
             select id, owner_id, dominio, firma_objetivo, descripcion, version, estado, origen, pasos,
-              creada_desde_trayectoria, ejecuciones_exitosas, ejecuciones_fallidas, ultima_ejecucion_en,
-              creada_en, actualizada_en
+              creada_desde_trayectoria, ejecuciones_exitosas, ejecuciones_fallidas, ajustes_automaticos,
+              ultima_ejecucion_en, creada_en, actualizada_en
             from recetas_web
             where owner_id = ${ownerId} and estado = 'activa'
             order by creada_en desc
           `
         : await this.sql<RecetaRow[]>`
             select id, owner_id, dominio, firma_objetivo, descripcion, version, estado, origen, pasos,
-              creada_desde_trayectoria, ejecuciones_exitosas, ejecuciones_fallidas, ultima_ejecucion_en,
-              creada_en, actualizada_en
+              creada_desde_trayectoria, ejecuciones_exitosas, ejecuciones_fallidas, ajustes_automaticos,
+              ultima_ejecucion_en, creada_en, actualizada_en
             from recetas_web
             where owner_id = ${ownerId} and estado = 'activa'
               and dominio in ${this.sql([...dominios])}
@@ -231,8 +238,8 @@ export class RecetasWebRepository {
            ${tx.json(input.pasos as unknown as Parameters<Sql['json']>[0])},
            ${input.creadaDesdeTrayectoria})
         returning id, owner_id, dominio, firma_objetivo, descripcion, version, estado, origen, pasos,
-          creada_desde_trayectoria, ejecuciones_exitosas, ejecuciones_fallidas, ultima_ejecucion_en,
-          creada_en, actualizada_en
+          creada_desde_trayectoria, ejecuciones_exitosas, ejecuciones_fallidas, ajustes_automaticos,
+          ultima_ejecucion_en, creada_en, actualizada_en
       `;
       return creadas[0] ?? null;
     });
@@ -263,6 +270,72 @@ export class RecetasWebRepository {
         actualizada_en = now()
       where id = ${id} and owner_id = ${ownerId} and estado = 'activa'
     `;
+  }
+
+  /**
+   * Lo que la AUTO REPARACION (V038) necesita leer FRESCO al cerrar una corrida exitosa: la version
+   * vigente (el candado optimista del guardado), los pasos vigentes (pudieron cambiar durante la
+   * corrida por la reparacion de selectores) y el historial de ganadoras crudo (lo interpreta el
+   * worker, promocion-estrategias.ts). Solo de la receta ACTIVA del owner; null si ya no lo es o si
+   * sus pasos no validan (misma falla cerrada que buscarActiva).
+   */
+  async leerAutoReparacion(
+    id: string,
+    ownerId: string,
+  ): Promise<{ version: number; pasos: PasoDeReceta[]; ganadoras: unknown } | null> {
+    const rows = await this.sql<Array<{ version: number; pasos: unknown; ganadoras: unknown }>>`
+      select version, pasos, ganadoras
+      from recetas_web
+      where id = ${id} and owner_id = ${ownerId} and estado = 'activa'
+    `;
+    const row = rows[0];
+    if (row === undefined) return null;
+    const pasos = parsearPasosDeReceta(row.pasos);
+    if (pasos === null) return null;
+    return { version: Number(row.version ?? 1), pasos, ganadoras: row.ganadoras };
+  }
+
+  /**
+   * GUARDA el resultado de la auto reparacion en UN solo UPDATE condicionado por la `version` leida
+   * (candado optimista): registra el historial de ganadoras y, si hubo promocion, reemplaza los
+   * pasos reordenados subiendo `version` y contando el ajuste. Devuelve si escribio.
+   *
+   * ATOMICIDAD (decidida): si otra corrida de la misma receta escribio entre la lectura y este
+   * update, la version ya no coincide, el update no toca NADA y el llamador solo lo loguea. El shape
+   * de `pasos` jamas queda mezclado de dos corridas; gana la que llego primero y la siguiente
+   * corrida vuelve a registrar.
+   */
+  async guardarAutoReparacion(
+    id: string,
+    ownerId: string,
+    version: number,
+    ganadoras: unknown,
+    pasosPromovidos: PasoDeReceta[] | null,
+    promociones: number,
+  ): Promise<boolean> {
+    const json = this.sql.json(ganadoras as Parameters<Sql['json']>[0]);
+    const rows =
+      pasosPromovidos === null
+        ? await this.sql<Array<{ id: string }>>`
+            update recetas_web set
+              ganadoras = ${json},
+              actualizada_en = now()
+            where id = ${id} and owner_id = ${ownerId} and estado = 'activa'
+              and version = ${version}
+            returning id
+          `
+        : await this.sql<Array<{ id: string }>>`
+            update recetas_web set
+              ganadoras = ${json},
+              pasos = ${this.sql.json(pasosPromovidos as unknown as Parameters<Sql['json']>[0])},
+              version = version + 1,
+              ajustes_automaticos = ajustes_automaticos + ${promociones},
+              actualizada_en = now()
+            where id = ${id} and owner_id = ${ownerId} and estado = 'activa'
+              and version = ${version}
+            returning id
+          `;
+    return rows.length > 0;
   }
 
   /** Contabiliza una ejecucion por receta (para poder medir el ahorro y detectar recetas muertas). */

@@ -2008,6 +2008,7 @@
     "vacioAyuda": "Ve a Sitios, entra al sitio que quieras y enséñale una tarea haciéndola tú una vez.",
     "usos": "La ha hecho {{n}} veces",
     "sinUsos": "Todavía no la ha hecho",
+    "ajustes": "Se ajustó sola {{n}} veces",
     "ensenadaEn": "Se la enseñaste el {{fecha}}",
     "aprendidaEn": "La aprendió sola el {{fecha}}",
     "borrar": "Que la olvide",

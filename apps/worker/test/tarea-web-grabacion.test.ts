@@ -204,6 +204,7 @@ function makeRecetaGrabada(): RecetaWeb {
     creadaDesdeTrayectoria: null,
     ejecucionesExitosas: 0,
     ejecucionesFallidas: 0,
+    ajustesAutomaticos: 0,
     ultimaEjecucionEn: null,
     creadaEn: '2026-07-24T00:00:00.000Z',
     actualizadaEn: '2026-07-24T00:00:00.000Z',

@@ -72,6 +72,14 @@ import {
   type VeredictoDeVerificacion,
 } from './ejecutor-receta.js';
 import {
+  aplicarPromociones,
+  evaluarPromociones,
+  ganadorasDeCorrida,
+  parsearHistorialGanadoras,
+  registrarGanadoras,
+  type PromocionDeEstrategia,
+} from './promocion-estrategias.js';
+import {
   firmaDeObjetivo,
   parametrosDeclaradosDesdeValores,
   promoverTrayectoria,
@@ -405,6 +413,24 @@ export interface RepositorioRecetasParaWorker {
   marcarObsoleta(id: string, ownerId: string): Promise<void>;
   reemplazarPasos(id: string, ownerId: string, pasos: PasoDeReceta[]): Promise<void>;
   registrarEjecucion(id: string, ownerId: string, exitosa: boolean): Promise<void>;
+  /**
+   * AUTO REPARACION (V038): lectura fresca del estado vigente (version, pasos, historial de
+   * ganadoras) y guardado ATOMICO del registro y de la eventual promocion, condicionado por la
+   * version leida. OPCIONALES con el mismo criterio que el resto del cableado optativo: sin ellos no
+   * se registran ganadoras ni se promueve nada, y todo lo demas corre igual.
+   */
+  leerAutoReparacion?(
+    id: string,
+    ownerId: string,
+  ): Promise<{ version: number; pasos: PasoDeReceta[]; ganadoras: unknown } | null>;
+  guardarAutoReparacion?(
+    id: string,
+    ownerId: string,
+    version: number,
+    ganadoras: unknown,
+    pasosPromovidos: PasoDeReceta[] | null,
+    promociones: number,
+  ): Promise<boolean>;
 }
 
 /** Dependencias del job de tarea web. index.ts cablea las reales; los tests pasan fakes. */
@@ -1468,16 +1494,6 @@ async function ejecutarPorReceta(
   );
 
   const completada = resultado.desenlace.tipo === 'completada';
-  await guardarTrayectoriaBestEffort(
-    deps,
-    job,
-    sitio,
-    objetivo,
-    completada ? 'exitosa' : 'fallida',
-    iniciadaEn,
-    { acciones: [], tokensIn: resultado.tokensIn, tokensOut: resultado.tokensOut },
-    resultado.pasos,
-  );
 
   // AUTO REPARACION (D5) y JUBILACION (D6): las dos son best-effort; su fallo no cambia el desenlace.
   // Una receta que se rindio DESPUES de tocar la pagina se jubila aunque no haya llegado al umbral
@@ -1491,6 +1507,26 @@ async function ejecutarPorReceta(
     obsoleta:
       (resultado.desenlace.tipo === 'abandonada' && resultado.desenlace.obsoleta) || seRindioAMedias,
   });
+
+  // PROMOCION DE ESTRATEGIAS (V038): solo tras un desenlace EXITOSO se registran las ganadoras y,
+  // si la regla aplica, se reordena el paso. Corre DESPUES del mantenimiento de arriba (la lectura
+  // fresca ve los pasos ya reparados y la version ya subida) y ANTES de persistir la trayectoria,
+  // para que la etiqueta RECETA:PROMOVIDA quede en el detalle de pasos de ESTA ejecucion. Best-effort
+  // total: cualquier fallo se loguea adentro y jamas cambia el desenlace del job.
+  const promociones = completada
+    ? await promoverEstrategiasBestEffort(deps, job, receta, resultado.ganadoras)
+    : [];
+
+  await guardarTrayectoriaBestEffort(
+    deps,
+    job,
+    sitio,
+    objetivo,
+    completada ? 'exitosa' : 'fallida',
+    iniciadaEn,
+    { acciones: [], tokensIn: resultado.tokensIn, tokensOut: resultado.tokensOut },
+    promociones.length === 0 ? resultado.pasos : conEtiquetasDePromocion(resultado.pasos, promociones),
+  );
 
   if (resultado.desenlace.tipo === 'detenida') {
     deps.logger.warn('tarea web DETENIDA antes de ejecutar la accion (ejecucion por receta)', {
@@ -1533,6 +1569,101 @@ async function ejecutarPorReceta(
     escalados: resultado.escalados,
   });
   return { tipo: 'completada' };
+}
+
+/**
+ * REGISTRA que estrategia gano en cada paso de una corrida EXITOSA por receta y, si la regla de
+ * promocion aplica (promocion-estrategias.ts: la primaria no gano en las ultimas 2 exitosas y gano
+ * SIEMPRE el mismo fallback), reordena ese paso poniendo la ganadora de primaria. Devuelve las
+ * promociones aplicadas, para etiquetar la traza de ESTA ejecucion (RECETA:PROMOVIDA).
+ *
+ * Best-effort SIEMPRE: cualquier fallo (lectura, carrera de versiones, escritura) se loguea y
+ * devuelve lista vacia; el desenlace del job ya esta decidido y esto no lo toca. La escritura es UN
+ * update condicionado por la version leida (candado optimista del repositorio): si dos corridas de
+ * la misma receta terminan a la vez, una gana y la otra solo pierde su registro de esta corrida.
+ */
+async function promoverEstrategiasBestEffort(
+  deps: TareaWebDeps,
+  job: Job,
+  receta: RecetaWeb,
+  ganadoras: Array<{ paso: number; indice: number }>,
+): Promise<PromocionDeEstrategia[]> {
+  const recetas = deps.recetas;
+  if (!recetas?.leerAutoReparacion || !recetas.guardarAutoReparacion) return [];
+  if (ganadoras.length === 0) return [];
+  try {
+    const fresco = await recetas.leerAutoReparacion(receta.id, job.ownerId);
+    if (fresco === null) return [];
+    // Las claves de las ganadoras salen de los pasos QUE SE EJECUTARON (los indices registrados
+    // apuntan a esa lista); la regla y el reordenamiento corren sobre los pasos VIGENTES en la base,
+    // que pudieron cambiar durante la corrida por la reparacion de selectores.
+    const historial = registrarGanadoras(
+      parsearHistorialGanadoras(fresco.ganadoras),
+      ganadorasDeCorrida(receta.pasos, ganadoras),
+      job.id,
+      new Date().toISOString(),
+    );
+    const promociones = evaluarPromociones(historial, fresco.pasos);
+    const pasosPromovidos =
+      promociones.length === 0 ? null : aplicarPromociones(fresco.pasos, promociones);
+    const escrito = await recetas.guardarAutoReparacion(
+      receta.id,
+      job.ownerId,
+      fresco.version,
+      historial,
+      pasosPromovidos,
+      promociones.length,
+    );
+    if (!escrito) {
+      deps.logger.info(
+        'tarea web: otra corrida actualizo lo aprendido primero; el registro de ganadoras de esta se descarta',
+        { jobId: job.id, recetaId: receta.id },
+      );
+      return [];
+    }
+    for (const promocion of promociones) {
+      deps.logger.info('tarea web: la tarea se ajusto sola (estrategia promovida a primaria)', {
+        jobId: job.id,
+        recetaId: receta.id,
+        paso: promocion.pasoIdx,
+        indicePromovido: promocion.indiceAnterior,
+        estrategia: JSON.stringify(promocion.estrategia),
+      });
+    }
+    return promociones;
+  } catch (error) {
+    deps.logger.warn(
+      'tarea web: no se pudo registrar que estrategias ganaron (se ignora, best-effort)',
+      { jobId: job.id, recetaId: receta.id, err: describir(error) },
+    );
+    return [];
+  }
+}
+
+/**
+ * Agrega a la traza de la corrida un paso sintetico RECETA:PROMOVIDA por cada promocion aplicada,
+ * visible en /actividad igual que las etiquetas receta:determinista y receta:escalado. El selector
+ * lleva la estrategia promovida (misma representacion que el selector de los demas pasos de receta).
+ */
+function conEtiquetasDePromocion(
+  pasos: PasoCensurado[],
+  promociones: PromocionDeEstrategia[],
+): PasoCensurado[] {
+  const etiquetas = promociones.map((promocion, i): PasoCensurado => ({
+    idx: pasos.length + i,
+    accion: {
+      tipo: 'receta:promovida',
+      instruccion: `la tarea se ajusto sola: el paso ${promocion.pasoIdx + 1} ahora se localiza primero de otra forma (${promocion.clave})`,
+      metodo: null,
+      argumentos: [],
+    },
+    selector: JSON.stringify(promocion.estrategia),
+    valorCensurado: null,
+    estrategias: [],
+    url: null,
+    exito: true,
+  }));
+  return [...pasos, ...etiquetas];
 }
 
 /** Repara, jubila y contabiliza la receta tras una corrida. Best-effort: nunca cambia el desenlace. */

@@ -46,6 +46,12 @@ function TarjetaDeTarea({ tarea }: { tarea: TareaEnsenada }) {
             {' · '}
             {tarea.usos > 0 ? t('ensenadas.usos', { n: tarea.usos }) : t('ensenadas.sinUsos')}
           </p>
+          {/* Solo si alguna vez se ajusto sola: una linea discreta, sin nada tecnico. */}
+          {(tarea.ajustes ?? 0) > 0 && (
+            <p className="mt-0.5 text-[12.5px] text-muted-soft">
+              {t('ensenadas.ajustes', { n: tarea.ajustes })}
+            </p>
+          )}
 
           <div className="mt-3">
             <p className="text-[12px] uppercase tracking-[0.07em] text-muted">

@@ -38,6 +38,9 @@ function toTareaEnsenadaDto(receta: RecetaWeb) {
     ensenadaEn: receta.creadaEn,
     usos: receta.ejecucionesExitosas,
     ultimoUsoEn: receta.ultimaEjecucionEn,
+    // Cuantas veces se ajusto sola (auto reparacion, V038): la consola lo muestra como una linea
+    // discreta. 0 en toda receta anterior a la migracion.
+    ajustes: receta.ajustesAutomaticos,
     // Que datos hay que darle cada vez. Sale de los pasos (marcadoresDeParametros), que es la unica
     // fuente que no puede divergir de lo que la ejecucion va a pedir de verdad.
     datosQueNecesita: marcadoresDeParametros(receta.pasos),
