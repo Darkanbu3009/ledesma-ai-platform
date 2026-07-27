@@ -9,7 +9,8 @@
     "build": "npm run parche && tsc -p tsconfig.build.json",
     "start": "node --experimental-websocket dist/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "validar-percepcion": "tsx scripts/validar-percepcion.ts"
   },
   "dependencies": {
     "@browserbasehq/sdk": "^2.16.0",

@@ -14,6 +14,7 @@ import {
   AccionBloqueadaError,
   AccionSinConfirmarError,
   FalloDeEsquemaDelMotorError,
+  MotorCortoPorElementoRepetidoError,
   PermanentExecutionError,
 } from './errores.js';
 import { SalidaDeRedNoDisponibleError, expiracionDeContexto } from './sitios.js';
@@ -54,6 +55,7 @@ import {
 } from './verificacion.js';
 import type { SubidorDeScreenshots } from './storage.js';
 import { censurarObjetivo, censurarTexto } from './censura.js';
+import type { PerceptorDePagina, PercepcionDePagina } from './percepcion.js';
 import {
   extraerPasosCensurados,
   type AccionCrudaDeMotor,
@@ -205,6 +207,13 @@ export interface NavegadorParaTarea {
    * objetivo del usuario es lo que el agente tecleo o eligio.
    */
   leerCamposDeLaPagina(sesionExternaId: string): Promise<CampoDeLaPagina[]>;
+  /**
+   * PERCEPCION DE LA PAGINA (FIX A y B): huella ligera (URL, titulo, nodos), foco y campos con el
+   * MISMO lector de chips de la verificacion. OPCIONAL para no romper los fakes de los tests: sin
+   * este metodo la tarea corre exactamente como antes (cero percepcion). Nunca lanza: null = no se
+   * pudo leer.
+   */
+  percibirPagina?(sesionExternaId: string): Promise<PercepcionDePagina | null>;
   /** LEE el texto visible de la pagina (o del elemento del selector), acotado y sin tocarla. */
   leerTextoVisible(sesionExternaId: string, selector?: string): Promise<string>;
   /**
@@ -322,6 +331,12 @@ export interface MotorDeTareaWeb {
      * motor no expone ninguna herramienta para salir del sitio en el que corre.
      */
     cambiador?: CambiadorDeSitio | undefined;
+    /**
+     * PERCEPCION DE EFECTO Y DE CAMPOS (FIX A y B): el motor lo consulta tras cada paso que toca la
+     * pagina y adjunta al contexto del agente las lineas resultantes (click sin efecto, donde
+     * aterrizo el texto tecleado). Ausente cuando el navegador no expone percepcion: cero cambio.
+     */
+    perceptor?: PerceptorDePagina | undefined;
     /** Ventana de historial que se reenvia al modelo en cada llamada (TAREA_WEB_HISTORIAL_PASOS). */
     historialPasos: number;
     /** Cuando se toma una captura de pantalla durante la corrida (TAREA_WEB_SCREENSHOTS). */
@@ -2677,6 +2692,23 @@ function crearObservadorDePasos(
 }
 
 /**
+ * Traduce el CORTE POR FALLO DE ESQUEMA del motor al fallo permanente del job (FIX D). Cuando el
+ * corte fue por REPETICION del MISMO identificador, el error lleva el nombre-prefijo estable
+ * MOTOR_CORTO_POR_ELEMENTO_REPETIDO, con lo que el last_error del job (describeError en
+ * execution.ts: `${name}: ${message}`) empieza exactamente con ese prefijo. La trayectoria acumulada
+ * ya quedo preservada por ejecutarMotorConRegistro ANTES de que este error se propague.
+ */
+export function convertirCorteDelMotor(error: FalloDeEsquemaDelMotorError): PermanentExecutionError {
+  const mensaje =
+    `el motor de navegacion fallo al resolver las acciones de la pagina (${error.message}); ` +
+    'la tarea se corto para no seguir reintentando lo mismo. No es un problema del objetivo: ' +
+    'vuelve a pedirla mas tarde';
+  return error.elementIdRepetido !== undefined
+    ? new MotorCortoPorElementoRepetidoError(mensaje)
+    : new PermanentExecutionError(mensaje);
+}
+
+/**
  * Corre el motor con el deadline de pared del worker (mismo patron AbortController de 7.1d). La
  * senal EXTERNA (cancelacion cooperativa) se encadena al mismo controller: cualquiera de las dos
  * (deadline o cancelacion) aborta la corrida del motor a mitad de tarea.
@@ -2698,6 +2730,13 @@ async function ejecutarMotor(
 ): Promise<ResultadoMotor> {
   const maxPasos = presupuesto?.maxPasos ?? deps.maxPasos;
   const timeoutMs = presupuesto?.timeoutMs ?? deps.runTimeoutMs;
+  // PERCEPCION (FIX A y B): solo si el adaptador del navegador la expone. El bind conserva el this
+  // del adaptador; el motor recibe una funcion cerrada sobre LA sesion de este tramo.
+  const percibirPagina = deps.navegador.percibirPagina?.bind(deps.navegador);
+  const perceptor: PerceptorDePagina | undefined =
+    percibirPagina !== undefined
+      ? { percibir: () => percibirPagina(sesionExternaId) }
+      : undefined;
   const controller = new AbortController();
   let expiroDeadline = false;
   const alAbortarExterno = (): void => controller.abort();
@@ -2720,6 +2759,7 @@ async function ejecutarMotor(
       registrarAccion,
       guardia,
       ...(cambiador !== undefined ? { cambiador } : {}),
+      ...(perceptor !== undefined ? { perceptor } : {}),
       historialPasos: deps.historialPasos,
       modoScreenshots: deps.modoScreenshots,
       reportarConsumo,
@@ -2745,11 +2785,7 @@ async function ejecutarMotor(
       throw new PermanentExecutionError(error.message);
     }
     if (error instanceof FalloDeEsquemaDelMotorError) {
-      throw new PermanentExecutionError(
-        `el motor de navegacion fallo al resolver las acciones de la pagina (${error.message}); ` +
-          'la tarea se corto para no seguir reintentando lo mismo. No es un problema del objetivo: ' +
-          'vuelve a pedirla mas tarde',
-      );
+      throw convertirCorteDelMotor(error);
     }
     if (expiroDeadline) {
       throw new PermanentExecutionError(

@@ -18,6 +18,8 @@ declare module 'jsdom' {
     dispatchEvent(evento: unknown): boolean;
     setAttribute(nombre: string, valor: string): void;
     appendChild(hijo: ElementoJsdom): ElementoJsdom;
+    /** Enfoca el elemento (percepcion-dom.test.ts: el descriptor del foco). */
+    focus(): void;
   }
 
   /** Constructor de evento tal como lo expone la ventana (Event, MouseEvent, KeyboardEvent). */
@@ -29,6 +31,7 @@ declare module 'jsdom' {
   export interface VentanaJsdom {
     document: {
       getElementById(id: string): ElementoJsdom | null;
+      querySelector(selector: string): ElementoJsdom | null;
       createElement(tag: string): ElementoJsdom;
       body: ElementoJsdom;
     };
