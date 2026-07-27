@@ -583,6 +583,49 @@ export function useTerminarJob() {
   });
 }
 
+/** Cada cuanto y hasta cuando se sondea el job de guardado de una tarea aprendida. */
+const GUARDAR_TAREA_POLL_MS = 1500;
+const GUARDAR_TAREA_POLL_MAX_MS = 12_000;
+
+function esperarMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * GUARDAR COMO TAREA APRENDIDA (POST /v1/tareas-ensenadas/desde-job): convierte el exito de una
+ * tarea web del motor libre en una tarea que el sistema ya sabe hacer. El backend solo ENCOLA (202 +
+ * jobId del job de conversion); aca se sondea ese job unos segundos para poder reportar el desenlace
+ * real en la misma interaccion. Si la conversion falla, la mutacion falla con su mensaje; si sigue
+ * en proceso al agotar el sondeo, se da por aceptada y el refetch del historial la refleja despues.
+ * Al terminar invalida ['jobs'] (la tarjeta pasa a "guardada") y ['tareas-ensenadas'] (la tarea
+ * aparece en la pantalla de lo que ya sabe hacer).
+ */
+export function useGuardarTareaAprendida() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (jobId: string) => {
+      const aceptado = await apiFetch<{ status: string; jobId: string }>(
+        '/v1/tareas-ensenadas/desde-job',
+        { method: 'POST', body: JSON.stringify({ jobId }) },
+      );
+      const limite = Date.now() + GUARDAR_TAREA_POLL_MAX_MS;
+      while (Date.now() < limite) {
+        const { job } = await apiFetch<{ job: JobActivity }>(`/v1/jobs/${aceptado.jobId}`);
+        if (job.status === 'completed') return job;
+        if (job.status === 'failed') {
+          throw new Error(job.lastError ?? 'la conversion fallo');
+        }
+        await esperarMs(GUARDAR_TAREA_POLL_MS);
+      }
+      return null;
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['jobs'] });
+      void qc.invalidateQueries({ queryKey: ['tareas-ensenadas'] });
+    },
+  });
+}
+
 /**
  * APROBAR un checkpoint de tarea web (POST /v1/aprobaciones/:id/aprobar, 7.1e): la accion pendiente
  * queda AUTORIZADA, el backend registra la intervencion Art.22 y devuelve el job pausado a la cola;

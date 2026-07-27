@@ -1781,6 +1781,13 @@
       "mensaje": "Mensaje",
       "sitio": "Sitio",
       "tareaWeb": "Tarea web"
+    },
+    "guardarTarea": {
+      "boton": "Guardar como tarea aprendida",
+      "guardando": "Guardando la tarea aprendida",
+      "guardada": "Guardada como tarea aprendida",
+      "detalle": "La próxima vez que pidas esta tarea se hará sin volver a analizar el sitio.",
+      "error": "No se pudo guardar la tarea aprendida. Inténtalo de nuevo."
     }
   },
   "multisitio": {

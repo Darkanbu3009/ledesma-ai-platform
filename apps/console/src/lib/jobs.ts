@@ -42,6 +42,13 @@ export interface JobActivity {
   conLoAprendido?: boolean;
   /** Ademas, el sitio habia cambiado y la tarea se ajusto sola. */
   ajustadaSola?: boolean;
+  /**
+   * La tarea web termino con exito corriendo con el motor y su registro alcanza para GUARDARLA como
+   * tarea aprendida (todavia sin guardar). Lo deriva el backend; ausente = no ofrecer el boton.
+   */
+  guardableComoTarea?: boolean;
+  /** Esta tarea ya se guardo como tarea aprendida. */
+  guardadaComoTarea?: boolean;
 }
 
 /** Una pagina del historial: los jobs + la metadata de paginacion que devuelve el backend. */
