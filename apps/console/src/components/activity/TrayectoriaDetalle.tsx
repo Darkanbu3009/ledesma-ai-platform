@@ -18,8 +18,10 @@ import {
  * ('[CENSURADO]'); aqui no hay nada que ocultar de mas. Sin promocion a receta ni replay (PR futuro).
  */
 
-/** Pill de estado de una trayectoria (mismos tonos que los estados de jobs). */
-function EstadoTrayectoriaBadge({ estado }: { estado: Trayectoria['estado'] }) {
+/** Pill de estado de una trayectoria (mismos tonos que los estados de jobs). Una ejecucion cuyo
+ *  job sigue corriendo se muestra "En curso" (FIX D): su estado persistido es provisional. */
+function EstadoTrayectoriaBadge({ estado, enCurso }: { estado: Trayectoria['estado']; enCurso?: boolean }) {
+  const { t } = useTranslation();
   const tone: Record<Trayectoria['estado'], string> = {
     exitosa: 'border-ok/30 bg-ok/10 text-ok',
     fallida: 'border-[rgba(192,73,43,0.3)] bg-[rgba(192,73,43,0.08)] text-[#C0492B]',
@@ -29,10 +31,10 @@ function EstadoTrayectoriaBadge({ estado }: { estado: Trayectoria['estado'] }) {
     <span
       className={[
         'inline-flex flex-none items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
-        tone[estado],
+        enCurso === true ? 'border-line bg-line-soft text-muted' : tone[estado],
       ].join(' ')}
     >
-      {trayectoriaEstadoLabel(estado)}
+      {enCurso === true ? t('actividad.trayectoria.estado.enCurso') : trayectoriaEstadoLabel(estado)}
     </span>
   );
 }
@@ -78,7 +80,15 @@ function PasoRow({ paso }: { paso: PasoDeTrayectoria }) {
 }
 
 /** Una ejecucion del motor: resumen (estado, duracion, tokens) + lista de pasos ordenada. */
-function TrayectoriaBloque({ trayectoria, numero }: { trayectoria: Trayectoria; numero: number }) {
+function TrayectoriaBloque({
+  trayectoria,
+  numero,
+  enCurso,
+}: {
+  trayectoria: Trayectoria;
+  numero: number;
+  enCurso?: boolean;
+}) {
   const { t } = useTranslation();
   return (
     <div className="rounded-xl border border-line bg-line-soft/40">
@@ -86,7 +96,7 @@ function TrayectoriaBloque({ trayectoria, numero }: { trayectoria: Trayectoria; 
         <span className="font-semibold text-ink">
           {t('actividad.trayectoria.ejecucion', { num: numero })}
         </span>
-        <EstadoTrayectoriaBadge estado={trayectoria.estado} />
+        <EstadoTrayectoriaBadge estado={trayectoria.estado} {...(enCurso === true ? { enCurso: true } : {})} />
         <span>{t('actividad.trayectoria.duracion', { valor: formatearDuracion(trayectoria.duracionMs) })}</span>
         {trayectoria.tokensIn !== null && trayectoria.tokensOut !== null && (
           <span>
@@ -109,9 +119,9 @@ function TrayectoriaBloque({ trayectoria, numero }: { trayectoria: Trayectoria; 
   );
 }
 
-export function TrayectoriaDetalle({ jobId }: { jobId: string }) {
+export function TrayectoriaDetalle({ jobId, enCurso = false }: { jobId: string; enCurso?: boolean }) {
   const { t } = useTranslation();
-  const { data: trayectorias, isLoading, isError } = useTrayectoriasDeJob(jobId, true);
+  const { data: trayectorias, isLoading, isError } = useTrayectoriasDeJob(jobId, true, enCurso);
 
   if (isLoading) {
     return (
@@ -149,7 +159,14 @@ export function TrayectoriaDetalle({ jobId }: { jobId: string }) {
         </div>
       )}
       {trayectorias.map((trayectoria, i) => (
-        <TrayectoriaBloque key={trayectoria.id} trayectoria={trayectoria} numero={i + 1} />
+        <TrayectoriaBloque
+          key={trayectoria.id}
+          trayectoria={trayectoria}
+          numero={i + 1}
+          // Solo la ULTIMA ejecucion de un job que sigue corriendo esta en curso (FIX D): las
+          // anteriores ya terminaron con su estado real.
+          enCurso={enCurso && i === trayectorias.length - 1}
+        />
       ))}
     </div>
   );

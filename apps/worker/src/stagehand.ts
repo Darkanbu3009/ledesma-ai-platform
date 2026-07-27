@@ -6,6 +6,7 @@ import {
   AccionSinConfirmarError,
   CambioDeSitioError,
   FalloDeEsquemaDelMotorError,
+  GuardiaBloqueoReintentosError,
 } from './errores.js';
 import { TOOL_CAMBIAR_DE_SITIO } from './prompt-tarea-web.js';
 import {
@@ -263,6 +264,12 @@ export interface ActBlindado {
    * de la tool la atrapa el handler de Stagehand, asi que el adaptador la reconstruye al terminar.
    */
   sinConfirmar(): string | null;
+  /**
+   * Mensaje del corte si la guardia bloqueo el reintento irreversible por SEGUNDA vez consecutiva
+   * (FIX C); null si no ocurrio. El adaptador lo convierte en GuardiaBloqueoReintentosError, cuyo
+   * nombre es el prefijo estable GUARDIA_BLOQUEO_REINTENTOS_IRREVERSIBLES del last_error.
+   */
+  reintentosAgotados(): string | null;
 }
 
 /** Espera real entre reintentos; los tests inyectan la suya para no dormir. */
@@ -309,12 +316,22 @@ export function crearActBlindado(params: {
   registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined;
   esperar?: ((ms: number) => Promise<void>) | undefined;
   guardia?: GuardiaDeAccion | undefined;
+  /**
+   * CORTE REAL del bucle del agente (FIX C). La evidencia de produccion del 27 jul demostro que
+   * lanzar desde la tool NO detiene el bucle: el handler de Stagehand atrapa la excepcion y se la
+   * devuelve al modelo como fallo de tool, y la corrida ciclo ~10 minutos contra la guardia hasta el
+   * deadline de pared. Este hook aborta el signal de la corrida en el mismo instante en que el
+   * blindaje registra un desenlace terminal (bloqueo, sin efecto confirmado, reintentos agotados o
+   * corte por esquema): ninguna corrida vuelve a ciclar contra la guardia.
+   */
+  alTerminar?: (() => void) | undefined;
 }): ActBlindado {
   const esperar = params.esperar ?? esperarMs;
   let fallosConsecutivos = 0;
   let corte: FalloDeEsquemaDelMotorError | null = null;
   let bloqueo: string | null = null;
   let sinConfirmar: string | null = null;
+  let reintentosAgotados: string | null = null;
   let autorizoIrreversible = false;
   /** Ultimo elementId que el motor rechazo; se compara con el del intento siguiente. */
   let elementIdRechazado: string | null = null;
@@ -363,6 +380,7 @@ export function crearActBlindado(params: {
             { elementId },
           );
           corte = new FalloDeEsquemaDelMotorError(fallosConsecutivos, elementId);
+          params.alTerminar?.();
           throw corte;
         }
         if (intento < MAX_REINTENTOS_ESQUEMA) {
@@ -377,6 +395,7 @@ export function crearActBlindado(params: {
         fallosConsecutivos += 1;
         if (fallosConsecutivos >= MAX_FALLOS_ESQUEMA_CONSECUTIVOS) {
           corte = new FalloDeEsquemaDelMotorError(fallosConsecutivos);
+          params.alTerminar?.();
           throw corte;
         }
         return {
@@ -394,31 +413,52 @@ export function crearActBlindado(params: {
     corte: () => corte,
     bloqueo: () => bloqueo,
     sinConfirmar: () => sinConfirmar,
+    reintentosAgotados: () => reintentosAgotados,
     autorizoIrreversible: () => autorizoIrreversible,
     ejecutar: async (accion: string): Promise<SalidaDeActBlindado> => {
       // La accion NO se registra en la traza: no llego al navegador. La constancia de por que se
       // bloqueo es el paso de verificacion que deja la propia guardia.
       const veredicto = await params.guardia?.revisar(accion);
       if (veredicto?.tipo === 'bloquear') {
+        // Cada causa termina la corrida con SU error (y su prefijo estable de last_error). El hook
+        // alTerminar aborta el bucle en el acto: lanzar desde la tool no basta (ver arriba).
+        if (veredicto.causa === 'sin_efecto') {
+          sinConfirmar = veredicto.mensaje;
+          params.alTerminar?.();
+          throw new AccionSinConfirmarError(veredicto.mensaje);
+        }
+        if (veredicto.causa === 'guardia_reintentos') {
+          reintentosAgotados = veredicto.mensaje;
+          params.alTerminar?.();
+          throw new GuardiaBloqueoReintentosError(veredicto.mensaje);
+        }
         bloqueo = veredicto.mensaje;
+        params.alTerminar?.();
         throw new AccionBloqueadaError(veredicto.mensaje);
       }
-      // INCOMPLETO (CAMBIO 1): la accion no pasa al navegador, pero la corrida NO se corta. El
-      // motivo vuelve al modelo como fallo de la tool para que termine de llenar los campos y la
-      // reintente; a diferencia del bloqueo, aqui el sistema no detuvo la tarea, solo esta accion.
-      if (veredicto?.tipo === 'incompleto') {
+      // INCOMPLETO (CAMBIO 1) y RECHAZAR (FIX C): la accion no pasa al navegador, pero la corrida NO
+      // se corta. El motivo vuelve al modelo como fallo de la tool; en 'rechazar' el texto ademas es
+      // terminal (la corrida terminara y el agente no debe insistir).
+      if (veredicto?.tipo === 'incompleto' || veredicto?.tipo === 'rechazar') {
         return { success: false, error: veredicto.mensaje };
       }
       const registro = registrarInicio(accion);
       const salida = await actuarConReintentos(accion, registro);
-      // CONFIRMACION (CAMBIO 4): tras EJECUTAR una accion irreversible se relee el DOM para ver que
-      // surtio efecto. Corre haya salido bien o mal la llamada: lo que decide es la pagina, no lo
-      // que reporte la tool. Sin confirmacion la tarea termina aqui y NO se reintenta.
+      // CONFIRMACION (CAMBIO 4 + FIX A): tras EJECUTAR una accion irreversible se relee el DOM para
+      // ver que surtio efecto. Corre haya salido bien o mal la llamada: lo que decide es la pagina,
+      // no lo que reporte la tool. Sin confirmacion:
+      //  - primera vez (terminal false): el mensaje vuelve al agente con la instruccion del UNICO
+      //    reintento autorizado (act + rol/aria-label);
+      //  - reintento (terminal true): la tarea termina aqui y NO se vuelve a intentar.
       if (veredicto?.tipo === 'permitir' && veredicto.confirmar === true && params.guardia) {
         autorizoIrreversible = true;
         const confirmacion = await params.guardia.confirmar();
         if (!confirmacion.confirmada) {
+          if (!confirmacion.terminal) {
+            return { success: false, error: confirmacion.mensaje };
+          }
           sinConfirmar = confirmacion.mensaje;
+          params.alTerminar?.();
           throw new AccionSinConfirmarError(confirmacion.mensaje);
         }
       }
@@ -633,17 +673,23 @@ export function herramientaScreenshotConPolitica(params: {
 /**
  * TOOLS QUE SE RETIRAN cuando la corrida lleva GUARDIA (revision adversarial). La guardia solo puede
  * interponerse en `act`, que es la unica tool que este worker reemplaza; el resto del toolset nativo
- * de Stagehand va directo al navegador. Dos de esas tools alcanzan la MISMA accion irreversible sin
- * pasar por la comparacion:
+ * de Stagehand va directo al navegador. Cuatro de esas tools alcanzan la MISMA accion irreversible
+ * sin pasar por la comparacion:
  *  - `keys`: manda pulsaciones a donde este el foco. Un "Control+Enter" envia el correo que la
  *    guardia acaba de detener.
  *  - `fillForm`: observa y actua sobre cada campo que le describan; su descripcion es texto libre,
  *    asi que puede resolver un boton igual que un input.
+ *  - `click` y `type` (modo hibrido, POR COORDENADAS): no llevan descripcion que la guardia pueda
+ *    clasificar y no resuelven ningun selector. En produccion (27 jul 2026, pasos 36-42) el click
+ *    final del envio salio por esta via, golpeo la cabecera del compose en vez del boton Enviar y
+ *    dejo la corrida en el limbo "ejecutada sin efecto". Los clicks por coordenadas quedan
+ *    PROHIBIDOS en toda corrida con guardia (FIX A): `act` resuelve el elemento por descripcion y
+ *    es la unica via de interaccion permitida.
  * Retirarlas deja a `act` como unica via de interaccion en las tareas que piden una accion bloqueada.
  * En el resto de las tareas (y en la reanudacion tras una decision humana) el toolset queda intacto:
  * no hay accion que verificar y no tiene sentido pagar el costo en capacidad.
  */
-export const TOOLS_RETIRADAS_CON_GUARDIA: readonly string[] = ['keys', 'fillForm'];
+export const TOOLS_RETIRADAS_CON_GUARDIA: readonly string[] = ['keys', 'fillForm', 'click', 'type'];
 
 /**
  * Opciones de `agent.execute()`. Exportada para poder fijar en un test lo que NO lleva: sin
@@ -915,6 +961,15 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
     // esquema) es justo donde mas hace falta saber cuanto se gasto antes de cortarse.
     const consumo = crearAcumuladorDeConsumo();
     try {
+      // CORTE REAL DEL BUCLE (FIX C): senal INTERNA encadenada a la externa. El blindaje la aborta
+      // en el instante en que registra un desenlace terminal (bloqueo, sin efecto, reintentos
+      // agotados o corte por esquema): en produccion quedo demostrado que lanzar desde la tool no
+      // detiene el bucle (Stagehand devuelve la excepcion al modelo como fallo de tool) y la
+      // corrida ciclo contra la guardia hasta el deadline de pared.
+      const controlador = new AbortController();
+      const alAbortarExterno = (): void => controlador.abort();
+      if (params.signal?.aborted === true) controlador.abort();
+      else params.signal?.addEventListener('abort', alAbortarExterno, { once: true });
       // La tool `act` del agente va BLINDADA (CAMBIO 2 y 3): misma forma que la nativa, con
       // reintento ante rechazo de esquema y corte por fallos consecutivos. Se pasa por `tools`, que
       // el handler de Stagehand fusiona DESPUES del toolset nativo y por tanto reemplaza a `act`.
@@ -923,6 +978,7 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
         logger: this.config.logger,
         registrarAccion: params.registrarAccion,
         guardia: params.guardia,
+        alTerminar: () => controlador.abort(),
       });
       // CAPTURAS BAJO POLITICA (TAREA_WEB_SCREENSHOTS): con 'siempre' NO se reemplaza la tool nativa
       // (cero intervencion, comportamiento historico exacto). Con los otros dos modos, la tool del
@@ -957,46 +1013,51 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
           ...(cambiador !== null ? cambiador.herramienta : {}),
         },
       });
-      const resultado = await agente.execute(
-        construirOpcionesDeEjecucion({
-          objetivo: params.objetivo,
-          maxPasos: params.maxPasos,
-          toolTimeoutMs: this.config.toolTimeoutMs,
-          signal: params.signal,
-          observador: params.observador,
-          // Las tools que no son `act` se registran por evidencia; `act` ya la registra el blindaje.
-          registrarAccion: params.registrarAccion,
-          conGuardia: params.guardia !== undefined,
-          historialPasos: params.historialPasos,
-          percepcion,
-          ...(params.reportarConsumo !== undefined
-            ? { registrarConsumo: (paso) => consumo.registrarPaso(paso) }
-            : {}),
-        }),
-      );
-      // Ni el bloqueo de la guardia ni el corte por fallos de esquema pueden viajar como excepcion
-      // desde la tool: el handler de Stagehand atrapa cualquier error del bucle y lo devuelve como
-      // resultado fallido. El bucle YA se corto (lanzar desde la tool lo detiene); aca se convierten
-      // en el error especifico de cada caso.
+      // El desenlace TERMINAL registrado por el blindaje manda sobre lo que devuelva (o lance) el
+      // bucle: cuando el hook alTerminar aborta la corrida, el error que sube es un abort generico y
+      // el motivo real vive en el blindaje. Se consulta en los DOS caminos (retorno y excepcion).
       //
-      // El BLOQUEO va primero: es un desenlace decidido por el sistema, no un fallo del motor, y su
-      // mensaje (la detencion ya serializada) es el que tiene que llegar al usuario.
-      const bloqueo = blindado.bloqueo();
-      if (bloqueo !== null) {
-        throw new AccionBloqueadaError(bloqueo);
-      }
-      // ACCION SIN CONFIRMAR (CAMBIO 4): se ejecuto y el sitio no mostro que surtiera efecto. Va
-      // antes del corte por esquema por el mismo motivo que el bloqueo: es un desenlace del sistema
-      // sobre una accion real, no un fallo del motor, y su mensaje es el que tiene que llegar.
-      const sinConfirmar = blindado.sinConfirmar();
-      if (sinConfirmar !== null) {
-        throw new AccionSinConfirmarError(sinConfirmar);
-      }
-      // El error EXACTO del corte (racha de fallos o repeticion determinista del mismo elementId):
-      // reconstruirlo aca perderia el identificador que hace veraz el diagnostico.
-      const corte = blindado.corte();
-      if (corte !== null) {
-        throw corte;
+      // Orden: reintentos agotados y bloqueo primero (desenlaces decididos por el sistema, no fallos
+      // del motor), despues la accion sin efecto confirmado y al final el corte por esquema.
+      const convertirDesenlaceTerminal = (): Error | null => {
+        const agotados = blindado.reintentosAgotados();
+        if (agotados !== null) return new GuardiaBloqueoReintentosError(agotados);
+        const bloqueo = blindado.bloqueo();
+        if (bloqueo !== null) return new AccionBloqueadaError(bloqueo);
+        const sinConfirmar = blindado.sinConfirmar();
+        if (sinConfirmar !== null) return new AccionSinConfirmarError(sinConfirmar);
+        // El error EXACTO del corte (racha de fallos o repeticion determinista del mismo elementId):
+        // reconstruirlo aca perderia el identificador que hace veraz el diagnostico.
+        return blindado.corte();
+      };
+      const resultado = await (async () => {
+        try {
+          return await agente.execute(
+            construirOpcionesDeEjecucion({
+              objetivo: params.objetivo,
+              maxPasos: params.maxPasos,
+              toolTimeoutMs: this.config.toolTimeoutMs,
+              signal: controlador.signal,
+              observador: params.observador,
+              // Las tools que no son `act` se registran por evidencia; `act` ya la registra el blindaje.
+              registrarAccion: params.registrarAccion,
+              conGuardia: params.guardia !== undefined,
+              historialPasos: params.historialPasos,
+              percepcion,
+              ...(params.reportarConsumo !== undefined
+                ? { registrarConsumo: (paso) => consumo.registrarPaso(paso) }
+                : {}),
+            }),
+          );
+        } catch (error) {
+          throw convertirDesenlaceTerminal() ?? error;
+        } finally {
+          params.signal?.removeEventListener('abort', alAbortarExterno);
+        }
+      })();
+      const terminal = convertirDesenlaceTerminal();
+      if (terminal !== null) {
+        throw terminal;
       }
       // CAMBIO DE SITIO AUTORIZADO: el bucle no fallo, TERMINO este tramo. Va despues de los tres
       // desenlaces anteriores porque todos ellos cierran la tarea entera y este solo cierra el tramo.

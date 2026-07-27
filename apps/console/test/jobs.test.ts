@@ -86,3 +86,28 @@ describe('buildJobsQuery', () => {
     expect(buildJobsQuery({ limit: 5, offset: 5, status: 'running' })).toBe('?limit=5&offset=5&status=running');
   });
 });
+
+describe('cierres del cupo irreversible (prefijos estables del worker)', () => {
+  it('detecta ACCION_SIN_EFECTO_CONFIRMADO solo en jobs failed', async () => {
+    const { esJobSinEfectoConfirmado } = await import('../src/lib/jobs');
+    const conPrefijo = makeJob({
+      status: 'failed',
+      lastError: 'ACCION_SIN_EFECTO_CONFIRMADO: la accion se intento pero no se pudo confirmar',
+    });
+    expect(esJobSinEfectoConfirmado(conPrefijo)).toBe(true);
+    expect(esJobSinEfectoConfirmado(makeJob({ status: 'completed', lastError: conPrefijo.lastError }))).toBe(false);
+    expect(
+      esJobSinEfectoConfirmado(makeJob({ status: 'failed', lastError: 'PermanentExecutionError: x' })),
+    ).toBe(false);
+  });
+
+  it('detecta GUARDIA_BLOQUEO_REINTENTOS_IRREVERSIBLES solo en jobs failed', async () => {
+    const { esJobBloqueadoPorReintentos } = await import('../src/lib/jobs');
+    const conPrefijo = makeJob({
+      status: 'failed',
+      lastError: 'GUARDIA_BLOQUEO_REINTENTOS_IRREVERSIBLES: la guardia bloqueo dos veces seguidas',
+    });
+    expect(esJobBloqueadoPorReintentos(conPrefijo)).toBe(true);
+    expect(esJobBloqueadoPorReintentos(makeJob({ status: 'failed', lastError: null }))).toBe(false);
+  });
+});

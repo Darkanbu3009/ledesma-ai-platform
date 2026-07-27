@@ -385,8 +385,35 @@ export function accionSurtioEfecto(entrada: {
   /** Foto tomada DESPUES de ejecutar. */
   despues: EstadoDeLaPagina;
 }): boolean {
-  if (PATRON_CONFIRMACION.test(normalizarTexto(entrada.despues.texto))) return true;
-  return contenedorDeLaAccionDesaparecio(entrada.parametros, entrada.antes, entrada.despues);
+  return desenlaceDelEfecto(entrada) === 'confirmado';
+}
+
+/**
+ * Los TRES desenlaces del clic irreversible (FIX B):
+ *  - 'confirmado': el sitio mostro su aviso de exito, O el formulario cuyos campos se verificaron
+ *    DESAPARECIO del DOM. Para una accion de envio, que Gmail cierre el compose ES el exito esperado
+ *    (evidencia del 27 jul: exigir ademas que los datos declarados no fueran legibles en la pagina
+ *    hacia inconfirmable un envio real, porque el hilo muestra el mensaje recien enviado).
+ *  - 'formulario_presente': la pagina cambio o no, pero el formulario verificado sigue en el DOM
+ *    (incluido un compose MINIMIZADO: sus campos siguen presentes aunque colapsados, porque el
+ *    lector incluye campos ocultos a proposito). Sin efecto.
+ *  - 'sin_rastro_previo': no habia campos verificados antes de ejecutar; no hay contenedor cuyo
+ *    cierre pueda confirmar nada. Sin efecto (nunca se asume exito).
+ */
+export type DesenlaceDelEfecto = 'confirmado' | 'formulario_presente' | 'sin_rastro_previo';
+
+export function desenlaceDelEfecto(entrada: {
+  parametros: ParametrosDeclarados;
+  antes: EstadoDeLaPagina;
+  despues: EstadoDeLaPagina;
+}): DesenlaceDelEfecto {
+  if (PATRON_CONFIRMACION.test(normalizarTexto(entrada.despues.texto))) return 'confirmado';
+  const formulario = camposDelFormularioVerificado(entrada.parametros, entrada.antes);
+  if (formulario.length === 0) return 'sin_rastro_previo';
+  const presentes = new Set(entrada.despues.campos.map(claveDeCampo));
+  return formulario.some((campo) => presentes.has(claveDeCampo(campo)))
+    ? 'formulario_presente'
+    : 'confirmado';
 }
 
 /** Identidad de un campo entre dos fotos: su contexto normalizado (name/id/tipo/rotulo). */
@@ -395,41 +422,50 @@ function claveDeCampo(campo: CampoDeLaPagina): string {
 }
 
 /**
- * ¿El CONTENEDOR de la accion desaparecio del DOM? Se responde con dos condiciones, las dos
- * necesarias, porque cada una sola tiene su falso positivo conocido:
+ * Los campos del FORMULARIO VERIFICADO: los de la foto previa cuyo valor contiene alguno de los
+ * datos de texto que el usuario declaro (los mismos que la verificacion determinista comparo). Son
+ * el contenedor cuya desaparicion confirma la accion y cuya presencia la niega. Si ningun campo
+ * contiene un dato declarado (o el objetivo no declaro texto), el formulario verificado son TODOS
+ * los campos previos: es el comportamiento anterior y evita que un campo ajeno persistente (una
+ * barra de busqueda llena) vuelva inconfirmable el cierre del redactor.
  *
- *  a) NINGUNO de los campos que habia antes de ejecutar sigue presente. Un chip vacia UN campo (el
- *     destinatario) y deja los demas del redactor -- asunto, cuerpo -- intactos; cerrar la ventana
- *     se los lleva TODOS. Se compara por contexto (name/id/rotulo), no por valor.
- *  b) ningun dato de texto que el usuario declaro sigue siendo legible en la pagina (ni en un campo
- *     ni en el texto visible). Es lo que cubre el caso limite de a): un redactor con un unico campo
- *     lleno, donde el chip deja la lista de campos vacia pero el destinatario sigue pintado en la
- *     pantalla.
- *
- * Sin campos en la foto previa no hay contenedor que pueda cerrarse y la respuesta es NO: una accion
- * sin rastro previo tampoco puede dejar rastro de haberse consumado.
- *
- * Montos y cantidades quedan FUERA de (b) a proposito: un numero aparece en cualquier parte de una
- * pagina (totales, historial, saldos) y su presencia no dice nada sobre si el formulario sigue vivo.
+ * Montos y cantidades quedan FUERA a proposito: un numero aparece en cualquier parte de una pagina
+ * (totales, historial, saldos) y no identifica al formulario.
  */
-function contenedorDeLaAccionDesaparecio(
+export function camposDelFormularioVerificado(
   parametros: ParametrosDeclarados,
   antes: EstadoDeLaPagina,
-  despues: EstadoDeLaPagina,
-): boolean {
-  if (antes.campos.length === 0) return false;
-  const presentes = new Set(despues.campos.map(claveDeCampo));
-  if (antes.campos.some((campo) => presentes.has(claveDeCampo(campo)))) return false;
-  const enLaPagina = [...despues.campos.map((c) => c.valor), despues.texto].map(normalizarTexto);
+): CampoDeLaPagina[] {
+  if (antes.campos.length === 0) return [];
   const declarados = [
     ...parametros.destinatarios,
     ...(parametros.producto !== null ? [parametros.producto] : []),
     ...(parametros.asunto !== null ? [parametros.asunto] : []),
     ...(parametros.cuerpo !== null ? [parametros.cuerpo] : []),
-  ].map(normalizarTexto);
-  return !declarados.some(
-    (valor) => valor !== '' && enLaPagina.some((texto) => texto.includes(valor)),
-  );
+  ]
+    .map(normalizarTexto)
+    .filter((valor) => valor !== '');
+  const delFormulario = antes.campos.filter((campo) => {
+    const valor = normalizarTexto(campo.valor);
+    return valor !== '' && declarados.some((declarado) => valor.includes(declarado));
+  });
+  return delFormulario.length > 0 ? delFormulario : antes.campos;
+}
+
+/**
+ * DOBLE SEGURIDAD del reintento (FIX A): ¿el formulario con los datos verificados SIGUE presente?
+ * Si ya no esta, la accion probablemente surtio efecto con retraso y reintentarla podria duplicarla:
+ * el llamador NO reintenta y termina reportando al usuario que verifique el resultado en el sitio.
+ */
+export function formularioVerificadoPresente(
+  parametros: ParametrosDeclarados,
+  antes: EstadoDeLaPagina,
+  ahora: EstadoDeLaPagina,
+): boolean {
+  const formulario = camposDelFormularioVerificado(parametros, antes);
+  if (formulario.length === 0) return false;
+  const presentes = new Set(ahora.campos.map(claveDeCampo));
+  return formulario.some((campo) => presentes.has(claveDeCampo(campo)));
 }
 
 /**

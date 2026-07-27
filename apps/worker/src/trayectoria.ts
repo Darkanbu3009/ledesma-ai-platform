@@ -100,9 +100,26 @@ export interface TrayectoriaNueva {
 }
 
 /** PUERTO de persistencia de trayectorias. Lo implementa el repositorio del backend (V030) cableado
- *  en index.ts; los tests pasan fakes. El llamador SIEMPRE lo invoca best-effort. */
+ *  en index.ts; los tests pasan fakes. El llamador SIEMPRE lo invoca best-effort.
+ *
+ *  ESCRITURA INCREMENTAL (FIX D): hasta este PR la trayectoria se escribia UNA sola vez al cerrar la
+ *  corrida, asi que /actividad mostraba "sin pasos" durante toda una tarea larga (10 minutos en la
+ *  corrida de produccion del 27 jul) y una ruta de termino anomala podia perderla entera. Los tres
+ *  metodos opcionales permiten crear la cabecera al arrancar, volcar los pasos POR LOTES mientras la
+ *  corrida avanza y REESCRIBIR el contenido final al cerrar (mismo resultado exacto que `guardar`).
+ *  Son opcionales con el criterio de siempre: sin ellos, el worker escribe al cierre como antes. */
 export interface RegistradorDeTrayectorias {
   guardar(trayectoria: TrayectoriaNueva): Promise<void>;
+  /** Crea la cabecera al ARRANCAR la corrida (estado provisional). Devuelve su id, o null si fallo. */
+  iniciar?(trayectoria: TrayectoriaNueva): Promise<string | null>;
+  /** Agrega un LOTE de pasos censurados a una trayectoria en curso (idx ya definitivos del lote). */
+  agregarPasos?(trayectoriaId: string, ownerId: string, pasos: PasoCensurado[]): Promise<void>;
+  /**
+   * CIERRA la trayectoria: actualiza la cabecera (estado, fin, duracion, tokens) y REEMPLAZA los
+   * pasos por la lista final (con las verificaciones intercaladas y los idx renumerados), que es
+   * identica a la que `guardar` habria escrito.
+   */
+  finalizar?(trayectoriaId: string, ownerId: string, trayectoria: TrayectoriaNueva): Promise<void>;
 }
 
 /** Metodos de Playwright que TECLEAN un valor (su argumento es texto del usuario y se censura). */

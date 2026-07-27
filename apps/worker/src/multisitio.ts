@@ -151,8 +151,14 @@ export function construirContinuacionEnOtroSitio(params: {
 export interface EstadoDeSitioParaGuardia {
   /** Acciones irreversibles que salieron al navegador EN ESTE SITIO. Monotono: nunca baja. */
   irreversiblesEjecutadas: number;
-  /** De esas, las que ademas se confirmaron leyendo el DOM. */
+  /** De esas, las que ademas se confirmaron leyendo el DOM. El CUPO se consume recien aqui (FIX A). */
   irreversiblesConfirmadas: number;
+  /**
+   * Reintentos autorizados tras una ejecucion SIN efecto confirmado (FIX A): UNO como maximo por
+   * sitio en toda la tarea. Vive aqui (y no en la guardia) por la misma razon que el cupo: volver a
+   * un sitio ya visitado no puede reabrir el reintento.
+   */
+  reintentosSinEfecto: number;
 }
 
 /** Registro de los estados por sitio de una tarea, indexado por el id de la conexion. */
@@ -161,6 +167,12 @@ export interface RegistroDeSitios {
   estadoDe(connectionId: string): EstadoDeSitioParaGuardia;
   /** ¿Alguna accion irreversible salio al navegador en CUALQUIERA de los sitios de la tarea? */
   algunaAutorizada(): boolean;
+  /**
+   * ¿Alguna accion irreversible salio al navegador SIN que su efecto se confirmara (FIX A)? Con esto
+   * el handler nunca cierra la tarea como exitosa: el paso final quedo sin confirmar y el mensaje al
+   * usuario tiene que decirlo.
+   */
+  algunaSinConfirmar(): boolean;
 }
 
 export function crearRegistroDeSitios(): RegistroDeSitios {
@@ -172,6 +184,7 @@ export function crearRegistroDeSitios(): RegistroDeSitios {
       const nuevo: EstadoDeSitioParaGuardia = {
         irreversiblesEjecutadas: 0,
         irreversiblesConfirmadas: 0,
+        reintentosSinEfecto: 0,
       };
       estados.set(connectionId, nuevo);
       return nuevo;
@@ -179,6 +192,12 @@ export function crearRegistroDeSitios(): RegistroDeSitios {
     algunaAutorizada: (): boolean => {
       for (const estado of estados.values()) {
         if (estado.irreversiblesEjecutadas > 0) return true;
+      }
+      return false;
+    },
+    algunaSinConfirmar: (): boolean => {
+      for (const estado of estados.values()) {
+        if (estado.irreversiblesEjecutadas > estado.irreversiblesConfirmadas) return true;
       }
       return false;
     },

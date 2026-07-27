@@ -174,6 +174,82 @@ export class TrayectoriasWebRepository {
   }
 
   /**
+   * ESCRITURA INCREMENTAL (FIX D), paso 1: crea SOLO la cabecera al arrancar la corrida, con el
+   * estado provisional que mande el worker ('fallida': si el proceso muere a mitad de camino, ese es
+   * ademas el estado veraz). Los pasos del input se ignoran a proposito (van llegando por lotes).
+   */
+  async iniciar(input: NuevaTrayectoria): Promise<string> {
+    const rows = await this.sql<Array<{ id: string }>>`
+      insert into trayectorias_web
+        (owner_id, job_id, connection_id, dominio, objetivo, estado, iniciada_en, terminada_en,
+         duracion_ms, tokens_in, tokens_out)
+      values
+        (${input.ownerId}, ${input.jobId}, ${input.connectionId}, ${input.dominio},
+         ${input.objetivo}, ${input.estado}, ${input.iniciadaEn}, ${input.terminadaEn},
+         ${input.duracionMs}, ${input.tokensIn}, ${input.tokensOut})
+      returning id
+    `;
+    return (rows[0] as { id: string }).id;
+  }
+
+  /**
+   * ESCRITURA INCREMENTAL (FIX D), paso 2: agrega UN LOTE de pasos (idx ya definitivos) a una
+   * trayectoria en curso. La pertenencia se verifica dentro de la transaccion: un id ajeno al owner
+   * no escribe nada. Los pasos llegan YA censurados, igual que en `crear`.
+   */
+  async agregarPasos(
+    trayectoriaId: string,
+    ownerId: string,
+    pasos: NuevoPasoTrayectoria[],
+  ): Promise<void> {
+    if (pasos.length === 0) return;
+    await this.sql.begin(async (tx) => {
+      const duena = await tx<Array<{ id: string }>>`
+        select id from trayectorias_web where id = ${trayectoriaId} and owner_id = ${ownerId}
+      `;
+      if (duena.length === 0) return;
+      for (const paso of pasos) {
+        await tx`
+          insert into pasos_trayectoria (trayectoria_id, idx, accion, selector, valor_censurado, url, exito)
+          values
+            (${trayectoriaId}, ${paso.idx}, ${tx.json(paso.accion as Parameters<Sql['json']>[0])},
+             ${paso.selector}, ${paso.valorCensurado}, ${paso.url}, ${paso.exito})
+          on conflict (trayectoria_id, idx) do nothing
+        `;
+      }
+    });
+  }
+
+  /**
+   * ESCRITURA INCREMENTAL (FIX D), paso 3: CIERRA la trayectoria. Actualiza la cabecera (estado
+   * final, fin, duracion, tokens) y REEMPLAZA los pasos por la lista final del worker (con las
+   * verificaciones intercaladas y los idx renumerados), en UNA transaccion: el contenido queda
+   * identico al que `crear` habria escrito de una sola vez.
+   */
+  async finalizar(trayectoriaId: string, ownerId: string, input: NuevaTrayectoria): Promise<void> {
+    await this.sql.begin(async (tx) => {
+      const duena = await tx<Array<{ id: string }>>`
+        update trayectorias_web
+        set estado = ${input.estado}, terminada_en = ${input.terminadaEn},
+            duracion_ms = ${input.duracionMs}, tokens_in = ${input.tokensIn},
+            tokens_out = ${input.tokensOut}
+        where id = ${trayectoriaId} and owner_id = ${ownerId}
+        returning id
+      `;
+      if (duena.length === 0) return;
+      await tx`delete from pasos_trayectoria where trayectoria_id = ${trayectoriaId}`;
+      for (const paso of input.pasos) {
+        await tx`
+          insert into pasos_trayectoria (trayectoria_id, idx, accion, selector, valor_censurado, url, exito)
+          values
+            (${trayectoriaId}, ${paso.idx}, ${tx.json(paso.accion as Parameters<Sql['json']>[0])},
+             ${paso.selector}, ${paso.valorCensurado}, ${paso.url}, ${paso.exito})
+        `;
+      }
+    });
+  }
+
+  /**
    * Trayectorias de UN job del owner (mas viejas primero: el orden natural de lectura es la corrida
    * inicial y despues la reanudacion), cada una con sus pasos ordenados por idx. Un job ajeno o sin
    * trayectorias devuelve lista vacia.

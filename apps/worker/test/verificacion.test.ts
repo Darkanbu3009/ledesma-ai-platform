@@ -4,7 +4,9 @@ import { extraerParametrosDeclarados } from '../src/parametros-objetivo.js';
 import {
   accionSurtioEfecto,
   construirPasoDeVerificacion,
+  desenlaceDelEfecto,
   dominioExcluido,
+  formularioVerificadoPresente,
   mensajeDeDetencion,
   mensajeDeIncompleto,
   verificarAccion,
@@ -329,12 +331,15 @@ describe('accionSurtioEfecto', () => {
       expect(accionSurtioEfecto({ parametros, antes, despues })).toBe(false);
     });
 
-    it('un redactor de UN solo campo cuyo dato quedo pintado como chip: NO confirmada', () => {
-      // Caso limite: sin campos en la foto siguiente, la lista de campos no distingue nada. Lo que
-      // decide es que el dato del usuario sigue legible en la pagina.
+    it('la desaparicion del formulario verificado ES exito, aunque el dato siga legible (FIX B)', () => {
+      // DECISION DE FIX B (27 jul): al enviar con exito, Gmail CIERRA el compose y el hilo muestra
+      // el mensaje recien enviado, asi que exigir ademas que los datos declarados no fueran
+      // legibles en la pagina volvia INCONFIRMABLE un envio real. El caso del chip que vaciaba el
+      // campo ya no puede confundirse con esto: el lector lee los chips como valor del campo
+      // (lector-campos-dom.test.ts), asi que un chip MANTIENE el campo presente en la foto.
       const soloDestinatario = pagina([DESTINATARIO]);
-      const despues = pagina([], 'Nuevo mensaje  Para: juan@ejemplo.com');
-      expect(accionSurtioEfecto({ parametros, antes: soloDestinatario, despues })).toBe(false);
+      const despues = pagina([], 'Conversacion  Para: juan@ejemplo.com');
+      expect(accionSurtioEfecto({ parametros, antes: soloDestinatario, despues })).toBe(true);
     });
 
     it('con el lector corregido el chip MANTIENE el campo presente: NO confirmada (CAMBIO 3)', () => {
@@ -355,6 +360,68 @@ describe('accionSurtioEfecto', () => {
       expect(
         accionSurtioEfecto({ parametros, antes, despues: pagina(antes.campos, 'Mensaje enviado') }),
       ).toBe(true);
+    });
+  });
+
+  /**
+   * FIX B: los TRES desenlaces del clic irreversible. El caso critico de produccion (27 jul): al
+   * enviar con exito Gmail CIERRA el compose, asi que la desaparicion del formulario verificado ES
+   * el efecto esperado del exito; el compose minimizado (campos presentes pero colapsados, y el
+   * lector incluye ocultos) sigue siendo SIN efecto.
+   */
+  describe('desenlaceDelEfecto (FIX B): sin cambio, formulario presente y desaparicion', () => {
+    const OBJETIVO =
+      'envia a juan@ejemplo.com un correo con asunto "Reporte de agosto" y cuerpo "Adjunto el reporte"';
+    const parametros = extraerParametrosDeclarados(OBJETIVO);
+    const PARA = { contexto: 'input email para', valor: 'juan@ejemplo.com' };
+    const ASUNTO = { contexto: 'input subjectbox asunto', valor: 'Reporte de agosto' };
+    const CUERPO = { contexto: 'div contenteditable cuerpo del mensaje', valor: 'Adjunto el reporte' };
+    /** La barra de busqueda llena: un campo AJENO al compose que persiste tras el envio. */
+    const BUSCADOR = { contexto: 'input text buscar correo', valor: 'facturas' };
+    const antes = pagina([BUSCADOR, PARA, ASUNTO, CUERPO]);
+
+    it('compose presente antes y AUSENTE despues: efecto confirmado', () => {
+      // El hilo muestra el mensaje recien enviado y el buscador sigue lleno: nada de eso niega el
+      // exito, porque el formulario VERIFICADO (los campos con los datos declarados) desaparecio.
+      const despues = pagina([BUSCADOR], 'Conversacion  Reporte de agosto  Adjunto el reporte');
+      expect(desenlaceDelEfecto({ parametros, antes, despues })).toBe('confirmado');
+      expect(accionSurtioEfecto({ parametros, antes, despues })).toBe(true);
+    });
+
+    it('compose intacto: sin efecto', () => {
+      expect(desenlaceDelEfecto({ parametros, antes, despues: antes })).toBe('formulario_presente');
+      expect(accionSurtioEfecto({ parametros, antes, despues: antes })).toBe(false);
+    });
+
+    it('compose MINIMIZADO (presente pero colapsado): sin efecto', () => {
+      // El lector de campos incluye los ocultos a proposito, asi que un compose minimizado sigue
+      // aportando sus campos a la foto: el formulario verificado sigue presente.
+      const despues = pagina([BUSCADOR, PARA, ASUNTO, CUERPO], 'Nuevo mensaje (minimizado)');
+      expect(desenlaceDelEfecto({ parametros, antes, despues })).toBe('formulario_presente');
+      expect(accionSurtioEfecto({ parametros, antes, despues })).toBe(false);
+    });
+
+    it('sin campos verificados en la foto previa: jamas se confirma por desaparicion', () => {
+      const vacia = pagina([], 'panel');
+      expect(desenlaceDelEfecto({ parametros, antes: vacia, despues: vacia })).toBe(
+        'sin_rastro_previo',
+      );
+    });
+  });
+
+  /** FIX A (doble seguridad): ¿el formulario con los datos verificados sigue presente? */
+  describe('formularioVerificadoPresente', () => {
+    const parametros = extraerParametrosDeclarados('envia el resumen a juan@ejemplo.com');
+    const PARA = { contexto: 'input email para', valor: 'juan@ejemplo.com' };
+    const BUSCADOR = { contexto: 'input text buscar', valor: 'facturas' };
+    const antes = pagina([BUSCADOR, PARA]);
+
+    it('presente mientras el campo verificado siga en la pagina', () => {
+      expect(formularioVerificadoPresente(parametros, antes, pagina([BUSCADOR, PARA]))).toBe(true);
+    });
+
+    it('ausente cuando el campo verificado desaparecio (aunque el resto siga): efecto probable', () => {
+      expect(formularioVerificadoPresente(parametros, antes, pagina([BUSCADOR]))).toBe(false);
     });
   });
 });

@@ -216,6 +216,36 @@ const CIERRES_DE_ACCION: readonly { etiqueta: string; patron: RegExp }[] = [
 ];
 
 /**
+ * NAVEGACION Y LECTURA (FIX F): acciones que JAMAS se bloquean, tenga o no cupo consumido la
+ * corrida. Existe por la reencarnacion del bug de la etiqueta inicial (commit 81288ca): con el cupo
+ * consumido, el matcheo por regex sobre la descripcion libre bloqueo "click the Enviados link in the
+ * Gmail left sidebar", que es navegacion de SOLO LECTURA, porque "Enviados" matchea el patron de
+ * enviar (y "Sent folder" matchea \bsent\b). Eso impidio al agente verificar si el correo salio.
+ *
+ * El criterio es DETERMINISTA y deliberadamente estrecho:
+ *  - un scroll, una captura o una lectura explicita nunca son la accion irreversible;
+ *  - una descripcion que nombra un DESTINO de navegacion (link, folder, sidebar, carpeta, pestana,
+ *    bandeja...) es ir a un lugar, no consumar un formulario;
+ *  - PERO cualquier GATILLO de accion (button/boton, submit, press/pulsa, un atajo de teclado)
+ *    anula la excepcion: "click the Enviar button" y "press Ctrl+Enter to send" NO son navegacion.
+ *  - "aria-label" se retira antes de evaluar: nombra COMO se localiza un elemento, no un destino, y
+ *    sin retirarlo "click the button with aria-label Enviar" mataria el gatillo con su "label".
+ */
+const ACCIONES_DE_SOLO_LECTURA =
+  /\b(?:scroll|desplaz\w*|screenshot|captura de pantalla|lee|leer|read|extrae|extraer|extract)\b/;
+const DESTINOS_DE_NAVEGACION =
+  /\b(?:link|enlace|folder|carpeta|sidebar|barra lateral|menu|tab|pestana|seccion|section|label|etiqueta|bandeja|inbox|nav|navigation)\b/;
+const GATILLOS_DE_ACCION =
+  /\b(?:button|boton|submit|press|pulsa\w*|presiona\w*|ctrl|control|cmd|meta|enter|intro|atajo|shortcut|keyboard|tecla\w*)\b/;
+
+/** ¿La accion descrita es navegacion o lectura de SOLO LECTURA? (FIX F: jamas se bloquea.) */
+export function esNavegacionDeSoloLectura(descripcion: string): boolean {
+  const texto = normalizarObjetivo(descripcion).replace(/aria[\s-]?label/g, ' ');
+  if (GATILLOS_DE_ACCION.test(texto)) return false;
+  return ACCIONES_DE_SOLO_LECTURA.test(texto) || DESTINOS_DE_NAVEGACION.test(texto);
+}
+
+/**
  * ¿La accion que el agente PROPONE ejecutar es LA ACCION IRREVERSIBLE QUE PIDIO EL USUARIO, y por
  * tanto exige que el sistema compare antes de dejarla pasar? (CAMBIO 1)
  *
@@ -238,6 +268,9 @@ export function detectarAccionQueExigeVerificacion(
   descripcion: string,
   verboDelObjetivo: string,
 ): string | null {
+  // FIX F: la navegacion y la lectura pasan SIEMPRE, tambien con el cupo consumido. Que el nombre de
+  // una carpeta ("Enviados", "Sent") contenga el verbo no la convierte en la accion irreversible.
+  if (esNavegacionDeSoloLectura(descripcion)) return null;
   const texto = normalizarObjetivo(descripcion);
   const accion = VERBOS_ACCION_BLOQUEADA.find((v) => v.verbo === verboDelObjetivo)?.accion;
   for (const entrada of VERBOS_ACCION_BLOQUEADA) {

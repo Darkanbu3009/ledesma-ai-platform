@@ -22,6 +22,7 @@ import {
   AccionSinConfirmarError,
   CambioDeSitioError,
   FalloDeEsquemaDelMotorError,
+  GuardiaBloqueoReintentosError,
 } from '../src/errores.js';
 import { TOOL_CAMBIAR_DE_SITIO } from '../src/prompt-tarea-web.js';
 import { resolverDominioAutorizado } from '../src/multisitio.js';
@@ -520,18 +521,109 @@ describe('crearActBlindado con GUARDIA', () => {
     expect(blindado.sinConfirmar()).toBeNull();
   });
 
-  it('sin confirmacion, la corrida se corta y la accion NO se repite', async () => {
+  it('sin confirmacion TERMINAL, la corrida se corta, se aborta el bucle y la accion NO se repite', async () => {
     const actuar = vi.fn(async () => ({ success: true }));
+    const alTerminar = vi.fn();
     const guardia: GuardiaDeAccion = {
       revisar: async () => ({ tipo: 'permitir', confirmar: true }),
-      confirmar: async () => ({ confirmada: false, mensaje: 'no se pudo confirmar' }),
+      confirmar: async () => ({ confirmada: false, mensaje: 'no se pudo confirmar', terminal: true }),
+    };
+    const blindado = crearActBlindado({ actuar, logger: makeLogger(), guardia, alTerminar });
+
+    await expect(blindado.ejecutar('haz clic en Enviar')).rejects.toThrow(AccionSinConfirmarError);
+    // La accion se ejecuto UNA sola vez y el hook aborto el bucle: lanzar desde la tool no basta
+    // (produccion 27 jul: Stagehand devuelve la excepcion al modelo y la corrida ciclo 10 minutos).
+    expect(actuar).toHaveBeenCalledTimes(1);
+    expect(alTerminar).toHaveBeenCalledTimes(1);
+    expect(blindado.sinConfirmar()).toBe('no se pudo confirmar');
+  });
+
+  /** FIX A: la PRIMERA confirmacion fallida NO corta la corrida: autoriza el unico reintento. */
+  it('sin confirmacion NO terminal, el mensaje del reintento vuelve al agente y la corrida sigue', async () => {
+    const actuar = vi.fn(async () => ({ success: true }));
+    const alTerminar = vi.fn();
+    const guardia: GuardiaDeAccion = {
+      revisar: async () => ({ tipo: 'permitir', confirmar: true }),
+      confirmar: async () => ({
+        confirmada: false,
+        mensaje: 'sin efecto: reintenta UNA vez con act y aria-label',
+        terminal: false,
+      }),
+    };
+    const blindado = crearActBlindado({ actuar, logger: makeLogger(), guardia, alTerminar });
+
+    const salida = await blindado.ejecutar('haz clic en Enviar');
+
+    expect(salida).toMatchObject({
+      success: false,
+      error: 'sin efecto: reintenta UNA vez con act y aria-label',
+    });
+    expect(actuar).toHaveBeenCalledTimes(1);
+    expect(alTerminar).not.toHaveBeenCalled();
+    // No es un desenlace terminal: ni bloqueo, ni sin-confirmar, ni corte.
+    expect(blindado.sinConfirmar()).toBeNull();
+    expect(blindado.bloqueo()).toBeNull();
+  });
+
+  /** FIX C: un veredicto 'rechazar' vuelve al agente como fallo de tool con mensaje terminal. */
+  it('un veredicto rechazar no toca el navegador y no corta la corrida (aviso terminal al agente)', async () => {
+    const actuar = vi.fn(async () => ({ success: true }));
+    const guardia: GuardiaDeAccion = {
+      revisar: async () => ({ tipo: 'rechazar', mensaje: 'la corrida terminara; no insistas' }),
+      confirmar: async () => ({ confirmada: true }),
     };
     const blindado = crearActBlindado({ actuar, logger: makeLogger(), guardia });
 
+    const salida = await blindado.ejecutar('haz clic en Enviar');
+
+    expect(salida).toMatchObject({ success: false, error: 'la corrida terminara; no insistas' });
+    expect(actuar).not.toHaveBeenCalled();
+    expect(blindado.bloqueo()).toBeNull();
+    expect(blindado.reintentosAgotados()).toBeNull();
+  });
+
+  /** FIX C: el bloqueo con causa 'guardia_reintentos' corta con su error y su prefijo propios. */
+  it('un bloqueo por reintentos agotados lanza GuardiaBloqueoReintentosError y aborta el bucle', async () => {
+    const actuar = vi.fn(async () => ({ success: true }));
+    const alTerminar = vi.fn();
+    const guardia: GuardiaDeAccion = {
+      revisar: async () => ({
+        tipo: 'bloquear',
+        causa: 'guardia_reintentos',
+        mensaje: 'reintento irreversible bloqueado dos veces',
+      }),
+      confirmar: async () => ({ confirmada: true }),
+    };
+    const blindado = crearActBlindado({ actuar, logger: makeLogger(), guardia, alTerminar });
+
+    await expect(blindado.ejecutar('haz clic en Enviar')).rejects.toThrow(
+      GuardiaBloqueoReintentosError,
+    );
+    expect(actuar).not.toHaveBeenCalled();
+    expect(alTerminar).toHaveBeenCalledTimes(1);
+    expect(blindado.reintentosAgotados()).toBe('reintento irreversible bloqueado dos veces');
+    // El nombre del error ES el prefijo estable del last_error.
+    expect(GuardiaBloqueoReintentosError.name).toBeDefined();
+  });
+
+  /** FIX A (doble seguridad): el bloqueo con causa 'sin_efecto' cierra como accion sin confirmar. */
+  it('un bloqueo por efecto probable lanza AccionSinConfirmarError sin tocar el navegador', async () => {
+    const actuar = vi.fn(async () => ({ success: true }));
+    const alTerminar = vi.fn();
+    const guardia: GuardiaDeAccion = {
+      revisar: async () => ({
+        tipo: 'bloquear',
+        causa: 'sin_efecto',
+        mensaje: 'efecto probable: verifica el resultado en el sitio',
+      }),
+      confirmar: async () => ({ confirmada: true }),
+    };
+    const blindado = crearActBlindado({ actuar, logger: makeLogger(), guardia, alTerminar });
+
     await expect(blindado.ejecutar('haz clic en Enviar')).rejects.toThrow(AccionSinConfirmarError);
-    // La accion se ejecuto UNA sola vez: lanzar corta el bucle del agente antes de que pueda repetirla.
-    expect(actuar).toHaveBeenCalledTimes(1);
-    expect(blindado.sinConfirmar()).toBe('no se pudo confirmar');
+    expect(actuar).not.toHaveBeenCalled();
+    expect(alTerminar).toHaveBeenCalledTimes(1);
+    expect(blindado.sinConfirmar()).toBe('efecto probable: verifica el resultado en el sitio');
   });
 });
 
@@ -679,10 +771,12 @@ describe('construirOpcionesDeEjecucion', () => {
       historialPasos: 8,
       conGuardia: true,
     });
-    // `keys` manda un Control+Enter a donde este el foco y `fillForm` actua sobre cualquier elemento
-    // que le describan: las dos alcanzan la accion irreversible sin pasar por la comparacion.
-    expect(opciones.excludeTools).toEqual(['keys', 'fillForm']);
-    expect(TOOLS_RETIRADAS_CON_GUARDIA).toEqual(['keys', 'fillForm']);
+    // `keys` manda un Control+Enter a donde este el foco, `fillForm` actua sobre cualquier elemento
+    // que le describan, y `click`/`type` (por coordenadas) no llevan descripcion clasificable ni
+    // selector: las cuatro alcanzan la accion irreversible sin pasar por la comparacion. En
+    // produccion (27 jul) el click final por coordenadas golpeo la cabecera del compose (FIX A).
+    expect(opciones.excludeTools).toEqual(['keys', 'fillForm', 'click', 'type']);
+    expect(TOOLS_RETIRADAS_CON_GUARDIA).toEqual(['keys', 'fillForm', 'click', 'type']);
     // La tool que SI lleva guardia sigue disponible: es la unica via de interaccion que queda.
     expect(opciones.excludeTools).not.toContain('act');
   });

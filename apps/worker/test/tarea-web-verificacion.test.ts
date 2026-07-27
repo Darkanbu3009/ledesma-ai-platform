@@ -10,7 +10,11 @@ import type {
   RepositorioSitiosParaTarea,
   TareaWebDeps,
 } from '../src/tarea-web.js';
-import { AccionBloqueadaError, AccionSinConfirmarError } from '../src/errores.js';
+import {
+  AccionBloqueadaError,
+  AccionSinConfirmarError,
+  GuardiaBloqueoReintentosError,
+} from '../src/errores.js';
 import type { CampoDeLaPagina, RepositorioPoliticasParaWorker } from '../src/verificacion.js';
 import { makeAprobacionesRepo } from './aprobaciones-fakes.js';
 import type { Logger } from '../src/logger.js';
@@ -163,9 +167,14 @@ function makeMotor(
       for (const accion of acciones) {
         const veredicto = await params.guardia?.revisar(accion);
         if (veredicto?.tipo === 'bloquear') {
+          // Mismo mapeo por causa que crearActBlindado (FIX A y C).
+          if (veredicto.causa === 'sin_efecto') throw new AccionSinConfirmarError(veredicto.mensaje);
+          if (veredicto.causa === 'guardia_reintentos') {
+            throw new GuardiaBloqueoReintentosError(veredicto.mensaje);
+          }
           throw new AccionBloqueadaError(veredicto.mensaje);
         }
-        if (veredicto?.tipo === 'incompleto') {
+        if (veredicto?.tipo === 'incompleto' || veredicto?.tipo === 'rechazar') {
           rechazadas.push(accion);
           continue;
         }
@@ -177,7 +186,11 @@ function makeMotor(
             pagina.texto = 'Mensaje enviado. Deshacer';
           }
           const confirmacion = await params.guardia.confirmar();
-          if (!confirmacion.confirmada) throw new AccionSinConfirmarError(confirmacion.mensaje);
+          if (!confirmacion.confirmada) {
+            // Terminal: la corrida se corta (el blindaje real ademas aborta el bucle). No terminal
+            // (FIX A): el mensaje del reintento vuelve al agente y la corrida sigue.
+            if (confirmacion.terminal) throw new AccionSinConfirmarError(confirmacion.mensaje);
+          }
         }
       }
       return {
@@ -337,19 +350,139 @@ describe('verificacion prematura y guarda de segunda accion (CAMBIOS 1 y 2)', ()
     expect(motor.ejecutar).toHaveBeenCalledTimes(1);
   });
 
-  it('una accion ejecutada SIN confirmar no reabre el cupo: no hay segundo envio', async () => {
-    // Revision adversarial: el contador de acciones irreversibles solo cuenta las EJECUTADAS, y el
-    // cupo se consume al dejarlas pasar. Que la confirmacion falle no puede devolver el cupo.
+  it('ejecutada SIN efecto: UN unico reintento re-verificado; si tampoco confirma, cierre con prefijo estable (FIX A)', async () => {
     const pagina = makePagina([DESTINATARIO, ASUNTO, CUERPO]);
-    // Sin `pagina` en el motor, la pagina no cambia: la accion no se puede confirmar.
+    // Sin `pagina` en el motor, la pagina no cambia jamas: ni la primera ejecucion ni el reintento
+    // se pueden confirmar. El segundo intento ES el reintento autorizado (con re-verificacion).
     const motor = makeMotor([ENVIAR, 'haz clic en Enviar otra vez'], 'enviado');
     const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina) });
 
-    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).rejects.toThrow(
-      /se intento pero no se pudo confirmar/,
+    let error: unknown;
+    try {
+      await procesarTareaWeb(deps, makeJob(OBJETIVO));
+    } catch (e) {
+      error = e;
+    }
+    expect(String(error)).toMatch(/se intento pero no se pudo confirmar/);
+    // El last_error arranca con el prefijo estable (describeError arma `${name}: ${message}`).
+    expect((error as Error).name).toBe('ACCION_SIN_EFECTO_CONFIRMADO');
+    // Las DOS ejecuciones llegaron al navegador (la original y su unico reintento) y ninguna mas.
+    expect(motor.ejecutadas).toEqual([ENVIAR, 'haz clic en Enviar otra vez']);
+  });
+
+  it('el reintento que SI confirma completa la tarea (el cupo se consume al confirmar)', async () => {
+    const pagina = makePagina([DESTINATARIO, ASUNTO, CUERPO]);
+    const REINTENTO = 'click the button with aria-label Enviar';
+    // La primera ejecucion no surte efecto (la pagina no cambia); el reintento consuma el envio.
+    const motor = makeMotor([ENVIAR, REINTENTO], 'enviado', undefined, {
+      [REINTENTO]: () => {
+        pagina.campos = [];
+        pagina.texto = 'Mensaje enviado. Deshacer';
+      },
+    });
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina) });
+
+    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
+    expect(motor.ejecutadas).toEqual([ENVIAR, REINTENTO]);
+  });
+
+  it('agotado el reintento, la corrida NUNCA cicla: aviso terminal y corte con prefijo de guardia (FIX C)', async () => {
+    const pagina = makePagina([DESTINATARIO, ASUNTO, CUERPO]);
+    // Motor que EMULA la produccion del 27 jul: el handler de Stagehand devuelve al modelo las
+    // excepciones de la tool como fallos, asi que el agente puede seguir insistiendo. El corte del
+    // segundo bloqueo consecutivo es lo que garantiza que jamas se llegue al timeout.
+    const intentos = [ENVIAR, 'haz clic en Enviar otra vez', 'click Send', 'press the Send button', 'click Send again'];
+    const ejecutadas: string[] = [];
+    const rechazadas: string[] = [];
+    const motor: MotorDeTareaWeb & { ejecutadas: string[]; rechazadas: string[] } = {
+      ejecutadas,
+      rechazadas,
+      ejecutar: vi.fn(async (params: { guardia?: GuardiaDeAccion | undefined }) => {
+        for (const accion of intentos) {
+          const veredicto = await params.guardia?.revisar(accion);
+          if (veredicto?.tipo === 'bloquear') {
+            if (veredicto.causa === 'guardia_reintentos') {
+              throw new GuardiaBloqueoReintentosError(veredicto.mensaje);
+            }
+            throw new AccionBloqueadaError(veredicto.mensaje);
+          }
+          if (veredicto?.tipo === 'incompleto' || veredicto?.tipo === 'rechazar') {
+            rechazadas.push(accion);
+            continue;
+          }
+          ejecutadas.push(accion);
+          if (veredicto?.tipo === 'permitir' && veredicto.confirmar === true && params.guardia) {
+            // La pagina nunca cambia y el agente IGNORA el cierre terminal (sigue el bucle).
+            await params.guardia.confirmar();
+          }
+        }
+        return {
+          exito: true,
+          completado: true,
+          mensaje: 'insisti hasta el final',
+          acciones: [],
+          tokensIn: null,
+          tokensOut: null,
+        };
+      }),
+    };
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina) });
+
+    let error: unknown;
+    try {
+      await procesarTareaWeb(deps, makeJob(OBJETIVO));
+    } catch (e) {
+      error = e;
+    }
+    expect((error as Error).name).toBe('GUARDIA_BLOQUEO_REINTENTOS_IRREVERSIBLES');
+    // Ejecutadas: la original y el unico reintento. El tercer intento recibio el aviso terminal
+    // (rechazar) y el cuarto se corto con el error de guardia: el quinto nunca se reviso.
+    expect(ejecutadas).toEqual([ENVIAR, 'haz clic en Enviar otra vez']);
+    expect(rechazadas).toEqual(['click Send']);
+  });
+
+  it('doble seguridad: si el formulario verificado ya no esta, NO hay reintento (efecto probable)', async () => {
+    const pagina = makePagina([DESTINATARIO, ASUNTO, CUERPO]);
+    // La primera ejecucion no confirma a tiempo; ANTES del reintento el compose desaparece (el
+    // envio surtio efecto con retraso). Reintentar seria el doble envio.
+    const DESAPARECE = 'espera a que el sitio reaccione';
+    const motor = makeMotor([ENVIAR, DESAPARECE, 'haz clic en Enviar otra vez'], 'enviado', undefined, {
+      [DESAPARECE]: () => {
+        pagina.campos = [];
+        pagina.texto = 'Bandeja de entrada';
+      },
+    });
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina) });
+
+    let error: unknown;
+    try {
+      await procesarTareaWeb(deps, makeJob(OBJETIVO));
+    } catch (e) {
+      error = e;
+    }
+    expect((error as Error).name).toBe('ACCION_SIN_EFECTO_CONFIRMADO');
+    expect(String(error)).toMatch(/lo mas probable es que la accion SI se haya realizado/);
+    // El reintento JAMAS llego al navegador.
+    expect(motor.ejecutadas).toEqual([ENVIAR, DESAPARECE]);
+  });
+
+  it('un DONE del agente con la accion sin efecto confirmado NO cierra la tarea como exitosa (FIX A)', async () => {
+    const pagina = makePagina([DESTINATARIO, ASUNTO, CUERPO]);
+    // El agente ejecuta una vez, recibe el aviso de reintento y en vez de reintentar termina DONE.
+    const motor = makeMotor([ENVIAR], 'listo, enviado');
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina) });
+
+    let error: unknown;
+    try {
+      await procesarTareaWeb(deps, makeJob(OBJETIVO));
+    } catch (e) {
+      error = e;
+    }
+    expect((error as Error).name).toBe('ACCION_SIN_EFECTO_CONFIRMADO');
+    expect(deps.guardarResultado).not.toHaveBeenCalledWith(
+      'job-1',
+      expect.objectContaining({ estado: 'ok' }),
     );
-    // La accion salio UNA vez al navegador y la corrida se corto ahi: la segunda nunca se propuso.
-    expect(motor.ejecutadas).toEqual([ENVIAR]);
   });
 
   it('el intento incompleto NO consume el cupo: al completarse los datos, el envio pasa', async () => {
@@ -416,6 +549,20 @@ describe('la guardia vigila el verbo del objetivo (CAMBIO 1)', () => {
     const detencion = await detencionDe(deps, makeJob(OBJETIVO));
     expect(detencion?.motivo).toBe('otraAccion');
     expect(motor.ejecutadas).toEqual([ENVIAR]);
+  });
+
+  it('con el cupo consumido, la navegacion de solo lectura JAMAS se bloquea (FIX F)', async () => {
+    // La reencarnacion del bug de la etiqueta (commit 81288ca): "Enviados" matchea el patron de
+    // enviar y "Sent folder" matchea sent, pero son navegacion de SOLO LECTURA y es justo lo que el
+    // agente necesita para verificar si el correo salio.
+    const pagina = makePagina([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]);
+    const NAVEGACIONES = ['click the Enviados link in the Gmail left sidebar', 'click Sent folder'];
+    const motor = makeMotor([ENVIAR, ...NAVEGACIONES], 'verificado en Enviados', pagina);
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina) });
+
+    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
+    expect(motor.ejecutadas).toEqual([ENVIAR, ...NAVEGACIONES]);
+    expect(motor.rechazadas).toEqual([]);
   });
 });
 

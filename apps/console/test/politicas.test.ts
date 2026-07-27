@@ -130,6 +130,13 @@ describe('textoDeDetencion (ES)', () => {
     );
   });
 
+  it('otraAccion NO afirma "no se ejecuto nada": la primera accion SI se completo (FIX E)', () => {
+    const texto = textoDeDetencion({ motivo: 'otraAccion' });
+    expect(texto.detalle.toLowerCase()).not.toContain('no se ejecuto nada');
+    expect(texto.detalle).toContain('ya habia completado');
+    expect(texto.detalle).toContain('Revisa en el sitio');
+  });
+
   it('NINGUN motivo usa terminos tecnicos', () => {
     const motivos = [
       { motivo: 'noCoincide' as const, pedido: 'a', encontrado: 'b' },

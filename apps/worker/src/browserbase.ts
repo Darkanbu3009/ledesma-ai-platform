@@ -290,6 +290,65 @@ export const EXPRESION_LEER_CAMPOS = String.raw`(() => {
  */
 export const EXPRESION_PERCEPCION = construirExpresionPercepcion(EXPRESION_LEER_CAMPOS);
 
+/** Lo que devuelve localizar el boton de una accion por rol y aria-label (modo simulacro, FASE 3). */
+export interface BotonLocalizado {
+  /** aria-label completo del boton VISIBLE que matcheo (en Gmail: "Enviar (Ctrl-Enter)"). */
+  ariaLabel: string;
+  /** Rol efectivo del elemento (atributo role, o el tag cuando es un <button>). */
+  rol: string;
+  /** Cuantos candidatos (visibles u ocultos) matchearon el prefijo en la pagina. */
+  candidatos: number;
+}
+
+/**
+ * Expresion de SOLO LECTURA que localiza el BOTON de una accion por su ROL y su ARIA-LABEL por
+ * PREFIJO (el aria-label real del boton Enviar de Gmail es "Enviar (Ctrl-Enter)", asi que la
+ * coincidencia exacta de las estrategias de receta no sirve aqui). Es la localizacion que el modo
+ * simulacro de scripts/validar-percepcion.ts valida contra Gmail real SIN clickear nada.
+ *
+ * VISIBILIDAD compatible con el navegador real y con el test de DOM (jsdom no calcula layout): un
+ * elemento con un ancestro display:none / hidden / aria-hidden esta oculto SIEMPRE; el criterio de
+ * caja (getBoundingClientRect) se aplica solo cuando el documento tiene layout de verdad.
+ */
+export function expresionLocalizarBotonPorAriaLabel(prefijos: string[]): string {
+  return String.raw`(() => {
+  const prefijos = ${JSON.stringify(prefijos)}.map((p) => String(p).toLowerCase());
+  const ocultoPorAtributos = (el) => {
+    for (let n = el; n && n.getAttribute; n = n.parentElement) {
+      const estilo = (n.getAttribute('style') || '').replace(/\s+/g, '').toLowerCase();
+      if (estilo.includes('display:none') || estilo.includes('visibility:hidden')) return true;
+      if (n.getAttribute('aria-hidden') === 'true' || n.hasAttribute('hidden')) return true;
+    }
+    return false;
+  };
+  const conLayout = !!(document.body && document.body.getBoundingClientRect
+    && document.body.getBoundingClientRect().width > 0);
+  const visible = (el) => {
+    if (ocultoPorAtributos(el)) return false;
+    if (!conLayout) return true;
+    const caja = el.getBoundingClientRect();
+    return caja.width > 0 && caja.height > 0;
+  };
+  let candidatos = 0;
+  let elegido = null;
+  for (const el of document.querySelectorAll('button, [role="button"]')) {
+    const aria = (el.getAttribute('aria-label') || '').trim();
+    if (aria === '') continue;
+    const plano = aria.toLowerCase();
+    if (!prefijos.some((p) => p !== '' && plano.indexOf(p) === 0)) continue;
+    candidatos += 1;
+    if (elegido === null && visible(el)) {
+      elegido = {
+        ariaLabel: aria.slice(0, 120),
+        rol: (el.getAttribute('role') || String(el.tagName || '').toLowerCase()),
+      };
+    }
+  }
+  if (elegido === null) return JSON.stringify({ localizado: null, candidatos: candidatos });
+  return JSON.stringify({ localizado: elegido, candidatos: candidatos });
+})()`;
+}
+
 /** Pausa acotada (los pasos de una receta necesitan dejar respirar al sitio entre acciones). */
 function pausar(ms: number): Promise<void> {
   return ms <= 0 ? Promise.resolve() : new Promise((resolve) => setTimeout(resolve, ms));
@@ -885,6 +944,44 @@ export class NavegadorBrowserbase
     try {
       const crudo = await this.evaluarEnLaPagina(sesionExternaId, EXPRESION_PERCEPCION);
       return parsearPercepcion(crudo);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * LOCALIZA (sin clickear) el boton VISIBLE cuyo aria-label empieza con alguno de los prefijos
+   * (modo simulacro de la FASE 3: validar la localizacion del boton Enviar contra Gmail real sin
+   * enviar nada). Solo lectura en el mundo aislado; null = ningun boton visible matcheo.
+   */
+  async localizarBotonPorAriaLabel(
+    sesionExternaId: string,
+    prefijos: string[],
+  ): Promise<BotonLocalizado | null> {
+    const crudo = await this.evaluarEnLaPagina(
+      sesionExternaId,
+      expresionLocalizarBotonPorAriaLabel(prefijos),
+    );
+    if (crudo === null || crudo === '') return null;
+    try {
+      const parsed = JSON.parse(crudo) as {
+        localizado?: { ariaLabel?: unknown; rol?: unknown } | null;
+        candidatos?: unknown;
+      };
+      const localizado = parsed.localizado;
+      if (
+        localizado === null ||
+        localizado === undefined ||
+        typeof localizado.ariaLabel !== 'string' ||
+        typeof localizado.rol !== 'string'
+      ) {
+        return null;
+      }
+      return {
+        ariaLabel: localizado.ariaLabel,
+        rol: localizado.rol,
+        candidatos: typeof parsed.candidatos === 'number' ? parsed.candidatos : 0,
+      };
     } catch {
       return null;
     }

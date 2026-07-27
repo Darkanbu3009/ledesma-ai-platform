@@ -28,6 +28,16 @@
  *   VALIDAR_OWNER_ID         owner concreto; sin el, se toma el sitio activo mas reciente del dominio.
  *   VALIDAR_DESTINATARIO     correo a teclear (default: validacion.percepcion@example.com). El
  *                            borrador se DESCARTA siempre; nada se envia.
+ *   VALIDAR_ENVIO=simulacro  (FASE 3 del fix del cupo irreversible) ademas del flujo normal,
+ *                            LOCALIZA el boton Enviar por rol/aria-label (por prefijo: el aria-label
+ *                            real es "Enviar (Ctrl-Enter)"), imprime el localizador resuelto y la
+ *                            huella previa SIN clickearlo, y despues descarta el borrador igual que
+ *                            siempre. Valida la localizacion del boton final contra Gmail real sin
+ *                            enviar nada y sin modelo.
+ *
+ * Comando del modo simulacro (desde la raiz del repo):
+ *
+ *   VALIDAR_ENVIO=simulacro npm run validar-percepcion -w apps/worker
  */
 import { SitiosConectadosRepository } from '@ledesma-platform/backend/sitios';
 import { NavegadorBrowserbase } from '../src/browserbase.js';
@@ -51,6 +61,10 @@ const BROWSERBASE_PROJECT_ID = requerida('BROWSERBASE_PROJECT_ID');
 const DOMINIO = process.env['VALIDAR_DOMINIO'] ?? 'mail.google.com';
 const OWNER_ID = process.env['VALIDAR_OWNER_ID'];
 const DESTINATARIO = process.env['VALIDAR_DESTINATARIO'] ?? 'validacion.percepcion@example.com';
+const MODO_SIMULACRO = process.env['VALIDAR_ENVIO'] === 'simulacro';
+
+/** Prefijos del aria-label del boton Enviar de Gmail (es y en). El sufijo real es "(Ctrl-Enter)". */
+const PREFIJOS_BOTON_ENVIAR = ['Enviar', 'Send'];
 
 /** Espera de pared para que Gmail reaccione entre pasos (render del compose, chip, descarte). */
 const ESPERA_TRAS_PASO_MS = 1200;
@@ -255,6 +269,26 @@ async function main(): Promise<void> {
       console.log(`  VEREDICTO: chip confirmado percibido como valor presente en [${chip.contexto.slice(0, 60)}]`);
     } else {
       console.log('  VEREDICTO: el chip aun no se percibe (Gmail puede tardar o dejar el texto en el input)');
+    }
+
+    if (MODO_SIMULACRO) {
+      titulo('8.5. SIMULACRO DE ENVIO: localizar el boton Enviar SIN clickearlo (FASE 3)');
+      // La huella previa: es la referencia contra la que la confirmacion de efecto compararia si el
+      // clic se ejecutara de verdad. Se imprime tal cual; NADA se clickea.
+      const huellaPrevia = trasEnter ?? (await navegador.percibirPagina(sesion.sesionExternaId));
+      console.log('  huella previa al (no) clic:');
+      resumenDePercepcion(huellaPrevia);
+      const boton = await navegador.localizarBotonPorAriaLabel(
+        sesion.sesionExternaId,
+        PREFIJOS_BOTON_ENVIAR,
+      );
+      if (boton === null) {
+        console.log('  VEREDICTO: NO se localizo un boton visible cuyo aria-label empiece con Enviar/Send');
+      } else {
+        console.log(`  localizador resuelto: rol=${boton.rol} aria-label="${boton.ariaLabel}"`);
+        console.log(`  candidatos que matchearon el prefijo: ${boton.candidatos}`);
+        console.log('  VEREDICTO: boton Enviar LOCALIZADO por rol/aria-label; NO se clickeo nada');
+      }
     }
 
     titulo('9. Descartar el borrador (nada se envia)');

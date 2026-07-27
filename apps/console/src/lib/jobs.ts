@@ -8,6 +8,10 @@
  * payload (dato sensible) y trunca last_error; aca solo lo mostramos.
  */
 
+import {
+  ACCION_SIN_EFECTO_CONFIRMADO_PREFIX,
+  GUARDIA_BLOQUEO_REINTENTOS_IRREVERSIBLES_PREFIX,
+} from '@ledesma-platform/shared/verificacion';
 import i18n from '../i18n';
 
 /** Tipo inferido del job (del payload, sin exponerlo): receta multi-paso, mensaje suelto, sitio
@@ -76,6 +80,29 @@ export function esJobCancelado(job: Pick<JobActivity, 'status' | 'lastError'>): 
 /** true si el sistema termino el job porque dejo de responder (etiqueta Detenida). */
 export function esJobDetenido(job: Pick<JobActivity, 'status' | 'lastError'>): boolean {
   return job.status === 'failed' && (job.lastError?.startsWith(SISTEMA_DETUVO_TAREA_PREFIX) ?? false);
+}
+
+/**
+ * true si la tarea web ejecuto su paso final (enviar, pagar) y el sitio no mostro que surtiera
+ * efecto (prefijo estable ACCION_SIN_EFECTO_CONFIRMADO del worker). La tarea AVANZO: el texto que se
+ * muestra jamas dice "no se ejecuto nada"; puede haber quedado un borrador a medias en el sitio.
+ */
+export function esJobSinEfectoConfirmado(job: Pick<JobActivity, 'status' | 'lastError'>): boolean {
+  return (
+    job.status === 'failed' &&
+    (job.lastError?.startsWith(ACCION_SIN_EFECTO_CONFIRMADO_PREFIX) ?? false)
+  );
+}
+
+/**
+ * true si el worker corto la corrida porque la guardia agoto los reintentos del paso irreversible
+ * (prefijo estable GUARDIA_BLOQUEO_REINTENTOS_IRREVERSIBLES). Mismo mensaje veraz que el anterior.
+ */
+export function esJobBloqueadoPorReintentos(job: Pick<JobActivity, 'status' | 'lastError'>): boolean {
+  return (
+    job.status === 'failed' &&
+    (job.lastError?.startsWith(GUARDIA_BLOQUEO_REINTENTOS_IRREVERSIBLES_PREFIX) ?? false)
+  );
 }
 
 /**
