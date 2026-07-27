@@ -4,6 +4,7 @@ import {
   REAP_SIN_LATIDO_MULTIPLO,
   isRecipeJobPayload,
   isGrabacionJobPayload,
+  isPromoverTrayectoriaJobPayload,
   isSitioJobPayload,
   isTareaWebJobPayload,
   parseRecipeJobPayload,
@@ -38,6 +39,8 @@ import { procesarTareaWeb } from './tarea-web.js';
 import type { TareaWebDeps } from './tarea-web.js';
 import { procesarJobDeGrabacion } from './grabacion.js';
 import type { GrabacionDeps } from './grabacion.js';
+import { procesarJobDePromoverTrayectoria } from './promover-trayectoria.js';
+import type { PromocionTrayectoriaDeps } from './promover-trayectoria.js';
 import type { BarridoAprobacionesDeps } from './aprobaciones.js';
 import type { Logger } from './logger.js';
 
@@ -169,6 +172,12 @@ export interface JobRunnerDeps {
    * mensaje claro y el resto del worker no cambia en nada.
    */
   grabacion?: GrabacionDeps;
+  /**
+   * Dependencias del job que GUARDA COMO TAREA APRENDIDA una tarea web exitosa (promocion
+   * trayectoria -> receta con consentimiento). No necesita navegador ni modelo (es lectura de V030 y
+   * escritura de V035), asi que index.ts lo cablea SIEMPRE, sin la compuerta de Browserbase.
+   */
+  promocionTrayectoria?: PromocionTrayectoriaDeps;
   /**
    * Dependencias del BARRIDO de aprobaciones vencidas (7.1e): expira los checkpoints sin decision,
    * cierra su sesion de navegador (que se mantuvo VIVA mientras estuvo pendiente) y cierra el job
@@ -608,6 +617,16 @@ export async function processClaimedJob(
       });
       await markCompletedWithRetry(deps, job.id);
       logger.info('job de grabacion de tarea completado', { jobId: job.id });
+      return;
+    }
+
+    // 1.66. RAMIFICAR el job de GUARDAR COMO TAREA APRENDIDA (promocion trayectoria -> receta con
+    //       consentimiento) con el mismo criterio: sin agente, sin credencial, sin modelo y sin
+    //       navegador (lectura de V030, escritura de V035). El gate por tier de arriba SI aplica.
+    if (isPromoverTrayectoriaJobPayload(job.payload)) {
+      await procesarJobDePromoverTrayectoria(deps.promocionTrayectoria, job);
+      await markCompletedWithRetry(deps, job.id);
+      logger.info('job de promocion de trayectoria completado', { jobId: job.id });
       return;
     }
 
