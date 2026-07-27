@@ -1765,7 +1765,8 @@
       "estado": {
         "exitosa": "Successful",
         "fallida": "Failed",
-        "pausada": "Paused"
+        "pausada": "Paused",
+        "enCurso": "In progress"
       }
     },
     "jobEstado": {
@@ -1930,7 +1931,15 @@
       "detalle": "One detail is missing to complete this action: {{campo}}. Ask again and include it."
     },
     "otraAccion": {
-      "detalle": "The task reached another action that cannot be undone and stopped. Nothing was done. Ask for it separately."
+      "detalle": "The task had already completed one action that cannot be undone and stopped before doing another. Check on the site what was done and ask for the remaining action separately."
+    },
+    "sinEfecto": {
+      "titulo": "The final step could not be confirmed",
+      "detalle": "The task made progress, but we could not confirm that the final step took effect on the site. A draft or a half-finished state may remain. Check the site before asking for it again."
+    },
+    "bloqueoReintentos": {
+      "titulo": "The final step could not be confirmed",
+      "detalle": "The task made progress, but the system stopped retrying the final step to avoid repeating it by accident. A draft or a half-finished state may remain on the site. Check it before asking again."
     },
     "nada": "nothing",
     "campos": {

@@ -129,9 +129,11 @@ export function useJobs(status: JobStatusFilter = 'all') {
  * TRAYECTORIA de una tarea web (GET /v1/trayectorias?jobId=..., Fase F V030): las ejecuciones del
  * motor de navegacion registradas para un job, con sus pasos censurados. Solo corre con `enabled`
  * (la tarjeta de actividad la pide recien al expandir la tarea: no se descargan pasos que nadie
- * abrio). Sin auto-refresh: la trayectoria se escribe UNA vez al cerrar la ejecucion.
+ * abrio). Con `enCurso` (FIX D: el worker ahora escribe los pasos POR LOTES mientras la tarea
+ * corre), el detalle se refresca solo al mismo ritmo que el historial, para mostrar el progreso
+ * real; terminada la tarea, cero polling, como siempre.
  */
-export function useTrayectoriasDeJob(jobId: string, enabled: boolean) {
+export function useTrayectoriasDeJob(jobId: string, enabled: boolean, enCurso = false) {
   return useQuery({
     queryKey: ['trayectorias', jobId],
     queryFn: () =>
@@ -139,6 +141,7 @@ export function useTrayectoriasDeJob(jobId: string, enabled: boolean) {
         (r) => r.trayectorias,
       ),
     enabled,
+    refetchInterval: enabled && enCurso ? JOBS_REFETCH_MS : false,
   });
 }
 

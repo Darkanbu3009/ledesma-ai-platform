@@ -16,8 +16,10 @@ import {
 import { formatRunAt } from '../../lib/schedule';
 import {
   AVISO_TAREA_LENTA_MS,
+  esJobBloqueadoPorReintentos,
   esJobCancelado,
   esJobDetenido,
+  esJobSinEfectoConfirmado,
   isJobInFlight,
   jobStatusLabel,
   jobTypeLabel,
@@ -106,7 +108,18 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
   // sitio y no coincidio (o sus propios limites lo impedian). No es un fallo tecnico: lleva su
   // propio texto, sin detalle tecnico que abrir.
   const detencion = detencionDeJob(job);
-  const textoDetencion = detencion ? textoDeDetencion(detencion) : null;
+  // PASO FINAL SIN CONFIRMAR (prefijos estables del worker): la tarea AVANZO y el paso final no se
+  // pudo confirmar; puede haber quedado un borrador a medias en el sitio. Texto propio y veraz:
+  // jamas se afirma "no se ejecuto nada" en estos cierres.
+  const textoPasoFinal = esJobSinEfectoConfirmado(job)
+    ? { titulo: t('verificacion.sinEfecto.titulo'), detalle: t('verificacion.sinEfecto.detalle') }
+    : esJobBloqueadoPorReintentos(job)
+      ? {
+          titulo: t('verificacion.bloqueoReintentos.titulo'),
+          detalle: t('verificacion.bloqueoReintentos.detalle'),
+        }
+      : null;
+  const textoDetencion = detencion ? textoDeDetencion(detencion) : textoPasoFinal;
   // AVISO de tarea lenta: en curso por encima del umbral. El reloj por cubetas mantiene fresco el
   // tiempo mostrado aunque el refetch tarde.
   const ahora = useSyncExternalStore(suscribirReloj, leerReloj);
@@ -278,7 +291,9 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
           </button>
           {pasosAbiertos && (
             <div className="mt-2.5">
-              <TrayectoriaDetalle jobId={job.id} />
+              {/* FIX D: con la escritura incremental, una tarea EN CURSO ya tiene pasos que mostrar
+                  y el detalle se refresca solo mientras corre. */}
+              <TrayectoriaDetalle jobId={job.id} enCurso={job.status === 'running'} />
             </div>
           )}
         </div>

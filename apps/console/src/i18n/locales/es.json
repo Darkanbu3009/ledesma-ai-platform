@@ -1765,7 +1765,8 @@
       "estado": {
         "exitosa": "Exitosa",
         "fallida": "Fallida",
-        "pausada": "Pausada"
+        "pausada": "Pausada",
+        "enCurso": "En curso"
       }
     },
     "jobEstado": {
@@ -1931,7 +1932,15 @@
       "detalle": "Falta un dato para completar esta accion: {{campo}}. Pidelo de nuevo incluyendolo."
     },
     "otraAccion": {
-      "detalle": "La tarea llego a otra accion que no se puede deshacer y se detuvo. No se ejecuto nada. Pidela por separado."
+      "detalle": "La tarea ya habia completado una accion que no se puede deshacer y se detuvo antes de ejecutar otra. Revisa en el sitio lo que alcanzo a hacer y pide la accion restante por separado."
+    },
+    "sinEfecto": {
+      "titulo": "El paso final no se pudo confirmar",
+      "detalle": "La tarea avanzo, pero no pudimos confirmar que el paso final surtiera efecto en el sitio. Es posible que haya quedado un borrador o un estado a medias. Revisalo en el sitio antes de volver a pedirla."
+    },
+    "bloqueoReintentos": {
+      "titulo": "El paso final no se pudo confirmar",
+      "detalle": "La tarea avanzo, pero el sistema detuvo los reintentos del paso final para no repetirlo por accidente. Es posible que haya quedado un borrador o un estado a medias en el sitio. Revisalo antes de volver a pedirla."
     },
     "nada": "nada",
     "campos": {
