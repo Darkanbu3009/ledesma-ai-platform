@@ -286,7 +286,7 @@
       "sitiosYaActivada": "The connected sites tool is already enabled",
       "sitiosTitulo": "Connected site tasks",
       "sitiosDescripcion": "The agent will be able to list your active connected sites and run natural language tasks inside the session you already started on each site.",
-      "sitiosNota": "Irreversible or financial actions (send, publish, delete, pay) are not executed: they stay blocked or pending your approval.",
+      "sitiosNota": "The agent runs tasks autonomously, final action included. Before an irreversible or financial action (send, publish, delete, pay), the system checks that the data on the site matches what you asked for; only if it does not match or cannot be read, the task stops without executing it and reports what was requested and what was found.",
       "sitiosActivosLabel": "Available active sites",
       "sitiosCargando": "Loading connected sites...",
       "sitiosVacio": "You have no active connected sites. Connect one so the agent can operate.",

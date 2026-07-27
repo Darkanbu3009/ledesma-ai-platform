@@ -286,7 +286,7 @@
       "sitiosYaActivada": "La herramienta de sitios conectados ya esta activada",
       "sitiosTitulo": "Tareas en sitios conectados",
       "sitiosDescripcion": "El agente podra listar tus sitios conectados activos y ejecutar tareas en lenguaje natural dentro de la sesion que ya iniciaste en cada sitio.",
-      "sitiosNota": "Las acciones irreversibles o financieras (enviar, publicar, borrar, pagar) no se ejecutan: quedan bloqueadas o pendientes de tu aprobacion.",
+      "sitiosNota": "El agente ejecuta las tareas de forma autonoma, accion final incluida. Antes de una accion irreversible o financiera (enviar, publicar, borrar, pagar), el sistema verifica que los datos del sitio coinciden con lo que pediste; solo si no coinciden o no se pueden leer, la tarea se detiene sin ejecutarla y te reporta que se pidio y que se encontro.",
       "sitiosActivosLabel": "Sitios activos disponibles",
       "sitiosCargando": "Cargando sitios conectados...",
       "sitiosVacio": "No tienes sitios conectados activos. Conecta uno para que el agente pueda operar.",

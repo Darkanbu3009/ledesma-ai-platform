@@ -18,6 +18,12 @@ import {
   type PoliticaDeScreenshots,
 } from './costo-modelo.js';
 import type { Logger } from './logger.js';
+import {
+  crearControlDePercepcion,
+  type ControlDePercepcion,
+  type PerceptorDePagina,
+} from './percepcion.js';
+import { instalarNormalizadorDeElementId } from './normalizador-elementid.js';
 import type { EscaladorDePaso, ResultadoEscalada } from './ejecutor-receta.js';
 import type { AccionCrudaDeMotor } from './trayectoria.js';
 import type {
@@ -664,10 +670,18 @@ export function construirOpcionesDeEjecucion(params: {
   historialPasos: number;
   /** Recibe el consumo de CADA llamada al modelo (tokens de entrada, salida y de cache). */
   registrarConsumo?: ((paso: PasoDeConsumoDelBucle) => void) | undefined;
+  /**
+   * PERCEPCION DE EFECTO Y DE CAMPOS (FIX A y B): tras cada paso que toca la pagina, el control lee
+   * la huella y el estado de campos (percepcion.ts) y sus lineas pendientes se ADJUNTAN al contexto
+   * del agente en el siguiente prepareStep, como mensaje de usuario acotado. Ausente, la corrida
+   * queda exactamente como antes: cero lecturas extra y cero mensajes extra.
+   */
+  percepcion?: ControlDePercepcion | undefined;
 }): AgentExecuteOptions {
   const observador = params.observador;
   const registrarAccion = params.registrarAccion;
   const registrarConsumo = params.registrarConsumo;
+  const percepcion = params.percepcion;
   // PREPARACION POR PASO (cache de prompt + system por su canal + ventana de historial). Tiene
   // estado (la longitud del envio anterior), asi que se crea uno por corrida.
   const preparador = crearPreparadorDePaso({ historialPasos: params.historialPasos });
@@ -683,11 +697,20 @@ export function construirOpcionesDeEjecucion(params: {
       // que mensajes viajan, por que canal van las instrucciones de sistema y que prefijo se cachea.
       prepareStep: (opciones) => {
         const preparado = preparador(opciones.messages);
+        // Las lineas de percepcion pendientes (FIX A y B) entran como UN mensaje de usuario al
+        // final del envio: es informacion del SISTEMA sobre el efecto real del paso anterior, no
+        // contenido de pagina, y el propio texto de cada linea lo dice. Acotadas por turno
+        // (MAX_LINEAS_POR_TURNO) para que el canal no crezca sin cota.
+        const lineas = percepcion?.tomarLineas() ?? [];
+        const mensajes =
+          lineas.length > 0
+            ? [...preparado.messages, { role: 'user' as const, content: lineas.join('\n') }]
+            : preparado.messages;
         return {
           ...(preparado.system !== undefined ? { system: preparado.system } : {}),
           // El tipo estructural de costo-modelo.ts y el ModelMessage del AI SDK describen la misma
           // forma; este es el UNICO punto del worker en que se cruzan.
-          messages: preparado.messages as unknown as typeof opciones.messages,
+          messages: mensajes as unknown as typeof opciones.messages,
         };
       },
       // CONSUMO POR PASO: el resultado del motor solo reporta entrada y salida totales; los tokens
@@ -710,12 +733,22 @@ export function construirOpcionesDeEjecucion(params: {
         : {}),
       // Best-effort SIEMPRE: la observacion enriquece la traza; si falla, la tarea sigue
       // igual y esa corrida simplemente no se podra promover a receta.
-      ...(observador !== undefined || registrarAccion !== undefined
+      ...(observador !== undefined || registrarAccion !== undefined || percepcion !== undefined
         ? {
             onEvidence: async (evento): Promise<void> => {
               if (evento.type !== 'step_finished') return;
               if (registrarAccion !== undefined && evento.actionName !== 'act') {
                 registrarAccion(accionCrudaDeEvidencia(evento));
+              }
+              // PERCEPCION (FIX A y B): se corre AQUI porque Stagehand espera (await) este callback
+              // antes de la siguiente llamada al modelo, asi que las lineas quedan listas para el
+              // prepareStep que sigue. alTerminarPaso nunca lanza (best-effort interno).
+              if (percepcion !== undefined) {
+                await percepcion.alTerminarPaso({
+                  actionName: evento.actionName,
+                  actionArgs: evento.actionArgs,
+                  toolOutput: { result: evento.toolOutput.result },
+                });
               }
               if (observador === undefined) return;
               try {
@@ -845,6 +878,7 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
     registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined;
     guardia?: GuardiaDeAccion | undefined;
     cambiador?: CambiadorDeSitio | undefined;
+    perceptor?: PerceptorDePagina | undefined;
     historialPasos: number;
     modoScreenshots: ModoScreenshots;
     reportarConsumo?: ((consumo: ConsumoDeCorrida) => void) | undefined;
@@ -859,6 +893,24 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
       }),
     );
     await stagehand.init();
+    // RED DE SEGURIDAD (FIX C): si el modelo devuelve un elementId sin el prefijo de frame y la
+    // pagina tiene un solo frame, se normaliza a 0-<id> en vez de dejar que el rechazo de esquema
+    // gire hasta el corte. Complementa al parche de patches/ (que evita OFRECER ids sin prefijo).
+    instalarNormalizadorDeElementId(stagehand, this.config.logger);
+    // PERCEPCION (FIX A y B): el control lee la huella y los campos tras cada paso que toca la
+    // pagina y sus lineas viajan al agente en el siguiente prepareStep. Solo si el handler cableo
+    // un perceptor; sin el, cero lecturas extra.
+    const perceptor = params.perceptor;
+    const percepcion =
+      perceptor !== undefined
+        ? crearControlDePercepcion({
+            percibir: () => perceptor.percibir(),
+            logger: this.config.logger,
+          })
+        : undefined;
+    // La huella INICIAL es el "antes" del primer paso (el primer click de la corrida tambien tiene
+    // que poder reportarse sin efecto). Best-effort: si falla, el primer paso queda sin comparacion.
+    if (percepcion !== undefined) await percepcion.inicializar();
     // El reporte se emite en el `finally`: una corrida que LANZA (deadline, cancelacion o corte por
     // esquema) es justo donde mas hace falta saber cuanto se gasto antes de cortarse.
     const consumo = crearAcumuladorDeConsumo();
@@ -916,6 +968,7 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
           registrarAccion: params.registrarAccion,
           conGuardia: params.guardia !== undefined,
           historialPasos: params.historialPasos,
+          percepcion,
           ...(params.reportarConsumo !== undefined
             ? { registrarConsumo: (paso) => consumo.registrarPaso(paso) }
             : {}),
@@ -1014,6 +1067,9 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
       }),
     );
     await stagehand.init();
+    // Misma red de seguridad que la corrida del agente (FIX C): una escalada tambien pasa por el
+    // esquema de act y el modelo tambien puede devolver el id sin prefijo.
+    instalarNormalizadorDeElementId(stagehand, this.config.logger);
     try {
       // Misma envoltura que la del agente (CAMBIO 2): un rechazo de esquema es intermitente y aca
       // tambien se reintenta. El corte por fallos consecutivos no aplica: es UNA sola llamada.

@@ -650,3 +650,18 @@ describe('platform_ejecutar_tarea_en_sitio con varios sitios', () => {
     expect(deps.jobs.createJob).not.toHaveBeenCalled();
   });
 });
+
+describe('descripcion de la tool de ejecutar (FIX E: sin lenguaje de aprobacion obsoleto)', () => {
+  it('describe la ejecucion autonoma con verificacion determinista, sin prometer aprobacion humana', () => {
+    const ejecutar = sitioToolsToDefinitions().find((t) => t.name === SITIO_TOOL_EJECUTAR);
+    expect(ejecutar).toBeDefined();
+    const descripcion = ejecutar?.description ?? '';
+    // Lo que el modelo NO debe volver a anunciar: que la accion queda pendiente de aprobacion.
+    expect(descripcion).not.toContain('aprobacion humana');
+    expect(descripcion).not.toContain('pendientes de aprobacion');
+    // Lo que SI describe: autonomia, verificacion determinista y el desenlace cuando no coincide.
+    expect(descripcion).toContain('AUTONOMA');
+    expect(descripcion).toContain('verifica de forma determinista');
+    expect(descripcion).toContain('que se pidio y que se encontro');
+  });
+});

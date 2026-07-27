@@ -38,6 +38,9 @@ export class RunTimeoutError extends Error {
  * repite exacto de una racha de fallos distintos.
  */
 export class FalloDeEsquemaDelMotorError extends Error {
+  /** El identificador que el motor rechazo DOS veces seguidas; undefined si el corte fue por racha. */
+  readonly elementIdRepetido: string | undefined;
+
   constructor(fallosConsecutivos: number, elementIdRepetido?: string) {
     super(
       elementIdRepetido !== undefined
@@ -48,6 +51,28 @@ export class FalloDeEsquemaDelMotorError extends Error {
             'seguidas (fallo conocido e intermitente del motor, no del objetivo)',
     );
     this.name = 'FalloDeEsquemaDelMotorError';
+    this.elementIdRepetido = elementIdRepetido;
+  }
+}
+
+/**
+ * Nombre-prefijo ESTABLE del corte por identificador repetido (FIX D): describeError construye el
+ * last_error como `${name}: ${message}`, asi que usar este texto como `name` de la subclase deja el
+ * last_error del job empezando EXACTAMENTE con `MOTOR_CORTO_POR_ELEMENTO_REPETIDO:`, que es el
+ * prefijo con el que el diagnostico (y cualquier alerta) distingue este corte sin parsear el resto.
+ */
+export const PREFIJO_MOTOR_CORTO_POR_ELEMENTO_REPETIDO = 'MOTOR_CORTO_POR_ELEMENTO_REPETIDO';
+
+/**
+ * Fallo PERMANENTE especifico del corte por ELEMENTO REPETIDO (FIX D): el motor rechazo dos veces el
+ * MISMO identificador y la corrida se corto. Subclase de PermanentExecutionError para que
+ * execution.ts lo cierre igual (markFailed directo, sin reintentos, trayectoria ya preservada por el
+ * handler); lo unico que cambia es el prefijo estable del last_error.
+ */
+export class MotorCortoPorElementoRepetidoError extends PermanentExecutionError {
+  constructor(mensaje: string) {
+    super(mensaje);
+    this.name = PREFIJO_MOTOR_CORTO_POR_ELEMENTO_REPETIDO;
   }
 }
 

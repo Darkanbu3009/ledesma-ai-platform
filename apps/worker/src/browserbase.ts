@@ -18,6 +18,11 @@ import type {
   ResultadoPasoDeterminista,
 } from './ejecutor-receta.js';
 import {
+  construirExpresionPercepcion,
+  parsearPercepcion,
+  type PercepcionDePagina,
+} from './percepcion.js';
+import {
   EXPRESION_VACIAR_CAMPO_ENFOCADO,
   expresionLeerEstrategias,
   expresionResolverElemento,
@@ -143,6 +148,8 @@ const EXPRESION_TEXTO_BODY =
  *    atributos; sin esta lectura el sistema leia cadena vacia donde el usuario veia el correo.
  *  - un campo con chips de los que NO se pudo extraer ningun valor sale marcado noLeible: "no se
  *    pudo leer" y "esta vacio" son estados distintos y la verificacion los trata distinto.
+ *  - un campo cuyo valor SALIO de sus chips va marcado porChips (FIX B): la percepcion lo reporta
+ *    como "chip confirmado". La verificacion lo ignora (leerCamposDeLaPagina no copia el campo).
  *  - todo va acotado (60 campos, 200 caracteres por valor y por contexto, 20 chips por campo): la
  *    verificacion compara datos concretos, no vuelca la pagina.
  *
@@ -231,6 +238,7 @@ export const EXPRESION_LEER_CAMPOS = String.raw`(() => {
     }
     valor = String(valor).trim();
     let noLeible = false;
+    let porChips = false;
     // Solo un campo de TEXTO vacio delega en sus chips: un checkbox sin marcar o un select sin
     // seleccion estan legitimamente vacios y no tienen chips que leer.
     const esCampoDeTexto = tag !== 'select' && tipo !== 'checkbox' && tipo !== 'radio';
@@ -238,6 +246,7 @@ export const EXPRESION_LEER_CAMPOS = String.raw`(() => {
       const chips = leerChipsDelCampo(nodo);
       if (chips.valores.length > 0) {
         valor = chips.valores.join(', ');
+        porChips = true;
       } else if (chips.ilegibles > 0) {
         noLeible = true;
       }
@@ -268,10 +277,18 @@ export const EXPRESION_LEER_CAMPOS = String.raw`(() => {
     ].join(' ').replace(/\s+/g, ' ').trim();
     const campo = { contexto: contexto.slice(0, MAX_CONTEXTO), valor: valor.slice(0, MAX_VALOR) };
     if (noLeible) campo.noLeible = true;
+    if (porChips) campo.porChips = true;
     salida.push(campo);
   }
   return JSON.stringify(salida);
 })()`;
+
+/**
+ * Expresion de PERCEPCION (FIX A y B): el lector de campos de arriba COMPUESTO con la huella de la
+ * pagina y el descriptor del foco (ver percepcion.ts). Exportada SOLO para el test de DOM, que la
+ * ejecuta tal cual sobre una pagina real igual que hace con EXPRESION_LEER_CAMPOS.
+ */
+export const EXPRESION_PERCEPCION = construirExpresionPercepcion(EXPRESION_LEER_CAMPOS);
 
 /** Pausa acotada (los pasos de una receta necesitan dejar respirar al sitio entre acciones). */
 function pausar(ms: number): Promise<void> {
@@ -854,6 +871,22 @@ export class NavegadorBrowserbase
       });
     } catch {
       return [];
+    }
+  }
+
+  /**
+   * PERCEPCION DE LA PAGINA (FIX A y B): la huella ligera (URL, titulo, conteo de nodos), el
+   * descriptor del elemento con FOCO y los campos con su valor actual, leidos con el MISMO lector
+   * de campos de la verificacion (chips, tokens y pills incluidos; ver EXPRESION_LEER_CAMPOS).
+   * Solo lectura en el mundo aislado. Best-effort: cualquier fallo devuelve null y ese paso queda
+   * sin percepcion; jamas cambia el desenlace de la tarea.
+   */
+  async percibirPagina(sesionExternaId: string): Promise<PercepcionDePagina | null> {
+    try {
+      const crudo = await this.evaluarEnLaPagina(sesionExternaId, EXPRESION_PERCEPCION);
+      return parsearPercepcion(crudo);
+    } catch {
+      return null;
     }
   }
 
