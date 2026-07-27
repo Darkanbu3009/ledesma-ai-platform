@@ -50,6 +50,21 @@ export const POLITICA_EJECUCION_DEFAULT: PoliticaDeEjecucion = {
 export const DETENIDA_VERIFICACION_PREFIX = 'DETENIDA_VERIFICACION: ';
 
 /**
+ * Prefijos ESTABLES de last_error de los dos cierres nuevos del cupo de accion irreversible
+ * (evidencia de produccion del 27 jul 2026). El worker los produce como `name` de la clase de error
+ * (describeError arma `${name}: ${message}`) y la consola los detecta con startsWith para mostrar un
+ * texto veraz en vez del fallo generico. Nunca cambiar: son contrato entre worker y consola.
+ *
+ *  - ACCION_SIN_EFECTO_CONFIRMADO: la accion irreversible se ejecuto (una vez, o su unico reintento)
+ *    y el sitio no mostro que surtiera efecto; puede haber quedado un borrador o un estado a medias.
+ *  - GUARDIA_BLOQUEO_REINTENTOS_IRREVERSIBLES: la guardia agoto el reintento autorizado y el agente
+ *    insistio; el worker corto la corrida en vez de dejarla ciclar contra la guardia.
+ */
+export const ACCION_SIN_EFECTO_CONFIRMADO_PREFIX = 'ACCION_SIN_EFECTO_CONFIRMADO:';
+export const GUARDIA_BLOQUEO_REINTENTOS_IRREVERSIBLES_PREFIX =
+  'GUARDIA_BLOQUEO_REINTENTOS_IRREVERSIBLES:';
+
+/**
  * Por que se detuvo la accion. Cada motivo tiene UN texto i18n propio en la consola:
  *  - noCoincide: lo que el objetivo pedia y lo que habia en el sitio no son lo mismo.
  *  - noLeible: el dato pedido no se pudo LEER del sitio para comprobarlo (el campo existe pero su
