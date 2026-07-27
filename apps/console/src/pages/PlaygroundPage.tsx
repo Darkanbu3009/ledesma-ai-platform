@@ -23,7 +23,9 @@ import { compatibleCredentials } from '../lib/credentials';
 import { useAgent, useCredentials } from '../lib/queries';
 import { runAgentStream, type ChatMessage, type RunCredential } from '../lib/run-agent';
 import type { SseMessage } from '../lib/sse';
+import { concatenarDictado, type IdiomaDictado } from '../lib/voz';
 import { PlaygroundCredential } from '../components/agents/PlaygroundCredential';
+import { VozDictado } from '../components/agents/VozDictado';
 
 /**
  * Filtros del dialogo del SO por categoria de adjunto. Son SOLO una sugerencia para el picker;
@@ -145,7 +147,9 @@ const CORTE_LABEL: Record<string, string> = {
 };
 
 export function PlaygroundPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  // Hint de idioma para la transcripcion del dictado: el idioma activo de la consola.
+  const idiomaDictado: IdiomaDictado = i18n.language.toLowerCase().startsWith('en') ? 'en' : 'es';
   const { id } = useParams<{ id: string }>();
   const { data: agent, isLoading, isError, refetch } = useAgent(id);
 
@@ -591,7 +595,7 @@ export function PlaygroundPage() {
                   className="w-full resize-none bg-transparent px-3.5 pt-2.5 text-sm text-ink outline-none transition placeholder:text-muted-soft disabled:cursor-not-allowed disabled:opacity-60"
                   placeholder={t('playground.mensajePlaceholder')}
                 />
-                <div className="flex items-center px-2 pb-2">
+                <div className="flex items-center gap-1 px-2 pb-2">
                   <MenuAdjuntar
                     disabled={credMissing || subiendo || adjuntos.length >= MAX_ADJUNTOS}
                     titulo={
@@ -600,6 +604,13 @@ export function PlaygroundPage() {
                         : t('playground.adjuntos.adjuntarArchivo')
                     }
                     onElegir={abrirSelector}
+                  />
+                  {/* Dictado por voz: el texto transcrito se INSERTA en el borrador (concatenando);
+                      el envio sigue siendo siempre manual. */}
+                  <VozDictado
+                    idioma={idiomaDictado}
+                    disabled={credMissing}
+                    onTexto={(texto) => setDraft((previo) => concatenarDictado(previo, texto))}
                   />
                 </div>
               </div>

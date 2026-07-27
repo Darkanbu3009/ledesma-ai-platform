@@ -337,6 +337,18 @@
       "quitarAria": "Remove {{name}}",
       "subiendo": "Uploading..."
     },
+    "voz": {
+      "iniciarAria": "Dictate by voice",
+      "detenerAria": "Stop dictation",
+      "transcribiendoAria": "Transcribing dictation",
+      "transcribiendo": "Transcribing...",
+      "permisoDenegado": "Microphone permission is missing. Enable it in your browser settings to dictate.",
+      "errorTranscripcion": "The dictation could not be transcribed. Check your connection; the audio is still available to retry.",
+      "noDisponible": "Voice dictation is not available on this platform.",
+      "reintentar": "Retry",
+      "reintentarAria": "Retry the dictation transcription",
+      "descartarAria": "Discard the dictation audio"
+    },
     "credencial": {
       "titulo": "Session credential",
       "descripcion": "Which key the agent chats with. Reuse one from your vault or paste one on the spot; it is never stored on the platform.",

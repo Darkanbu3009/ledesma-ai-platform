@@ -96,6 +96,12 @@ const EnvSchema = z.object({
       message: 'RELAY_PUBLIC_URL debe ser una URL WebSocket (wss:// en produccion)',
     })
     .optional(),
+  // KEY DE PLATAFORMA de OpenAI para la TRANSCRIPCION DE VOZ del Playground (POST /v1/voz/
+  // transcribir -> whisper-1). Es una key del OPERADOR, no BYOK: el dictado es una capacidad de la
+  // consola, no del agente del usuario. OPCIONAL con el patron de siempre: si falta, el endpoint
+  // responde 501 VOZ_NO_DISPONIBLE y la consola oculta el boton de dictado. La key vive SOLO en el
+  // backend: jamas viaja a la consola, ni a logs, ni a mensajes de error.
+  OPENAI_API_KEY: z.string().min(1).optional(),
   // PUERTO del LISTENER INTERNO del backend para la AUTORIDAD DE COORDINACION del relay (B-1): uso unico
   // del jti y lock por conexion. Es un segundo listener, SEPARADO del publico (PORT), que Railway NO
   // mapea al dominio publico: solo es alcanzable por la RED PRIVADA (`backend.railway.internal:<puerto>`)
