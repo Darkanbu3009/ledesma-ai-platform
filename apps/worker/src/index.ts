@@ -158,7 +158,16 @@ function main(): void {
       aprobacionTtlMs: config.APROBACION_TTL_MINUTOS * 60 * 1000,
       marcarJobPausado: (jobId) => jobs.marcarPausado(jobId),
       subidorScreenshots,
-      trayectorias: { guardar: async (trayectoria) => void (await trayectoriasRepo.crear(trayectoria)) },
+      // Escritura al cierre (guardar) MAS la incremental (FIX D): cabecera al arrancar, pasos por
+      // lotes y cierre que reescribe el contenido final. /actividad muestra progreso real.
+      trayectorias: {
+        guardar: async (trayectoria) => void (await trayectoriasRepo.crear(trayectoria)),
+        iniciar: (trayectoria) => trayectoriasRepo.iniciar(trayectoria),
+        agregarPasos: (trayectoriaId, ownerId, pasos) =>
+          trayectoriasRepo.agregarPasos(trayectoriaId, ownerId, pasos),
+        finalizar: (trayectoriaId, ownerId, trayectoria) =>
+          trayectoriasRepo.finalizar(trayectoriaId, ownerId, trayectoria),
+      },
       // Las tres piezas del camino determinista van juntas: repositorio de lo aprendido, primitivas
       // de bajo nivel del navegador y escalada de un paso suelto al motor.
       recetas: recetasRepo,

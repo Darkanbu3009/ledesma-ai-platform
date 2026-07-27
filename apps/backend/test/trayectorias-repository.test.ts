@@ -90,6 +90,58 @@ describe('TrayectoriasWebRepository.crear', () => {
   });
 });
 
+describe('escritura incremental (FIX D): iniciar, agregarPasos y finalizar', () => {
+  it('iniciar inserta SOLO la cabecera y devuelve su id', async () => {
+    const sql = makeSql((text) =>
+      text.includes('insert into trayectorias_web') ? [{ id: 'tray-1' }] : [],
+    );
+    const id = await new TrayectoriasWebRepository(sql).iniciar({ ...NUEVA, estado: 'fallida', pasos: [] });
+    expect(id).toBe('tray-1');
+    expect(sql.calls).toHaveLength(1);
+    expect(sql.calls[0]?.text).toContain('insert into trayectorias_web');
+  });
+
+  it('agregarPasos verifica la pertenencia dentro de la transaccion y vuelca el lote', async () => {
+    const sql = makeSql((text) =>
+      text.includes('select id from trayectorias_web') ? [{ id: 'tray-1' }] : [],
+    );
+    await new TrayectoriasWebRepository(sql).agregarPasos('tray-1', 'user-1', NUEVA.pasos);
+    expect(sql.calls).toHaveLength(3);
+    expect(sql.calls.every((c) => c.tx)).toBe(true);
+    expect(sql.calls[0]?.text).toContain('select id from trayectorias_web');
+    expect(sql.calls[0]?.values).toEqual(['tray-1', 'user-1']);
+    expect(sql.calls[1]?.text).toContain('insert into pasos_trayectoria');
+    // Idempotente por (trayectoria_id, idx): un lote reintentado no duplica pasos.
+    expect(sql.calls[1]?.text).toContain('on conflict (trayectoria_id, idx) do nothing');
+    expect(sql.calls[1]?.values[0]).toBe('tray-1');
+    expect(sql.calls[1]?.values[1]).toBe(0);
+  });
+
+  it('agregarPasos con una trayectoria AJENA no escribe nada', async () => {
+    const sql = makeSql(() => []);
+    await new TrayectoriasWebRepository(sql).agregarPasos('tray-ajena', 'user-1', NUEVA.pasos);
+    expect(sql.calls).toHaveLength(1);
+  });
+
+  it('finalizar actualiza la cabecera y REEMPLAZA los pasos por la lista final, todo en la transaccion', async () => {
+    const sql = makeSql((text) => (text.includes('update trayectorias_web') ? [{ id: 'tray-1' }] : []));
+    await new TrayectoriasWebRepository(sql).finalizar('tray-1', 'user-1', NUEVA);
+    // 1 update + 1 delete + 2 inserts, todos transaccionales.
+    expect(sql.calls).toHaveLength(4);
+    expect(sql.calls.every((c) => c.tx)).toBe(true);
+    expect(sql.calls[0]?.text).toContain('update trayectorias_web');
+    expect(sql.calls[0]?.text).toContain('where id = ? and owner_id = ?');
+    expect(sql.calls[1]?.text).toContain('delete from pasos_trayectoria');
+    expect(sql.calls[2]?.text).toContain('insert into pasos_trayectoria');
+  });
+
+  it('finalizar sobre una trayectoria AJENA no borra ni escribe pasos', async () => {
+    const sql = makeSql(() => []);
+    await new TrayectoriasWebRepository(sql).finalizar('tray-ajena', 'user-1', NUEVA);
+    expect(sql.calls).toHaveLength(1);
+  });
+});
+
 describe('TrayectoriasWebRepository.listarPorJobConPasos', () => {
   const CABECERA = {
     id: 'tray-1',

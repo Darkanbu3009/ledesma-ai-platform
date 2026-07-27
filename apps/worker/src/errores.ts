@@ -77,6 +77,44 @@ export class MotorCortoPorElementoRepetidoError extends PermanentExecutionError 
 }
 
 /**
+ * Nombre-prefijo ESTABLE del cierre por accion irreversible SIN EFECTO CONFIRMADO (FIX A): la accion
+ * se ejecuto (una vez, o con su unico reintento autorizado) y el sitio no mostro que surtiera efecto.
+ * Mismo mecanismo que MOTOR_CORTO_POR_ELEMENTO_REPETIDO: usar este texto como `name` deja el
+ * last_error del job empezando EXACTAMENTE con `ACCION_SIN_EFECTO_CONFIRMADO:`, que es lo que la
+ * consola detecta para mostrar un cierre veraz (puede haber quedado un borrador a medias).
+ */
+export const PREFIJO_ACCION_SIN_EFECTO_CONFIRMADO = 'ACCION_SIN_EFECTO_CONFIRMADO';
+
+/**
+ * Fallo PERMANENTE del cierre sin efecto confirmado (FIX A). Subclase de PermanentExecutionError
+ * para que execution.ts lo cierre igual (markFailed directo, trayectoria ya preservada); lo unico
+ * que cambia es el prefijo estable del last_error. JAMAS se reintenta: la accion pudo haberse
+ * ejecutado y repetirla a ciegas es como se duplica un envio.
+ */
+export class AccionSinEfectoConfirmadoError extends PermanentExecutionError {
+  constructor(mensaje: string) {
+    super(mensaje);
+    this.name = PREFIJO_ACCION_SIN_EFECTO_CONFIRMADO;
+  }
+}
+
+/**
+ * Nombre-prefijo ESTABLE del corte por REINTENTOS IRREVERSIBLES AGOTADOS (FIX C): la guardia ya
+ * agoto el unico reintento autorizado de la accion irreversible y el agente insistio. El worker
+ * corta la corrida en vez de dejarla ciclar contra la guardia hasta el timeout (evidencia de
+ * produccion del 27 jul 2026: ~10 minutos de bucle "bloqueo / no surtio efecto").
+ */
+export const PREFIJO_GUARDIA_BLOQUEO_REINTENTOS = 'GUARDIA_BLOQUEO_REINTENTOS_IRREVERSIBLES';
+
+/** Fallo PERMANENTE del corte por reintentos irreversibles agotados (FIX C). */
+export class GuardiaBloqueoReintentosError extends PermanentExecutionError {
+  constructor(mensaje: string) {
+    super(mensaje);
+    this.name = PREFIJO_GUARDIA_BLOQUEO_REINTENTOS;
+  }
+}
+
+/**
  * La GUARDIA DE ACCION del worker BLOQUEO una accion del agente ANTES de que llegara al navegador: la
  * verificacion determinista comparo lo que hay en la pagina contra lo que declaro el objetivo y no
  * coincidio (o la politica del usuario no la permite). `message` es el mensaje de la detencion ya

@@ -181,8 +181,11 @@ function makeMotorQuePropone(
     }) => {
       for (const accion of acciones) {
         const veredicto = await params.guardia?.revisar(accion);
-        if (veredicto?.tipo === 'bloquear') throw new AccionBloqueadaError(veredicto.mensaje);
-        if (veredicto?.tipo === 'incompleto') {
+        if (veredicto?.tipo === 'bloquear') {
+          if (veredicto.causa === 'sin_efecto') throw new AccionSinConfirmarError(veredicto.mensaje);
+          throw new AccionBloqueadaError(veredicto.mensaje);
+        }
+        if (veredicto?.tipo === 'incompleto' || veredicto?.tipo === 'rechazar') {
           rechazadas.push(accion);
           continue;
         }
@@ -196,7 +199,10 @@ function makeMotorQuePropone(
             pagina.texto = 'Mensaje enviado. Deshacer';
           }
           const confirmacion = await params.guardia.confirmar();
-          if (!confirmacion.confirmada) throw new AccionSinConfirmarError(confirmacion.mensaje);
+          // Solo el cierre TERMINAL corta (FIX A): el aviso del reintento vuelve al agente.
+          if (!confirmacion.confirmada && confirmacion.terminal) {
+            throw new AccionSinConfirmarError(confirmacion.mensaje);
+          }
         }
       }
       return {
@@ -959,6 +965,113 @@ describe('registro de trayectorias (Fase F, V030)', () => {
   });
 });
 
+/**
+ * ESCRITURA INCREMENTAL de la trayectoria (FIX D): en produccion (27 jul) la trayectoria se escribia
+ * UNA vez al cierre y /actividad mostro "sin pasos" durante los ~10 minutos de la corrida. Ahora la
+ * cabecera se crea al arrancar, los pasos se vuelcan por lotes y el cierre reescribe el contenido
+ * final exacto.
+ */
+describe('escritura incremental de la trayectoria (FIX D)', () => {
+  interface PasoVolcado {
+    idx: number;
+    accion: { tipo: string };
+  }
+  function makeTrayectoriasIncrementales() {
+    return {
+      guardar: vi.fn<(trayectoria: TrayectoriaNueva) => Promise<void>>(async () => {}),
+      iniciar: vi.fn<(trayectoria: TrayectoriaNueva) => Promise<string | null>>(async () => 'tray-1'),
+      agregarPasos: vi.fn<(id: string, ownerId: string, pasos: PasoVolcado[]) => Promise<void>>(
+        async () => {},
+      ),
+      finalizar: vi.fn<(id: string, ownerId: string, trayectoria: TrayectoriaNueva) => Promise<void>>(
+        async () => {},
+      ),
+    };
+  }
+  const JOB_ENVIO = () =>
+    makeJob({
+      payload: {
+        kind: 'tarea_web',
+        connectionId: CONNECTION_ID,
+        objetivo: 'envia el resumen a juan@ejemplo.com',
+      },
+    });
+
+  it('cabecera al arrancar, lotes durante la corrida y cierre que reescribe el contenido final', async () => {
+    const trayectorias = makeTrayectoriasIncrementales();
+    const pagina = makePagina([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]);
+    const motor = makeMotorQuePropone(
+      ['abre el redactor', 'escribe el destinatario', 'escribe el resumen', 'haz clic en Enviar'],
+      'listo',
+      pagina,
+    );
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina), trayectorias });
+
+    await expect(procesarTareaWeb(deps, JOB_ENVIO())).resolves.toBe('completada');
+
+    // La cabecera se creo al ARRANCAR, con estado provisional 'fallida' (veraz si el proceso muere)
+    // y sin pasos: es lo que hace visible la ejecucion en /actividad desde el primer momento.
+    expect(trayectorias.iniciar).toHaveBeenCalledTimes(1);
+    expect(trayectorias.iniciar.mock.calls[0]?.[0]).toMatchObject({
+      jobId: 'job-1',
+      estado: 'fallida',
+      pasos: [],
+    });
+    // Con 4 acciones y lotes de 3, UN lote salio DURANTE la corrida, con los idx definitivos.
+    expect(trayectorias.agregarPasos).toHaveBeenCalledTimes(1);
+    const [id, ownerId, lote] = trayectorias.agregarPasos.mock.calls[0] ?? [];
+    expect(id).toBe('tray-1');
+    expect(ownerId).toBe('user-1');
+    expect(lote?.map((p) => p.idx)).toEqual([0, 1, 2]);
+    // El cierre REESCRIBE el contenido final: estado real y verificacion intercalada. `guardar` no
+    // corre (seria una ejecucion duplicada).
+    expect(trayectorias.finalizar).toHaveBeenCalledTimes(1);
+    const final = trayectorias.finalizar.mock.calls[0]?.[2];
+    expect(final).toMatchObject({ estado: 'exitosa' });
+    expect(final?.pasos.some((p) => p.accion.tipo === 'verificacion')).toBe(true);
+    expect(trayectorias.guardar).not.toHaveBeenCalled();
+  });
+
+  it('si la cabecera no se pudo crear, degrada a la escritura unica al cierre (best-effort)', async () => {
+    const trayectorias = makeTrayectoriasIncrementales();
+    trayectorias.iniciar = vi.fn(async () => {
+      throw new Error('db caida');
+    });
+    const pagina = makePagina([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]);
+    const motor = makeMotorQuePropone(
+      ['abre el redactor', 'escribe el destinatario', 'escribe el resumen', 'haz clic en Enviar'],
+      'listo',
+      pagina,
+    );
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina), trayectorias });
+
+    await expect(procesarTareaWeb(deps, JOB_ENVIO())).resolves.toBe('completada');
+
+    expect(trayectorias.guardar).toHaveBeenCalledTimes(1);
+    expect(trayectorias.finalizar).not.toHaveBeenCalled();
+    expect(trayectorias.guardar.mock.calls[0]?.[0]).toMatchObject({ estado: 'exitosa' });
+  });
+
+  it('una corrida que LANZA tambien cierra su trayectoria incremental (ninguna ruta la pierde)', async () => {
+    const trayectorias = makeTrayectoriasIncrementales();
+    const motor: MotorDeTareaWeb = {
+      ejecutar: vi.fn(
+        async (params: { registrarAccion?: ((accion: AccionCrudaDeMotor) => void) | undefined }) => {
+          params.registrarAccion?.({ type: 'act', action: 'click en Redactar', success: true });
+          throw new FalloDeEsquemaDelMotorError(3);
+        },
+      ),
+    } as unknown as MotorDeTareaWeb;
+    const deps = makeDeps({ motor, trayectorias });
+
+    await expect(procesarTareaWeb(deps, makeJob())).rejects.toThrow(/motor de navegacion fallo/);
+
+    expect(trayectorias.finalizar).toHaveBeenCalledTimes(1);
+    expect(trayectorias.finalizar.mock.calls[0]?.[2]).toMatchObject({ estado: 'fallida' });
+    expect(trayectorias.guardar).not.toHaveBeenCalled();
+  });
+});
+
 describe('defensa anti-injection (separacion instruccion vs contenido)', () => {
   it('el system prompt declara el contenido de pagina como NO CONFIABLE y prohibe seguir sus ordenes', () => {
     const prompt = construirSystemPromptTareaWeb();
@@ -1115,6 +1228,32 @@ describe('detectarAccionQueExigeVerificacion (la accion del agente contra el VER
     expect(detectarAccionQueExigeVerificacion('haz clic en Aceptar las cookies', 'enviar')).toBeNull();
     expect(detectarAccionQueExigeVerificacion('click Continue', 'enviar')).toBeNull();
   });
+
+  it('la navegacion de SOLO LECTURA jamas es la accion irreversible (FIX F)', () => {
+    // La reencarnacion del bug de la etiqueta (commit 81288ca): "Enviados" matchea el patron de
+    // enviar y "Sent" matchea \bsent\b, pero abrir una carpeta es navegacion, no un envio. En
+    // produccion este matcheo por descripcion impidio al agente verificar si el correo salio.
+    expect(
+      detectarAccionQueExigeVerificacion('click the Enviados link in the Gmail left sidebar', 'enviar'),
+    ).toBeNull();
+    expect(detectarAccionQueExigeVerificacion('click Sent folder', 'enviar')).toBeNull();
+    expect(detectarAccionQueExigeVerificacion('abre la carpeta Enviados', 'enviar')).toBeNull();
+    expect(detectarAccionQueExigeVerificacion('scroll to the sent messages', 'enviar')).toBeNull();
+    expect(detectarAccionQueExigeVerificacion('lee la bandeja de Enviados', 'enviar')).toBeNull();
+  });
+
+  it('un GATILLO de accion anula la excepcion de navegacion (FIX F)', () => {
+    // Estas si son (o pueden ser) el envio: boton, atajo de teclado, submit. Pasan por la guardia.
+    expect(detectarAccionQueExigeVerificacion('click the Enviar button', 'enviar')).toBe('enviar');
+    expect(detectarAccionQueExigeVerificacion('press Ctrl+Enter to send', 'enviar')).toBe('send');
+    expect(
+      detectarAccionQueExigeVerificacion('click the button with aria-label Enviar (Ctrl-Enter)', 'enviar'),
+    ).toBe('enviar');
+    // "aria-label" se retira antes de evaluar: nombra COMO se localiza, no un destino de navegacion.
+    expect(
+      detectarAccionQueExigeVerificacion('click the element with aria-label Send', 'enviar'),
+    ).toBe('send');
+  });
 });
 
 describe('barrera de la GUARDIA sobre un objetivo con accion bloqueada', () => {
@@ -1215,14 +1354,21 @@ describe('barrera de la GUARDIA sobre un objetivo con accion bloqueada', () => {
    * DOM lo muestra. Si el sitio no cierra el formulario ni muestra confirmacion, la tarea termina
    * diciendo exactamente eso y NO reintenta.
    */
-  it('accion ejecutada que el sitio no confirma: se reporta sin reintentar', async () => {
-    // La pagina NO cambia tras la accion (no se pasa `pagina` al motor): nada que confirmar.
+  it('accion ejecutada que el sitio no confirma: la tarea NO se cierra como exitosa (FIX A)', async () => {
+    // La pagina NO cambia tras la accion (no se pasa `pagina` al motor): nada que confirmar. El
+    // agente recibe el aviso del reintento, no reintenta y cierra DONE: el worker igual reporta el
+    // paso final sin confirmar, con el prefijo estable.
     const pagina = paginaConDestinatario('juan@ejemplo.com');
     const motor = makeMotorQuePropone(['haz clic en el boton Enviar'], 'correo enviado');
     const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina), esperar: async () => {} });
-    await expect(procesarTareaWeb(deps, makeJobConObjetivo(OBJETIVO_BLOQUEADO))).rejects.toThrow(
-      /se intento pero no se pudo confirmar/,
-    );
+    let error: unknown;
+    try {
+      await procesarTareaWeb(deps, makeJobConObjetivo(OBJETIVO_BLOQUEADO));
+    } catch (e) {
+      error = e;
+    }
+    expect(String(error)).toMatch(/se intento pero no se pudo confirmar/);
+    expect((error as Error).name).toBe('ACCION_SIN_EFECTO_CONFIRMADO');
     // La accion se ejecuto UNA sola vez: el sistema jamas la repite por su cuenta.
     expect(motor.ejecutadas).toEqual(['haz clic en el boton Enviar']);
     expect(deps.navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');

@@ -164,7 +164,13 @@ describe('corrida inicial: la aprobacion por accion ya no es el default (D1)', (
         for (const accion of acciones) {
           const veredicto = await params.guardia?.revisar(accion);
           if (veredicto?.tipo === 'bloquear') throw new AccionBloqueadaError(veredicto.mensaje);
+          if (veredicto?.tipo === 'incompleto' || veredicto?.tipo === 'rechazar') continue;
           ejecutadas.push(accion);
+          // Mismo contrato que el adaptador real: una accion permitida con confirmacion SIEMPRE se
+          // confirma despues de ejecutarla (FIX A).
+          if (veredicto?.tipo === 'permitir' && veredicto.confirmar === true && params.guardia) {
+            await params.guardia.confirmar();
+          }
         }
         return {
           exito: true,
@@ -180,7 +186,8 @@ describe('corrida inicial: la aprobacion por accion ya no es el default (D1)', (
 
   it('accion financiera: NO crea checkpoint, NO pausa el job y NO notifica', async () => {
     const motor = makeMotorQuePropone(['haz clic en confirmar la compra'], 'compra confirmada');
-    const navegador = makeNavegador();
+    // El sitio muestra su aviso de exito: la accion ejecutada se confirma leyendo el DOM (FIX A).
+    const navegador = makeNavegador({ leerTextoVisible: vi.fn(async () => 'compra realizada') });
     const deps = makeDeps({ motor, navegador });
 
     // El objetivo ("compra el vuelo a Cancun del 12 de agosto") no declara datos y el verbo no exige
@@ -226,7 +233,8 @@ describe('corrida inicial: la aprobacion por accion ya no es el default (D1)', (
   it('la infraestructura de aprobaciones sigue INTACTA: el repositorio no se toca en la corrida inicial', async () => {
     const aprobaciones = makeAprobacionesRepo();
     const motor = makeMotorQuePropone(['haz clic en confirmar la compra']);
-    const deps = makeDeps({ motor, aprobaciones });
+    const navegador = makeNavegador({ leerTextoVisible: vi.fn(async () => 'compra realizada') });
+    const deps = makeDeps({ motor, aprobaciones, navegador });
     await procesarTareaWeb(deps, makeJob());
     // Solo la consulta de reanudacion (que devuelve null en una corrida fresca).
     expect(aprobaciones.obtenerVigentePorJob).toHaveBeenCalledTimes(1);

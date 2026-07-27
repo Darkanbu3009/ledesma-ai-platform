@@ -13,7 +13,9 @@ import type { DecryptedProviderCredential } from '@ledesma-platform/backend/exec
 import {
   AccionBloqueadaError,
   AccionSinConfirmarError,
+  AccionSinEfectoConfirmadoError,
   FalloDeEsquemaDelMotorError,
+  GuardiaBloqueoReintentosError,
   MotorCortoPorElementoRepetidoError,
   PermanentExecutionError,
 } from './errores.js';
@@ -44,6 +46,7 @@ import {
   accionSurtioEfecto,
   construirPasoDeBloqueo,
   construirPasoDeVerificacion,
+  formularioVerificadoPresente,
   mensajeDeDetencion,
   mensajeDeIncompleto,
   verificarAccion,
@@ -63,6 +66,7 @@ import {
   type ObservacionDePaso,
   type PasoCensurado,
   type RegistradorDeTrayectorias,
+  type TrayectoriaNueva,
 } from './trayectoria.js';
 import type { NuevaRecetaWeb, RecetaWeb } from '@ledesma-platform/backend/recetas-web';
 import type { EstrategiaLocalizacion, PasoDeReceta } from '@ledesma-platform/shared';
@@ -231,17 +235,29 @@ export interface NavegadorParaTarea {
  *    despues de ejecutarlas (CAMBIO 4): son las irreversibles que acaban de pasar la verificacion.
  *  - 'incompleto' (CAMBIO 1): NO pasa, pero la tarea SIGUE. Faltan datos del objetivo por escribir en
  *    la pagina; el mensaje vuelve al agente para que termine de llenarlos.
- *  - 'bloquear': NO pasa y la tarea termina con el mensaje de la detencion.
+ *  - 'rechazar' (FIX C): NO pasa y la tarea sigue, pero el mensaje es TERMINAL: la corrida va a
+ *    terminar y el agente no debe intentar la accion de nuevo por ninguna via. Es el aviso previo al
+ *    corte duro del segundo bloqueo consecutivo.
+ *  - 'bloquear': NO pasa y la tarea termina con el mensaje de la detencion. `causa` distingue los
+ *    dos cierres nuevos: 'sin_efecto' (efecto probable, no se reintenta; el adaptador lo convierte
+ *    en ACCION_SIN_EFECTO_CONFIRMADO) y 'guardia_reintentos' (el agente insistio tras agotar el
+ *    reintento; se convierte en GUARDIA_BLOQUEO_REINTENTOS_IRREVERSIBLES).
  */
 export type VeredictoDeGuardia =
   | { tipo: 'permitir'; confirmar?: boolean }
   | { tipo: 'incompleto'; mensaje: string }
-  | { tipo: 'bloquear'; mensaje: string };
+  | { tipo: 'rechazar'; mensaje: string }
+  | { tipo: 'bloquear'; mensaje: string; causa?: 'sin_efecto' | 'guardia_reintentos' };
 
-/** Resultado de confirmar en el DOM que una accion irreversible surtio efecto (CAMBIO 4). */
+/**
+ * Resultado de confirmar en el DOM que una accion irreversible surtio efecto (CAMBIO 4, FIX A).
+ * `terminal: false` = el sistema autoriza UN unico reintento verificado; el mensaje vuelve al agente
+ * con la instruccion de reintentar con `act` y localizador por rol/aria-label. `terminal: true` = la
+ * corrida termina (el reintento tampoco confirmo, o no hay reintento posible).
+ */
 export type ResultadoDeConfirmacion =
   | { confirmada: true }
-  | { confirmada: false; mensaje: string };
+  | { confirmada: false; mensaje: string; terminal: boolean };
 
 /**
  * GUARDIA DE ACCION: el punto de INTERCEPCION entre el agente y el navegador. El adaptador del motor
@@ -1021,6 +1037,10 @@ function crearGuardiaDeAccion(
   let paginaPrevia: EstadoDeLaPagina | null = null;
   let mensajeDeBloqueo: string | null = null;
   let ultimosFaltantes: string[] | null = null;
+  /** La accion permitida en vuelo es el REINTENTO autorizado (FIX A): su confirmacion es terminal. */
+  let ejecucionPendienteEsReintento = false;
+  /** Intentos irreversibles bloqueados DESPUES de agotar el reintento (FIX C): al segundo, corte. */
+  let bloqueosTrasReintento = 0;
 
   const bloquear = (veredicto: Extract<Veredicto, { tipo: 'detener' }>): VeredictoDeGuardia => {
     mensajeDeBloqueo = mensajeDeDetencion(veredicto);
@@ -1076,9 +1096,9 @@ function crearGuardiaDeAccion(
       // que abrir el redactor o escribir un campo. No consume cupo ni se bloquea.
       const etiqueta = detectarAccionQueExigeVerificacion(accion, opciones.verboBloqueado);
       if (etiqueta === null) return permitir({ tipo: 'permitir' });
-      // Una accion irreversible que YA salio al navegador cierra la corrida para cualquier otra: es
-      // la barrera que impide enviar dos veces.
-      if (estado.irreversiblesEjecutadas > 0) {
+      // Una accion irreversible CON EFECTO CONFIRMADO cierra la corrida para cualquier otra: es la
+      // barrera que impide enviar dos veces. El cupo se consume al CONFIRMAR, no al ejecutar (FIX A).
+      if (estado.irreversiblesConfirmadas > 0) {
         deps.logger.warn('tarea web: segunda accion irreversible en la misma corrida; se bloquea', {
           jobId: job.id,
           connectionId: sitio.id,
@@ -1087,6 +1107,81 @@ function crearGuardiaDeAccion(
           irreversiblesConfirmadas: estado.irreversiblesConfirmadas,
         });
         return bloquearRegistrando(detencionDirecta('otraAccion'));
+      }
+      // EJECUTADA SIN EFECTO CONFIRMADO (FIX A): se autoriza UN unico reintento en la corrida,
+      // precedido de la re-verificacion determinista completa y de la doble seguridad de abajo.
+      // Nunca un bucle: agotado el reintento, la corrida termina (FIX C).
+      if (estado.irreversiblesEjecutadas > 0) {
+        if (estado.reintentosSinEfecto >= 1) {
+          bloqueosTrasReintento += 1;
+          registrarRechazo('reintento irreversible ya agotado');
+          deps.logger.warn(
+            'tarea web: la guardia bloqueo un reintento irreversible ya agotado; la corrida terminara',
+            {
+              jobId: job.id,
+              connectionId: sitio.id,
+              etiqueta,
+              bloqueosTrasReintento,
+            },
+          );
+          if (bloqueosTrasReintento >= 2) {
+            // Segundo bloqueo consecutivo de la misma etiqueta: corte duro con prefijo estable.
+            mensajeDeBloqueo = MENSAJE_GUARDIA_AGOTADA;
+            return { tipo: 'bloquear', causa: 'guardia_reintentos', mensaje: MENSAJE_GUARDIA_AGOTADA };
+          }
+          return { tipo: 'rechazar', mensaje: MENSAJE_BLOQUEO_TERMINAL };
+        }
+        try {
+          const { veredicto, pagina } = await resolverVerificacion(deps, job, sitio, sesionExternaId, {
+            politica: opciones.politica,
+            verboBloqueado: opciones.verboBloqueado,
+            textoParametros: opciones.textoParametros,
+          });
+          // DOBLE SEGURIDAD (FIX A): si el formulario con los datos verificados YA NO esta, la
+          // accion probablemente surtio efecto con retraso. NO se reintenta (seria el doble envio);
+          // la corrida termina pidiendole al usuario que verifique el resultado en el sitio.
+          const previa = paginaPrevia;
+          if (previa !== null && pagina !== null && !formularioVerificadoPresente(parametros, previa, pagina)) {
+            registrarRechazo('efecto probable: el formulario verificado ya no esta en la pagina');
+            deps.logger.warn(
+              'tarea web: el formulario verificado ya no esta; se trata como efecto probable y NO se reintenta',
+              { jobId: job.id, connectionId: sitio.id, etiqueta },
+            );
+            mensajeDeBloqueo = MENSAJE_EFECTO_PROBABLE;
+            return { tipo: 'bloquear', causa: 'sin_efecto', mensaje: MENSAJE_EFECTO_PROBABLE };
+          }
+          verificaciones.push({ accionesPrevias, paso: construirPasoDeVerificacion(veredicto) });
+          if (veredicto.tipo === 'detener') {
+            deps.logger.warn('tarea web: el reintento irreversible NO supero la re-verificacion', {
+              jobId: job.id,
+              connectionId: sitio.id,
+              motivo: veredicto.detencion.motivo,
+              etiqueta,
+            });
+            return bloquear(veredicto);
+          }
+          if (veredicto.tipo === 'incompleto') {
+            ultimosFaltantes = veredicto.faltantes;
+            return { tipo: 'incompleto', mensaje: mensajeDeIncompleto(veredicto) };
+          }
+          // El reintento NO suma una segunda ejecucion: es LA MISMA accion (confirmarla deja
+          // ejecutadas == confirmadas y la tarea puede cerrarse como exitosa).
+          estado.reintentosSinEfecto += 1;
+          ejecucionPendienteEsReintento = true;
+          paginaPrevia = pagina ?? { campos: [], texto: '' };
+          deps.logger.info(
+            'tarea web: reintento irreversible autorizado tras re-verificacion (unico de la corrida)',
+            { jobId: job.id, connectionId: sitio.id, etiqueta },
+          );
+          return permitir({ tipo: 'permitir', confirmar: true });
+        } catch (error) {
+          deps.logger.error('tarea web: la re-verificacion del reintento fallo; la accion NO se ejecuta', {
+            jobId: job.id,
+            connectionId: sitio.id,
+            err: describir(error),
+          });
+          return bloquearRegistrando(detencionDirecta('politicaNoDisponible'));
+        }
       }
       try {
         const { veredicto, pagina } = await resolverVerificacion(deps, job, sitio, sesionExternaId, {
@@ -1131,8 +1226,10 @@ function crearGuardiaDeAccion(
           return { tipo: 'incompleto', mensaje: mensajeDeIncompleto(veredicto) };
         }
         ultimosFaltantes = null;
-        // El cupo se consume AQUI, no al confirmar: desde este punto la accion va al navegador.
+        // La EJECUCION se cuenta aqui (desde este punto la accion va al navegador); el CUPO se
+        // consume recien al CONFIRMAR el efecto (FIX A): irreversiblesConfirmadas es la barrera.
         estado.irreversiblesEjecutadas += 1;
+        ejecucionPendienteEsReintento = false;
         // La foto que se acaba de comparar es la referencia contra la que se confirmara el efecto.
         paginaPrevia = pagina ?? { campos: [], texto: '' };
         deps.logger.info('tarea web: verificacion determinista superada; la accion pasa al navegador', {
@@ -1161,6 +1258,7 @@ function crearGuardiaDeAccion(
       if (antes === null || estado.irreversiblesConfirmadas >= estado.irreversiblesEjecutadas) {
         return { confirmada: true };
       }
+      const esReintento = ejecucionPendienteEsReintento;
       for (let intento = 0; intento < INTENTOS_DE_CONFIRMACION; intento++) {
         if (intento > 0) await esperar(ESPERA_ENTRE_CONFIRMACIONES_MS);
         const despues = await leerEstadoDeLaPagina(deps, job, sesionExternaId);
@@ -1176,25 +1274,74 @@ function crearGuardiaDeAccion(
         });
         return { confirmada: true };
       }
+      if (!esReintento) {
+        // FIX A: la primera ejecucion sin efecto confirmado NO termina la corrida ni consume el
+        // cupo: el agente recibe la instruccion de reintentar UNA vez, con act y localizador por
+        // rol/aria-label (los clicks por coordenadas quedan fuera del toolset con guardia).
+        deps.logger.warn(
+          'tarea web: la accion se ejecuto sin efecto confirmado; se autoriza UN unico reintento verificado',
+          { jobId: job.id, connectionId: sitio.id, dominio: sitio.dominio },
+        );
+        return { confirmada: false, terminal: false, mensaje: MENSAJE_REINTENTO_AUTORIZADO };
+      }
       deps.logger.warn(
-        'tarea web: la accion se ejecuto pero el sitio no muestra que haya surtido efecto; NO se reintenta',
+        'tarea web: el reintento tampoco confirmo efecto; la corrida termina y NO se vuelve a intentar',
         { jobId: job.id, connectionId: sitio.id, dominio: sitio.dominio },
       );
-      return { confirmada: false, mensaje: MENSAJE_SIN_CONFIRMAR };
+      return { confirmada: false, terminal: true, mensaje: MENSAJE_SIN_CONFIRMAR };
     },
   };
 }
 
 /**
- * Mensaje del cierre cuando la accion se ejecuto y el sitio no mostro que surtiera efecto (CAMBIO 4).
- * Dice exactamente eso, sin afirmar ni negar que haya ocurrido, y deja claro que el sistema no la va
- * a repetir: repetir a ciegas una accion irreversible es como se duplica un envio o un pago.
+ * Mensaje del cierre cuando la accion se ejecuto (incluido su unico reintento) y el sitio no mostro
+ * que surtiera efecto (CAMBIO 4 + FIX A). Dice exactamente eso, sin afirmar ni negar que haya
+ * ocurrido, y deja claro que el sistema no la va a repetir: repetir a ciegas una accion irreversible
+ * es como se duplica un envio o un pago. Viaja con el prefijo ACCION_SIN_EFECTO_CONFIRMADO.
  */
 const MENSAJE_SIN_CONFIRMAR =
   'la accion se intento pero no se pudo confirmar que surtiera efecto en el sitio (ni se cerro el ' +
   'formulario ni aparecio una confirmacion); la tarea termina aqui y NO se reintenta ' +
   'automaticamente, para no repetir una accion que quiza ya se ejecuto. Revisa el sitio antes de ' +
   'volver a pedirla';
+
+/**
+ * Mensaje que vuelve al agente tras la PRIMERA ejecucion sin efecto confirmado (FIX A): el sistema
+ * autoriza UN unico reintento y fija el COMO (act con localizador por rol/aria-label, jamas
+ * coordenadas: en produccion el click por coordenadas golpeo la cabecera del compose, no Enviar).
+ */
+const MENSAJE_REINTENTO_AUTORIZADO =
+  'la accion se ejecuto pero el sitio NO muestra que haya surtido efecto (el formulario sigue igual). ' +
+  'El sistema autoriza UN unico reintento: usa la herramienta act y localiza el boton objetivo por su ' +
+  'rol y su aria-label (por ejemplo, el boton cuyo aria-label empieza con Enviar o Send). No uses ' +
+  'coordenadas ni atajos de teclado, y no intentes ninguna otra ruta. Si el reintento tampoco surte ' +
+  'efecto, la tarea terminara sola: no insistas.';
+
+/**
+ * Mensaje TERMINAL de la guardia cuando bloquea un intento irreversible con el reintento ya agotado
+ * (FIX C): avisa que la corrida va a terminar. Si el agente insiste una vez mas, el worker corta con
+ * el prefijo GUARDIA_BLOQUEO_REINTENTOS_IRREVERSIBLES.
+ */
+const MENSAJE_BLOQUEO_TERMINAL =
+  'el sistema bloqueo esta accion: el unico reintento autorizado ya se uso y no se permite ninguno ' +
+  'mas. La corrida va a terminar; NO intentes la accion de nuevo por ninguna via. Termina ahora y ' +
+  'reporta lo que paso.';
+
+/** Mensaje del corte duro tras el segundo bloqueo consecutivo (FIX C): jamas un bucle. */
+const MENSAJE_GUARDIA_AGOTADA =
+  'la guardia bloqueo dos veces seguidas el reintento de la accion irreversible (el unico reintento ' +
+  'autorizado ya se habia agotado) y la corrida se corto para no ciclar. Es posible que haya quedado ' +
+  'un borrador o un estado a medias en el sitio: revisalo antes de volver a pedir la tarea';
+
+/**
+ * Mensaje del cierre por EFECTO PROBABLE (FIX A, doble seguridad): el formulario con los datos
+ * verificados ya no esta, asi que la accion probablemente se ejecuto con retraso. NO se reintenta.
+ */
+const MENSAJE_EFECTO_PROBABLE =
+  'la accion se ejecuto y, aunque el sitio no mostro una confirmacion inmediata, el formulario con ' +
+  'los datos verificados ya no esta en la pagina: lo mas probable es que la accion SI se haya ' +
+  'realizado. No se reintenta para no duplicarla. Verifica el resultado en el sitio antes de volver ' +
+  'a pedir la tarea';
 
 /**
  * CAMINO POR RECETA (CAMBIO 5): busca la receta ACTIVA de este owner, dominio y firma de objetivo.
@@ -2313,6 +2460,19 @@ export async function procesarTareaWeb(
       throw new PermanentExecutionError(describirFalloDelMotor(resultado, deps.maxPasos));
     }
 
+    // ACCION SIN EFECTO CONFIRMADO (FIX A): si una accion irreversible salio al navegador y su
+    // efecto nunca se confirmo, la tarea NO puede cerrarse como exitosa aunque el agente haya
+    // terminado con DONE (por ejemplo, tras recibir el aviso terminal de la guardia). Tampoco se
+    // promueve receta de una corrida asi: repetirla repetiria el paso sin confirmar.
+    if (verboBloqueado !== null && registro.algunaSinConfirmar()) {
+      deps.logger.warn('tarea web: la corrida termino con la accion irreversible sin efecto confirmado', {
+        jobId: job.id,
+        connectionId: activo.sitio.id,
+        dominio: activo.sitio.dominio,
+      });
+      throw new AccionSinEfectoConfirmadoError(MENSAJE_SIN_CONFIRMAR);
+    }
+
     // 8. Exito: guardar el contexto ACTUALIZADO (re-cifrado) + refrescar ultimo_uso_en de CADA sitio
     //    que la tarea uso, no solo del ultimo: la sesion de un sitio visitado a mitad de camino
     //    tambien avanzo y sus cookies nuevas son las que evitan que caduque antes de tiempo.
@@ -2449,6 +2609,96 @@ function intercalarVerificaciones(
   return pasos;
 }
 
+/** Tamano del lote de la escritura incremental (FIX D): cada N acciones nuevas se vuelca un lote. */
+const LOTE_DE_PASOS_INCREMENTAL = 3;
+
+/** Escritor de UNA trayectoria en curso (FIX D): cabecera al arrancar, lotes durante, cierre final. */
+interface EscritorIncrementalDeTrayectoria {
+  /** Avisa que la traza en vivo crecio; vuelca un lote censurado si toca. Sincrono y sin efectos. */
+  alRegistrar(acciones: AccionCrudaDeMotor[]): void;
+  /** Cierra con el contenido final EXACTO de `guardar`. false = la cabecera nunca se pudo crear. */
+  finalizar(trayectoria: TrayectoriaNueva): Promise<boolean>;
+}
+
+/**
+ * ESCRITURA INCREMENTAL de la trayectoria (FIX D). La cabecera se crea al ARRANCAR la corrida (con
+ * estado provisional 'fallida': si el proceso muriera a mitad de camino, ese es ademas el estado
+ * veraz) y los pasos se vuelcan POR LOTES mientras el motor avanza, asi /actividad muestra progreso
+ * real en vez de "sin pasos" durante toda una tarea larga. Al cerrar, `finalizar` REESCRIBE los
+ * pasos con la lista final (verificaciones intercaladas, idx renumerados): el contenido persistido
+ * queda identico al de la escritura unica de antes. Best-effort de punta a punta: cualquier fallo
+ * degrada a la escritura al cierre de siempre o, si la cabecera ya existe, conserva lo volcado.
+ *
+ * Devuelve null cuando el registrador no expone los metodos incrementales: cero cambio.
+ */
+function crearEscritorIncremental(
+  deps: TareaWebDeps,
+  job: Job,
+  sitio: SitioConectado,
+  objetivo: string,
+  iniciadaEn: Date,
+): EscritorIncrementalDeTrayectoria | null {
+  const registrador = deps.trayectorias;
+  if (!registrador?.iniciar || !registrador.agregarPasos || !registrador.finalizar) return null;
+  const agregarPasos = registrador.agregarPasos.bind(registrador);
+  const cerrar = registrador.finalizar.bind(registrador);
+  const idPromise: Promise<string | null> = registrador
+    .iniciar({
+      ownerId: job.ownerId,
+      jobId: job.id,
+      connectionId: sitio.id,
+      dominio: sitio.dominio,
+      objetivo: censurarObjetivo(objetivo),
+      estado: 'fallida',
+      iniciadaEn,
+      terminadaEn: iniciadaEn,
+      duracionMs: 0,
+      tokensIn: null,
+      tokensOut: null,
+      pasos: [],
+    })
+    .catch((error: unknown) => {
+      deps.logger.warn(
+        'tarea web: no se pudo iniciar la trayectoria incremental (se escribira al cierre)',
+        { jobId: job.id, err: describir(error) },
+      );
+      return null;
+    });
+  let volcados = 0;
+  // Los lotes se SERIALIZAN en una cola de un solo vuelo: dos inserts del mismo idx no pueden
+  // cruzarse, y el cierre espera la cola antes de reescribir.
+  let cola: Promise<void> = Promise.resolve();
+  return {
+    alRegistrar: (acciones: AccionCrudaDeMotor[]): void => {
+      if (acciones.length - volcados < LOTE_DE_PASOS_INCREMENTAL) return;
+      const desde = volcados;
+      const copia = acciones.slice();
+      volcados = copia.length;
+      cola = cola
+        .then(async () => {
+          const id = await idPromise;
+          if (id === null) return;
+          // extraerPasosCensurados asigna idx por posicion sobre la traza completa, asi que el
+          // slice conserva los idx definitivos del lote.
+          await agregarPasos(id, job.ownerId, extraerPasosCensurados(copia).slice(desde));
+        })
+        .catch((error: unknown) => {
+          deps.logger.warn('tarea web: fallo un lote de la trayectoria incremental (se ignora)', {
+            jobId: job.id,
+            err: describir(error),
+          });
+        });
+    },
+    finalizar: async (trayectoria: TrayectoriaNueva): Promise<boolean> => {
+      const id = await idPromise;
+      if (id === null) return false;
+      await cola;
+      await cerrar(id, job.ownerId, trayectoria);
+      return true;
+    },
+  };
+}
+
 /**
  * Persiste la TRAYECTORIA de una ejecucion del motor (V030), SIEMPRE best-effort: la traza es
  * observabilidad; su fallo jamas cambia el desenlace de la tarea (misma politica que el screenshot
@@ -2475,6 +2725,8 @@ async function guardarTrayectoriaBestEffort(
    * promocion no depende de que V030 este aplicada.
    */
   acumulador?: PasoCensurado[],
+  /** Escritor incremental de ESTA corrida (FIX D): si cerro la trayectoria, no se re-escribe. */
+  escritor?: EscritorIncrementalDeTrayectoria | null,
 ): Promise<void> {
   const pasos = [
     ...pasosPrevios,
@@ -2489,23 +2741,38 @@ async function guardarTrayectoriaBestEffort(
   acumulador?.push(...pasos);
   if (!deps.trayectorias) return;
   const terminadaEn = new Date();
+  const trayectoria: TrayectoriaNueva = {
+    ownerId: job.ownerId,
+    jobId: job.id,
+    connectionId: sitio.id,
+    dominio: sitio.dominio,
+    objetivo: censurarObjetivo(objetivo),
+    estado,
+    iniciadaEn,
+    terminadaEn,
+    duracionMs: Math.max(0, terminadaEn.getTime() - iniciadaEn.getTime()),
+    tokensIn: resultado.tokensIn,
+    tokensOut: resultado.tokensOut,
+    // El paso de verificacion queda intercalado donde ocurrio y el idx ya viene renumerado, para
+    // que el orden persistido sea el orden real de lo que paso.
+    pasos,
+  };
+  // CIERRE INCREMENTAL (FIX D): si la cabecera ya existe, se cierra reescribiendo los pasos finales.
+  // Si el cierre falla con la cabecera creada NO se cae a `guardar` (duplicaria la ejecucion): los
+  // lotes ya volcados se conservan y el fallo se loguea.
+  if (escritor !== null && escritor !== undefined) {
+    try {
+      if (await escritor.finalizar(trayectoria)) return;
+    } catch (error) {
+      deps.logger.warn(
+        'tarea web: no se pudo cerrar la trayectoria incremental (se conservan los lotes volcados)',
+        { jobId: job.id, connectionId: sitio.id, err: describir(error) },
+      );
+      return;
+    }
+  }
   try {
-    await deps.trayectorias.guardar({
-      ownerId: job.ownerId,
-      jobId: job.id,
-      connectionId: sitio.id,
-      dominio: sitio.dominio,
-      objetivo: censurarObjetivo(objetivo),
-      estado,
-      iniciadaEn,
-      terminadaEn,
-      duracionMs: Math.max(0, terminadaEn.getTime() - iniciadaEn.getTime()),
-      tokensIn: resultado.tokensIn,
-      tokensOut: resultado.tokensOut,
-      // El paso de verificacion queda intercalado donde ocurrio y el idx ya viene renumerado, para
-      // que el orden persistido sea el orden real de lo que paso.
-      pasos,
-    });
+    await deps.trayectorias.guardar(trayectoria);
   } catch (error) {
     deps.logger.warn('tarea web: no se pudo registrar la trayectoria (se ignora, best-effort)', {
       jobId: job.id,
@@ -2580,6 +2847,9 @@ async function ejecutarMotorConRegistro(
   const observador = crearObservadorDePasos(deps, sesionExternaId, observaciones);
   // Traza EN VIVO de la corrida: es la unica que queda si el motor lanza (CAMBIO 7).
   const accionesEnVivo: AccionCrudaDeMotor[] = [];
+  // ESCRITURA INCREMENTAL (FIX D): cabecera al arrancar y lotes de pasos mientras el motor corre,
+  // para que /actividad muestre progreso real. null si el registrador no la soporta.
+  const escritor = crearEscritorIncremental(deps, job, sitio, objetivo, iniciadaEn);
   // CONSUMO DE LA CORRIDA: el motor lo emite en su cierre, haya devuelto o haya lanzado. Se loguea
   // en los dos caminos porque es lo que permite medir si el ahorro (cache de prompt, ventana de
   // historial, capturas bajo politica) esta funcionando de verdad en produccion.
@@ -2593,7 +2863,10 @@ async function ejecutarMotorConRegistro(
       prompt,
       senalExterna,
       observador,
-      (accion) => accionesEnVivo.push(accion),
+      (accion) => {
+        accionesEnVivo.push(accion);
+        escritor?.alRegistrar(accionesEnVivo);
+      },
       guardia,
       (reporte) => {
         consumo = reporte;
@@ -2616,6 +2889,8 @@ async function ejecutarMotorConRegistro(
       [],
       guardia?.verificaciones() ?? [],
       observaciones,
+      undefined,
+      escritor,
     );
     throw error;
   }
@@ -2639,6 +2914,7 @@ async function ejecutarMotorConRegistro(
     guardia?.verificaciones() ?? [],
     observaciones,
     acumulador,
+    escritor,
   );
   return { resultado, desenlace };
 }
@@ -2779,10 +3055,15 @@ async function ejecutarMotor(
     if (error instanceof AccionBloqueadaError) {
       throw new PermanentExecutionError(error.message);
     }
-    // ACCION SIN CONFIRMAR (CAMBIO 4): se ejecuto y el sitio no mostro que surtiera efecto. La tarea
-    // termina reportandolo tal cual; jamas se reintenta (repetirla podria duplicar el efecto).
+    // ACCION SIN CONFIRMAR (CAMBIO 4 + FIX A): se ejecuto (con su unico reintento incluido) y el
+    // sitio no mostro que surtiera efecto. La tarea termina con el prefijo estable
+    // ACCION_SIN_EFECTO_CONFIRMADO; jamas se reintenta (repetirla podria duplicar el efecto).
     if (error instanceof AccionSinConfirmarError) {
-      throw new PermanentExecutionError(error.message);
+      throw new AccionSinEfectoConfirmadoError(error.message);
+    }
+    // CORTE POR REINTENTOS AGOTADOS (FIX C): ya viene con su nombre-prefijo estable; pasa intacto.
+    if (error instanceof GuardiaBloqueoReintentosError) {
+      throw error;
     }
     if (error instanceof FalloDeEsquemaDelMotorError) {
       throw convertirCorteDelMotor(error);
