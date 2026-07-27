@@ -337,6 +337,18 @@
       "quitarAria": "Quitar {{name}}",
       "subiendo": "Subiendo..."
     },
+    "voz": {
+      "iniciarAria": "Dictar por voz",
+      "detenerAria": "Detener dictado",
+      "transcribiendoAria": "Transcribiendo dictado",
+      "transcribiendo": "Transcribiendo...",
+      "permisoDenegado": "No hay permiso para usar el microfono. Habilitalo en la configuracion del navegador para poder dictar.",
+      "errorTranscripcion": "No se pudo transcribir el dictado. Revisa tu conexion; el audio sigue disponible para reintentar.",
+      "noDisponible": "El dictado por voz no esta disponible en esta plataforma.",
+      "reintentar": "Reintentar",
+      "reintentarAria": "Reintentar la transcripcion del dictado",
+      "descartarAria": "Descartar el audio del dictado"
+    },
     "credencial": {
       "titulo": "Credencial de la sesion",
       "descripcion": "Con que key conversa el agente. Reusa una de tu boveda o pega una al momento; nunca se guarda en la plataforma.",

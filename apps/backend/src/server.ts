@@ -24,6 +24,7 @@ import { trayectoriasRoutes } from './routes/trayectorias.js';
 import { grabacionesRoutes } from './routes/grabaciones.js';
 import { tareasEnsenadasRoutes } from './routes/tareas-ensenadas.js';
 import { dashboardRoutes } from './routes/dashboard.js';
+import { vozRoutes } from './routes/voz.js';
 import { triggerRoutes } from './routes/triggers.js';
 import { incomingTriggerRoutes } from './routes/incoming-triggers.js';
 import { sessionTokenRoutes } from './routes/session-tokens.js';
@@ -128,6 +129,10 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
   // Resumen AGREGADO del dashboard (solo lectura): los tres ejes (actividad, operaciones, gasto) por
   // owner. Aditivo: lee agent_runs, jobs y los repos de recursos; no escribe nada.
   await app.register(dashboardRoutes(config));
+  // Entrada por voz del Playground (POST /v1/voz/transcribir): reenvia el dictado a whisper-1 y
+  // devuelve el texto para que el usuario lo revise antes de enviar. El audio no se persiste; sin
+  // OPENAI_API_KEY responde 501 VOZ_NO_DISPONIBLE y la consola oculta el boton. Aditivo.
+  await app.register(vozRoutes(config));
   await app.register(triggerRoutes(config));
   await app.register(incomingTriggerRoutes(config));
   await app.register(sessionTokenRoutes(config));
