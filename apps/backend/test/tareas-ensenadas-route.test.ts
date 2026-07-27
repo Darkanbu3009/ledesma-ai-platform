@@ -38,6 +38,52 @@ const verifier: JwtVerifier = {
 
 const listarActivas = vi.fn();
 const borrar = vi.fn();
+const buscarPorTrayectorias = vi.fn();
+const getSummaryForOwner = vi.fn();
+const createJob = vi.fn();
+const listarPorJob = vi.fn();
+const getProfileTier = vi.fn();
+
+const JOB_ID = '11111111-1111-4111-8111-111111111111';
+const JOB_PROMOCION_ID = '22222222-2222-4222-8222-222222222222';
+const TRAY_ID = '33333333-3333-4333-8333-333333333333';
+
+function makeJobSummary(overrides: Record<string, unknown> = {}) {
+  return {
+    id: JOB_ID,
+    agentId: null,
+    status: 'completed',
+    type: 'tarea_web',
+    attempts: 1,
+    lastError: null,
+    scheduledFor: null,
+    createdAt: '2026-07-26T18:00:00.000Z',
+    startedAt: '2026-07-26T18:00:00.000Z',
+    finishedAt: '2026-07-26T18:05:00.000Z',
+    conLoAprendido: false,
+    ajustadaSola: false,
+    ...overrides,
+  };
+}
+
+function makeTrayectoria(overrides: Record<string, unknown> = {}) {
+  return {
+    id: TRAY_ID,
+    ownerId: 'user-1',
+    jobId: JOB_ID,
+    connectionId: 'conn-1',
+    dominio: 'correo.ejemplo.com',
+    objetivo: 'enviar el reporte',
+    estado: 'exitosa',
+    iniciadaEn: '2026-07-26T18:00:00.000Z',
+    terminadaEn: '2026-07-26T18:05:00.000Z',
+    duracionMs: 300_000,
+    tokensIn: null,
+    tokensOut: null,
+    creadaEn: '2026-07-26T18:00:00.000Z',
+    ...overrides,
+  };
+}
 
 function makeReceta(overrides: Partial<RecetaWeb> = {}): RecetaWeb {
   return {
@@ -87,7 +133,13 @@ async function makeApp(): Promise<FastifyInstance> {
   const app = Fastify();
   registerErrorHandler(app, config);
   await app.register(
-    tareasEnsenadasRoutes(config, { verifier, recetasRepo: { listarActivas, borrar } }),
+    tareasEnsenadasRoutes(config, {
+      verifier,
+      recetasRepo: { listarActivas, borrar, buscarPorTrayectorias },
+      jobsRepo: { getSummaryForOwner, createJob },
+      trayectoriasRepo: { listarPorJob },
+      registrationRepo: { getProfileTier },
+    }),
   );
   return app;
 }
@@ -97,6 +149,11 @@ beforeEach(async () => {
   vi.clearAllMocks();
   listarActivas.mockResolvedValue([]);
   borrar.mockResolvedValue(true);
+  buscarPorTrayectorias.mockResolvedValue(null);
+  getSummaryForOwner.mockResolvedValue(makeJobSummary());
+  createJob.mockResolvedValue({ id: JOB_PROMOCION_ID });
+  listarPorJob.mockResolvedValue([makeTrayectoria()]);
+  getProfileTier.mockResolvedValue('pro');
   app = await makeApp();
 });
 
@@ -154,6 +211,88 @@ describe('GET /v1/tareas-ensenadas', () => {
       headers: { authorization: 'Bearer valid-user-1' },
     });
     expect(res.json().tareas[0].descripcion).toBeNull();
+  });
+});
+
+describe('POST /v1/tareas-ensenadas/desde-job (guardar como tarea aprendida)', () => {
+  function post(jobId: string = JOB_ID, token: string | null = 'valid-user-1') {
+    return app.inject({
+      method: 'POST',
+      url: '/v1/tareas-ensenadas/desde-job',
+      ...(token !== null ? { headers: { authorization: `Bearer ${token}` } } : {}),
+      payload: { jobId },
+    });
+  }
+
+  it('sin token: 401 y no se toca ningun repositorio', async () => {
+    const res = await post(JOB_ID, null);
+    expect(res.statusCode).toBe(401);
+    expect(getSummaryForOwner).not.toHaveBeenCalled();
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it('sin un plan con autonomia: 403 y no se encola nada', async () => {
+    getProfileTier.mockResolvedValue('free');
+    const res = await post();
+    expect(res.statusCode).toBe(403);
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it('encola la promocion del job PROPIO y responde 202 con el job de conversion', async () => {
+    const res = await post();
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toEqual({ status: 'accepted', jobId: JOB_PROMOCION_ID });
+    // La pertenencia sale SIEMPRE del token, jamas del cliente.
+    expect(getSummaryForOwner).toHaveBeenCalledWith(JOB_ID, 'user-1');
+    expect(listarPorJob).toHaveBeenCalledWith(JOB_ID, 'user-1');
+    expect(createJob).toHaveBeenCalledWith({
+      agentId: null,
+      ownerId: 'user-1',
+      credentialId: null,
+      payload: { kind: 'promover_trayectoria', jobId: JOB_ID },
+    });
+  });
+
+  it('un job ajeno o inexistente responde 404 (no se distinguen) y no encola', async () => {
+    getSummaryForOwner.mockResolvedValue(null);
+    const res = await post();
+    expect(res.statusCode).toBe(404);
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it('un job que no es una tarea web completada responde 400', async () => {
+    getSummaryForOwner.mockResolvedValue(makeJobSummary({ status: 'failed' }));
+    const res = await post();
+    expect(res.statusCode).toBe(400);
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it('una tarea que corrio por receta no tiene nada nuevo que guardar: 400', async () => {
+    getSummaryForOwner.mockResolvedValue(makeJobSummary({ conLoAprendido: true }));
+    const res = await post();
+    expect(res.statusCode).toBe(400);
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it('sin trayectoria exitosa registrada: 400', async () => {
+    listarPorJob.mockResolvedValue([makeTrayectoria({ estado: 'fallida' })]);
+    const res = await post();
+    expect(res.statusCode).toBe(400);
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it('DOBLE GUARDADO: con una receta ya creada desde la trayectoria responde 409 sin encolar', async () => {
+    buscarPorTrayectorias.mockResolvedValue(RECETA_ID);
+    const res = await post();
+    expect(res.statusCode).toBe(409);
+    expect(buscarPorTrayectorias).toHaveBeenCalledWith('user-1', [TRAY_ID]);
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it('un jobId que no es un uuid se rechaza antes de tocar la base', async () => {
+    const res = await post('no-soy-un-uuid');
+    expect(res.statusCode).toBe(400);
+    expect(getSummaryForOwner).not.toHaveBeenCalled();
   });
 });
 

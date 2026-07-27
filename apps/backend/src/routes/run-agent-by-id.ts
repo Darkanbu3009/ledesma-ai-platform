@@ -16,6 +16,13 @@ import { resolveStoredCredential } from '../credentials/resolve-stored-credentia
 import { AGENT_LIMITS } from '../agent/index.js';
 import { assembleAgentRun } from '../execution/assemble-agent-run.js';
 import { SitiosConectadosRepository } from '../sitios/sitios-conectados-repository.js';
+import { TrayectoriasWebRepository } from '../trayectorias/trayectorias-repository.js';
+import { RecetasWebRepository } from '../recetas-web/recetas-web-repository.js';
+import {
+  encolarGuardadoDeJob,
+  evaluarGuardadoDeJob,
+  type GuardarTareaAprendidaDeps,
+} from '../recetas-web/guardar-tarea-aprendida.js';
 import { streamAgentRun } from './sse-runner.js';
 
 // Adjuntos por referencia (URL): imagenes a vision nativa, documentos a texto extraido.
@@ -140,6 +147,17 @@ export function runAgentByIdRoutes(
     // en el camino x-credential-id (unico con owner + credencial de boveda establecidos).
     const jobsRepo = new JobsRepository(getSql(config));
     const sitiosRepo = new SitiosConectadosRepository(getSql(config));
+    // GUARDAR COMO TAREA APRENDIDA (Fase F): el MISMO servicio del endpoint de la consola, atado a
+    // los repos de este route, para que la tool del agente y el boton de /actividad nunca diverjan.
+    const guardadoDeps: GuardarTareaAprendidaDeps = {
+      jobs: jobsRepo,
+      trayectorias: new TrayectoriasWebRepository(getSql(config)),
+      recetas: new RecetasWebRepository(getSql(config)),
+    };
+    const guardado = {
+      evaluar: (ownerId: string, jobId: string) => evaluarGuardadoDeJob(guardadoDeps, ownerId, jobId),
+      encolar: (ownerId: string, jobId: string) => encolarGuardadoDeJob(guardadoDeps, ownerId, jobId),
+    };
     const credentialRepo = deps?.credentialRepo ?? new ProviderCredentialRepository(getSql(config));
     const verifier = deps?.verifier ?? createSupabaseJwtVerifier(config);
 
@@ -233,7 +251,7 @@ export function runAgentByIdRoutes(
         ...(parsed.data.maxIterations !== undefined ? { maxIterations: parsed.data.maxIterations } : {}),
         // TOOLS DE SITIOS (7.1d): solo con contexto de tenancy completo (camino x-credential-id).
         ...(sitioToolsCtx
-          ? { sitios: { context: sitioToolsCtx, deps: { jobs: jobsRepo, sitios: sitiosRepo } } }
+          ? { sitios: { context: sitioToolsCtx, deps: { jobs: jobsRepo, sitios: sitiosRepo, guardado } } }
           : {}),
         warn: (message) => request.log.warn(message),
       });

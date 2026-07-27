@@ -1,14 +1,23 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { marcadoresDeParametros } from '@ledesma-platform/shared';
+import { JobsRepository, marcadoresDeParametros, tierAllowsAutonomy } from '@ledesma-platform/shared';
 import type { Env } from '../config/env.js';
 import { AppError } from '../errors/app-error.js';
 import { getSql } from '../db/client.js';
 import { createSupabaseJwtVerifier, type JwtVerifier } from '../auth/jwt-verifier.js';
 import { requireUser } from '../auth/require-user.js';
+import { RegistrationRepository } from '../registration/registration-repository.js';
+import { TrayectoriasWebRepository } from '../trayectorias/trayectorias-repository.js';
 import { RecetasWebRepository, type RecetaWeb } from '../recetas-web/index.js';
+import {
+  encolarGuardadoDeJob,
+  type GuardarTareaAprendidaDeps,
+} from '../recetas-web/guardar-tarea-aprendida.js';
 
 const IdParamSchema = z.object({ id: z.string().uuid() });
+
+// Body de POST /v1/tareas-ensenadas/desde-job: el job de tarea web cuyo exito se guarda.
+const DesdeJobBodySchema = z.object({ jobId: z.string().uuid() });
 
 /**
  * TAREAS QUE EL SISTEMA YA SABE HACER (recetas_web, V035 + V037), para la consola: listar lo que el
@@ -51,17 +60,65 @@ export function tareasEnsenadasRoutes(
   config: Env,
   deps?: {
     verifier?: JwtVerifier;
-    recetasRepo?: Pick<RecetasWebRepository, 'listarActivas' | 'borrar'>;
+    recetasRepo?: Pick<RecetasWebRepository, 'listarActivas' | 'borrar' | 'buscarPorTrayectorias'>;
+    jobsRepo?: Pick<JobsRepository, 'getSummaryForOwner' | 'createJob'>;
+    trayectoriasRepo?: Pick<TrayectoriasWebRepository, 'listarPorJob'>;
+    registrationRepo?: Pick<RegistrationRepository, 'getProfileTier'>;
   },
 ) {
   return async function (app: FastifyInstance): Promise<void> {
     const verifier = deps?.verifier ?? createSupabaseJwtVerifier(config);
     const repo = deps?.recetasRepo ?? new RecetasWebRepository(getSql(config));
+    const jobsRepo = deps?.jobsRepo ?? new JobsRepository(getSql(config));
+    const trayectoriasRepo = deps?.trayectoriasRepo ?? new TrayectoriasWebRepository(getSql(config));
+    const registrationRepo = deps?.registrationRepo ?? new RegistrationRepository(getSql(config));
 
     app.get('/v1/tareas-ensenadas', async (request: FastifyRequest, reply: FastifyReply) => {
       const user = await requireUser(request, verifier);
       const tareas = await repo.listarActivas(user.id);
       return reply.send({ tareas: tareas.map(toTareaEnsenadaDto) });
+    });
+
+    // GUARDAR COMO TAREA APRENDIDA (consentimiento explicito): convierte el exito de una tarea web
+    // del motor libre en una receta. Solo ENCOLA (202 + jobId del job de promocion; el worker
+    // convierte); la pertenencia es SIEMPRE por el token (un job ajeno responde 404, identico a uno
+    // inexistente). Gate por tier igual que la grabacion: sembrar recetas es parte de la suite
+    // autonoma. La promocion JAMAS es automatica por esta via: solo corre cuando el usuario la pide.
+    app.post('/v1/tareas-ensenadas/desde-job', async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = await requireUser(request, verifier);
+      const body = DesdeJobBodySchema.safeParse(request.body);
+      if (!body.success) {
+        throw new AppError('VALIDATION_ERROR', 400, 'Invalid request', body.error.issues);
+      }
+      const tier = await registrationRepo.getProfileTier(user.id);
+      if (!tierAllowsAutonomy(tier)) {
+        throw new AppError(
+          'FORBIDDEN',
+          403,
+          'Saving a learned task requires a plan with autonomy (Pro or Business)',
+        );
+      }
+
+      const servicio: GuardarTareaAprendidaDeps = {
+        jobs: jobsRepo,
+        trayectorias: trayectoriasRepo,
+        recetas: repo,
+      };
+      const resultado = await encolarGuardadoDeJob(servicio, user.id, body.data.jobId);
+      if (!resultado.encolado) {
+        if (resultado.motivo === 'no_encontrado') {
+          throw new AppError('NOT_FOUND', 404, 'Task not found');
+        }
+        if (resultado.motivo === 'ya_guardada') {
+          throw new AppError('CONFLICT', 409, 'La tarea ya esta guardada como tarea aprendida');
+        }
+        throw new AppError(
+          'VALIDATION_ERROR',
+          400,
+          'La tarea no es una tarea web exitosa del agente con registro para guardar',
+        );
+      }
+      return reply.status(202).send({ status: 'accepted', jobId: resultado.jobId });
     });
 
     app.delete('/v1/tareas-ensenadas/:id', async (request: FastifyRequest, reply: FastifyReply) => {

@@ -13,6 +13,10 @@ import {
   TAREA_WEB_OBJETIVO_MAX_CHARS,
 } from '@ledesma-platform/shared';
 import type { SitioConectado } from '../sitios/sitios-conectados-repository.js';
+import type {
+  EvaluacionDeGuardado,
+  ResultadoDeEncolado,
+} from '../recetas-web/guardar-tarea-aprendida.js';
 import type { ToolCall, ToolExecutionResult, ToolExecutor } from '../agent/index.js';
 
 /**
@@ -33,6 +37,7 @@ import type { ToolCall, ToolExecutionResult, ToolExecutor } from '../agent/index
 export const SITIO_TOOL_LISTAR = 'platform_listar_sitios_conectados';
 export const SITIO_TOOL_EJECUTAR = 'platform_ejecutar_tarea_en_sitio';
 export const SITIO_TOOL_REVISAR = 'platform_revisar_tarea_en_sitio';
+export const SITIO_TOOL_GUARDAR = 'platform_guardar_tarea_aprendida';
 
 const listarSchema: JsonSchema = {
   type: 'object',
@@ -72,6 +77,18 @@ const revisarSchema: JsonSchema = {
   required: ['job_id'],
 };
 
+const guardarSchema: JsonSchema = {
+  type: 'object',
+  properties: {
+    job_id: {
+      type: 'string',
+      description:
+        'El job_id de la tarea exitosa a guardar (el mismo que se paso a platform_revisar_tarea_en_sitio).',
+    },
+  },
+  required: ['job_id'],
+};
+
 /** Catalogo de las tools de sitios que se inyectan cuando el run tiene contexto de sitios (boveda). */
 export const SITIO_TOOLS: readonly ToolDefinition[] = [
   {
@@ -105,6 +122,17 @@ export const SITIO_TOOLS: readonly ToolDefinition[] = [
       'Esta tool ESPERA internamente mientras la tarea sigue corriendo (hasta ~25 segundos por llamada), ' +
       'asi que una sola llamada suele bastar; si aun asi devuelve en_proceso, vuelve a llamarla.',
     inputSchema: revisarSchema,
+  },
+  {
+    name: SITIO_TOOL_GUARDAR,
+    description:
+      'Guarda como TAREA APRENDIDA una tarea web que termino con exito, para que la proxima vez se ' +
+      'repita sin volver a analizar el sitio (con la misma verificacion y la misma politica del ' +
+      'usuario de siempre). Solo aplica cuando el resultado de platform_revisar_tarea_en_sitio ' +
+      'indico guardable_como_tarea_aprendida. REQUIERE CONFIRMACION PREVIA DEL USUARIO EN LA ' +
+      'CONVERSACION: primero ofrecele guardarla y llama esta tool UNICAMENTE si el usuario acepta de ' +
+      'forma explicita. Nunca la llames por tu cuenta ni des por hecho que acepta.',
+    inputSchema: guardarSchema,
   },
 ];
 
@@ -177,6 +205,16 @@ export interface SitioToolsDeps {
   sitios: {
     obtenerPorId(id: string, ownerId: string): Promise<SitioConectado | null>;
     listarPorOwner(ownerId: string): Promise<SitioConectado[]>;
+  };
+  /**
+   * GUARDAR COMO TAREA APRENDIDA (Fase F): el MISMO servicio que usa el endpoint de la consola
+   * (recetas-web/guardar-tarea-aprendida.ts), para que el boton de /actividad y esta tool nunca
+   * diverjan en que es guardable. OPCIONAL: sin cablear, revisar no ofrece guardar y la tool
+   * responde que no esta disponible.
+   */
+  guardado?: {
+    evaluar(ownerId: string, jobId: string): Promise<EvaluacionDeGuardado>;
+    encolar(ownerId: string, jobId: string): Promise<ResultadoDeEncolado>;
   };
 }
 
@@ -434,8 +472,118 @@ export function createSitioToolsExecutor(
         isError: true,
       };
     }
+    // GUARDABLE (Fase F): si el exito corrio con el motor y todavia no tiene receta creada desde su
+    // trayectoria, el resultado lo declara para que el modelo pueda OFRECERLE al usuario guardarla.
+    // Best-effort: un fallo de esta evaluacion jamas cambia el reporte del resultado.
+    let guardable = false;
+    if (deps.guardado !== undefined) {
+      try {
+        guardable = (await deps.guardado.evaluar(ctx.ownerId, jobId)).guardable;
+      } catch {
+        guardable = false;
+      }
+    }
     return {
-      content: JSON.stringify({ estado: 'completada', resultado: job.resultado ?? null }),
+      content: JSON.stringify({
+        estado: 'completada',
+        resultado: job.resultado ?? null,
+        ...(guardable
+          ? {
+              guardable_como_tarea_aprendida: true,
+              nota_guardado:
+                'Esta tarea se puede guardar como tarea aprendida para repetirla despues sin volver ' +
+                'a analizar el sitio. Ofrecele al usuario guardarla; SOLO si acepta de forma ' +
+                `explicita, llama ${SITIO_TOOL_GUARDAR} con este job_id.`,
+            }
+          : {}),
+      }),
+      isError: false,
+    };
+  };
+
+  const guardar = async (
+    input: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<ToolExecutionResult> => {
+    const jobId = inputString(input, 'job_id');
+    if (!jobId) {
+      return { content: 'Falta job_id (string no vacio).', isError: true };
+    }
+    const guardado = deps.guardado;
+    if (guardado === undefined) {
+      return {
+        content: 'Guardar tareas aprendidas no esta disponible en esta conversacion.',
+        isError: true,
+      };
+    }
+    const resultado = await guardado.encolar(ctx.ownerId, jobId);
+    if (!resultado.encolado) {
+      if (resultado.motivo === 'no_encontrado') {
+        return { content: 'No existe una tarea con ese job_id para este usuario.', isError: true };
+      }
+      if (resultado.motivo === 'ya_guardada') {
+        return {
+          content: JSON.stringify({
+            estado: 'ya_guardada',
+            nota: 'Esta tarea ya estaba guardada como tarea aprendida; no hay nada mas que hacer.',
+          }),
+          isError: false,
+        };
+      }
+      if (resultado.motivo === 'corrio_por_receta') {
+        return {
+          content:
+            'Esa tarea ya corrio con una tarea aprendida, asi que no hay nada nuevo que guardar.',
+          isError: true,
+        };
+      }
+      return {
+        content:
+          'Esa tarea no se puede guardar como tarea aprendida: no es una tarea web exitosa con ' +
+          'registro completo de lo que hizo.',
+        isError: true,
+      };
+    }
+    // El guardado corre como job en el worker (sin modelo). MISMO long-poll que revisar: casi
+    // siempre termina en segundos, asi que una sola llamada alcanza para reportar el desenlace.
+    const deadline = Date.now() + esperaMaxMs;
+    let jobPromocion = await deps.jobs.obtenerJobDeOwner(resultado.jobId, ctx.ownerId);
+    while (
+      jobPromocion !== null &&
+      (jobPromocion.status === 'pending' || jobPromocion.status === 'running') &&
+      !signal?.aborted
+    ) {
+      const restante = deadline - Date.now();
+      if (restante <= 0) break;
+      await esperar(Math.min(esperaIntervaloMs, restante), signal);
+      if (signal?.aborted) break;
+      jobPromocion = await deps.jobs.obtenerJobDeOwner(resultado.jobId, ctx.ownerId);
+    }
+    if (jobPromocion !== null && jobPromocion.status === 'failed') {
+      return {
+        content: JSON.stringify({
+          estado: 'fallida',
+          detalle: jobPromocion.lastError ?? 'sin detalle',
+        }),
+        isError: true,
+      };
+    }
+    if (jobPromocion !== null && jobPromocion.status === 'completed') {
+      return {
+        content: JSON.stringify({
+          estado: 'guardada',
+          nota:
+            'La tarea quedo guardada como tarea aprendida: aparece en la pantalla de tareas que el ' +
+            'sistema ya sabe hacer y la proxima vez se hara sin volver a analizar el sitio.',
+        }),
+        isError: false,
+      };
+    }
+    return {
+      content: JSON.stringify({
+        estado: 'en_proceso',
+        nota: 'El guardado sigue en proceso; se completara en unos segundos.',
+      }),
       isError: false,
     };
   };
@@ -446,6 +594,7 @@ export function createSitioToolsExecutor(
       if (call.name === SITIO_TOOL_LISTAR) return await listar();
       if (call.name === SITIO_TOOL_EJECUTAR) return await ejecutar(input);
       if (call.name === SITIO_TOOL_REVISAR) return await revisar(input, signal);
+      if (call.name === SITIO_TOOL_GUARDAR) return await guardar(input, signal);
       return { content: `Tool ${call.name} no es una tool de sitios conectados`, isError: true };
     } catch (error) {
       // Fallo de infraestructura (DB): mensaje generico, sin detalle interno hacia el modelo.

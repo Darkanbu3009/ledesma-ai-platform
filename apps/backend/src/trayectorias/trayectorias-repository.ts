@@ -254,6 +254,55 @@ export class TrayectoriasWebRepository {
    * inicial y despues la reanudacion), cada una con sus pasos ordenados por idx. Un job ajeno o sin
    * trayectorias devuelve lista vacia.
    */
+  /**
+   * SOLO las cabeceras de las trayectorias de un job, en orden. Para evaluar si un exito se puede
+   * guardar como tarea aprendida sin traer los pasos a memoria (la conversion real, que si los
+   * necesita, corre en el worker con listarPorJobConPasos).
+   */
+  async listarPorJob(jobId: string, ownerId: string): Promise<TrayectoriaWeb[]> {
+    const rows = await this.sql<TrayectoriaRow[]>`
+      select id, owner_id, job_id, connection_id, dominio, objetivo, estado, iniciada_en,
+        terminada_en, duracion_ms, tokens_in, tokens_out, creada_en
+      from trayectorias_web
+      where job_id = ${jobId} and owner_id = ${ownerId}
+      order by iniciada_en asc
+    `;
+    return rows.map(rowToTrayectoria);
+  }
+
+  /**
+   * RESUMEN DE GUARDADO por job, para el historial de /actividad: por cada job pedido, si tiene una
+   * trayectoria EXITOSA que rescatar y si alguna de sus trayectorias ya tiene una receta creada
+   * desde ella (doble guardado). UNA sola query para toda la pagina del listado. Acotado por owner;
+   * lista vacia devuelve mapa vacio sin consultar.
+   */
+  async resumenDeGuardadoPorJobs(
+    ownerId: string,
+    jobIds: readonly string[],
+  ): Promise<Map<string, { tieneExitosa: boolean; guardada: boolean }>> {
+    const resumen = new Map<string, { tieneExitosa: boolean; guardada: boolean }>();
+    if (jobIds.length === 0) return resumen;
+    const rows = await this.sql<
+      Array<{ job_id: string; tiene_exitosa: boolean | null; guardada: boolean | null }>
+    >`
+      select t.job_id,
+        bool_or(t.estado = 'exitosa') as tiene_exitosa,
+        bool_or(r.id is not null) as guardada
+      from trayectorias_web t
+      left join recetas_web r
+        on r.creada_desde_trayectoria = t.id and r.owner_id = t.owner_id
+      where t.owner_id = ${ownerId} and t.job_id in ${this.sql([...jobIds])}
+      group by t.job_id
+    `;
+    for (const row of rows) {
+      resumen.set(row.job_id, {
+        tieneExitosa: row.tiene_exitosa === true,
+        guardada: row.guardada === true,
+      });
+    }
+    return resumen;
+  }
+
   async listarPorJobConPasos(jobId: string, ownerId: string): Promise<TrayectoriaConPasos[]> {
     const cabeceras = await this.sql<TrayectoriaRow[]>`
       select id, owner_id, job_id, connection_id, dominio, objetivo, estado, iniciada_en,

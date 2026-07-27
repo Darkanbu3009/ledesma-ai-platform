@@ -5,6 +5,7 @@ import {
   createSitioToolsExecutor,
   sitioToolsToDefinitions,
   SITIO_TOOL_EJECUTAR,
+  SITIO_TOOL_GUARDAR,
   SITIO_TOOL_LISTAR,
   SITIO_TOOL_NAMES,
   SITIO_TOOL_REVISAR,
@@ -66,6 +67,7 @@ function makeDeps(overrides: {
   consulta?: JobConsulta | null;
   listado?: SitioConectado[];
   falloReciente?: boolean;
+  guardado?: SitioToolsDeps['guardado'];
 } = {}): SitioToolsDeps {
   return {
     jobs: {
@@ -77,6 +79,7 @@ function makeDeps(overrides: {
       obtenerPorId: vi.fn(async () => (overrides.sitio === undefined ? makeSitio() : overrides.sitio)),
       listarPorOwner: vi.fn(async () => overrides.listado ?? [makeSitio()]),
     },
+    ...(overrides.guardado !== undefined ? { guardado: overrides.guardado } : {}),
   };
 }
 
@@ -293,6 +296,71 @@ describe('platform_revisar_tarea_en_sitio', () => {
     const res = await exec(call(SITIO_TOOL_REVISAR, { job_id: 'job-ajeno' }));
     expect(res.isError).toBe(true);
   });
+
+  it('un exito GUARDABLE lo declara en el resultado, con la instruccion de pedir confirmacion', async () => {
+    const evaluar = vi.fn(async () => ({ guardable: true as const, trayectorias: [] }));
+    const deps = makeDeps({
+      consulta: { id: 'job-1', status: 'completed', resultado: { estado: 'ok' }, lastError: null },
+      guardado: { evaluar, encolar: vi.fn() },
+    });
+    const exec = createSitioToolsExecutor(CTX, deps);
+    const res = await exec(call(SITIO_TOOL_REVISAR, { job_id: 'job-1' }));
+    expect(res.isError).toBe(false);
+    const contenido = JSON.parse(res.content);
+    expect(contenido.guardable_como_tarea_aprendida).toBe(true);
+    expect(contenido.nota_guardado).toContain('SOLO si acepta');
+    expect(evaluar).toHaveBeenCalledWith('user-1', 'job-1');
+  });
+
+  it('sin el servicio de guardado cableado, el resultado de revisar queda EXACTAMENTE como antes', async () => {
+    const deps = makeDeps({
+      consulta: { id: 'job-1', status: 'completed', resultado: { estado: 'ok' }, lastError: null },
+    });
+    const exec = createSitioToolsExecutor(CTX, deps);
+    const res = await exec(call(SITIO_TOOL_REVISAR, { job_id: 'job-1' }));
+    expect(JSON.parse(res.content)).toEqual({ estado: 'completada', resultado: { estado: 'ok' } });
+  });
+});
+
+describe('platform_guardar_tarea_aprendida', () => {
+  it('encola con el owner del RUN (jamas del modelo) y reporta guardada cuando el job completa', async () => {
+    const encolar = vi.fn(async () => ({ encolado: true as const, jobId: 'job-promo-1' }));
+    const deps = makeDeps({
+      consulta: { id: 'job-promo-1', status: 'completed', resultado: { estado: 'ok' }, lastError: null },
+      guardado: { evaluar: vi.fn(), encolar },
+    });
+    const exec = createSitioToolsExecutor(CTX, deps, ESPERA_TEST);
+    const res = await exec(call(SITIO_TOOL_GUARDAR, { job_id: 'job-1' }));
+    expect(res.isError).toBe(false);
+    expect(JSON.parse(res.content).estado).toBe('guardada');
+    expect(encolar).toHaveBeenCalledWith('user-1', 'job-1');
+    expect(deps.jobs.obtenerJobDeOwner).toHaveBeenCalledWith('job-promo-1', 'user-1');
+  });
+
+  it('el doble guardado no es un error: reporta ya_guardada sin encolar dos veces', async () => {
+    const encolar = vi.fn(async () => ({ encolado: false as const, motivo: 'ya_guardada' as const }));
+    const deps = makeDeps({ guardado: { evaluar: vi.fn(), encolar } });
+    const exec = createSitioToolsExecutor(CTX, deps);
+    const res = await exec(call(SITIO_TOOL_GUARDAR, { job_id: 'job-1' }));
+    expect(res.isError).toBe(false);
+    expect(JSON.parse(res.content).estado).toBe('ya_guardada');
+  });
+
+  it('un job ajeno o no guardable responde error accionable sin encolar nada', async () => {
+    const encolar = vi.fn(async () => ({ encolado: false as const, motivo: 'no_encontrado' as const }));
+    const deps = makeDeps({ guardado: { evaluar: vi.fn(), encolar } });
+    const exec = createSitioToolsExecutor(CTX, deps);
+    const res = await exec(call(SITIO_TOOL_GUARDAR, { job_id: 'job-ajeno' }));
+    expect(res.isError).toBe(true);
+  });
+
+  it('sin el servicio cableado, la tool responde no disponible sin lanzar', async () => {
+    const deps = makeDeps();
+    const exec = createSitioToolsExecutor(CTX, deps);
+    const res = await exec(call(SITIO_TOOL_GUARDAR, { job_id: 'job-1' }));
+    expect(res.isError).toBe(true);
+    expect(res.content).toContain('no esta disponible');
+  });
 });
 
 // --- Integracion con el ensamblado -------------------------------------------------------------
@@ -499,7 +567,8 @@ describe('assembleAgentRun con tools de sitios (7.1d)', () => {
     expect(SITIO_TOOL_NAMES.has(SITIO_TOOL_LISTAR)).toBe(true);
     expect(SITIO_TOOL_NAMES.has(SITIO_TOOL_EJECUTAR)).toBe(true);
     expect(SITIO_TOOL_NAMES.has(SITIO_TOOL_REVISAR)).toBe(true);
-    expect(sitioToolsToDefinitions()).toHaveLength(3);
+    expect(SITIO_TOOL_NAMES.has(SITIO_TOOL_GUARDAR)).toBe(true);
+    expect(sitioToolsToDefinitions()).toHaveLength(4);
   });
 });
 
