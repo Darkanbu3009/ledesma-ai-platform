@@ -66,6 +66,12 @@ export interface ResultadoPasoDeterminista {
   estado: 'ok' | 'no_localizado' | 'fallo';
   /** Estrategias que el elemento tiene AHORA (auto enriquecimiento). Vacia si no hubo elemento. */
   estrategias: EstrategiaLocalizacion[];
+  /**
+   * INDICE de la estrategia del paso que resolvio el elemento (registro de ganadoras, V038).
+   * null (o ausente, para no obligar a los fakes) cuando el paso no localiza un elemento o el
+   * navegador no lo informo: ese paso simplemente no registra ganadora.
+   */
+  indiceUsado?: number | null;
   /** Diagnostico interno; nunca se le muestra al usuario. */
   detalle: string | null;
 }
@@ -138,6 +144,13 @@ export interface ResultadoDeEjecucionPorReceta {
   pasosReparados: PasoDeReceta[] | null;
   /** Cuantos pasos hubo que escalar al motor. 0 = la corrida no consumio un solo token. */
   escalados: number;
+  /**
+   * QUE ESTRATEGIA GANO en cada paso que localizo su elemento sin motor (V038): el `idx` del paso y
+   * el indice de la estrategia dentro de sus `estrategias` TAL COMO SE EJECUTARON. Es el insumo del
+   * registro de ganadoras; solo se persiste si la corrida termina exitosa (lo decide el llamador).
+   * Un paso escalado al motor no aparece: no gano ninguna estrategia.
+   */
+  ganadoras: Array<{ paso: number; indice: number }>;
   tokensIn: number;
   tokensOut: number;
 }
@@ -302,6 +315,7 @@ export async function ejecutarReceta(
     pasosReparados: null,
     escalados: 0,
     pasosEjecutados: 0,
+    ganadoras: [] as Array<{ paso: number; indice: number }>,
     tokensIn: 0,
     tokensOut: 0,
   };
@@ -320,6 +334,7 @@ export async function ejecutarReceta(
 
   const traza: PasoCensurado[] = [];
   let reparados: PasoDeReceta[] | null = null;
+  const ganadoras: Array<{ paso: number; indice: number }> = [];
   let escalados = 0;
   let pasosEjecutados = 0;
   let tokensIn = 0;
@@ -335,6 +350,7 @@ export async function ejecutarReceta(
       return {
         pasos: traza,
         pasosReparados: reparados,
+        ganadoras,
         escalados,
         pasosEjecutados,
         tokensIn,
@@ -354,6 +370,7 @@ export async function ejecutarReceta(
         return {
           pasos: traza,
           pasosReparados: reparados,
+          ganadoras,
           escalados,
           pasosEjecutados,
           tokensIn,
@@ -375,6 +392,7 @@ export async function ejecutarReceta(
         return {
           pasos: traza,
           pasosReparados: reparados,
+          ganadoras,
           escalados,
           pasosEjecutados,
           tokensIn,
@@ -390,6 +408,7 @@ export async function ejecutarReceta(
       return {
         pasos: traza,
         pasosReparados: reparados,
+        ganadoras,
         escalados,
         pasosEjecutados,
         tokensIn,
@@ -415,6 +434,16 @@ export async function ejecutarReceta(
     pasosEjecutados++;
     if (resultado.estado === 'ok') {
       traza.push(pasoDeTraza(sustituido, traza.length, 'determinista', true));
+      // REGISTRO DE GANADORAS (V038): que estrategia del paso resolvio el elemento. Solo un indice
+      // que exista dentro de las estrategias ejecutadas cuenta; el llamador lo persiste si la
+      // corrida entera termina exitosa.
+      const indiceUsado = resultado.indiceUsado;
+      if (
+        typeof indiceUsado === 'number' &&
+        sustituido.paso.estrategias[indiceUsado] !== undefined
+      ) {
+        ganadoras.push({ paso: sustituido.paso.idx, indice: indiceUsado });
+      }
       // AUTO ENRIQUECIMIENTO: el elemento sigue ahi y hoy expone estrategias que la receta no tenia
       // (o que cambiaron). Se guardan para la proxima corrida. El texto que este paso acaba de
       // teclear viaja para que NINGUNA de las nuevas dependa de el: se leyeron del DOM con el campo
@@ -442,6 +471,7 @@ export async function ejecutarReceta(
       return {
         pasos: traza,
         pasosReparados: reparados,
+        ganadoras,
         escalados,
         pasosEjecutados,
         tokensIn,
@@ -473,6 +503,7 @@ export async function ejecutarReceta(
       return {
         pasos: traza,
         pasosReparados: reparados,
+        ganadoras,
         escalados,
         pasosEjecutados,
         tokensIn,
@@ -489,6 +520,7 @@ export async function ejecutarReceta(
   return {
     pasos: traza,
     pasosReparados: reparados,
+    ganadoras,
     escalados,
     pasosEjecutados,
     tokensIn,

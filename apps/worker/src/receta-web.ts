@@ -10,6 +10,7 @@ import {
 } from '@ledesma-platform/shared';
 import { VALOR_CENSURADO } from './censura.js';
 import { estrategiasIndependientesDelValor } from './localizacion.js';
+import { claveDeEstrategia } from './promocion-estrategias.js';
 import { TOOL_CAMBIAR_DE_SITIO } from './prompt-tarea-web.js';
 import {
   extraerMontos,
@@ -461,6 +462,12 @@ export function promoverTrayectoria(entrada: {
  * sea con el campo ya lleno, asi que el dato concreto de esta corrida aparece dentro de ellas. Sin
  * este filtro, reparar una receta le guardaria el valor del usuario en la localizacion -- y ademas la
  * dejaria localizando por un dato que la proxima corrida no va a tener.
+ *
+ * LA PRIMARIA VIGENTE SE RESPETA (auto reparacion, V038): si la lista fresca trae una estrategia con
+ * la MISMA CLAVE que la primaria actual del paso, esa queda de primaria aunque el orden canonico
+ * dijera otra cosa. Sin esto, cada corrida exitosa desharia una promocion (el reemplazo canonico
+ * volveria a poner de primaria el atributo dinamico que la promocion acababa de bajar) y la receta
+ * oscilaria entre mejorar y romperse.
  */
 export function repararEstrategias(
   pasos: PasoDeReceta[],
@@ -473,7 +480,25 @@ export function repararEstrategias(
   );
   // Sin ninguna estrategia utilizable no hay reparacion posible: se conserva la que la receta tenia.
   if (limpias.length === 0) return pasos;
-  return pasos.map((paso) => (paso.idx === idx ? { ...paso, estrategias: limpias } : paso));
+  return pasos.map((paso) => {
+    if (paso.idx !== idx) return paso;
+    return { ...paso, estrategias: conLaPrimariaVigentePrimero(paso.estrategias, limpias) };
+  });
+}
+
+/** La lista fresca, con la estrategia que comparte clave con la primaria vigente puesta primero. */
+function conLaPrimariaVigentePrimero(
+  actuales: EstrategiaLocalizacion[],
+  frescas: EstrategiaLocalizacion[],
+): EstrategiaLocalizacion[] {
+  const primaria = actuales[0];
+  if (primaria === undefined) return frescas;
+  const clave = claveDeEstrategia(primaria);
+  const indice = frescas.findIndex((estrategia) => claveDeEstrategia(estrategia) === clave);
+  if (indice <= 0) return frescas;
+  const elegida = frescas[indice];
+  if (elegida === undefined) return frescas;
+  return [elegida, ...frescas.filter((_, i) => i !== indice)];
 }
 
 /**

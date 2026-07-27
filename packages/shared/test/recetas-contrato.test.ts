@@ -172,16 +172,17 @@ describe('estrategias de localizacion', () => {
     ]);
   });
 
-  it('el parser DEVUELVE las estrategias ya ordenadas, sea cual sea el orden persistido', () => {
+  it('el parser RESPETA el orden persistido (una promocion de la auto reparacion sobrevive a la lectura)', () => {
     const pasos = parsearPasosDeReceta([
       paso({
         estrategias: [
+          { tipo: 'rol', rol: 'button', nombre: 'Enviar' },
+          { tipo: 'atributo', atributo: 'id', valor: ':u3' },
           { tipo: 'xpath', xpath: '/html[1]' },
-          { tipo: 'atributo', atributo: 'id', valor: 'para' },
         ],
       }),
     ]);
-    expect(pasos?.[0]?.estrategias.map((e) => e.tipo)).toEqual(['atributo', 'xpath']);
+    expect(pasos?.[0]?.estrategias.map((e) => e.tipo)).toEqual(['rol', 'atributo', 'xpath']);
   });
 });
 

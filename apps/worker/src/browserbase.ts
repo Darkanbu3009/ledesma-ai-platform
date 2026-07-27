@@ -944,15 +944,15 @@ export class NavegadorBrowserbase
   ): Promise<ResultadoPasoDeterminista> {
     if (instruccion.accion === 'esperar') {
       await pausar(Math.min(instruccion.esperaMs ?? 0, ESPERA_DE_CARGA_MS));
-      return { estado: 'ok', estrategias: [], detalle: null };
+      return { estado: 'ok', estrategias: [], indiceUsado: null, detalle: null };
     }
     return this.conPaginaCdp(sesionExternaId, async (pagina) => {
       if (instruccion.accion === 'navegar') {
         if (instruccion.url === null) {
-          return { estado: 'fallo', estrategias: [], detalle: 'navegacion sin url' } as const;
+          return { estado: 'fallo', estrategias: [], indiceUsado: null, detalle: 'navegacion sin url' } as const;
         }
         await pagina.navegar(instruccion.url);
-        return { estado: 'ok', estrategias: [], detalle: null } as const;
+        return { estado: 'ok', estrategias: [], indiceUsado: null, detalle: null } as const;
       }
 
       const crudo = await pagina.evaluar(expresionResolverElemento(instruccion.estrategias));
@@ -961,6 +961,7 @@ export class NavegadorBrowserbase
         return {
           estado: 'no_localizado',
           estrategias: [],
+          indiceUsado: null,
           detalle: 'ninguna estrategia resolvio el elemento',
         } as const;
       }
@@ -968,12 +969,12 @@ export class NavegadorBrowserbase
       if (instruccion.accion === 'click') {
         await pagina.click(elemento);
         await pausar(PAUSA_TRAS_ACCION_MS);
-        return { estado: 'ok', estrategias: elemento.estrategias, detalle: null } as const;
+        return { estado: 'ok', estrategias: elemento.estrategias, indiceUsado: elemento.indice, detalle: null } as const;
       }
 
       if (instruccion.accion === 'escribir') {
         if (instruccion.texto === null) {
-          return { estado: 'fallo', estrategias: [], detalle: 'escritura sin texto' } as const;
+          return { estado: 'fallo', estrategias: [], indiceUsado: null, detalle: 'escritura sin texto' } as const;
         }
         // Click para enfocar, seleccionar lo que hubiera y sustituirlo: un campo prellenado por el
         // sitio no debe quedar concatenado con el valor nuevo.
@@ -982,18 +983,18 @@ export class NavegadorBrowserbase
         await pagina.pulsar({ key: 'Delete', windowsVirtualKeyCode: 46, modifiers: 0, text: null });
         await pagina.insertarTexto(instruccion.texto);
         await pausar(PAUSA_TRAS_ACCION_MS);
-        return { estado: 'ok', estrategias: elemento.estrategias, detalle: null } as const;
+        return { estado: 'ok', estrategias: elemento.estrategias, indiceUsado: elemento.indice, detalle: null } as const;
       }
 
       const pulsacion =
         instruccion.teclas === null ? null : parsearCombinacionDeTeclas(instruccion.teclas);
       if (pulsacion === null) {
-        return { estado: 'fallo', estrategias: [], detalle: 'combinacion de teclas no admitida' } as const;
+        return { estado: 'fallo', estrategias: [], indiceUsado: null, detalle: 'combinacion de teclas no admitida' } as const;
       }
       await pagina.click(elemento);
       await pagina.pulsar(pulsacion);
       await pausar(PAUSA_TRAS_ACCION_MS);
-      return { estado: 'ok', estrategias: elemento.estrategias, detalle: null } as const;
+      return { estado: 'ok', estrategias: elemento.estrategias, indiceUsado: elemento.indice, detalle: null } as const;
     });
   }
 

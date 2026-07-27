@@ -247,6 +247,7 @@ function makeReceta(pasos: unknown[], origen: RecetaWeb['origen'] = 'automatica'
     creadaDesdeTrayectoria: null,
     ejecucionesExitosas: 3,
     ejecucionesFallidas: 0,
+    ajustesAutomaticos: 0,
     ultimaEjecucionEn: null,
     creadaEn: '2026-07-20T00:00:00.000Z',
     actualizadaEn: '2026-07-20T00:00:00.000Z',
@@ -385,6 +386,72 @@ describe('seleccion de camino y ejecucion por receta (CAMBIO 4 y 5)', () => {
     expect(recetas.registrarEjecucion).toHaveBeenCalledWith('rec-1', 'user-1', true);
     // Y no se vuelve a promover lo que ya estaba aprendido.
     expect(recetas.promover).not.toHaveBeenCalled();
+  });
+
+  it('AUTO REPARACION (V038): una corrida exitosa registra las ganadoras y, con la racha cumplida, promueve en UN guardado atomico', async () => {
+    const receta = makeReceta([pasoClick(0), pasoClick(1)]);
+    const recetas = makeRecetas(receta);
+    // En la corrida anterior el paso 0 ya lo habia resuelto el xpath (la primaria por id fallo).
+    const leerAutoReparacion = vi.fn(async () => ({
+      version: 4,
+      pasos: receta.pasos,
+      ganadoras: { '0': [{ indice: 1, clave: 'xpath', jobId: 'job-0', en: '2026-07-26T00:00:00.000Z' }] },
+    }));
+    const guardarAutoReparacion = vi.fn(async () => true);
+    const conAutoReparacion = { ...recetas, leerAutoReparacion, guardarAutoReparacion };
+    // En ESTA corrida el xpath vuelve a ganar en los dos pasos (indice 1: el id dinamico fallo).
+    const determinista: NavegadorDeterminista = {
+      ejecutarPasoDeterminista: vi.fn(async () => ({
+        estado: 'ok' as const,
+        estrategias: [],
+        indiceUsado: 1,
+        detalle: null,
+      })),
+      leerEstrategiasDeElemento: vi.fn(async () => []),
+    };
+    const deps = makeDeps({ recetas: conAutoReparacion, determinista });
+
+    const resultado = await procesarTareaWeb(deps, makeJob('abre el ultimo correo'));
+
+    expect(resultado).toBe('completada');
+    expect(guardarAutoReparacion).toHaveBeenCalledTimes(1);
+    const [id, ownerId, version, historial, pasosPromovidos, promociones] =
+      guardarAutoReparacion.mock.calls[0] as unknown as [
+        string,
+        string,
+        number,
+        Record<string, Array<{ indice: number; clave: string }>>,
+        PasoDeReceta[] | null,
+        number,
+      ];
+    // El guardado viaja con la version LEIDA: el update condicionado es lo que lo hace atomico.
+    expect([id, ownerId, version]).toEqual(['rec-1', 'user-1', 4]);
+    // El historial registro esta corrida en los dos pasos.
+    expect(historial['0']).toHaveLength(2);
+    expect(historial['1']).toHaveLength(1);
+    // Paso 0: xpath gano las ultimas 2 -> promovido a primaria, la antigua primaria queda segunda.
+    // Paso 1: una sola corrida registrada -> intacto.
+    expect(promociones).toBe(1);
+    expect(pasosPromovidos?.[0]?.estrategias.map((e) => e.tipo)).toEqual(['xpath', 'atributo']);
+    expect(pasosPromovidos?.[1]?.estrategias.map((e) => e.tipo)).toEqual(['atributo', 'xpath']);
+  });
+
+  it('AUTO REPARACION: una corrida que NO termina exitosa no registra ganadoras', async () => {
+    const receta = makeReceta([pasoClick(0), pasoClick(1)]);
+    const recetas = makeRecetas(receta);
+    const leerAutoReparacion = vi.fn(async () => null);
+    const guardarAutoReparacion = vi.fn(async () => true);
+    const conAutoReparacion = { ...recetas, leerAutoReparacion, guardarAutoReparacion };
+    // El paso 1 no localiza y la escalada tampoco sale: la receta se abandona y sigue el motor.
+    const escalador: EscaladorDePaso = {
+      ejecutarPasoConModelo: vi.fn(async () => ({ ok: false, selector: null, tokensIn: null, tokensOut: null })),
+    };
+    await procesarTareaWeb(
+      makeDeps({ recetas: conAutoReparacion, determinista: makeDeterminista([1]), escalador }),
+      makeJob('abre el ultimo correo'),
+    );
+    expect(leerAutoReparacion).not.toHaveBeenCalled();
+    expect(guardarAutoReparacion).not.toHaveBeenCalled();
   });
 
   it('un paso roto escala SOLO ese paso, repara la receta y la tarea igual termina por receta', async () => {

@@ -108,6 +108,41 @@ describe('ejecucion determinista (el ahorro que motiva el PR)', () => {
     expect(resultado.pasos.every((p) => p.accion.tipo === 'receta:determinista')).toBe(true);
   });
 
+  it('REGISTRA que estrategia gano en cada paso resuelto sin motor (insumo de la promocion, V038)', async () => {
+    const navegador: NavegadorDeterminista = {
+      // El paso 0 lo resuelve la primaria; el 1, el fallback en el indice 1 (el caso Gmail: el id
+      // dinamico fallo y gano la siguiente). Un indice fuera de la lista no registra nada.
+      ejecutarPasoDeterminista: vi.fn(
+        async (_s: string, instruccion: InstruccionDePaso): Promise<ResultadoPasoDeterminista> => ({
+          estado: 'ok',
+          estrategias: [],
+          indiceUsado: instruccion.estrategias.length > 0 ? 1 : null,
+          detalle: null,
+        }),
+      ),
+      leerEstrategiasDeElemento: vi.fn(async () => []),
+    };
+    const resultado = await ejecutarReceta(
+      [
+        pasoReceta({ estrategias: [ATRIBUTO, XPATH] }),
+        pasoReceta({ idx: 1, accion: 'navegar', estrategias: [], ruta: '/inbox' }),
+        pasoReceta({ idx: 2, estrategias: [ATRIBUTO] }),
+      ],
+      SIN_PARAMETROS,
+      makeDeps({ navegador }),
+    );
+    expect(resultado.desenlace).toEqual({ tipo: 'completada' });
+    // El paso 1 no toca elemento y el paso 2 devolvio un indice fuera de su lista: solo el 0 cuenta.
+    expect(resultado.ganadoras).toEqual([{ paso: 0, indice: 1 }]);
+  });
+
+  it('un fake sin indiceUsado (recetas anteriores a V038) no registra ganadoras y todo lo demas corre igual', async () => {
+    const { navegador } = makeNavegador();
+    const resultado = await ejecutarReceta([pasoReceta()], SIN_PARAMETROS, makeDeps({ navegador }));
+    expect(resultado.desenlace).toEqual({ tipo: 'completada' });
+    expect(resultado.ganadoras).toEqual([]);
+  });
+
   it('una ruta de navegacion se resuelve contra el DOMINIO de la conexion, nunca contra la receta', async () => {
     const { navegador, ejecutados } = makeNavegador();
     await ejecutarReceta(

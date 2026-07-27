@@ -189,6 +189,83 @@ describe('mantenimiento de la receta', () => {
     expect(sqlValues(sql)).toEqual([PASOS_VALIDOS, 'rec-1', 'user-1']);
   });
 
+  it('leerAutoReparacion devuelve version, pasos validados y el historial crudo, solo de la ACTIVA', async () => {
+    const sql = makeSql([{ version: 3, pasos: PASOS_VALIDOS, ganadoras: { '0': [] } }]);
+    const estado = await new RecetasWebRepository(sql).leerAutoReparacion('rec-1', 'user-1');
+    expect(estado?.version).toBe(3);
+    expect(estado?.pasos).toHaveLength(1);
+    expect(estado?.ganadoras).toEqual({ '0': [] });
+    expect(sqlText(sql)).toContain("estado = 'activa'");
+    expect(sqlValues(sql)).toEqual(['rec-1', 'user-1']);
+  });
+
+  it('leerAutoReparacion con pasos manipulados devuelve null (falla cerrada, igual que buscarActiva)', async () => {
+    const sql = makeSql([{ version: 3, pasos: 'no soy un arreglo', ganadoras: {} }]);
+    expect(await new RecetasWebRepository(sql).leerAutoReparacion('rec-1', 'user-1')).toBeNull();
+  });
+
+  it('guardarAutoReparacion SIN promocion escribe solo el historial, en UN update condicionado por version', async () => {
+    const sql = makeSql([{ id: 'rec-1' }]);
+    const historial = { '0': [{ indice: 1, clave: 'rol', jobId: 'job-1', en: 'x' }] };
+    const escrito = await new RecetasWebRepository(sql).guardarAutoReparacion(
+      'rec-1',
+      'user-1',
+      3,
+      historial,
+      null,
+      0,
+    );
+    expect(escrito).toBe(true);
+    const calls = (sql as unknown as { mock: { calls: unknown[] } }).mock.calls;
+    expect(calls).toHaveLength(1);
+    const texto = sqlText(sql);
+    expect(texto).toContain('set');
+    expect(texto).toContain('ganadoras =');
+    expect(texto).not.toContain('pasos =');
+    expect(texto).toContain("estado = 'activa'");
+    expect(texto).toContain('and version =');
+    expect(sqlValues(sql)).toEqual([historial, 'rec-1', 'user-1', 3]);
+  });
+
+  it('guardarAutoReparacion CON promocion reordena pasos, sube version y cuenta el ajuste, TODO en un solo statement', async () => {
+    const sql = makeSql([{ id: 'rec-1' }]);
+    const historial = { '0': [{ indice: 1, clave: 'rol', jobId: 'job-1', en: 'x' }] };
+    const escrito = await new RecetasWebRepository(sql).guardarAutoReparacion(
+      'rec-1',
+      'user-1',
+      3,
+      historial,
+      PASOS_VALIDOS as never,
+      1,
+    );
+    expect(escrito).toBe(true);
+    // ATOMICIDAD: el historial, los pasos reordenados, la version y el contador viajan en la MISMA
+    // llamada, condicionada por la version leida. No hay ventana en la que el shape quede a medias.
+    const calls = (sql as unknown as { mock: { calls: unknown[] } }).mock.calls;
+    expect(calls).toHaveLength(1);
+    const texto = sqlText(sql);
+    expect(texto).toContain('ganadoras =');
+    expect(texto).toContain('pasos =');
+    expect(texto).toContain('version = version + 1');
+    expect(texto).toContain('ajustes_automaticos = ajustes_automaticos +');
+    expect(texto).toContain("estado = 'activa'");
+    expect(texto).toContain('and version =');
+    expect(sqlValues(sql)).toEqual([historial, PASOS_VALIDOS, 1, 'rec-1', 'user-1', 3]);
+  });
+
+  it('guardarAutoReparacion con la version ya movida por otra corrida NO escribe y lo dice', async () => {
+    const sql = makeSql([]);
+    const escrito = await new RecetasWebRepository(sql).guardarAutoReparacion(
+      'rec-1',
+      'user-1',
+      3,
+      {},
+      null,
+      0,
+    );
+    expect(escrito).toBe(false);
+  });
+
   it('registrarEjecucion suma al contador que corresponde', async () => {
     const exitosa = makeSql([]);
     await new RecetasWebRepository(exitosa).registrarEjecucion('rec-1', 'user-1', true);

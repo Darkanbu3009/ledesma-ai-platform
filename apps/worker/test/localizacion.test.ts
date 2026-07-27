@@ -98,19 +98,22 @@ describe('expresiones que corren dentro de la pagina', () => {
     expect(expresion).toContain('document.elementFromPoint(11, 20)');
   });
 
-  it('la resolucion embebe las estrategias como JSON y prueba los cuatro tipos en orden', () => {
+  it('la resolucion embebe las estrategias como JSON EN EL ORDEN RECIBIDO (el orden persistido manda)', () => {
     const expresion = expresionResolverElemento([
-      { tipo: 'xpath', xpath: '/html[1]' },
-      { tipo: 'atributo', atributo: 'id', valor: 'enviar' },
+      { tipo: 'rol', rol: 'button', nombre: 'Redactar' },
+      { tipo: 'atributo', atributo: 'id', valor: ':u3' },
     ]);
     expect(expresion).toContain('JSON.parse(');
-    // Ordenadas antes de embeberlas: el atributo se prueba antes que el xpath.
+    // SIN reordenar: una promocion de la auto reparacion (el rol puesto de primaria) se respeta, y
+    // el indice que devuelve la resolucion refiere a la lista tal como la guarda el paso.
     const especificacion = expresion.slice(expresion.indexOf('JSON.parse('));
-    expect(especificacion.indexOf('atributo')).toBeLessThan(especificacion.indexOf('xpath'));
+    expect(especificacion.indexOf('rol')).toBeLessThan(especificacion.indexOf('atributo'));
     expect(expresion).toContain('porAtributo');
     expect(expresion).toContain('porRol');
     expect(expresion).toContain('porTexto');
     expect(expresion).toContain('porXpath');
+    // La estrategia ganadora vuelve con su indice, insumo del registro de ganadoras.
+    expect(expresion).toContain('indice: indice');
   });
 
   it('un elemento sin caja no cuenta como resuelto (no se hace click a ciegas)', () => {

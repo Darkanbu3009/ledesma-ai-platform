@@ -163,15 +163,21 @@ ${AYUDANTES_DOM}
 }
 
 /**
- * Expresion que RESUELVE un elemento probando las estrategias EN ORDEN, lo trae al viewport y
- * devuelve un JSON con el centro de su caja, la estrategia que funciono y las estrategias que ese
- * elemento tiene AHORA (insumo de la auto reparacion). Devuelve la cadena vacia si ninguna resuelve.
+ * Expresion que RESUELVE un elemento probando las estrategias EN EL ORDEN RECIBIDO, lo trae al
+ * viewport y devuelve un JSON con el centro de su caja, la estrategia que funciono (tipo e INDICE,
+ * insumo del registro de ganadoras de la auto reparacion) y las estrategias que ese elemento tiene
+ * AHORA (insumo de la reparacion de selectores). Devuelve la cadena vacia si ninguna resuelve.
+ *
+ * NO reordena las estrategias a proposito: el orden que llega es el orden persistido del paso, que
+ * puede traer una promocion de la auto reparacion (un fallback que vino ganando, puesto de primaria).
+ * Reordenar aqui la desharia; ademas el indice devuelto debe referirse a la lista tal como la guarda
+ * el paso.
  *
  * Un elemento sin caja (display:none, width 0) se considera NO RESUELTO a proposito: hacer click en
  * las coordenadas de un elemento invisible es hacer click en otra cosa.
  */
 export function expresionResolverElemento(estrategias: EstrategiaLocalizacion[]): string {
-  const especificacion = JSON.stringify(ordenarEstrategias(estrategias));
+  const especificacion = JSON.stringify(estrategias);
   return `(() => {
 ${AYUDANTES_DOM}
   const especificacion = JSON.parse(${JSON.stringify(especificacion)});
@@ -211,13 +217,15 @@ ${AYUDANTES_DOM}
   }
   let elegido = null;
   let usada = null;
-  for (const estrategia of especificacion) {
+  let indice = -1;
+  for (let i = 0; i < especificacion.length; i++) {
+    const estrategia = especificacion[i];
     let candidato = null;
     if (estrategia.tipo === 'atributo') candidato = porAtributo(estrategia);
     else if (estrategia.tipo === 'rol') candidato = porRol(estrategia);
     else if (estrategia.tipo === 'texto') candidato = porTexto(estrategia);
     else if (estrategia.tipo === 'xpath') candidato = porXpath(estrategia.xpath);
-    if (candidato && visible(candidato)) { elegido = candidato; usada = estrategia.tipo; break; }
+    if (candidato && visible(candidato)) { elegido = candidato; usada = estrategia.tipo; indice = i; break; }
   }
   if (!elegido) return '';
   try { elegido.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) { /* sin scroll */ }
@@ -227,6 +235,7 @@ ${AYUDANTES_DOM}
     x: Math.round(caja.left + caja.width / 2),
     y: Math.round(caja.top + caja.height / 2),
     usada: usada,
+    indice: indice,
     estrategias: estrategiasDe(elegido),
   });
 })()`;
@@ -260,6 +269,12 @@ export interface PuntoDeLaPagina {
 export interface ElementoResuelto extends PuntoDeLaPagina {
   /** Tipo de estrategia que efectivamente lo encontro (observabilidad). */
   usada: EstrategiaLocalizacion['tipo'];
+  /**
+   * INDICE de la estrategia que lo encontro, dentro de la lista que se paso a resolver (que es el
+   * orden persistido del paso). Es el insumo del registro de ganadoras: 0 = la primaria sigue
+   * sirviendo; mayor a 0 = un fallback la esta cargando. null si el navegador no lo informo.
+   */
+  indice: number | null;
   /** Estrategias que el elemento tiene AHORA: insumo de la auto reparacion (D5). */
   estrategias: EstrategiaLocalizacion[];
 }
@@ -472,10 +487,14 @@ export function leerElementoResuelto(crudo: string): ElementoResuelto | null {
     return null;
   }
   if (usada !== 'atributo' && usada !== 'rol' && usada !== 'texto' && usada !== 'xpath') return null;
+  // El indice es observabilidad (registro de ganadoras), no localizacion: uno raro no invalida el
+  // elemento resuelto, simplemente no se registra nada de este paso.
+  const indice = objeto.indice;
   return {
     x,
     y,
     usada,
+    indice: typeof indice === 'number' && Number.isInteger(indice) && indice >= 0 ? indice : null,
     estrategias: sanearEstrategias(JSON.stringify(objeto.estrategias ?? [])),
   };
 }
