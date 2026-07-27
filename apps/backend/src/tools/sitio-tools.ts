@@ -90,9 +90,12 @@ export const SITIO_TOOLS: readonly ToolDefinition[] = [
       'pasalos en connection_ids con el de arranque primero. Si no conoces los ids, obtenlos ' +
       'primero con platform_listar_sitios_conectados. Encola la tarea en segundo plano y devuelve ' +
       'un job_id: la tarea NO es inmediata, usa platform_revisar_tarea_en_sitio con ese job_id para obtener el ' +
-      'resultado. Solo sirve para sitios que el usuario ya conecto; no inicia sesion ni maneja credenciales. Las ' +
-      'acciones irreversibles o financieras (enviar, publicar, borrar, pagar, transferir) NO se ejecutan: se ' +
-      'reportan como pendientes de aprobacion humana.',
+      'resultado. Solo sirve para sitios que el usuario ya conecto; no inicia sesion ni maneja credenciales. ' +
+      'La tarea se ejecuta de forma AUTONOMA, accion final incluida (enviar, publicar, pagar, borrar): NO pidas ' +
+      'aprobacion al usuario ni anuncies que la pediras. Antes de una accion irreversible o financiera, el ' +
+      'sistema verifica de forma determinista que los datos escritos en el sitio coinciden con lo pedido; solo ' +
+      'si NO coinciden o no se pueden leer, la tarea se detiene sin ejecutar esa accion y el resultado reporta ' +
+      'que se pidio y que se encontro. Tu trabajo es encolar la tarea y reportar el resultado.',
     inputSchema: ejecutarSchema,
   },
   {
