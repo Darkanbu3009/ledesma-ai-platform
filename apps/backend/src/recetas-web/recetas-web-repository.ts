@@ -338,6 +338,25 @@ export class RecetasWebRepository {
     return rows.length > 0;
   }
 
+  /**
+   * Id de una receta del owner creada desde ALGUNA de estas trayectorias, o null. Es el chequeo de
+   * DOBLE GUARDADO de "guardar como tarea aprendida": la promocion con consentimiento estampa
+   * `creada_desde_trayectoria` (la automatica no lo hace), asi que este vinculo dice si ese exito
+   * concreto ya se guardo. Acotado por owner; lista vacia devuelve null sin consultar.
+   */
+  async buscarPorTrayectorias(
+    ownerId: string,
+    trayectoriaIds: readonly string[],
+  ): Promise<string | null> {
+    if (trayectoriaIds.length === 0) return null;
+    const rows = await this.sql<Array<{ id: string }>>`
+      select id from recetas_web
+      where owner_id = ${ownerId} and creada_desde_trayectoria in ${this.sql([...trayectoriaIds])}
+      limit 1
+    `;
+    return rows[0]?.id ?? null;
+  }
+
   /** Contabiliza una ejecucion por receta (para poder medir el ahorro y detectar recetas muertas). */
   async registrarEjecucion(id: string, ownerId: string, exitosa: boolean): Promise<void> {
     await this.sql`

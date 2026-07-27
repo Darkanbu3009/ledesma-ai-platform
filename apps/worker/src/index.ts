@@ -238,8 +238,19 @@ function main(): void {
     logger.info('sitios conectados deshabilitados: falta BROWSERBASE_API_KEY y/o BROWSERBASE_PROJECT_ID');
   }
 
+  // GUARDAR COMO TAREA APRENDIDA (promocion trayectoria -> receta con consentimiento): solo lee
+  // V030 y escribe V035, sin navegador ni modelo, asi que se cablea SIEMPRE (sin la compuerta de
+  // Browserbase). Instancias propias de los repos: fuera del bloque de arriba no existen.
+  const promocionTrayectoria = {
+    trayectorias: new TrayectoriasWebRepository(sql),
+    recetas: new RecetasWebRepository(sql),
+    guardarResultado: (jobId: string, resultado: unknown) => jobs.guardarResultado(jobId, resultado),
+    logger,
+  };
+
   const deps: JobRunnerDeps = {
     jobs,
+    promocionTrayectoria,
     getProfileTier: (ownerId) => registrationRepo.getProfileTier(ownerId),
     loadAgent: (agentId) => agentRepo.getById(agentId),
     resolveCredential: (ownerId, credentialId) =>

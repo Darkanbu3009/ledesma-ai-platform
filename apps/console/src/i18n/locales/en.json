@@ -1781,6 +1781,13 @@
       "mensaje": "Message",
       "sitio": "Site",
       "tareaWeb": "Web task"
+    },
+    "guardarTarea": {
+      "boton": "Save as learned task",
+      "guardando": "Saving the learned task",
+      "guardada": "Saved as a learned task",
+      "detalle": "Next time you ask for this task it will run without analyzing the site again.",
+      "error": "The learned task could not be saved. Please try again."
     }
   },
   "multisitio": {

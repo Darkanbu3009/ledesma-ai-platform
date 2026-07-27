@@ -2,6 +2,7 @@ import { useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AlertCircle,
+  BookmarkPlus,
   Bot,
   ChefHat,
   ChevronDown,
@@ -28,7 +29,7 @@ import {
   type JobStatus,
 } from '../../lib/jobs';
 import { detencionDeJob, textoDeDetencion } from '../../lib/politicas';
-import { useTerminarJob } from '../../lib/mutations';
+import { useGuardarTareaAprendida, useTerminarJob } from '../../lib/mutations';
 import { TerminarTareaDialog } from './TerminarTareaDialog';
 import { TrayectoriaDetalle } from './TrayectoriaDetalle';
 
@@ -102,6 +103,12 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
   const [confirmandoTerminar, setConfirmandoTerminar] = useState(false);
   const terminar = useTerminarJob();
   const terminable = isJobInFlight(job.status);
+  // GUARDAR COMO TAREA APRENDIDA (Fase F): solo en tareas web EXITOSAS del motor libre que el
+  // backend marco como guardables. El guardado es SIEMPRE una decision del usuario (nada se guarda
+  // solo); tras guardarse, la tarjeta muestra la marca y la tarea aparece en "Ya sabe hacer".
+  const guardar = useGuardarTareaAprendida();
+  const guardadaComoTarea = job.guardadaComoTarea === true || guardar.isSuccess;
+  const guardableComoTarea = job.guardableComoTarea === true && !guardadaComoTarea;
   const cancelada = esJobCancelado(job);
   const detenida = esJobDetenido(job);
   // DETENIDA ANTES DE EJECUTAR: el sistema comparo lo que el usuario pidio con lo que habia en el
@@ -277,18 +284,49 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
 
       {job.type === 'tarea_web' && (
         <div className="mt-3">
-          <button
-            type="button"
-            aria-expanded={pasosAbiertos}
-            onClick={() => setPasosAbiertos((abiertos) => !abiertos)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-line-soft px-2.5 py-1 text-[12px] font-semibold text-muted transition hover:border-brasa-line hover:text-brasa"
-          >
-            <ListTree className="h-3.5 w-3.5" />
-            {pasosAbiertos ? t('actividad.trayectoria.ocultarPasos') : t('actividad.trayectoria.verPasos')}
-            <ChevronDown
-              className={['h-3.5 w-3.5 transition-transform', pasosAbiertos ? 'rotate-180' : ''].join(' ')}
-            />
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              aria-expanded={pasosAbiertos}
+              onClick={() => setPasosAbiertos((abiertos) => !abiertos)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-line-soft px-2.5 py-1 text-[12px] font-semibold text-muted transition hover:border-brasa-line hover:text-brasa"
+            >
+              <ListTree className="h-3.5 w-3.5" />
+              {pasosAbiertos ? t('actividad.trayectoria.ocultarPasos') : t('actividad.trayectoria.verPasos')}
+              <ChevronDown
+                className={['h-3.5 w-3.5 transition-transform', pasosAbiertos ? 'rotate-180' : ''].join(' ')}
+              />
+            </button>
+            {/* GUARDAR COMO TAREA APRENDIDA: consentimiento explicito del usuario; nada se guarda
+                solo. Tras guardarse (en esta sesion o antes), queda la marca en verde. */}
+            {guardableComoTarea && (
+              <button
+                type="button"
+                disabled={guardar.isPending}
+                onClick={() => guardar.mutate(job.id)}
+                title={t('actividad.guardarTarea.detalle')}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-line-soft px-2.5 py-1 text-[12px] font-semibold text-muted transition hover:border-brasa-line hover:text-brasa disabled:cursor-default disabled:opacity-60"
+              >
+                {guardar.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <BookmarkPlus className="h-3.5 w-3.5" />
+                )}
+                {guardar.isPending
+                  ? t('actividad.guardarTarea.guardando')
+                  : t('actividad.guardarTarea.boton')}
+              </button>
+            )}
+            {guardadaComoTarea && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-ok/30 bg-ok/10 px-2.5 py-0.5 text-[11px] font-semibold text-ok">
+                <Sparkles className="h-3.5 w-3.5" />
+                {t('actividad.guardarTarea.guardada')}
+              </span>
+            )}
+          </div>
+          {guardableComoTarea && guardar.isError && (
+            <p className="mt-1.5 text-[12px] text-brasa">{t('actividad.guardarTarea.error')}</p>
+          )}
           {pasosAbiertos && (
             <div className="mt-2.5">
               {/* FIX D: con la escritura incremental, una tarea EN CURSO ya tiene pasos que mostrar

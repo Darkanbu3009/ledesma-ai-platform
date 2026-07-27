@@ -15,6 +15,7 @@ vi.mock('../src/lib/queries', () => ({
 const useTerminarJob = vi.fn(() => ({ isPending: false, isError: false, mutate: vi.fn() }));
 vi.mock('../src/lib/mutations', () => ({
   useTerminarJob: () => useTerminarJob(),
+  useGuardarTareaAprendida: () => ({ isPending: false, isError: false, isSuccess: false, mutate: vi.fn() }),
 }));
 
 import { JobActivityCard } from '../src/components/activity/JobActivityCard';

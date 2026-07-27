@@ -10,6 +10,7 @@ export * from './jobs/recipe-payload.js';
 export * from './jobs/sitio-payload.js';
 export * from './jobs/tarea-web-payload.js';
 export * from './jobs/grabacion-payload.js';
+export * from './jobs/promover-trayectoria-payload.js';
 export * from './verificacion/contrato.js';
 export * from './recetas/contrato.js';
 export * from './grabaciones/contrato.js';

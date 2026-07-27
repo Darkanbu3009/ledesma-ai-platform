@@ -7,6 +7,7 @@ import { getSql } from '../db/client.js';
 import { createSupabaseJwtVerifier, type JwtVerifier } from '../auth/jwt-verifier.js';
 import { requireUser } from '../auth/require-user.js';
 import { AprobacionesWebRepository } from '../aprobaciones/aprobaciones-repository.js';
+import { TrayectoriasWebRepository } from '../trayectorias/trayectorias-repository.js';
 
 // Paginacion del historial: 50 es el TECHO duro por pagina (cota defensiva contra scans grandes) y 20
 // el tamano por defecto. Se acota server-side: el cliente no puede pedir mas de 50.
@@ -42,7 +43,16 @@ function truncateError(text: string | null): string | null {
  * DTO de una ejecucion para el historial (respuesta de GET /v1/jobs). Deriva del JobSummary del repo:
  * SIN el payload (dato sensible: mensajes del usuario / snapshots de recetas) y con last_error truncado.
  */
-function toJobActivity(job: JobSummary) {
+function toJobActivity(
+  job: JobSummary,
+  guardado?: { tieneExitosa: boolean; guardada: boolean } | undefined,
+) {
+  // GUARDAR COMO TAREA APRENDIDA (Fase F): una tarea web COMPLETADA que corrio con el MOTOR (no por
+  // receta), con trayectoria exitosa registrada y sin receta ya creada desde ella, se puede guardar.
+  // Los dos flags son opcionales a proposito: sin resumen de guardado (migraciones V030/V035 sin
+  // aplicar, o el resumen fallo) simplemente no viajan y la tarjeta no ofrece el boton.
+  const esExitoDelMotor =
+    job.type === 'tarea_web' && job.status === 'completed' && job.conLoAprendido !== true;
   return {
     id: job.id,
     type: job.type,
@@ -59,6 +69,12 @@ function toJobActivity(job: JobSummary) {
     // expone (puede llevar el resumen de la tarea, que es dato del usuario): solo estos escalares.
     conLoAprendido: job.conLoAprendido,
     ajustadaSola: job.ajustadaSola,
+    ...(guardado !== undefined && esExitoDelMotor
+      ? {
+          guardableComoTarea: guardado.tieneExitosa && !guardado.guardada,
+          guardadaComoTarea: guardado.guardada,
+        }
+      : {}),
   };
 }
 
@@ -83,12 +99,34 @@ export function jobsRoutes(
       AprobacionesWebRepository,
       'cerrarPendientePorCancelacion' | 'registrarIntervencion'
     >;
+    trayectoriasRepo?: Pick<TrayectoriasWebRepository, 'resumenDeGuardadoPorJobs'>;
   },
 ) {
   return async function (app: FastifyInstance): Promise<void> {
     const verifier = deps?.verifier ?? createSupabaseJwtVerifier(config);
     const jobsRepo = deps?.jobsRepo ?? new JobsRepository(getSql(config));
     const aprobacionesRepo = deps?.aprobacionesRepo ?? new AprobacionesWebRepository(getSql(config));
+    const trayectoriasRepo = deps?.trayectoriasRepo ?? new TrayectoriasWebRepository(getSql(config));
+
+    /**
+     * RESUMEN DE GUARDADO best-effort para las tareas web completadas de una pagina del historial:
+     * UNA query extra por pagina. Si falla (p. ej. V030/V035 sin aplicar en un despliegue), el
+     * historial sigue funcionando igual, solo que sin los flags de guardado.
+     */
+    async function resumenDeGuardado(
+      ownerId: string,
+      jobs: JobSummary[],
+    ): Promise<Map<string, { tieneExitosa: boolean; guardada: boolean }>> {
+      const candidatos = jobs
+        .filter((job) => job.type === 'tarea_web' && job.status === 'completed')
+        .map((job) => job.id);
+      if (candidatos.length === 0) return new Map();
+      try {
+        return await trayectoriasRepo.resumenDeGuardadoPorJobs(ownerId, candidatos);
+      } catch {
+        return new Map();
+      }
+    }
 
     // Lista el historial de ejecuciones del owner (mas nuevas primero), paginado y filtrable por estado.
     app.get('/v1/jobs', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -101,8 +139,9 @@ export function jobsRoutes(
       const { limit, offset, status } = parsed.data;
 
       const jobs = await jobsRepo.listByOwner(user.id, { limit, offset, status });
+      const guardado = await resumenDeGuardado(user.id, jobs);
       return reply.send({
-        jobs: jobs.map(toJobActivity),
+        jobs: jobs.map((job) => toJobActivity(job, guardado.get(job.id))),
         pagination: {
           limit,
           offset,

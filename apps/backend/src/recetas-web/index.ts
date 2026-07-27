@@ -15,3 +15,11 @@ export {
   type OrigenReceta,
   type RecetaWeb,
 } from './recetas-web-repository.js';
+export {
+  encolarGuardadoDeJob,
+  evaluarGuardadoDeJob,
+  type EvaluacionDeGuardado,
+  type GuardarTareaAprendidaDeps,
+  type MotivoNoGuardable,
+  type ResultadoDeEncolado,
+} from './guardar-tarea-aprendida.js';
