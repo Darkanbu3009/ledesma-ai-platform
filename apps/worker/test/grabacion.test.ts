@@ -236,6 +236,23 @@ describe('la grabacion captura pasos con sus estrategias de localizacion', () =>
     expect(detener).toHaveBeenCalledTimes(1);
     expect(cerrarSesion).toHaveBeenCalledWith('ses-1');
   });
+
+  it('publica la sesion del proveedor como resultado INTERMEDIO (para el token del relay) y el desenlace la sobreescribe', async () => {
+    const { deps, resultados } = makeDeps();
+    await procesarJobDeGrabacion(deps, makeJob(PAYLOAD_GRABAR));
+    // Mientras la grabacion corre, el backend puede leer la sesion viva para acunar el token del
+    // relay de teclado movil. El desenlace final NO conserva el id de sesion.
+    expect(resultados[0]).toEqual({
+      estado: 'grabando',
+      grabacionId: GRABACION_ID,
+      sesionExternaId: 'ses-1',
+    });
+    expect(resultados[resultados.length - 1]).toEqual({
+      estado: 'grabada',
+      grabacionId: GRABACION_ID,
+      pasos: expect.any(Number),
+    });
+  });
 });
 
 describe('EL INVARIANTE: el login jamas se graba', () => {
@@ -262,9 +279,12 @@ describe('EL INVARIANTE: el login jamas se graba', () => {
     // NADA se guarda: ni los pasos que ya se habian capturado antes del campo de contrasena.
     expect(pasosGuardados).toEqual([]);
     expect(deps.grabaciones.guardarPasos).not.toHaveBeenCalled();
-    expect(resultados).toEqual([
-      { estado: 'descartada', grabacionId: GRABACION_ID, motivo: 'contrasena' },
-    ]);
+    // El desenlace (descartada) SOBREESCRIBE el resultado intermedio de la sesion del relay.
+    expect(resultados[resultados.length - 1]).toEqual({
+      estado: 'descartada',
+      grabacionId: GRABACION_ID,
+      motivo: 'contrasena',
+    });
   });
 
   it('si el sitio YA pide login al abrir, no se instala la captura siquiera', async () => {

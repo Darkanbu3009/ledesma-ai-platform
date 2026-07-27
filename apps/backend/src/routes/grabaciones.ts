@@ -8,6 +8,7 @@ import {
   parseGrabacionJobPayload,
   tierAllowsAutonomy,
 } from '@ledesma-platform/shared';
+import { mintRelayToken } from '@ledesma-platform/shared/relay-token';
 import type { Env } from '../config/env.js';
 import { AppError } from '../errors/app-error.js';
 import { getSql } from '../db/client.js';
@@ -81,7 +82,7 @@ export function grabacionesRoutes(
     verifier?: JwtVerifier;
     grabacionesRepo?: Pick<GrabacionesRepository, 'crear' | 'obtener' | 'terminar'>;
     sitiosRepo?: Pick<SitiosConectadosRepository, 'obtenerPorId'>;
-    jobsRepo?: Pick<JobsRepository, 'createJob'>;
+    jobsRepo?: Pick<JobsRepository, 'createJob' | 'obtenerSesionDeGrabacion'>;
     registrationRepo?: Pick<RegistrationRepository, 'getProfileTier'>;
   },
 ) {
@@ -189,6 +190,45 @@ export function grabacionesRoutes(
           throw new AppError('CONFLICT', 409, 'Recording is no longer in progress');
         }
         return reply.send({ status: 'ok' });
+      },
+    );
+
+    // TOKEN DEL RELAY DE TECLADO MOVIL para la GRABACION (espejo de POST /v1/sitios/:id/relay-token):
+    // la vista en vivo de la grabacion es el mismo screencast que la del login, asi que en tactil el
+    // teclado nativo tampoco se levanta. Este endpoint ACUNA el mismo token efimero de un solo uso,
+    // ligado a (owner, conexion, sesion del proveedor DE LA GRABACION); no releva nada ni habla con
+    // Browserbase. La sesion viva la publico el worker como resultado intermedio del job
+    // kind:'grabar_tarea' (jobs.resultado, V026), y se lee acotada por owner y solo con el job aun
+    // corriendo. El relay no gana ningun privilegio: recibe la MISMA terna que en el login.
+    app.post(
+      '/v1/grabaciones/:id/relay-token',
+      async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+        const user = await requireUser(request, verifier);
+        await requireAutonomy(user.id);
+        const grabacion = await resolveGrabacionParam(request, user.id);
+
+        // Solo tiene sentido con la grabacion EN CURSO y su vista en vivo ya publicada (la captura
+        // instalada). En cualquier otro momento no hay sesion que relevar: 400 inmediato y claro.
+        if (grabacion.estado !== 'grabando' || grabacion.vistaEnVivoUrl === null) {
+          throw new AppError('VALIDATION_ERROR', 400, 'Recording has no live view in progress');
+        }
+
+        // Feature opcional: sin el secreto compartido o la URL publica del relay, el canal no existe.
+        // La consola cae al aviso de "hazlo desde una computadora" (el flujo previo en tactil).
+        if (config.RELAY_TOKEN_SECRET === undefined || config.RELAY_PUBLIC_URL === undefined) {
+          throw new AppError('RELAY_NO_DISPONIBLE', 501, 'Assisted mobile keyboard relay is not configured');
+        }
+
+        const sesionExternaId = await jobsRepo.obtenerSesionDeGrabacion(grabacion.id, user.id);
+        if (sesionExternaId === null) {
+          throw new AppError('VALIDATION_ERROR', 400, 'Recording has no live view in progress');
+        }
+
+        const { token, expiresAt, bindingKey } = mintRelayToken(
+          { ownerId: user.id, connectionId: grabacion.connectionId, sesionExternaId },
+          config.RELAY_TOKEN_SECRET,
+        );
+        return reply.status(201).send({ token, expiresAt, relayUrl: config.RELAY_PUBLIC_URL, hs: bindingKey });
       },
     );
 

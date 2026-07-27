@@ -713,6 +713,14 @@ async function grabarTarea(
     // podria empezar a hacer la tarea con la captura todavia sin instalar y perderiamos sus primeros
     // pasos (y, peor, la guardia de contrasena no estaria mirando).
     await deps.grabaciones.publicarVistaEnVivo(grabacionId, job.ownerId, sesion.vistaEnVivoUrl);
+    // RESULTADO INTERMEDIO (se sobreescribe con el desenlace final): publica la sesion del proveedor
+    // para que el backend pueda acunar el token del relay de teclado movil SOBRE ESTA sesion (la tabla
+    // grabaciones no la guarda). Es un metadato, no contenido: el mismo id que ya viaja en los logs.
+    await deps.guardarResultado(job.id, {
+      estado: 'grabando',
+      grabacionId,
+      sesionExternaId: sesion.sesionExternaId,
+    });
     deps.logger.info('grabacion abierta: el usuario ya puede hacer la tarea', {
       jobId: job.id,
       grabacionId,

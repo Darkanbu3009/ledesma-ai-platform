@@ -720,6 +720,37 @@ describe('JobsRepository (7.1d: resultado de jobs)', () => {
       expect(job?.resultado).toBeNull();
     });
   });
+
+  describe('obtenerSesionDeGrabacion', () => {
+    it('lee la sesion del resultado intermedio, acotado por owner y con el job aun running', async () => {
+      const sql = makeSqlReturning([
+        { resultado: { estado: 'grabando', grabacionId: 'gra-1', sesionExternaId: 'ses-grab-1' } },
+      ]);
+      const sesion = await new JobsRepository(sql).obtenerSesionDeGrabacion('gra-1', 'user-1');
+      expect(sesion).toBe('ses-grab-1');
+      const texto = sqlText(sql);
+      expect(texto).toContain('owner_id = <param>');
+      expect(texto).toContain("status = 'running'");
+      expect(texto).toContain("payload->>'kind' = <param>");
+      expect(texto).toContain("payload->>'grabacionId' = <param>");
+      expect(sqlValues(sql)).toEqual(['user-1', 'grabar_tarea', 'gra-1']);
+    });
+
+    it('null si no hay job running de esa grabacion o el resultado no trae sesion', async () => {
+      expect(await new JobsRepository(makeSqlReturning([])).obtenerSesionDeGrabacion('gra-1', 'user-1')).toBeNull();
+      expect(
+        await new JobsRepository(
+          makeSqlReturning([{ resultado: { estado: 'grabada', grabacionId: 'gra-1' } }]),
+        ).obtenerSesionDeGrabacion('gra-1', 'user-1'),
+      ).toBeNull();
+      expect(
+        await new JobsRepository(makeSqlReturning([{ resultado: null }])).obtenerSesionDeGrabacion(
+          'gra-1',
+          'user-1',
+        ),
+      ).toBeNull();
+    });
+  });
 });
 
 describe('JobsRepository (7.1e: checkpoints de aprobacion, estado pausado)', () => {

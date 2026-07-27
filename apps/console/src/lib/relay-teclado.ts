@@ -36,6 +36,14 @@ export async function solicitarTokenRelay(sitioId: string): Promise<TokenRelay> 
   return apiFetch<TokenRelay>(`/v1/sitios/${sitioId}/relay-token`, { method: 'POST' });
 }
 
+/**
+ * Igual que solicitarTokenRelay pero para una GRABACION en curso: el token queda ligado a la sesion
+ * de navegador de la grabacion (no a la del login). Mismo contrato de respuesta y mismos errores.
+ */
+export async function solicitarTokenRelayGrabacion(grabacionId: string): Promise<TokenRelay> {
+  return apiFetch<TokenRelay>(`/v1/grabaciones/${grabacionId}/relay-token`, { method: 'POST' });
+}
+
 export type EstadoConexionRelay = 'conectando' | 'listo' | 'error' | 'cerrado';
 
 export interface OpcionesConexion {

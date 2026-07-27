@@ -1986,6 +1986,12 @@
     "cerrarAria": "Cerrar",
     "iframeTitulo": "Navegador seguro para hacer la tarea en {{dominio}}",
     "pie": "Se abre en un navegador seguro con tu sesión ya iniciada. Nunca te pedimos tu contraseña.",
+    "relayMovil": {
+      "avisoMovil": "En teléfonos y tablets todavía no se puede escribir dentro de esta vista: el navegador seguro aún no soporta el teclado móvil. Abre esta página en una computadora para enseñar la tarea.",
+      "campoAria": "Campo para escribir los datos de la tarea; las teclas se transmiten cifradas hasta la infraestructura de Ledesma, que las descifra y las reenvía al navegador seguro",
+      "placeholder": "Escribe aquí los datos de la tarea",
+      "divulgacion": "En el teléfono, lo que escribes aquí viaja cifrado hasta la infraestructura de Ledesma, donde se descifra para reenviarlo al navegador seguro donde haces la tarea. No se almacena ni se registra en ningún momento. Nunca escribas aquí una contraseña: si aparece un campo de contraseña, la grabación se detiene y no se guarda nada."
+    },
     "tipos": {
       "destinatario": "Para quién es",
       "asunto": "El asunto",
