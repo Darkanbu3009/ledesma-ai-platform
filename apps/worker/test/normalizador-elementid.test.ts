@@ -2,11 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import {
   crearMiddlewareDeModelo,
-  hayUnSoloFrame,
+  framesPorId,
   instalarNormalizadorDeElementId,
   normalizarIdsPelones,
   normalizarIdsPelonesEnTexto,
   rescatarSalidaConIdPelon,
+  resolverFrameDeId,
   textoDeFalloDeEsquema,
 } from '../src/normalizador-elementid.js';
 import type { Logger } from '../src/logger.js';
@@ -14,8 +15,10 @@ import type { Logger } from '../src/logger.js';
 /**
  * NORMALIZADOR DEFENSIVO DE elementId SIN PREFIJO (FIX C). El parche de patches/ evita que el arbol
  * OFREZCA ids sin prefijo; esto cubre el otro camino: el modelo que QUITA el prefijo por su cuenta
- * ("6377" en vez de "0-6377"). Con un solo frame se normaliza y se re-valida con el MISMO esquema;
- * con varios frames o cualquier duda, el error original se propaga tal cual.
+ * ("6377" en vez de "0-6377"). El frame se RESUELVE buscando el id pelon entre los ids rotulados
+ * [frame-id] del arbol enviado: presente en exactamente UN frame se normaliza y se re-valida con el
+ * MISMO esquema; presente en varios o en ninguno (ambiguedad real), el error original se propaga tal
+ * cual. El caso Gmail (multiples iframes siempre, id valido del frame principal) queda cubierto.
  */
 
 const logger: Logger = {
@@ -43,9 +46,22 @@ const mensajesUnFrame = [
   { role: 'user', content: 'Tree:\n[0-1] RootWebArea\n  [0-6377] button: Redactar\n  [0-9] link' },
 ];
 
-/** Mensajes con DOS frames (Gmail con iframes): aparece un prefijo distinto de 0. */
-const mensajesDosFrames = [
+/** Mensajes con DOS frames (Gmail con iframes) donde el id 6377 SI existe, solo en el frame 0. */
+const mensajesDosFramesConElId = [
+  {
+    role: 'user',
+    content: 'Tree:\n[0-1] RootWebArea\n  [0-6377] button: Redactar\n  [1-40] button: Enviar',
+  },
+];
+
+/** Mensajes con DOS frames donde el id 6377 NO aparece en ninguno. */
+const mensajesDosFramesSinElId = [
   { role: 'user', content: 'Tree:\n[0-1] RootWebArea\n  [1-40] button: Enviar\n  [0-9] link' },
+];
+
+/** Mensajes donde el id 6377 aparece en DOS frames a la vez (ambiguedad real). */
+const mensajesIdAmbiguo = [
+  { role: 'user', content: 'Tree:\n[0-6377] button: A\n  [1-6377] button: B' },
 ];
 
 function errorDeEsquema(salida: unknown): Error {
@@ -61,27 +77,47 @@ const salidaConIdPelon = {
   twoStep: false,
 };
 
-describe('hayUnSoloFrame', () => {
-  it('true cuando todos los ids rotulados llevan prefijo 0', () => {
-    expect(hayUnSoloFrame(mensajesUnFrame)).toBe(true);
+describe('framesPorId y resolverFrameDeId', () => {
+  it('mapea cada id rotulado a los frames donde aparece', () => {
+    const frames = framesPorId(mensajesDosFramesConElId);
+    expect(resolverFrameDeId('6377', frames)).toBe('0');
+    expect(resolverFrameDeId('40', frames)).toBe('1');
   });
-  it('false con varios frames o sin ids rotulados', () => {
-    expect(hayUnSoloFrame(mensajesDosFrames)).toBe(false);
-    expect(hayUnSoloFrame([{ role: 'user', content: 'sin arbol' }])).toBe(false);
+  it('un id ausente o presente en varios frames no se resuelve', () => {
+    expect(resolverFrameDeId('6377', framesPorId(mensajesDosFramesSinElId))).toBeNull();
+    expect(resolverFrameDeId('6377', framesPorId(mensajesIdAmbiguo))).toBeNull();
+    expect(resolverFrameDeId('6377', framesPorId([{ role: 'user', content: 'sin arbol' }]))).toBeNull();
   });
 });
 
 describe('normalizarIdsPelones', () => {
-  it('normaliza SOLO los elementId de puros digitos, en cualquier profundidad', () => {
-    const { valor, normalizados } = normalizarIdsPelones({
-      action: { elementId: '6377' },
-      elements: [{ elementId: '0-5' }, { elementId: '88' }],
-    });
-    expect(normalizados).toEqual(['6377', '88']);
+  it('normaliza SOLO los elementId de puros digitos, al frame resuelto de cada uno', () => {
+    const frames = framesPorId([
+      { role: 'user', content: 'Tree:\n[0-6377] a\n[1-88] b\n[0-5] c' },
+    ]);
+    const { valor, normalizados, sinResolver } = normalizarIdsPelones(
+      {
+        action: { elementId: '6377' },
+        elements: [{ elementId: '0-5' }, { elementId: '88' }],
+      },
+      frames,
+    );
+    expect(normalizados).toEqual(['6377 -> 0-6377', '88 -> 1-88']);
+    expect(sinResolver).toEqual([]);
     expect(valor).toEqual({
       action: { elementId: '0-6377' },
-      elements: [{ elementId: '0-5' }, { elementId: '0-88' }],
+      elements: [{ elementId: '0-5' }, { elementId: '1-88' }],
     });
+  });
+
+  it('un id que no aparece en exactamente un frame queda tal cual y se reporta sin resolver', () => {
+    const { valor, normalizados, sinResolver } = normalizarIdsPelones(
+      { action: { elementId: '6377' } },
+      framesPorId(mensajesIdAmbiguo),
+    );
+    expect(normalizados).toEqual([]);
+    expect(sinResolver).toEqual(['6377']);
+    expect(valor).toEqual({ action: { elementId: '6377' } });
   });
 });
 
@@ -99,15 +135,29 @@ describe('rescatarSalidaConIdPelon', () => {
     expect(rescatado?.usage['prompt_tokens']).toBe(100);
   });
 
-  it('con VARIOS frames NO se normaliza (0-<id> seria una adivinanza)', () => {
-    expect(
-      rescatarSalidaConIdPelon({
-        error: errorDeEsquema(salidaConIdPelon),
-        mensajes: mensajesDosFrames,
-        esquema: esquemaAct,
-        logger,
-      }),
-    ).toBeNull();
+  it('el caso Gmail: VARIOS frames pero el id existe solo en el frame principal, se normaliza', () => {
+    const rescatado = rescatarSalidaConIdPelon({
+      error: errorDeEsquema(salidaConIdPelon),
+      mensajes: mensajesDosFramesConElId,
+      esquema: esquemaAct,
+      logger,
+    });
+    expect(rescatado).not.toBeNull();
+    const data = rescatado?.data as typeof salidaConIdPelon;
+    expect(data.action.elementId).toBe('0-6377');
+  });
+
+  it('un id ausente del arbol, o presente en varios frames, NO se normaliza (ambiguedad real)', () => {
+    for (const mensajes of [mensajesDosFramesSinElId, mensajesIdAmbiguo]) {
+      expect(
+        rescatarSalidaConIdPelon({
+          error: errorDeEsquema(salidaConIdPelon),
+          mensajes,
+          esquema: esquemaAct,
+          logger,
+        }),
+      ).toBeNull();
+    }
   });
 
   it('un error que no es rechazo de esquema, o sin texto, no se toca', () => {
@@ -220,7 +270,23 @@ describe('crearMiddlewareDeModelo (FIX B: normalizacion ANTES de validar, en tod
     expect(parseado.action?.elementId).toBe('0-5627');
   });
 
-  it('con VARIOS frames en el prompt no se toca la salida (0-<id> seria una adivinanza)', async () => {
+  it('el caso Gmail: varios frames y el id existe solo en uno, se normaliza a ese frame', async () => {
+    const salida = {
+      content: [{ type: 'text', text: '{"action":{"elementId":"5604"},"twoStep":false}' }],
+    };
+    const resultado = await middleware.wrapGenerate({
+      doGenerate: async () => salida,
+      params: {
+        prompt: [
+          { role: 'user', content: [{ type: 'text', text: 'Tree:\n[0-5604] a\n[1-40] b' }] },
+        ],
+      },
+    });
+    const parte = (resultado.content as Array<{ text: string }>)[0];
+    expect(parte?.text).toContain('"elementId":"0-5604"');
+  });
+
+  it('un id ausente del arbol (o rotulado en varios frames) no toca la salida', async () => {
     const salida = {
       content: [{ type: 'text', text: '{"action":{"elementId":"5627"},"twoStep":false}' }],
     };
@@ -273,13 +339,17 @@ describe('crearMiddlewareDeModelo (FIX B: normalizacion ANTES de validar, en tod
 });
 
 describe('normalizarIdsPelonesEnTexto', () => {
-  it('normaliza todos los elementId pelones del texto y deja el resto intacto', () => {
-    const { texto, normalizados } = normalizarIdsPelonesEnTexto(
-      '{"action":{"elementId":"5627"},"otros":[{"elementId":"0-4"},{"elementId": "88"}]}',
+  it('normaliza los elementId pelones resolubles del texto y deja el resto intacto', () => {
+    const frames = framesPorId([{ role: 'user', content: '[0-5627] a [1-88] b [0-4] c' }]);
+    const { texto, normalizados, sinResolver } = normalizarIdsPelonesEnTexto(
+      '{"action":{"elementId":"5627"},"otros":[{"elementId":"0-4"},{"elementId": "88"},{"elementId":"999"}]}',
+      frames,
     );
-    expect(normalizados).toEqual(['5627', '88']);
+    expect(normalizados).toEqual(['5627 -> 0-5627', '88 -> 1-88']);
+    expect(sinResolver).toEqual(['999']);
     expect(texto).toContain('"elementId":"0-5627"');
-    expect(texto).toContain('"elementId": "0-88"');
+    expect(texto).toContain('"elementId": "1-88"');
     expect(texto).toContain('"elementId":"0-4"');
+    expect(texto).toContain('"elementId":"999"');
   });
 });

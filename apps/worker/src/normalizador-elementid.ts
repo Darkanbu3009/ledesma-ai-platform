@@ -13,10 +13,13 @@ import type { Logger } from './logger.js';
  *
  * Este complemento vive en NUESTRO codigo (no en el parche): envuelve `createChatCompletion` del
  * cliente LLM que Stagehand construyo y, cuando una llamada CON response_model falla por esquema con
- * un elementId /^\d+$/ y la pagina tiene EXACTAMENTE UN frame (todos los ids del arbol enviado
- * llevan prefijo 0-), normaliza el id a `0-<id>`, re-valida contra el MISMO esquema zod de la
- * llamada y devuelve la salida rescatada, logueando la normalizacion. Cualquier duda (varios frames,
- * texto ilegible, esquema que sigue rechazando) re-lanza el error original: nunca se inventa nada.
+ * un elementId /^\d+$/, RESUELVE a que frame pertenece ese id buscandolo entre los ids rotulados
+ * [frame-id] del arbol que viajo al modelo: si el id existe en EXACTAMENTE UN frame, se normaliza a
+ * `<frame>-<id>`, se re-valida contra el MISMO esquema zod de la llamada y se devuelve la salida
+ * rescatada, logueando la normalizacion. Si el id existe en varios frames o en ninguno (ambiguedad
+ * real), o el texto es ilegible, o el esquema sigue rechazando, se re-lanza el error original: nunca
+ * se inventa nada. El caso Gmail (multiples iframes SIEMPRE, id valido del frame principal) queda
+ * cubierto: antes la regla exigia un unico frame y en Gmail no operaba jamas.
  */
 
 /** El patron del esquema de act/observe de Stagehand (lib/inference.js). */
@@ -26,7 +29,7 @@ const PATRON_ID_VALIDO = /^\d+-\d+$/;
 const PATRON_ID_PELON = /^\d+$/;
 
 /** Ids prefijados tal como se rotulan en el arbol enviado al modelo: [frame-backendNodeId]. */
-const PATRON_ID_ROTULADO = /\[(\d+)-\d+\]/g;
+const PATRON_ID_ROTULADO = /\[(\d+)-(\d+)\]/g;
 
 /** Marca para no envolver dos veces el mismo cliente. */
 const MARCA_INSTALADO = '__normalizadorElementIdInstalado';
@@ -50,32 +53,50 @@ function textosDeMensajes(valor: unknown, salida: string[], profundidad = 0): vo
 }
 
 /**
- * ¿El arbol que viajo al modelo describe EXACTAMENTE UN frame? Se leen los prefijos de todos los ids
- * rotulados en los mensajes: un solo frame significa que todos son 0. Sin ningun id rotulado no se
- * puede afirmar nada y la normalizacion NO procede (conservador a proposito).
+ * EN QUE FRAMES rotula el arbol enviado cada backendNodeId: mapa id -> conjunto de frames. Es la
+ * base de la resolucion multiframe: un id pelon solo se puede normalizar si el arbol lo rotula en
+ * EXACTAMENTE un frame.
  */
-export function hayUnSoloFrame(mensajes: unknown): boolean {
+export function framesPorId(mensajes: unknown): Map<string, Set<string>> {
   const textos: string[] = [];
   textosDeMensajes(mensajes, textos);
-  const prefijos = new Set<string>();
+  const mapa = new Map<string, Set<string>>();
   for (const texto of textos) {
     for (const match of texto.matchAll(PATRON_ID_ROTULADO)) {
-      if (match[1] !== undefined) prefijos.add(match[1]);
+      const frame = match[1];
+      const id = match[2];
+      if (frame === undefined || id === undefined) continue;
+      const frames = mapa.get(id) ?? new Set<string>();
+      frames.add(frame);
+      mapa.set(id, frames);
     }
   }
-  if (prefijos.size === 0) return false;
-  for (const prefijo of prefijos) {
-    if (prefijo !== '0') return false;
-  }
-  return true;
+  return mapa;
 }
 
 /**
- * Recorre una salida parseada y normaliza TODO `elementId` pelon a `0-<id>`. Devuelve la copia
- * normalizada y la lista de ids que se tocaron (solo numeros del arbol: no arrastran contenido).
+ * El frame al que pertenece un id pelon, si el arbol lo rotula en EXACTAMENTE UN frame. Devuelve
+ * null si el id aparece en varios frames o en ninguno: esa es la ambiguedad REAL en la que
+ * normalizar seria adivinar (conservador a proposito).
  */
-export function normalizarIdsPelones(valor: unknown): { valor: unknown; normalizados: string[] } {
+export function resolverFrameDeId(id: string, frames: Map<string, Set<string>>): string | null {
+  const conjunto = frames.get(id);
+  if (conjunto === undefined || conjunto.size !== 1) return null;
+  return [...conjunto][0] ?? null;
+}
+
+/**
+ * Recorre una salida parseada y normaliza TODO `elementId` pelon al frame que la resolucion le
+ * asigne (`<frame>-<id>`). Devuelve la copia normalizada, la lista de ids resueltos (con su destino,
+ * para el log) y los que quedaron SIN resolver (ambiguos o ausentes del arbol): con uno solo sin
+ * resolver, el llamador no rescata nada.
+ */
+export function normalizarIdsPelones(
+  valor: unknown,
+  frames: Map<string, Set<string>>,
+): { valor: unknown; normalizados: string[]; sinResolver: string[] } {
   const normalizados: string[] = [];
+  const sinResolver: string[] = [];
   const recorrer = (nodo: unknown, profundidad = 0): unknown => {
     if (profundidad > 8) return nodo;
     if (Array.isArray(nodo)) return nodo.map((item) => recorrer(item, profundidad + 1));
@@ -83,15 +104,21 @@ export function normalizarIdsPelones(valor: unknown): { valor: unknown; normaliz
     const copia: Record<string, unknown> = {};
     for (const [clave, contenido] of Object.entries(nodo)) {
       if (clave === 'elementId' && typeof contenido === 'string' && PATRON_ID_PELON.test(contenido)) {
-        normalizados.push(contenido);
-        copia[clave] = `0-${contenido}`;
+        const frame = resolverFrameDeId(contenido, frames);
+        if (frame === null) {
+          sinResolver.push(contenido);
+          copia[clave] = contenido;
+        } else {
+          normalizados.push(`${contenido} -> ${frame}-${contenido}`);
+          copia[clave] = `${frame}-${contenido}`;
+        }
         continue;
       }
       copia[clave] = recorrer(contenido, profundidad + 1);
     }
     return copia;
   };
-  return { valor: recorrer(valor), normalizados };
+  return { valor: recorrer(valor), normalizados, sinResolver };
 }
 
 /** ¿Hay en la salida algun elementId que el esquema fuera a aceptar tal cual o tras normalizar? */
@@ -145,9 +172,9 @@ function usageDeFallo(error: unknown): Record<string, number> {
 }
 
 /**
- * Intenta RESCATAR la salida rechazada: parsea el texto crudo, normaliza los elementId pelones (solo
- * con un unico frame) y re-valida contra el esquema zod de la llamada. null = no rescatable (el
- * llamador re-lanza el error original).
+ * Intenta RESCATAR la salida rechazada: parsea el texto crudo, resuelve el frame de cada elementId
+ * pelon contra el arbol enviado y re-valida contra el esquema zod de la llamada. null = no
+ * rescatable (el llamador re-lanza el error original).
  */
 export function rescatarSalidaConIdPelon(params: {
   error: unknown;
@@ -164,12 +191,12 @@ export function rescatarSalidaConIdPelon(params: {
   } catch {
     return null;
   }
-  const { valor, normalizados } = normalizarIdsPelones(crudo);
-  if (normalizados.length === 0) return null;
-  if (!hayUnSoloFrame(params.mensajes)) {
+  const { valor, normalizados, sinResolver } = normalizarIdsPelones(crudo, framesPorId(params.mensajes));
+  if (normalizados.length === 0 && sinResolver.length === 0) return null;
+  if (sinResolver.length > 0) {
     params.logger.warn(
-      'tarea web: el modelo devolvio un elementId sin prefijo pero la pagina tiene varios frames; no se normaliza',
-      { elementIds: normalizados },
+      'tarea web: el modelo devolvio un elementId sin prefijo que no aparece en exactamente un frame del arbol; no se normaliza',
+      { elementIds: sinResolver },
     );
     return null;
   }
@@ -183,8 +210,8 @@ export function rescatarSalidaConIdPelon(params: {
   }
   // Solo numeros del arbol de accesibilidad: la normalizacion no arrastra contenido de la pagina.
   params.logger.warn(
-    'tarea web: el modelo devolvio elementId sin prefijo y habia un solo frame; se normalizo a 0-<id>',
-    { elementIds: normalizados.map((id) => `${id} -> 0-${id}`) },
+    'tarea web: el modelo devolvio elementId sin prefijo; el id aparece en un solo frame del arbol y se normalizo a <frame>-<id>',
+    { elementIds: normalizados },
   );
   return { data, usage: usageDeFallo(params.error) };
 }
@@ -251,8 +278,9 @@ export function instalarNormalizadorDeElementId(stagehand: unknown, logger: Logg
  * futuro, puede nacer sin el.
  *
  *  - FIX B (wrapGenerate): normaliza el elementId pelon en la salida cruda ANTES de que el esquema
- *    de act/observe la valide, con la MISMA regla conservadora del rescate: solo con un unico frame
- *    en el prompt. El fallo ya no llega a producirse; el rescate de instancia queda de segunda red.
+ *    de act/observe la valide, con la MISMA regla conservadora del rescate: el id tiene que aparecer
+ *    en exactamente un frame del prompt. El fallo ya no llega a producirse; el rescate de instancia
+ *    queda de segunda red.
  *  - FIX C (transformParams): las llamadas de inferencia con esquema (act, observe, extract) viajan
  *    sin ninguna marca de cache de prompt (el cliente aisdk de Stagehand no marca nada; en
  *    produccion, 28 jul 2026, cachedInputTokens llego en 0). Se marca el ULTIMO mensaje de sistema
@@ -304,17 +332,30 @@ export interface MiddlewareDeModelo {
 /** elementId pelon dentro del JSON crudo de una salida ("elementId":"123", sin prefijo de frame). */
 const PATRON_ID_PELON_EN_JSON = /("elementId"\s*:\s*")(\d+)(")/g;
 
-/** Normaliza los elementId pelones de un texto JSON crudo, sin parsearlo (la validacion viene despues). */
-export function normalizarIdsPelonesEnTexto(texto: string): { texto: string; normalizados: string[] } {
+/**
+ * Normaliza los elementId pelones de un texto JSON crudo, sin parsearlo (la validacion viene
+ * despues), resolviendo el frame de cada uno contra el arbol enviado. Un id que no se pueda
+ * resolver queda tal cual y se reporta en `sinResolver`.
+ */
+export function normalizarIdsPelonesEnTexto(
+  texto: string,
+  frames: Map<string, Set<string>>,
+): { texto: string; normalizados: string[]; sinResolver: string[] } {
   const normalizados: string[] = [];
+  const sinResolver: string[] = [];
   const normalizado = texto.replace(
     PATRON_ID_PELON_EN_JSON,
-    (_todo, antes: string, id: string, despues: string) => {
-      normalizados.push(id);
-      return `${antes}0-${id}${despues}`;
+    (todo, antes: string, id: string, despues: string) => {
+      const frame = resolverFrameDeId(id, frames);
+      if (frame === null) {
+        sinResolver.push(id);
+        return todo as string;
+      }
+      normalizados.push(`${id} -> ${frame}-${id}`);
+      return `${antes}${frame}-${id}${despues}`;
     },
   );
-  return { texto: normalizado, normalizados };
+  return { texto: normalizado, normalizados, sinResolver };
 }
 
 /** ¿Algun mensaje del prompt YA lleva una marca de cache de Anthropic? (el bucle del agente marca). */
@@ -357,8 +398,9 @@ export function conCacheEnElPrefijo(params: ParametrosDeLlamadaDeModelo): Parame
 /**
  * FIX B: normaliza los elementId pelones de las partes generadas (texto directo y tool-calls, que es
  * donde viaja la salida estructurada con Anthropic). Devuelve null si no habia nada que normalizar.
- * Misma regla conservadora del rescate: solo con un UNICO frame en el prompt; con varios frames (o
- * sin ids rotulados que lo demuestren) no se toca nada y la validacion decide.
+ * Misma regla conservadora del rescate: cada id se resuelve contra los ids rotulados del prompt y
+ * solo se normaliza si aparece en EXACTAMENTE un frame; con un id ambiguo o ausente no se toca nada
+ * y la validacion decide.
  */
 export function normalizarSalidaGenerada(
   resultado: ResultadoDeGeneracion,
@@ -367,36 +409,40 @@ export function normalizarSalidaGenerada(
 ): ResultadoDeGeneracion | null {
   const contenido = resultado.content;
   if (!Array.isArray(contenido)) return null;
-  const pelones: string[] = [];
+  const frames = framesPorId(prompt);
+  const resueltos: string[] = [];
+  const ambiguos: string[] = [];
   for (const parte of contenido) {
     const { text, input } = (parte ?? {}) as ParteGenerada;
     for (const texto of [text, input]) {
       if (typeof texto !== 'string') continue;
-      pelones.push(...normalizarIdsPelonesEnTexto(texto).normalizados);
+      const { normalizados, sinResolver } = normalizarIdsPelonesEnTexto(texto, frames);
+      resueltos.push(...normalizados);
+      ambiguos.push(...sinResolver);
     }
   }
-  if (pelones.length === 0) return null;
-  if (!hayUnSoloFrame(prompt)) {
+  if (resueltos.length === 0 && ambiguos.length === 0) return null;
+  if (ambiguos.length > 0) {
     logger.warn(
-      'tarea web: el modelo devolvio un elementId sin prefijo pero la pagina tiene varios frames; no se normaliza',
-      { elementIds: pelones },
+      'tarea web: el modelo devolvio un elementId sin prefijo que no aparece en exactamente un frame del arbol; no se normaliza',
+      { elementIds: ambiguos },
     );
     return null;
   }
   const nuevoContenido = contenido.map((parte) => {
     const { text, input } = (parte ?? {}) as ParteGenerada;
-    if (typeof text === 'string' && normalizarIdsPelonesEnTexto(text).normalizados.length > 0) {
-      return { ...(parte as object), text: normalizarIdsPelonesEnTexto(text).texto };
+    if (typeof text === 'string' && normalizarIdsPelonesEnTexto(text, frames).normalizados.length > 0) {
+      return { ...(parte as object), text: normalizarIdsPelonesEnTexto(text, frames).texto };
     }
-    if (typeof input === 'string' && normalizarIdsPelonesEnTexto(input).normalizados.length > 0) {
-      return { ...(parte as object), input: normalizarIdsPelonesEnTexto(input).texto };
+    if (typeof input === 'string' && normalizarIdsPelonesEnTexto(input, frames).normalizados.length > 0) {
+      return { ...(parte as object), input: normalizarIdsPelonesEnTexto(input, frames).texto };
     }
     return parte as unknown;
   });
   // Solo numeros del arbol de accesibilidad: la normalizacion no arrastra contenido de la pagina.
   logger.warn(
-    'tarea web: el modelo devolvio elementId sin prefijo y habia un solo frame; se normalizo a 0-<id>',
-    { elementIds: pelones.map((id) => `${id} -> 0-${id}`) },
+    'tarea web: el modelo devolvio elementId sin prefijo; el id aparece en un solo frame del arbol y se normalizo a <frame>-<id>',
+    { elementIds: resueltos },
   );
   return { ...resultado, content: nuevoContenido };
 }
