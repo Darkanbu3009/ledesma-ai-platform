@@ -1739,6 +1739,7 @@
     },
     "card": {
       "agenteEliminado": "Deleted agent",
+      "sistema": "Platform task",
       "fin": "Finished: {{fecha}}",
       "intentos_one": "{{count}} attempt",
       "intentos_other": "{{count}} attempts",

@@ -141,13 +141,18 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
         : MessageSquare;
   const created = formatRunAt(job.createdAt) ?? '—';
   const finished = formatRunAt(job.finishedAt);
-  // Un job de sitios conectados o de tarea web no tiene agente: el titular es la seccion.
+  // Un job de sitios conectados o de tarea web no tiene agente: el titular es la seccion. "Agente
+  // eliminado" queda RESERVADO para un job que TUVO agente (agentId presente) y ya no resuelve
+  // nombre; un job sin agente (agentId null: trabajos internos de la plataforma) jamas debe
+  // presentarse con ese titulo alarmante.
   const title =
     job.type === 'sitio'
       ? t('actividad.card.sitios')
       : job.type === 'tarea_web'
         ? t('actividad.card.tareaWeb')
-        : (agentName ?? t('actividad.card.agenteEliminado'));
+        : job.agentId === null
+          ? t('actividad.card.sistema')
+          : (agentName ?? t('actividad.card.agenteEliminado'));
 
   return (
     <div className="rounded-2xl border border-line bg-surface p-5 shadow-card">

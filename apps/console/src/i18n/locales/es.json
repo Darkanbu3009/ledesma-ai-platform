@@ -1739,6 +1739,7 @@
     },
     "card": {
       "agenteEliminado": "Agente eliminado",
+      "sistema": "Tarea de la plataforma",
       "fin": "Fin: {{fecha}}",
       "intentos_one": "{{count}} intento",
       "intentos_other": "{{count}} intentos",

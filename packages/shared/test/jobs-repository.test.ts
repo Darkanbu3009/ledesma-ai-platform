@@ -479,8 +479,16 @@ describe('JobsRepository', () => {
       expect(texto).toContain('order by created_at desc');
       expect(texto).toContain('limit ');
       expect(texto).toContain('offset ');
-      // Owner del parametro, limit y offset viajan como parametros (no interpolados en el texto).
-      expect(sqlValues(sql)).toEqual(['user-1', 20, 40]);
+      // Owner del parametro, kind excluido, limit y offset viajan como parametros (no interpolados).
+      expect(sqlValues(sql)).toEqual(['user-1', 'promover_trayectoria', 20, 40]);
+    });
+
+    it('EXCLUYE el job interno de guardado (kind promover_trayectoria): no es una actividad del agente', async () => {
+      const sql = makeSqlReturning([makeSummaryRow()]);
+      await new JobsRepository(sql).listByOwner('user-1', { limit: 20, offset: 0 });
+      const texto = sqlText(sql);
+      expect(texto).toContain("payload->>'kind' is distinct from ");
+      expect(sqlValues(sql)).toContain('promover_trayectoria');
     });
 
     it('NO expone el payload: selecciona payload->>\'kind\' como escalar, nunca el payload entero ni select *', async () => {
@@ -498,7 +506,7 @@ describe('JobsRepository', () => {
       await new JobsRepository(sql).listByOwner('user-1', { limit: 10, offset: 0 });
       const texto = sqlText(sql);
       expect(texto).not.toContain('status = ');
-      expect(sqlValues(sql)).toEqual(['user-1', 10, 0]);
+      expect(sqlValues(sql)).toEqual(['user-1', 'promover_trayectoria', 10, 0]);
     });
 
     it('con status: agrega el filtro y lo pasa como parametro', async () => {
@@ -506,8 +514,8 @@ describe('JobsRepository', () => {
       await new JobsRepository(sql).listByOwner('user-1', { limit: 10, offset: 0, status: 'failed' });
       const texto = sqlText(sql);
       expect(texto).toContain('and status = ');
-      // owner, status, limit, offset (en ese orden dentro del template).
-      expect(sqlValues(sql)).toEqual(['user-1', 'failed', 10, 0]);
+      // owner, status, kind excluido, limit, offset (en ese orden dentro del template).
+      expect(sqlValues(sql)).toEqual(['user-1', 'failed', 'promover_trayectoria', 10, 0]);
     });
 
     it('infiere el type del payload_kind: recipe, los tres kinds de sitio, y simple para el resto', async () => {

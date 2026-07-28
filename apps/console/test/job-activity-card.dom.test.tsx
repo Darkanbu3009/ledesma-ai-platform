@@ -41,6 +41,21 @@ afterEach(async () => {
   await i18n.changeLanguage('es');
 });
 
+describe('JobActivityCard: titular de un job sin agente (FIX B)', () => {
+  it('un job simple SIN agente (agentId null) NO se titula "Agente eliminado"', () => {
+    render(<JobActivityCard job={makeJob({ type: 'simple', agentId: null })} agentName={null} />);
+    expect(screen.queryByText('Agente eliminado')).not.toBeInTheDocument();
+    expect(screen.getByText('Tarea de la plataforma')).toBeInTheDocument();
+  });
+
+  it('"Agente eliminado" queda reservado para un job que TUVO agente y ya no resuelve nombre', () => {
+    render(
+      <JobActivityCard job={makeJob({ type: 'simple', agentId: 'agente-1' })} agentName={null} />,
+    );
+    expect(screen.getByText('Agente eliminado')).toBeInTheDocument();
+  });
+});
+
 describe('JobActivityCard: error amable con detalle tecnico colapsable (BUG C)', () => {
   it('un job fallido muestra el texto amable y OCULTA el error crudo hasta abrir Detalle tecnico', () => {
     render(<JobActivityCard job={makeJob()} agentName={null} />);

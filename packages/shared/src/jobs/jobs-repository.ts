@@ -13,6 +13,7 @@ import { RECIPE_JOB_KIND } from './recipe-payload.js';
 import { SITIO_JOB_KINDS } from './sitio-payload.js';
 import { TAREA_WEB_JOB_KIND } from './tarea-web-payload.js';
 import { GRABACION_JOB_KINDS, GRABAR_TAREA_JOB_KIND } from './grabacion-payload.js';
+import { PROMOVER_TRAYECTORIA_JOB_KIND } from './promover-trayectoria-payload.js';
 
 /**
  * Cliente postgres (tagged template) que el repositorio recibe por inyeccion, IGUAL que los
@@ -251,6 +252,11 @@ export class JobsRepository {
    * Dos ramas explicitas (con/sin status) en vez de un fragmento SQL condicional: cada rama es UN solo
    * template, mas legible y trivial de testear con un mock del tagged template. La ruta valida y acota
    * limit/offset antes de llamar aca (este metodo confia en valores ya saneados).
+   *
+   * El job INTERNO de guardado (kind 'promover_trayectoria') queda FUERA del listado a proposito:
+   * guardar una tarea aprendida no es una actividad del agente, y su tarjeta salia como "Agente
+   * eliminado" con estado fallida cada vez que la conversion se rechazaba. Su estado se sigue
+   * consultando por el detalle (getSummaryForOwner), que es lo que la consola sondea al guardar.
    */
   async listByOwner(ownerId: string, options: ListJobsByOwnerOptions): Promise<JobSummary[]> {
     const { limit, offset, status } = options;
@@ -262,6 +268,7 @@ export class JobsRepository {
               resultado->>'via' as resultado_via, resultado->>'reparada' as resultado_reparada
             from jobs
             where owner_id = ${ownerId}
+              and (payload->>'kind' is distinct from ${PROMOVER_TRAYECTORIA_JOB_KIND})
             order by created_at desc
             limit ${limit} offset ${offset}
           `
@@ -271,6 +278,7 @@ export class JobsRepository {
               resultado->>'via' as resultado_via, resultado->>'reparada' as resultado_reparada
             from jobs
             where owner_id = ${ownerId} and status = ${status}
+              and (payload->>'kind' is distinct from ${PROMOVER_TRAYECTORIA_JOB_KIND})
             order by created_at desc
             limit ${limit} offset ${offset}
           `;
