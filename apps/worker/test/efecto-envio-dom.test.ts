@@ -148,4 +148,32 @@ describe('expresionLocalizarBotonPorAriaLabel (FASE 3)', () => {
     expect(resultado.localizado).toBeNull();
     expect(resultado.candidatos).toBe(0);
   });
+
+  // EL CONTROL DE DESCARTAR del script de validacion usa la MISMA tecnica: el aria-label real de
+  // Gmail lleva sufijo de atajo, por eso la coincidencia exacta daba no_localizado en las corridas
+  // reales (borradores huerfanos). El localizador por prefijo devuelve el aria-label COMPLETO, que
+  // es el que el script usa despues como estrategia exacta para el click.
+  it('localiza el control de Descartar borrador por prefijo aunque lleve sufijo de atajo (es y en)', () => {
+    const es = localizar(
+      '<div role="button" aria-label="Descartar borrador ‪(Ctrl-Shift-D)‬">x</div>',
+      ['Descartar borrador', 'Discard draft'],
+    );
+    expect(es.localizado?.ariaLabel.startsWith('Descartar borrador')).toBe(true);
+    expect(es.localizado?.rol).toBe('button');
+
+    const en = localizar(
+      '<div role="button" aria-label="Discard draft ‪(Ctrl-Shift-D)‬">x</div>',
+      ['Descartar borrador', 'Discard draft'],
+    );
+    expect(en.localizado?.ariaLabel.startsWith('Discard draft')).toBe(true);
+  });
+
+  it('no confunde el descarte: "Descartar cambios" no empieza con "Descartar borrador"', () => {
+    const resultado = localizar(
+      '<button aria-label="Descartar cambios">x</button>',
+      ['Descartar borrador', 'Discard draft'],
+    );
+    expect(resultado.localizado).toBeNull();
+    expect(resultado.candidatos).toBe(0);
+  });
 });
