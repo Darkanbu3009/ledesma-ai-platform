@@ -506,6 +506,54 @@ function donanteDelMismoCampo(
   return null;
 }
 
+/** ¿El paso es una PULSACION DE TECLA registrada como act del motor (metodo 'press')? */
+function esPulsacionDeTecla(paso: PasoCensurado): boolean {
+  return paso.accion.metodo === 'press';
+}
+
+/**
+ * HERENCIA DE LOCALIZADOR EN LAS PULSACIONES (FIX teclas, caso real de produccion del 28 jul 2026):
+ * una pulsacion que sigue a una escritura opera sobre el campo QUE ACABA DE RECIBIR EL TEXTO, asi que
+ * hereda TODAS las estrategias de esa escritura (atributo, rol, texto y xpath) y no solo el xpath que
+ * la traza le dejo. La receta 2017cfba fallaba justo ahi: su paso de teclas quedo con una sola
+ * estrategia, el xpath absoluto del compose de la corrida origen (div[32]), que en sesion fresca no
+ * resuelve; el paso escalaba al motor y la corrida moria en 13 segundos.
+ *
+ * Las propias del paso se conservan DETRAS de las heredadas (el orden canonico las reordena despues) y
+ * la lista se deduplica y se acota. Es la RED de la correccion, no la principal: el ejecutor pulsa
+ * sobre el foco cuando la pulsacion sigue a una escritura exitosa (ejecutor-receta.ts), que es la
+ * semantica real del teclado y no necesita localizador ninguno.
+ */
+function heredarEstrategiasEnPulsaciones(
+  pasos: PasoCensurado[],
+  valores: ValoresDeParametros,
+): PasoCensurado[] {
+  let escrituraPrevia: PasoCensurado | null = null;
+  return pasos.map((paso) => {
+    if (TIPOS_SIN_EFECTO.has(paso.accion.tipo)) return paso;
+    if (esEscrituraConDato(paso)) {
+      escrituraPrevia = paso;
+      return paso;
+    }
+    if (!esPulsacionDeTecla(paso)) {
+      escrituraPrevia = null;
+      return paso;
+    }
+    if (escrituraPrevia === null) return paso;
+    const heredadas = estrategiasUtilizables(escrituraPrevia, valores);
+    const propias = estrategiasUtilizables(paso, valores);
+    const vistas = new Set<string>();
+    const estrategias: EstrategiaLocalizacion[] = [];
+    for (const estrategia of [...heredadas, ...propias]) {
+      const clave = claveDeEstrategia(estrategia);
+      if (vistas.has(clave)) continue;
+      vistas.add(clave);
+      estrategias.push(estrategia);
+    }
+    return { ...paso, estrategias: estrategias.slice(0, MAX_ESTRATEGIAS_POR_PASO) };
+  });
+}
+
 /** ¿Los dos pasos apuntan al MISMO campo? Selector identico, o descripciones del mismo campo. */
 function apuntaAlMismoCampo(a: PasoCensurado, b: PasoCensurado): boolean {
   if (a.selector !== null && b.selector !== null && a.selector === b.selector) return true;
@@ -687,9 +735,9 @@ function convertirPaso(
   // 2026: "press Tab key to confirm the recipient"). Es el MISMO gesto que ya saben repetir las
   // recetas grabadas al confirmar un chip (grabacion.ts: paso 'teclas' que pulsa sobre el foco) y
   // que los pasos 'keys' de arriba: se promueve como paso 'teclas' conservando la tecla y su
-  // posicion. Si el registro trae selector, las estrategias derivadas se CONSERVAN (el ejecutor
-  // pulsa sobre ese elemento); sin selector queda una pulsacion sobre el foco del paso previo, la
-  // misma forma que dejan la grabacion y los pasos 'keys'.
+  // posicion. Sus estrategias son las HEREDADAS de la escritura previa mas las suyas propias
+  // (heredarEstrategiasEnPulsaciones), nunca el xpath solo; y el ejecutor pulsa sobre el FOCO cuando
+  // el paso sigue a una escritura exitosa, que es la semantica real del teclado.
   if (paso.accion.metodo === 'press') {
     const teclas = paso.accion.argumentos[0]?.trim();
     if (teclas === undefined || teclas === '') {
@@ -789,10 +837,14 @@ export function promoverTrayectoria(entrada: {
   const llenadosSinRegistro: string[] = [];
   const clicksSinLocalizacion: Array<{ idx: number; descriptor: string }> = [];
   const escriturasPromovidas: number[] = [];
-  // Primero la adopcion (una escritura sin selector toma el localizador del adyacente) y DESPUES la
-  // destilacion: el orden importa, porque el donante puede ser justo un click que la destilacion
-  // descartara por redundante.
-  const preparados = adoptarEstrategiasDeCampoAdyacente(entrada.pasos, valores);
+  // Primero la adopcion (una escritura sin selector toma el localizador del adyacente), despues la
+  // herencia de las pulsaciones (que copia las estrategias ya completas de la escritura previa) y al
+  // final la destilacion: el orden importa, porque el donante puede ser justo un click que la
+  // destilacion descartara por redundante.
+  const preparados = heredarEstrategiasEnPulsaciones(
+    adoptarEstrategiasDeCampoAdyacente(entrada.pasos, valores),
+    valores,
+  );
   for (const paso of descartarDesviosDeLaTrayectoria(preparados, valores)) {
     if (paso.exito === false) {
       return { promovida: false, motivo: 'la trayectoria contiene un paso fallido' };

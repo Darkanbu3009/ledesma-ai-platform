@@ -843,6 +843,23 @@ describe('convertirTrayectoriaPersistida (fixture real de 44 pasos: clicks de fo
     expect(resultado.pasosSoloXpath).toEqual([]);
   });
 
+  it('el paso de teclas hereda las estrategias de la escritura previa, no solo el xpath', () => {
+    const resultado = convertirTrayectoriaPersistida([trayectoria({ pasos: pasosGmailReal44() })]);
+    expect(resultado.guardable).toBe(true);
+    if (!resultado.guardable) return;
+    const teclas = resultado.pasos.find((p) => p.accion === 'teclas');
+    expect(teclas?.teclas).toBe('Tab');
+    // El Tab confirma el chip del destinatario: opera sobre el campo Para, asi que hereda SUS
+    // estrategias completas. Con solo el xpath del compose de la corrida origen (lo que la receta
+    // 2017cfba guardo) el paso no resolvia nada en sesion fresca.
+    expect(teclas?.estrategias[0]).toEqual({
+      tipo: 'atributo',
+      atributo: 'aria-label',
+      valor: 'Para',
+    });
+    expect(teclas?.estrategias.some((e) => e.tipo !== 'xpath')).toBe(true);
+  });
+
   it('si el clic final pierde selector y descripcion, falla nombrando el paso exacto', () => {
     const pasos = pasosGmailReal44().map((p) =>
       p.idx === 35

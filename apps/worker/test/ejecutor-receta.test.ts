@@ -108,6 +108,43 @@ describe('ejecucion determinista (el ahorro que motiva el PR)', () => {
     expect(resultado.pasos.every((p) => p.accion.tipo === 'receta:determinista')).toBe(true);
   });
 
+  it('una pulsacion tras una escritura exitosa se ejecuta SOBRE EL FOCO, sin exigir localizador', async () => {
+    // La semantica real del teclado: el Tab que confirma el chip del destinatario cae sobre el campo
+    // que acaba de recibir el texto. La receta 2017cfba moria aqui porque el paso exigia resolver el
+    // xpath del compose de la corrida origen, que en sesion fresca no existe.
+    const { navegador, ejecutados } = makeNavegador();
+    const escalador = makeEscalador();
+    const pasos = [
+      pasoReceta({ idx: 0, accion: 'escribir', valor: { tipo: 'parametro', parametro: 'destinatario' } }),
+      pasoReceta({ idx: 1, accion: 'teclas', teclas: 'Tab', estrategias: [XPATH] }),
+      // Sin escritura previa (sigue a una pulsacion) pero tampoco con estrategias: tambien va al foco.
+      pasoReceta({ idx: 2, accion: 'teclas', teclas: 'Enter', estrategias: [] }),
+      pasoReceta({ idx: 3 }),
+    ];
+
+    const resultado = await ejecutarReceta(
+      pasos,
+      { destinatario: 'ana@otra.com' },
+      makeDeps({ navegador, escalador }),
+    );
+
+    expect(resultado.desenlace).toEqual({ tipo: 'completada' });
+    expect(ejecutados.map((i) => i.sobreElFoco)).toEqual([false, true, true, false]);
+  });
+
+  it('una pulsacion que NO sigue a una escritura conserva su localizador', async () => {
+    const { navegador, ejecutados } = makeNavegador();
+    const pasos = [
+      pasoReceta({ idx: 0 }),
+      pasoReceta({ idx: 1, accion: 'teclas', teclas: 'Enter', estrategias: [ATRIBUTO, XPATH] }),
+    ];
+
+    await ejecutarReceta(pasos, SIN_PARAMETROS, makeDeps({ navegador }));
+
+    expect(ejecutados[1]?.sobreElFoco).toBe(false);
+    expect(ejecutados[1]?.estrategias).toEqual([ATRIBUTO, XPATH]);
+  });
+
   it('REGISTRA que estrategia gano en cada paso resuelto sin motor (insumo de la promocion, V038)', async () => {
     const navegador: NavegadorDeterminista = {
       // El paso 0 lo resuelve la primaria; el 1, el fallback en el indice 1 (el caso Gmail: el id
