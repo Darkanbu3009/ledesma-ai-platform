@@ -583,6 +583,21 @@ export function useTerminarJob() {
   });
 }
 
+/**
+ * ELIMINAR una actividad TERMINADA del historial (DELETE /v1/jobs/:id): borra el job y su registro
+ * (trayectorias y pasos). La tarea aprendida derivada se conserva (el backend no la toca) y nada se
+ * toca en el sitio externo. La UI SIEMPRE lo dispara tras una confirmacion explicita
+ * (EliminarActividadDialog); un job en vuelo responde 409 (para eso existe Terminar tarea). Al exito
+ * invalida ['jobs'] y la tarjeta desaparece sin refresh.
+ */
+export function useEliminarActividad() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/v1/jobs/${id}`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['jobs'] }),
+  });
+}
+
 /** Cada cuanto y hasta cuando se sondea el job de guardado de una tarea aprendida. */
 const GUARDAR_TAREA_POLL_MS = 1500;
 const GUARDAR_TAREA_POLL_MAX_MS = 12_000;
@@ -595,8 +610,11 @@ function esperarMs(ms: number): Promise<void> {
  * GUARDAR COMO TAREA APRENDIDA (POST /v1/tareas-ensenadas/desde-job): convierte el exito de una
  * tarea web del motor libre en una tarea que el sistema ya sabe hacer. El backend solo ENCOLA (202 +
  * jobId del job de conversion); aca se sondea ese job unos segundos para poder reportar el desenlace
- * real en la misma interaccion. Si la conversion falla, la mutacion falla con su mensaje; si sigue
- * en proceso al agotar el sondeo, se da por aceptada y el refetch del historial la refleja despues.
+ * real en la misma interaccion. Si la conversion falla, la mutacion falla con el last_error del job
+ * (con su prefijo estable: la tarjeta distingue el fallo permanente PROMOCION_NO_REPETIBLE del
+ * transitorio, ver esGuardadoNoRepetible); si sigue en proceso al agotar el sondeo, se da por
+ * aceptada y el refetch del historial la refleja despues. Una tarea YA GUARDADA responde 200 con
+ * status 'ya_guardada' (idempotencia del endpoint) y se trata como exito, sin sondear nada.
  * Al terminar invalida ['jobs'] (la tarjeta pasa a "guardada") y ['tareas-ensenadas'] (la tarea
  * aparece en la pantalla de lo que ya sabe hacer).
  */
@@ -604,10 +622,11 @@ export function useGuardarTareaAprendida() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (jobId: string) => {
-      const aceptado = await apiFetch<{ status: string; jobId: string }>(
+      const aceptado = await apiFetch<{ status: string; jobId?: string }>(
         '/v1/tareas-ensenadas/desde-job',
         { method: 'POST', body: JSON.stringify({ jobId }) },
       );
+      if (aceptado.status === 'ya_guardada' || aceptado.jobId === undefined) return null;
       const limite = Date.now() + GUARDAR_TAREA_POLL_MAX_MS;
       while (Date.now() < limite) {
         const { job } = await apiFetch<{ job: JobActivity }>(`/v1/jobs/${aceptado.jobId}`);

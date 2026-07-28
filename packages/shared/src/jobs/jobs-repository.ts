@@ -13,6 +13,7 @@ import { RECIPE_JOB_KIND } from './recipe-payload.js';
 import { SITIO_JOB_KINDS } from './sitio-payload.js';
 import { TAREA_WEB_JOB_KIND } from './tarea-web-payload.js';
 import { GRABACION_JOB_KINDS, GRABAR_TAREA_JOB_KIND } from './grabacion-payload.js';
+import { PROMOVER_TRAYECTORIA_JOB_KIND } from './promover-trayectoria-payload.js';
 
 /**
  * Cliente postgres (tagged template) que el repositorio recibe por inyeccion, IGUAL que los
@@ -58,6 +59,9 @@ export type ResultadoCancelacion =
   | { resultado: 'cancelado'; estadoPrevio: JobStatus }
   | { resultado: 'conflicto' }
   | { resultado: 'no_encontrado' };
+
+/** Desenlace de borrarTerminalDeOwner: borrado, en un estado no terminal, o inexistente/ajeno. */
+export type ResultadoBorradoJob = 'borrado' | 'no_terminal' | 'no_encontrado';
 
 /** Fila cruda de la tabla `jobs` (snake_case). */
 interface JobRow {
@@ -183,6 +187,26 @@ export class JobsRepository {
   }
 
   /**
+   * IDEMPOTENCIA del guardado de una tarea aprendida: el job de PROMOCION en vuelo (pending o
+   * running) del owner para el MISMO job de origen, si existe. El endpoint lo devuelve en lugar de
+   * encolar otro: un doble click (dos POST antes de que el primero termine) produce UN solo job de
+   * conversion en vez de dos tarjetas fallidas. Acotado por owner_id, como toda lectura.
+   */
+  async buscarPromocionEnVuelo(ownerId: string, jobOrigenId: string): Promise<string | null> {
+    const rows = await this.sql<Array<{ id: string }>>`
+      select id
+      from jobs
+      where owner_id = ${ownerId}
+        and status in ('pending', 'running')
+        and payload->>'kind' = ${PROMOVER_TRAYECTORIA_JOB_KIND}
+        and payload->>'jobId' = ${jobOrigenId}
+      order by created_at asc
+      limit 1
+    `;
+    return rows[0]?.id ?? null;
+  }
+
+  /**
    * PEEK de solo lectura: el proximo job ELEGIBLE (pending y cuyo scheduled_for ya vencio o es ASAP),
    * sin tomarlo. No bloquea ni cambia estado: util para inspeccionar la cola (p.ej. el esqueleto del
    * worker). Para TOMAR un job de forma segura entre varios workers, usar claimNextJob.
@@ -251,6 +275,11 @@ export class JobsRepository {
    * Dos ramas explicitas (con/sin status) en vez de un fragmento SQL condicional: cada rama es UN solo
    * template, mas legible y trivial de testear con un mock del tagged template. La ruta valida y acota
    * limit/offset antes de llamar aca (este metodo confia en valores ya saneados).
+   *
+   * El job INTERNO de guardado (kind 'promover_trayectoria') queda FUERA del listado a proposito:
+   * guardar una tarea aprendida no es una actividad del agente, y su tarjeta salia como "Agente
+   * eliminado" con estado fallida cada vez que la conversion se rechazaba. Su estado se sigue
+   * consultando por el detalle (getSummaryForOwner), que es lo que la consola sondea al guardar.
    */
   async listByOwner(ownerId: string, options: ListJobsByOwnerOptions): Promise<JobSummary[]> {
     const { limit, offset, status } = options;
@@ -262,6 +291,7 @@ export class JobsRepository {
               resultado->>'via' as resultado_via, resultado->>'reparada' as resultado_reparada
             from jobs
             where owner_id = ${ownerId}
+              and (payload->>'kind' is distinct from ${PROMOVER_TRAYECTORIA_JOB_KIND})
             order by created_at desc
             limit ${limit} offset ${offset}
           `
@@ -271,6 +301,7 @@ export class JobsRepository {
               resultado->>'via' as resultado_via, resultado->>'reparada' as resultado_reparada
             from jobs
             where owner_id = ${ownerId} and status = ${status}
+              and (payload->>'kind' is distinct from ${PROMOVER_TRAYECTORIA_JOB_KIND})
             order by created_at desc
             limit ${limit} offset ${offset}
           `;
@@ -593,6 +624,30 @@ export class JobsRepository {
       select id from jobs where id = ${id} and owner_id = ${ownerId}
     `;
     return existe.length > 0 ? { resultado: 'conflicto' } : { resultado: 'no_encontrado' };
+  }
+
+  /**
+   * BORRADO de una actividad por su DUENO desde la consola: elimina un job PROPIO que ya esta en
+   * estado TERMINAL ('completed' o 'failed'; una cancelada o detenida es un 'failed' con prefijo).
+   * Un job en vuelo (pending/running/pausado) NO se borra: para eso existe Terminar tarea, y borrar
+   * un registro que todavia se mueve dejaria al worker escribiendo sobre una fila inexistente.
+   *
+   * ATOMICO: el DELETE exige owner, id y estado terminal en el mismo WHERE, asi una carrera con una
+   * transicion de estado afecta 0 filas y se distingue despues (no_terminal vs no_encontrado). Un
+   * job ajeno responde 'no_encontrado', identico a uno inexistente (jamas se toca ni se revela).
+   * El segundo DELETE del mismo id tambien responde 'no_encontrado': idempotencia por 404.
+   */
+  async borrarTerminalDeOwner(id: string, ownerId: string): Promise<ResultadoBorradoJob> {
+    const borrados = await this.sql<Array<{ id: string }>>`
+      delete from jobs
+      where id = ${id} and owner_id = ${ownerId} and status in ('completed', 'failed')
+      returning id
+    `;
+    if (borrados.length > 0) return 'borrado';
+    const existe = await this.sql<Array<{ id: string }>>`
+      select id from jobs where id = ${id} and owner_id = ${ownerId}
+    `;
+    return existe.length > 0 ? 'no_terminal' : 'no_encontrado';
   }
 
   /**

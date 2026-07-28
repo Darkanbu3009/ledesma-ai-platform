@@ -1,6 +1,7 @@
 import {
   esAtributoEstable,
   parsePromoverTrayectoriaJobPayload,
+  PROMOCION_NO_REPETIBLE_PREFIX,
   type EstrategiaLocalizacion,
   type Job,
   type PasoDeReceta,
@@ -203,9 +204,16 @@ export interface PromocionTrayectoriaDeps {
   logger: Logger;
 }
 
-/** Mensaje al usuario cuando lo registrado no alcanza para repetir la tarea. Sin detalle tecnico. */
-const MENSAJE_NO_GUARDABLE =
-  'lo que hizo esta tarea no quedo registrado con el detalle necesario para repetirla, asi que no se puede guardar como tarea aprendida';
+/**
+ * last_error del job de promocion cuando lo registrado no alcanza para repetir la tarea: el prefijo
+ * ESTABLE (la consola lo mapea a su mensaje i18n, sin invitar a reintentar) mas el motivo del
+ * conversor, que es especifico y legible ("paso fillFormVision de llenado sin campos registrados:
+ * asunto sin ningun otro paso que lo cubra") y no arrastra datos del usuario (la trayectoria ya
+ * viene censurada).
+ */
+function errorNoRepetible(motivo: string): string {
+  return `${PROMOCION_NO_REPETIBLE_PREFIX}${motivo}`;
+}
 
 /**
  * kind:'promover_trayectoria': punto de entrada del job. Lanza en fallo (execution.ts decide el
@@ -260,7 +268,7 @@ export async function procesarJobDePromoverTrayectoria(
       jobOrigenId,
       motivo: conversion.motivo,
     });
-    throw new PermanentExecutionError(MENSAJE_NO_GUARDABLE);
+    throw new PermanentExecutionError(errorNoRepetible(conversion.motivo));
   }
 
   const receta = await deps.recetas.promover({

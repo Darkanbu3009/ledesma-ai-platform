@@ -12,11 +12,13 @@ import {
   Loader2,
   MessageSquare,
   Sparkles,
+  Trash2,
   XCircle,
 } from 'lucide-react';
 import { formatRunAt } from '../../lib/schedule';
 import {
   AVISO_TAREA_LENTA_MS,
+  esGuardadoNoRepetible,
   esJobBloqueadoPorReintentos,
   esJobCancelado,
   esJobDetenido,
@@ -29,7 +31,8 @@ import {
   type JobStatus,
 } from '../../lib/jobs';
 import { detencionDeJob, textoDeDetencion } from '../../lib/politicas';
-import { useGuardarTareaAprendida, useTerminarJob } from '../../lib/mutations';
+import { useEliminarActividad, useGuardarTareaAprendida, useTerminarJob } from '../../lib/mutations';
+import { EliminarActividadDialog } from './EliminarActividadDialog';
 import { TerminarTareaDialog } from './TerminarTareaDialog';
 import { TrayectoriaDetalle } from './TrayectoriaDetalle';
 
@@ -103,6 +106,11 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
   const [confirmandoTerminar, setConfirmandoTerminar] = useState(false);
   const terminar = useTerminarJob();
   const terminable = isJobInFlight(job.status);
+  // ELIMINAR ACTIVIDAD: solo en estados terminales (completada, fallida, cancelada, detenida); un
+  // job en vuelo no muestra el icono (para eso existe Terminar tarea). Confirmacion obligatoria
+  // (estado derivado del click, sin useEffect), mismo patron que Terminar.
+  const [confirmandoEliminar, setConfirmandoEliminar] = useState(false);
+  const eliminar = useEliminarActividad();
   // GUARDAR COMO TAREA APRENDIDA (Fase F): solo en tareas web EXITOSAS del motor libre que el
   // backend marco como guardables. El guardado es SIEMPRE una decision del usuario (nada se guarda
   // solo); tras guardarse, la tarjeta muestra la marca y la tarea aparece en "Ya sabe hacer".
@@ -141,13 +149,18 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
         : MessageSquare;
   const created = formatRunAt(job.createdAt) ?? '—';
   const finished = formatRunAt(job.finishedAt);
-  // Un job de sitios conectados o de tarea web no tiene agente: el titular es la seccion.
+  // Un job de sitios conectados o de tarea web no tiene agente: el titular es la seccion. "Agente
+  // eliminado" queda RESERVADO para un job que TUVO agente (agentId presente) y ya no resuelve
+  // nombre; un job sin agente (agentId null: trabajos internos de la plataforma) jamas debe
+  // presentarse con ese titulo alarmante.
   const title =
     job.type === 'sitio'
       ? t('actividad.card.sitios')
       : job.type === 'tarea_web'
         ? t('actividad.card.tareaWeb')
-        : (agentName ?? t('actividad.card.agenteEliminado'));
+        : job.agentId === null
+          ? t('actividad.card.sistema')
+          : (agentName ?? t('actividad.card.agenteEliminado'));
 
   return (
     <div className="rounded-2xl border border-line bg-surface p-5 shadow-card">
@@ -279,6 +292,17 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
               {t('avisoTareaLenta.boton')}
             </button>
           )}
+          {!terminable && (
+            <button
+              type="button"
+              onClick={() => setConfirmandoEliminar(true)}
+              aria-label={t('actividad.card.eliminar')}
+              title={t('actividad.card.eliminar')}
+              className="inline-flex items-center justify-center rounded-lg border border-line bg-line-soft p-1.5 text-muted transition hover:border-brasa-line hover:text-brasa"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -324,8 +348,14 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
               </span>
             )}
           </div>
+          {/* El fallo PERMANENTE (lo registrado no se puede volver repetible) lleva su propio
+              mensaje y NO invita a reintentar: reintentar no puede cambiar el resultado. */}
           {guardableComoTarea && guardar.isError && (
-            <p className="mt-1.5 text-[12px] text-brasa">{t('actividad.guardarTarea.error')}</p>
+            <p className="mt-1.5 text-[12px] text-brasa">
+              {esGuardadoNoRepetible(guardar.error)
+                ? t('actividad.guardarTarea.errorNoRepetible')
+                : t('actividad.guardarTarea.error')}
+            </p>
           )}
           {pasosAbiertos && (
             <div className="mt-2.5">
@@ -343,6 +373,16 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
           {...(terminar.isError ? { error: t('confirmarTerminar.error') } : {})}
           onConfirm={() => terminar.mutate(job.id, { onSuccess: () => setConfirmandoTerminar(false) })}
           onCancel={() => setConfirmandoTerminar(false)}
+        />
+      )}
+
+      {confirmandoEliminar && (
+        <EliminarActividadDialog
+          conservaTareaAprendida={guardadaComoTarea}
+          busy={eliminar.isPending}
+          {...(eliminar.isError ? { error: t('confirmarEliminarActividad.error') } : {})}
+          onConfirm={() => eliminar.mutate(job.id, { onSuccess: () => setConfirmandoEliminar(false) })}
+          onCancel={() => setConfirmandoEliminar(false)}
         />
       )}
     </div>

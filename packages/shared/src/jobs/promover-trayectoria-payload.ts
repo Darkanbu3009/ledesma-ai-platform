@@ -20,6 +20,15 @@
 /** Discriminador del job que promueve una trayectoria persistida a receta con consentimiento. */
 export const PROMOVER_TRAYECTORIA_JOB_KIND = 'promover_trayectoria';
 
+/**
+ * Prefijo ESTABLE del last_error cuando la conversion es IMPOSIBLE con lo que quedo registrado (un
+ * fallo permanente que reintentar no cambia). Mismo mecanismo que CANCELADO_POR_USUARIO_PREFIX: la
+ * consola lo detecta para mostrar el motivo real ("incluye un paso que no se puede convertir en
+ * repetible todavia") en vez del generico que invita a reintentar. Lo que sigue al prefijo es el
+ * motivo tecnico interno del conversor (sin datos del usuario: la trayectoria ya viene censurada).
+ */
+export const PROMOCION_NO_REPETIBLE_PREFIX = 'PROMOCION_NO_REPETIBLE: ';
+
 /** Payload del job. El owner NUNCA viaja aqui: sale del propio job (jobs.owner_id). */
 export interface PromoverTrayectoriaJobPayload {
   kind: typeof PROMOVER_TRAYECTORIA_JOB_KIND;

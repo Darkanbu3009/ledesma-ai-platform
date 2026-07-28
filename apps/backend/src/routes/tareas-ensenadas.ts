@@ -61,7 +61,7 @@ export function tareasEnsenadasRoutes(
   deps?: {
     verifier?: JwtVerifier;
     recetasRepo?: Pick<RecetasWebRepository, 'listarActivas' | 'borrar' | 'buscarPorTrayectorias'>;
-    jobsRepo?: Pick<JobsRepository, 'getSummaryForOwner' | 'createJob'>;
+    jobsRepo?: Pick<JobsRepository, 'getSummaryForOwner' | 'createJob' | 'buscarPromocionEnVuelo'>;
     trayectoriasRepo?: Pick<TrayectoriasWebRepository, 'listarPorJob'>;
     registrationRepo?: Pick<RegistrationRepository, 'getProfileTier'>;
   },
@@ -109,8 +109,11 @@ export function tareasEnsenadasRoutes(
         if (resultado.motivo === 'no_encontrado') {
           throw new AppError('NOT_FOUND', 404, 'Task not found');
         }
+        // IDEMPOTENCIA: una tarea ya guardada responde el EXITO existente (200), no un conflicto.
+        // Reintentar un guardado que ya ocurrio no es un error del usuario ni tiene arreglo posible;
+        // la consola lo refleja como guardada sin encolar nada.
         if (resultado.motivo === 'ya_guardada') {
-          throw new AppError('CONFLICT', 409, 'La tarea ya esta guardada como tarea aprendida');
+          return reply.send({ status: 'ya_guardada' });
         }
         throw new AppError(
           'VALIDATION_ERROR',

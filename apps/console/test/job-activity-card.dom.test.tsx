@@ -12,6 +12,7 @@ vi.mock('../src/lib/queries', () => ({
 vi.mock('../src/lib/mutations', () => ({
   useTerminarJob: () => ({ isPending: false, isError: false, mutate: vi.fn() }),
   useGuardarTareaAprendida: () => ({ isPending: false, isError: false, isSuccess: false, mutate: vi.fn() }),
+  useEliminarActividad: () => ({ isPending: false, isError: false, mutate: vi.fn() }),
 }));
 
 import i18n from '../src/i18n';
@@ -39,6 +40,21 @@ function makeJob(overrides: Partial<JobActivity> = {}): JobActivity {
 afterEach(async () => {
   cleanup();
   await i18n.changeLanguage('es');
+});
+
+describe('JobActivityCard: titular de un job sin agente (FIX B)', () => {
+  it('un job simple SIN agente (agentId null) NO se titula "Agente eliminado"', () => {
+    render(<JobActivityCard job={makeJob({ type: 'simple', agentId: null })} agentName={null} />);
+    expect(screen.queryByText('Agente eliminado')).not.toBeInTheDocument();
+    expect(screen.getByText('Tarea de la plataforma')).toBeInTheDocument();
+  });
+
+  it('"Agente eliminado" queda reservado para un job que TUVO agente y ya no resuelve nombre', () => {
+    render(
+      <JobActivityCard job={makeJob({ type: 'simple', agentId: 'agente-1' })} agentName={null} />,
+    );
+    expect(screen.getByText('Agente eliminado')).toBeInTheDocument();
+  });
 });
 
 describe('JobActivityCard: error amable con detalle tecnico colapsable (BUG C)', () => {

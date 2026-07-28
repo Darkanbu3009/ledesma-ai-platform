@@ -41,6 +41,7 @@ const borrar = vi.fn();
 const buscarPorTrayectorias = vi.fn();
 const getSummaryForOwner = vi.fn();
 const createJob = vi.fn();
+const buscarPromocionEnVuelo = vi.fn();
 const listarPorJob = vi.fn();
 const getProfileTier = vi.fn();
 
@@ -136,7 +137,7 @@ async function makeApp(): Promise<FastifyInstance> {
     tareasEnsenadasRoutes(config, {
       verifier,
       recetasRepo: { listarActivas, borrar, buscarPorTrayectorias },
-      jobsRepo: { getSummaryForOwner, createJob },
+      jobsRepo: { getSummaryForOwner, createJob, buscarPromocionEnVuelo },
       trayectoriasRepo: { listarPorJob },
       registrationRepo: { getProfileTier },
     }),
@@ -152,6 +153,7 @@ beforeEach(async () => {
   buscarPorTrayectorias.mockResolvedValue(null);
   getSummaryForOwner.mockResolvedValue(makeJobSummary());
   createJob.mockResolvedValue({ id: JOB_PROMOCION_ID });
+  buscarPromocionEnVuelo.mockResolvedValue(null);
   listarPorJob.mockResolvedValue([makeTrayectoria()]);
   getProfileTier.mockResolvedValue('pro');
   app = await makeApp();
@@ -281,11 +283,21 @@ describe('POST /v1/tareas-ensenadas/desde-job (guardar como tarea aprendida)', (
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  it('DOBLE GUARDADO: con una receta ya creada desde la trayectoria responde 409 sin encolar', async () => {
+  it('IDEMPOTENCIA: con una receta ya creada desde la trayectoria responde el exito existente sin encolar', async () => {
     buscarPorTrayectorias.mockResolvedValue(RECETA_ID);
     const res = await post();
-    expect(res.statusCode).toBe(409);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ status: 'ya_guardada' });
     expect(buscarPorTrayectorias).toHaveBeenCalledWith('user-1', [TRAY_ID]);
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it('DOBLE CLICK: con una promocion ya en vuelo responde ese job sin encolar otro', async () => {
+    buscarPromocionEnVuelo.mockResolvedValue(JOB_PROMOCION_ID);
+    const res = await post();
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toEqual({ status: 'accepted', jobId: JOB_PROMOCION_ID });
+    expect(buscarPromocionEnVuelo).toHaveBeenCalledWith('user-1', JOB_ID);
     expect(createJob).not.toHaveBeenCalled();
   });
 

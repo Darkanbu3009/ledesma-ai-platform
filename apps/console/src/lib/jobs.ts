@@ -97,6 +97,19 @@ export const AVISO_TAREA_LENTA_MS = 180_000;
 export const CANCELADO_POR_USUARIO_PREFIX = 'CANCELADO_POR_USUARIO:';
 export const SISTEMA_DETUVO_TAREA_PREFIX = 'SISTEMA_DETUVO_TAREA:';
 
+/**
+ * Prefijo ESTABLE del last_error del job de promocion cuando la ejecucion incluye algo que todavia
+ * no se puede convertir en repetible (mismo mecanismo que los dos anteriores; lo escribe el worker).
+ * La tarjeta lo usa para mostrar el motivo real del fallo de guardado, sin invitar a reintentar:
+ * reintentar no puede cambiar el resultado.
+ */
+export const PROMOCION_NO_REPETIBLE_PREFIX = 'PROMOCION_NO_REPETIBLE:';
+
+/** true si el fallo de guardado es permanente: lo registrado no se puede volver repetible. */
+export function esGuardadoNoRepetible(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith(PROMOCION_NO_REPETIBLE_PREFIX);
+}
+
 /** true si el job fallo porque su dueno lo termino desde la consola (etiqueta Cancelada). */
 export function esJobCancelado(job: Pick<JobActivity, 'status' | 'lastError'>): boolean {
   return job.status === 'failed' && (job.lastError?.startsWith(CANCELADO_POR_USUARIO_PREFIX) ?? false);
