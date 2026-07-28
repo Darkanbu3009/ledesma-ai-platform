@@ -309,7 +309,7 @@ export function PrivacyRightsPage() {
           i18nKey="privacidad.derechos.avisoFooter"
           components={{
             aviso: (
-              <Link to="/aviso-de-privacidad" className="font-medium text-brasa hover:underline" />
+              <Link to="/privacidad" className="font-medium text-brasa hover:underline" />
             ),
           }}
         />

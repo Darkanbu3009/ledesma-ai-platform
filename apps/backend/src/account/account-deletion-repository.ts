@@ -23,6 +23,11 @@ export interface AccountDataDeletionResult {
   recipes: number;
   processingRecords: number;
   providerCredentials: number;
+  /**
+   * Aceptaciones legales del titular. Suma las filas de `aceptaciones_legales` (V039, la tabla vigente) y
+   * las de `consents` (V014, congelada como historico): el erasure tiene que llevarse las dos, y para el
+   * titular es UN solo concepto, asi que se reporta como un solo numero.
+   */
   consents: number;
   dataSubjectRequests: number;
   upgradeRequests: number;
@@ -52,7 +57,7 @@ interface IdRow {
 /**
  * MOTOR DE BORRADO DE DATOS DE CUENTA (atomico). Borra/anonimiza TODOS los datos de negocio de un owner en
  * UNA transaccion (this.sql.begin): todo o nada. Es el SUPERCONJUNTO ATOMICO del viejo
- * eraseOwnerOperationalData (6 DELETE sueltos, no atomico -> hallazgo H-01 de la auditoria 8): cubre las 17
+ * eraseOwnerOperationalData (6 DELETE sueltos, no atomico -> hallazgo H-01 de la auditoria 8): cubre las 18
  * tablas, respeta las FKs y protege a los demas owners.
  *
  * NO borra auth.users: eso vive en el sistema de autenticacion de Supabase (sin FK ni transaccion comun con
@@ -64,7 +69,8 @@ interface IdRow {
  *      processing_records. Se borran EXPLICITO por owner_id (no solo via el cascade de agents) porque
  *      processing_records.agent_id es NULLABLE: una fila con agent_id null no la alcanzaria el cascade.
  *   3. agents: el `on delete cascade` de sus 6 hijos limpia cualquier remanente (defensa en profundidad).
- *   4. Tablas sueltas por owner_id sin FK: provider_credentials, consents, data_subject_requests,
+ *   4. Tablas sueltas por owner_id sin FK: provider_credentials, aceptaciones_legales (V039) y consents
+ *      (V014, historica), data_subject_requests,
  *      upgrade_requests, sitios_conectados (V024; ademas recoge sus contexto_externo_id para el
  *      purgado en el proveedor externo, que ejecuta 7.1b), trayectorias_web (V030; su cascade
  *      arrastra pasos_trayectoria) y recetas_web (V035).
@@ -112,6 +118,9 @@ export class AccountDeletionRepository {
 
       // --- (4) Tablas sueltas por owner_id (sin FK) ---
       const providerCredentials = await tx<IdRow[]>`delete from provider_credentials where owner_id = ${ownerId} returning id`;
+      // Aceptaciones legales: la tabla VIGENTE (V039) y la historica (V014). Las dos se borran; la
+      // historica sigue existiendo hasta que una migracion posterior la retire.
+      const aceptacionesLegales = await tx<IdRow[]>`delete from aceptaciones_legales where owner_id = ${ownerId} returning id`;
       const consents = await tx<IdRow[]>`delete from consents where owner_id = ${ownerId} returning id`;
       const dataSubjectRequests = await tx<IdRow[]>`delete from data_subject_requests where owner_id = ${ownerId} returning id`;
       const upgradeRequests = await tx<IdRow[]>`delete from upgrade_requests where owner_id = ${ownerId} returning id`;
@@ -174,7 +183,7 @@ export class AccountDeletionRepository {
         recipes: recipes.length,
         processingRecords: processingRecords.length,
         providerCredentials: providerCredentials.length,
-        consents: consents.length,
+        consents: aceptacionesLegales.length + consents.length,
         dataSubjectRequests: dataSubjectRequests.length,
         upgradeRequests: upgradeRequests.length,
         sitiosConectados: sitiosConectados.length,

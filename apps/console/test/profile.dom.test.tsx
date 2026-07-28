@@ -26,7 +26,13 @@ const {
   usePoliticaMock: vi.fn(() => ({ data: undefined, isLoading: true, isError: false })),
   useGuardarPoliticaMock: vi.fn(() => ({ isPending: false, mutate: vi.fn() })),
 }));
-vi.mock('../src/lib/queries', () => ({ useMe: useMeMock, usePoliticaEjecucion: usePoliticaMock }));
+// useConsents alimenta la seccion "Documentos legales"; devuelve undefined aqui (la seccion no se
+// dibuja) y se ejerce a fondo en documentos-legales.dom.test.tsx.
+vi.mock('../src/lib/queries', () => ({
+  useMe: useMeMock,
+  usePoliticaEjecucion: usePoliticaMock,
+  useConsents: () => ({ data: undefined }),
+}));
 vi.mock('../src/auth/useAuth', () => ({ useAuth: useAuthMock }));
 vi.mock('../src/lib/mutations', () => ({
   useUpdateProfileName: useUpdateProfileNameMock,

@@ -145,6 +145,13 @@
       "eliminar400": "El email no coincide con el de tu cuenta. Escríbelo tal como aparece arriba.",
       "eliminar401": "Tu sesión expiró. Vuelve a iniciar sesión.",
       "eliminarGenerico": "No pudimos eliminar tu cuenta. Intenta de nuevo en un momento."
+    },
+    "legales": {
+      "titulo": "Documentos legales",
+      "descripcion": "Lo que aceptaste, en qué versión y cuándo.",
+      "aceptado": "Aceptado el {{fecha}} · versión {{version}}",
+      "pendiente": "Pendiente de aceptar la versión {{version}}",
+      "verTexto": "Ver texto"
     }
   },
   "configuracion": {
@@ -666,85 +673,24 @@
     },
     "consentimiento": {
       "titulo": "Antes de continuar",
-      "kicker": "AVISO DE PRIVACIDAD",
-      "intro": "La plataforma opera agentes de IA de forma autonoma que procesan datos. Para continuar, necesitamos tu consentimiento sobre como los tratamos.",
-      "avisoSimplificadoTitulo": "Aviso simplificado",
-      "consultaIntegral": "Consulta el <integral>aviso de privacidad integral</integral>.",
-      "aceptacion": "He leido y acepto el Aviso de Privacidad de la plataforma.",
-      "error": "No pudimos registrar tu aceptacion. Intenta de nuevo.",
+      "kicker": "AVISO DE PRIVACIDAD Y TÉRMINOS",
+      "intro": "La plataforma opera agentes de IA que actúan en tu nombre y tratan tus datos. Para usarla necesitamos que leas y aceptes estos documentos.",
+      "versionEtiqueta": "Versión {{version}}",
+      "leerTexto": "Leer texto completo",
+      "nota": "Marca ambas casillas para continuar. Tu aceptación queda registrada con la versión y la fecha.",
+      "error": "No pudimos registrar tu aceptación. Intenta de nuevo.",
       "registrando": "Registrando...",
       "aceptar": "Aceptar y continuar",
-      "cerrarSesion": "Cerrar sesion"
+      "verSimplificado": "Ver aviso simplificado",
+      "cerrarSesion": "Cerrar sesión"
     },
     "aviso": {
-      "placeholderTag": "Revision legal pendiente",
-      "version": "Version {{version}}",
-      "opcional": "Opcional"
+      "versionFecha": "Versión {{version}} · {{fecha}}"
     },
     "avisoIntegral": {
-      "titulo": "Aviso de Privacidad Integral",
-      "subtitulo": "Detalle completo del tratamiento de tus datos personales conforme a la LFPDPPP y el GDPR.",
-      "secciones": {
-        "responsable": {
-          "titulo": "Identidad y domicilio del responsable",
-          "placeholder": "Nombre/denominacion legal del responsable, domicilio fiscal y datos de contacto (incluye area/persona de datos personales)."
-        },
-        "datos": {
-          "titulo": "Datos personales que se tratan",
-          "placeholder": "Todas las categorias de datos que se recaban, IDENTIFICANDO expresamente los datos personales SENSIBLES si los hubiera."
-        },
-        "finalidades": {
-          "titulo": "Finalidades del tratamiento",
-          "placeholder": "Finalidades NECESARIAS (dan origen/son requeridas para la relacion) distinguidas de las VOLUNTARIAS (que requieren consentimiento). Indicar cuales requieren consentimiento."
-        },
-        "derechos": {
-          "titulo": "Medios para ejercer los derechos del titular (ARCO)",
-          "placeholder": "Procedimiento y medios para ejercer los derechos de Acceso, Rectificacion, Cancelacion y Oposicion (y supresion/portabilidad para GDPR), incluyendo requisitos y plazos de respuesta."
-        },
-        "limitar-uso": {
-          "titulo": "Medios para limitar el uso o divulgacion",
-          "placeholder": "Mecanismos para limitar el uso o divulgacion de los datos (p.ej. registros de exclusion, revocacion del consentimiento)."
-        },
-        "ia": {
-          "titulo": "Uso de inteligencia artificial y decisiones automatizadas",
-          "placeholder": "Que la plataforma opera agentes de IA de forma autonoma; existencia de decisiones automatizadas y, cuando tengan efecto significativo, el derecho a INTERVENCION HUMANA y a oponerse (GDPR Art 22). Divulgacion de interaccion con IA (EU AI Act Art 50)."
-        },
-        "transferencias": {
-          "titulo": "Transferencias de datos",
-          "placeholder": "Transferencias a terceros, sus finalidades y si requieren consentimiento. La nueva LFPDPPP ya NO exige informarlas en el aviso; se incluye por buenas practicas y GDPR."
-        },
-        "cambios": {
-          "titulo": "Cambios al aviso de privacidad",
-          "placeholder": "Como se comunicaran los cambios al aviso y el versionado. Al cambiar la version, se solicita nuevamente tu consentimiento."
-        }
-      },
-      "footer": "Ver tambien el <simplificado>aviso simplificado</simplificado> o <derechos>ejercer tus derechos</derechos>."
+      "footer": "Ver también el <simplificado>aviso simplificado</simplificado>, los <terminos>Términos de Servicio</terminos> o <derechos>ejercer tus derechos</derechos>."
     },
     "avisoSimplificado": {
-      "titulo": "Aviso de Privacidad Simplificado",
-      "subtitulo": "Resumen de como tratamos tus datos personales. El aviso integral tiene el detalle completo.",
-      "secciones": {
-        "responsable": {
-          "titulo": "Identidad y domicilio del responsable",
-          "placeholder": "Nombre/denominacion legal del responsable, domicilio fiscal y datos de contacto en Mexico."
-        },
-        "datos": {
-          "titulo": "Datos personales que se tratan",
-          "placeholder": "Categorias de datos que se recaban, indicando expresamente si se tratan datos personales SENSIBLES."
-        },
-        "finalidades": {
-          "titulo": "Finalidades del tratamiento",
-          "placeholder": "Finalidades NECESARIAS (para prestar el servicio) y VOLUNTARIAS (requieren consentimiento), indicando cuales de estas ultimas requieren tu consentimiento."
-        },
-        "limitar-uso": {
-          "titulo": "Medios para limitar el uso o divulgacion",
-          "placeholder": "Como puedes limitar el uso o divulgacion de tus datos (p.ej. registros de exclusion, mecanismos de contacto)."
-        },
-        "integral": {
-          "titulo": "Donde consultar el aviso integral",
-          "placeholder": "Enlace y/o ubicacion donde puedes consultar el AVISO DE PRIVACIDAD INTEGRAL con todo el detalle."
-        }
-      },
       "footer": "Consulta el <integral>aviso de privacidad integral</integral> para el detalle completo."
     },
     "solicitudes": {
@@ -801,6 +747,19 @@
         "enviadaEl": "Enviada el {{fecha}}"
       },
       "avisoFooter": "Consulta el <aviso>aviso de privacidad</aviso> para conocer como tratamos tus datos."
+    },
+    "documentos": {
+      "privacy_notice": {
+        "nombre": "Aviso de Privacidad",
+        "aceptacion": "He leído y acepto el Aviso de Privacidad."
+      },
+      "terms": {
+        "nombre": "Términos de Servicio",
+        "aceptacion": "He leído y acepto los Términos de Servicio."
+      }
+    },
+    "terminos": {
+      "footer": "Consulta también el <aviso>Aviso de Privacidad</aviso>."
     }
   },
   "landing": {
@@ -1041,7 +1000,8 @@
       "facebookAria": "Facebook de Ledesma AI Labs",
       "copyright": "© 2026 Ledesma AI Labs. Todos los derechos reservados",
       "politicaPrivacidad": "Política de privacidad",
-      "logoInicio": "Ledesma AI Labs, ir al inicio"
+      "logoInicio": "Ledesma AI Labs, ir al inicio",
+      "terminos": "Términos de Servicio"
     },
     "capacidades": {
       "eyebrow": "Para tu día a día",

@@ -1,30 +1,21 @@
 import { Trans, useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { LegalDocument } from '../components/privacy/LegalDocument';
-import { INTEGRAL_NOTICE } from '../lib/privacy';
+import { documentoLegal } from '../content/legal';
 
 /**
- * AVISO DE PRIVACIDAD INTEGRAL (publico). Estructura legal completa con placeholders [REVISION LEGAL
- * PENDIENTE]. Ruta publica /aviso-de-privacidad, enlazable desde la landing, el widget y el flujo de
- * consentimiento. La ESTRUCTURA (ids, version, optional) viene de lib/privacy.ts; los TEXTOS se
- * resuelven aqui via i18n por id de seccion.
+ * AVISO DE PRIVACIDAD INTEGRAL, ruta PUBLICA /privacidad. Enlazable desde la landing, el widget, el pie de
+ * los correos y el flujo de consentimiento, y accesible SIN sesion: un aviso de privacidad que exige
+ * iniciar sesion para leerse no cumple su funcion.
+ *
+ * El texto vive en content/legal (versionado, en los dos idiomas); esta pagina solo elige el idioma actual
+ * y lo entrega al renderizador.
  */
 export function PrivacyNoticePage() {
-  const { t } = useTranslation();
-  const doc = {
-    ...INTEGRAL_NOTICE,
-    title: t('privacidad.avisoIntegral.titulo'),
-    subtitle: t('privacidad.avisoIntegral.subtitulo'),
-    sections: INTEGRAL_NOTICE.sections.map((section) => ({
-      ...section,
-      heading: t(`privacidad.avisoIntegral.secciones.${section.id}.titulo`),
-      placeholder: t(`privacidad.avisoIntegral.secciones.${section.id}.placeholder`),
-    })),
-  };
-
+  const { t, i18n } = useTranslation();
   return (
     <LegalDocument
-      doc={doc}
+      doc={documentoLegal('aviso', i18n.language)}
       footer={
         <p>
           <Trans
@@ -33,13 +24,12 @@ export function PrivacyNoticePage() {
             components={{
               simplificado: (
                 <Link
-                  to="/aviso-de-privacidad/simplificado"
+                  to="/privacidad/simplificado"
                   className="font-medium text-brasa hover:underline"
                 />
               ),
-              derechos: (
-                <Link to="/privacidad" className="font-medium text-brasa hover:underline" />
-              ),
+              terminos: <Link to="/terminos" className="font-medium text-brasa hover:underline" />,
+              derechos: <Link to="/mis-datos" className="font-medium text-brasa hover:underline" />,
             }}
           />
         </p>

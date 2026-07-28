@@ -22,6 +22,14 @@ const EnvSchema = z.object({
   // (rotar el de la boveda no invalida los session-tokens en vuelo y viceversa). Debe setearse en el
   // entorno con 32+ caracteres.
   VAULT_SECRET: z.string().min(32),
+  // Secreto del HMAC que anonimiza la IP en el registro de ACEPTACIONES LEGALES (V039). La evidencia del
+  // consentimiento no guarda la IP en claro: guarda HMAC-SHA256 con este secreto, que es de una sola via.
+  // OPCIONAL a proposito (mismo patron que RESEND_*/WEB_WORKER_*): si falta, se cae a SESSION_TOKEN_SECRET
+  // (siempre presente) con un prefijo de separacion de dominio, asi que la evidencia NUNCA degrada a IP en
+  // claro por una env sin setear. Setearlo explicito permite ROTAR el hash de IP sin invalidar los
+  // session-tokens en vuelo; rotarlo hace que los hashes viejos dejen de correlacionar con los nuevos, que
+  // es exactamente lo que se espera de un identificador seudonimo.
+  CONSENT_IP_HASH_SECRET: z.string().min(32).optional(),
   // SERVICE_ROLE_KEY de Supabase: llave del rol de servicio que BYPASEA RLS y habilita el ADMIN API de
   // auth (supabase.auth.admin.deleteUser), usado por el MOTOR DE BORRADO DE CUENTA para eliminar la fila
   // de auth.users tras borrar los datos de negocio. Es una llave MUY poderosa (acceso total, ignora RLS):

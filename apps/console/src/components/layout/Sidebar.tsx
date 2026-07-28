@@ -38,7 +38,7 @@ const navItems = [
   { to: '/ya-sabe-hacer', labelKey: 'nav.ensenadas', icon: Sparkles },
   { to: '/actividad', labelKey: 'nav.actividad', icon: Activity },
   { to: '/credenciales', labelKey: 'nav.credenciales', icon: KeyRound },
-  { to: '/privacidad', labelKey: 'nav.privacidad', icon: ShieldCheck },
+  { to: '/mis-datos', labelKey: 'nav.privacidad', icon: ShieldCheck },
 ];
 
 /** Item de nav del area de admin. Solo se agrega cuando useIsAdmin() resuelve true (ver abajo). */

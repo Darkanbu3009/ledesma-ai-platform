@@ -24,6 +24,7 @@ import { SettingsLayout } from './pages/SettingsLayout';
 import { PlansPage } from './pages/PlansPage';
 import { PrivacyNoticePage } from './pages/PrivacyNoticePage';
 import { PrivacySimplifiedNoticePage } from './pages/PrivacySimplifiedNoticePage';
+import { TermsPage } from './pages/TermsPage';
 import { PrivacyRightsPage } from './pages/PrivacyRightsPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { RegistrationGate } from './components/RegistrationGate';
@@ -65,18 +66,29 @@ export function App() {
           contrasena (destino del redirectTo del correo de reset de Supabase). */}
       <Route path="/recuperar" element={<PasswordRecoveryPage />} />
       <Route path="/nueva-contrasena" element={<NewPasswordPage />} />
-      {/* Avisos de privacidad PUBLICOS (sin sesion): enlazables desde la landing, el widget y el flujo
-          de consentimiento. Estructura legal + placeholders [REVISION LEGAL PENDIENTE]. */}
-      <Route path="/aviso-de-privacidad" element={<PrivacyNoticePage />} />
-      <Route path="/aviso-de-privacidad/simplificado" element={<PrivacySimplifiedNoticePage />} />
+      {/* Documentos legales PUBLICOS (sin sesion): el aviso de privacidad, su version simplificada y los
+          terminos de servicio. Publicos A PROPOSITO: el consentimiento solo es informado si el titular
+          puede leer el texto ANTES de aceptarlo, y sin sesion (la pantalla de consentimiento enlaza aqui
+          en pestana nueva, y el pie de la landing tambien). El texto vive en src/content/legal. */}
+      <Route path="/privacidad" element={<PrivacyNoticePage />} />
+      <Route path="/privacidad/simplificado" element={<PrivacySimplifiedNoticePage />} />
+      <Route path="/terminos" element={<TermsPage />} />
+      {/* Compat: las rutas historicas del aviso siguen resolviendo (correos y enlaces ya publicados). */}
+      <Route path="/aviso-de-privacidad" element={<Navigate to="/privacidad" replace />} />
+      <Route
+        path="/aviso-de-privacidad/simplificado"
+        element={<Navigate to="/privacidad/simplificado" replace />}
+      />
       <Route element={<ProtectedRoute />}>
-        {/* Onboarding: requiere sesion pero no un registro completo. */}
-        <Route path="/registro" element={<RegistrationPage />} />
-        {/* Dashboard: ademas de sesion, exige registro activo (RegistrationGate) y consentimiento
-            vigente (ConsentGate). El ConsentGate cubre todo el dashboard, asi las features autonomas
-            quedan gateadas por consentimiento por construccion. */}
-        <Route element={<RegistrationGate />}>
-          <Route element={<ConsentGate />}>
+        {/* El ConsentGate va POR FUERA del registro a proposito: aceptar el aviso y los terminos es lo
+            PRIMERO que ocurre tras crear la cuenta o iniciar sesion, antes incluso del formulario de
+            registro. Asi ninguna pantalla de la aplicacion (ni el onboarding) se alcanza sin
+            consentimiento vigente, y un cambio de version vuelve a bloquear a todos. */}
+        <Route element={<ConsentGate />}>
+          {/* Onboarding: requiere sesion y consentimiento, pero no un registro completo. */}
+          <Route path="/registro" element={<RegistrationPage />} />
+          {/* Dashboard: ademas exige registro activo (RegistrationGate). */}
+          <Route element={<RegistrationGate />}>
             <Route element={<AppLayout />}>
               {/* Panel: resumen del owner (actividad, operaciones, gasto). Solo lectura, sin gate por
                   tier -- cada quien ve su propio dashboard. Es la primera vista del layout. Diferido
@@ -122,8 +134,10 @@ export function App() {
               </Route>
               {/* Compat: /perfil era la URL historica de Mi cuenta; redirige para no romper enlaces. */}
               <Route path="/perfil" element={<Navigate to="/configuracion/cuenta" replace />} />
-              {/* Ejercicio de derechos del titular (ARCO/GDPR). */}
-              <Route path="/privacidad" element={<PrivacyRightsPage />} />
+              {/* Ejercicio de derechos del titular (ARCO/GDPR). Vive en /mis-datos porque /privacidad
+                  es ahora la ruta PUBLICA del aviso: la pagina de derechos exige sesion (es donde el
+                  titular consulta y descarga LO SUYO) y el aviso no puede exigirla. */}
+              <Route path="/mis-datos" element={<PrivacyRightsPage />} />
               {/* Area de ADMIN: vive en el mismo layout pero detras del AdminGate, que devuelve a la
                   home a quien no es super-admin. Guard COSMETICO (UX): la autoridad real es el gate
                   server-side (requireAdminRole) que ya protege los endpoints. La LISTA (/admin) va

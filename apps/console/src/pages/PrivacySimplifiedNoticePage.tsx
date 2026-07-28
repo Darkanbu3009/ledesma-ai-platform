@@ -1,30 +1,18 @@
 import { Trans, useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { LegalDocument } from '../components/privacy/LegalDocument';
-import { SIMPLIFIED_NOTICE } from '../lib/privacy';
+import { documentoLegal } from '../content/legal';
 
 /**
- * AVISO DE PRIVACIDAD SIMPLIFICADO (publico). Obligatorio al recabar datos por medios electronicos (esta
- * plataforma). Estructura minima con placeholders y enlace al integral. Ruta publica
- * /aviso-de-privacidad/simplificado. La ESTRUCTURA (ids, version) viene de lib/privacy.ts; los TEXTOS
- * se resuelven aqui via i18n por id de seccion.
+ * AVISO DE PRIVACIDAD SIMPLIFICADO, ruta PUBLICA /privacidad/simplificado. La ley mexicana lo exige cuando
+ * los datos se recaban por medios electronicos, que es el caso de esta plataforma. Es un RESUMEN y siempre
+ * remite al integral, que es el que rige.
  */
 export function PrivacySimplifiedNoticePage() {
-  const { t } = useTranslation();
-  const doc = {
-    ...SIMPLIFIED_NOTICE,
-    title: t('privacidad.avisoSimplificado.titulo'),
-    subtitle: t('privacidad.avisoSimplificado.subtitulo'),
-    sections: SIMPLIFIED_NOTICE.sections.map((section) => ({
-      ...section,
-      heading: t(`privacidad.avisoSimplificado.secciones.${section.id}.titulo`),
-      placeholder: t(`privacidad.avisoSimplificado.secciones.${section.id}.placeholder`),
-    })),
-  };
-
+  const { t, i18n } = useTranslation();
   return (
     <LegalDocument
-      doc={doc}
+      doc={documentoLegal('avisoSimplificado', i18n.language)}
       footer={
         <p>
           <Trans
@@ -32,10 +20,7 @@ export function PrivacySimplifiedNoticePage() {
             i18nKey="privacidad.avisoSimplificado.footer"
             components={{
               integral: (
-                <Link
-                  to="/aviso-de-privacidad"
-                  className="font-medium text-brasa hover:underline"
-                />
+                <Link to="/privacidad" className="font-medium text-brasa hover:underline" />
               ),
             }}
           />
