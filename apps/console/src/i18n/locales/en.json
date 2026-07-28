@@ -1794,6 +1794,7 @@
       "errorNoRepetible": "This run includes a step that cannot be made repeatable yet, so it cannot be saved as a learned task.",
       "motivoMetodo": "This run includes a {{metodo}} action that the system cannot repeat yet, so it cannot be saved as a learned task.",
       "motivoSinEstrategia": "A step in this run was recorded without a way to find its element again, so it cannot be saved as a learned task.",
+      "motivoSinEstrategiaPaso": "Step {{paso}} of this run ({{descripcion}}) was recorded without a way to find its element again, so it cannot be saved as a learned task.",
       "motivoDatoSinCubrir": "The record of this run does not keep how each piece of data of the task was filled in, so it cannot be saved as a learned task."
     }
   },

@@ -119,8 +119,12 @@ export function esGuardadoNoRepetible(error: unknown): boolean {
 export type MotivoNoRepetible =
   /** La ejecucion incluye una accion que el sistema todavia no sabe repetir (select, arrastre...). */
   | { tipo: 'metodo'; metodo: string }
-  /** Un paso quedo registrado sin ninguna forma de volver a encontrar su elemento. */
-  | { tipo: 'sinEstrategia' }
+  /**
+   * Un paso quedo registrado sin ninguna forma de volver a encontrar su elemento. Cuando el worker
+   * nombra el paso que bloqueo (motivos nuevos), `paso` y `descripcion` viajan para que el mensaje
+   * de la UI diga cual fue en vez del generico.
+   */
+  | { tipo: 'sinEstrategia'; paso?: string; descripcion?: string }
   /** El registro no conserva como se llenaron todos los datos de la tarea. */
   | { tipo: 'datoSinCubrir' }
   /** Cualquier otro motivo permanente: mensaje generico que tampoco invita a reintentar. */
@@ -136,7 +140,20 @@ export function motivoDeGuardadoNoRepetible(error: unknown): MotivoNoRepetible |
     return { tipo: 'metodo', metodo: metodo[1] };
   }
   if (metodo !== null) return { tipo: 'generico' };
-  if (motivo.includes('sin ninguna estrategia de localizacion')) return { tipo: 'sinEstrategia' };
+  if (
+    motivo.includes('sin ninguna estrategia de localizacion') ||
+    motivo.includes('sin estrategia y sin paso adyacente')
+  ) {
+    // Los motivos nuevos del worker nombran el paso que bloqueo: "paso 13: type escribir el
+    // cuerpo, sin ..." o "el click del paso 19 (click the message body area) quedo sin ...".
+    const bloqueante =
+      /^paso (\d+): (.+?), sin /.exec(motivo) ??
+      /^el click del paso (\d+) \((.+?)\) quedo sin /.exec(motivo);
+    if (bloqueante?.[1] !== undefined && bloqueante[2] !== undefined) {
+      return { tipo: 'sinEstrategia', paso: bloqueante[1], descripcion: bloqueante[2] };
+    }
+    return { tipo: 'sinEstrategia' };
+  }
   if (motivo.includes('de llenado sin campos registrados')) return { tipo: 'datoSinCubrir' };
   return { tipo: 'generico' };
 }

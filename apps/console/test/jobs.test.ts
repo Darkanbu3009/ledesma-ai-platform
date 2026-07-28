@@ -151,6 +151,21 @@ describe('motivoDeGuardadoNoRepetible (fallo permanente del guardado, por famili
         new Error('PROMOCION_NO_REPETIBLE: paso act sin ninguna estrategia de localizacion'),
       ),
     ).toEqual({ tipo: 'sinEstrategia' });
+    // Motivos nuevos del worker (FIX B): nombran indice y descripcion del paso que bloqueo.
+    expect(
+      motivoDeGuardadoNoRepetible(
+        new Error(
+          'PROMOCION_NO_REPETIBLE: paso 13: type the message into the body, sin estrategia y sin paso adyacente que cubra el campo',
+        ),
+      ),
+    ).toEqual({ tipo: 'sinEstrategia', paso: '13', descripcion: 'type the message into the body' });
+    expect(
+      motivoDeGuardadoNoRepetible(
+        new Error(
+          'PROMOCION_NO_REPETIBLE: el click del paso 19 (click the message body area) quedo sin ninguna estrategia de localizacion y ninguna escritura posterior lo cubre',
+        ),
+      ),
+    ).toEqual({ tipo: 'sinEstrategia', paso: '19', descripcion: 'click the message body area' });
     expect(
       motivoDeGuardadoNoRepetible(
         new Error(
