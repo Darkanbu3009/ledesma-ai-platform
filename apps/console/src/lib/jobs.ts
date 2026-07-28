@@ -64,6 +64,24 @@ export const JOB_PAGE_SIZE = 20;
 export const JOBS_REFETCH_MS = 10_000;
 
 /**
+ * Intervalos del polling ADAPTATIVO de la LISTA de /actividad (semi tiempo real): con algun job en
+ * vuelo entre los cargados, la lista se refresca cada JOBS_LISTA_EN_VUELO_MS para que el progreso
+ * se vea sin refresh manual; con todo en estado terminal baja a JOBS_LISTA_REPOSO_MS en vez de
+ * apagarse, porque una tarea RECIEN ENCOLADA desde otra pantalla (el Playground encola via el
+ * agente) no figura entre los jobs cargados y con el polling apagado la tarjeta nueva jamas
+ * aparecia sin interaccion. El endpoint de lista es barato (select paginado por owner+created_at
+ * indexado, sin payload), y react-query no consulta con la pestana en background
+ * (refetchIntervalInBackground=false por defecto).
+ */
+export const JOBS_LISTA_EN_VUELO_MS = 5_000;
+export const JOBS_LISTA_REPOSO_MS = 30_000;
+
+/** Intervalo adaptativo de la lista del historial segun los jobs ya cargados. */
+export function intervaloRefetchDeLista(jobs: JobActivity[]): number {
+  return hasInFlightJobs(jobs) ? JOBS_LISTA_EN_VUELO_MS : JOBS_LISTA_REPOSO_MS;
+}
+
+/**
  * Umbral del AVISO de tarea lenta (ms): una ejecucion en curso que supera este tiempo muestra un
  * aviso destacado con el boton de terminarla. Es informativo: la decision de terminar una tarea que
  * sigue avanzando es SIEMPRE del usuario; el sistema jamas la termina por su cuenta en este caso.

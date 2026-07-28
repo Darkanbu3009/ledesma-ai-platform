@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   buildJobsQuery,
   hasInFlightJobs,
+  intervaloRefetchDeLista,
   isJobInFlight,
   jobStatusLabel,
   jobTypeLabel,
+  JOBS_LISTA_EN_VUELO_MS,
+  JOBS_LISTA_REPOSO_MS,
   type JobActivity,
   type JobStatus,
 } from '../src/lib/jobs';
@@ -67,6 +70,19 @@ describe('hasInFlightJobs', () => {
   it('false si todos estan en estado terminal o la lista esta vacia', () => {
     expect(hasInFlightJobs([makeJob({ status: 'completed' }), makeJob({ status: 'failed' })])).toBe(false);
     expect(hasInFlightJobs([])).toBe(false);
+  });
+});
+
+describe('intervaloRefetchDeLista (polling adaptativo de /actividad)', () => {
+  it('con algun job en vuelo consulta al ritmo rapido', () => {
+    expect(intervaloRefetchDeLista([makeJob({ status: 'running' })])).toBe(JOBS_LISTA_EN_VUELO_MS);
+    expect(intervaloRefetchDeLista([makeJob({ status: 'pending' })])).toBe(JOBS_LISTA_EN_VUELO_MS);
+  });
+
+  it('con todo terminal (o lista vacia) baja al ritmo de reposo, pero NUNCA se apaga: una tarea recien encolada desde otra pantalla debe aparecer sola', () => {
+    expect(intervaloRefetchDeLista([makeJob({ status: 'completed' })])).toBe(JOBS_LISTA_REPOSO_MS);
+    expect(intervaloRefetchDeLista([])).toBe(JOBS_LISTA_REPOSO_MS);
+    expect(JOBS_LISTA_REPOSO_MS).toBeGreaterThan(0);
   });
 });
 
