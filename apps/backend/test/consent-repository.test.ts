@@ -3,16 +3,16 @@ import { ConsentRepository } from '../src/privacy/consent-repository.js';
 import type { Sql } from '../src/db/client.js';
 
 const CONSENT_ID = '55555555-5555-4555-8555-555555555555';
+const IP_HASH = 'a'.repeat(64);
 
 function makeRow(overrides: Record<string, unknown> = {}) {
   return {
     id: CONSENT_ID,
     owner_id: 'user-1',
-    document_type: 'privacy_notice',
-    document_version: '2025-03-21',
-    accepted_at: '2026-06-30T00:00:00.000Z',
-    ip_address: '10.0.0.1',
-    user_agent: 'jest',
+    documento: 'aviso_privacidad',
+    version: '2026-07-28',
+    aceptada_en: '2026-06-30T00:00:00.000Z',
+    ip_hash: IP_HASH,
     ...overrides,
   };
 }
@@ -32,83 +32,101 @@ function makeSqlReturning(result: unknown[]): Sql {
 }
 
 function callText(sql: Sql, index = 0): string {
-  const calls = (sql as unknown as { mock: { calls: Array<[readonly string[], ...unknown[]]> } }).mock.calls;
+  const calls = (sql as unknown as { mock: { calls: Array<[readonly string[], ...unknown[]]> } })
+    .mock.calls;
   return (calls[index]?.[0] ?? []).join('<param>');
 }
 
 function callValues(sql: Sql, index = 0): unknown[] {
-  const calls = (sql as unknown as { mock: { calls: Array<[readonly string[], ...unknown[]]> } }).mock.calls;
+  const calls = (sql as unknown as { mock: { calls: Array<[readonly string[], ...unknown[]]> } })
+    .mock.calls;
   const [, ...values] = (calls[index] ?? [[]]) as [readonly string[], ...unknown[]];
   return values;
 }
 
 describe('ConsentRepository', () => {
   describe('recordConsent', () => {
-    it('inserta con columnas explicitas, on conflict do nothing, y mapea snake -> camel', async () => {
+    it('inserta en aceptaciones_legales con columnas explicitas y on conflict do nothing', async () => {
       const sql = makeSqlReturning([makeRow()]);
       const consent = await new ConsentRepository(sql).recordConsent({
         ownerId: 'user-1',
         documentType: 'privacy_notice',
-        documentVersion: '2025-03-21',
-        ipAddress: '10.0.0.1',
-        userAgent: 'jest',
+        documentVersion: '2026-07-28',
+        ipHash: IP_HASH,
       });
       expect(consent).toMatchObject({
         id: CONSENT_ID,
         ownerId: 'user-1',
         documentType: 'privacy_notice',
-        documentVersion: '2025-03-21',
-        ipAddress: '10.0.0.1',
-        userAgent: 'jest',
+        documentVersion: '2026-07-28',
+        ipHash: IP_HASH,
       });
       const text = callText(sql);
-      expect(text).toContain('insert into consents');
-      expect(text).toContain('on conflict (owner_id, document_type, document_version) do nothing');
+      expect(text).toContain('insert into aceptaciones_legales');
+      expect(text).toContain('on conflict (owner_id, documento, version) do nothing');
       expect(text).not.toContain('returning *');
-      // owner_id es el primer parametro; version y evidencia viajan como parametros.
       const values = callValues(sql);
       expect(values[0]).toBe('user-1');
-      expect(values).toContain('2025-03-21');
+      expect(values).toContain('2026-07-28');
     });
 
-    it('ip/user-agent ausentes se insertan como null', async () => {
-      const sql = makeSqlReturning([makeRow({ ip_address: null, user_agent: null })]);
+    it('traduce el tipo del contrato HTTP al vocabulario de la columna `documento`', async () => {
+      const sql = makeSqlReturning([makeRow({ documento: 'terminos' })]);
       const consent = await new ConsentRepository(sql).recordConsent({
         ownerId: 'user-1',
         documentType: 'terms',
-        documentVersion: '2025-03-21',
+        documentVersion: '2026-07-28',
       });
-      expect(consent.ipAddress).toBeNull();
-      expect(consent.userAgent).toBeNull();
-      expect(callValues(sql)).toContain(null);
+      // Hacia la base viaja 'terminos'; hacia el contrato HTTP vuelve 'terms'.
+      expect(callValues(sql)).toContain('terminos');
+      expect(consent.documentType).toBe('terms');
     });
 
-    it('IDEMPOTENTE: si el insert no devuelve fila (conflicto), consulta y devuelve el consentimiento previo', async () => {
-      // Primera llamada (insert) devuelve [] (conflicto); segunda (select) devuelve el existente.
+    it('NUNCA persiste la IP en claro: solo acepta un hash y sin el guarda null', async () => {
+      const sql = makeSqlReturning([makeRow({ ip_hash: null })]);
+      const consent = await new ConsentRepository(sql).recordConsent({
+        ownerId: 'user-1',
+        documentType: 'terms',
+        documentVersion: '2026-07-28',
+      });
+      expect(consent.ipHash).toBeNull();
+      expect(callValues(sql)).toContain(null);
+      // La sentencia no menciona ninguna columna de IP en claro ni de user-agent.
+      const text = callText(sql);
+      expect(text).not.toContain('ip_address');
+      expect(text).not.toContain('user_agent');
+      // Y ningun parametro parece una direccion IP.
+      for (const value of callValues(sql)) {
+        expect(String(value)).not.toMatch(/^\d{1,3}(\.\d{1,3}){3}$/);
+      }
+    });
+
+    it('IDEMPOTENTE: si el insert no devuelve fila (conflicto), consulta y devuelve la aceptacion previa', async () => {
+      // Primera llamada (insert) devuelve [] (conflicto); segunda (select) devuelve la existente.
       const sql = makeSqlSequence([[], [makeRow()]]);
       const consent = await new ConsentRepository(sql).recordConsent({
         ownerId: 'user-1',
         documentType: 'privacy_notice',
-        documentVersion: '2025-03-21',
+        documentVersion: '2026-07-28',
       });
       expect(consent.id).toBe(CONSENT_ID);
-      // La segunda query es un select acotado por owner + tipo + version.
       const selectText = callText(sql, 1);
-      expect(selectText).toContain('from consents');
+      expect(selectText).toContain('from aceptaciones_legales');
       expect(selectText).toMatch(/where owner_id = <param>/);
-      expect(callValues(sql, 1)).toEqual(['user-1', 'privacy_notice', '2025-03-21']);
+      expect(callValues(sql, 1)).toEqual(['user-1', 'aviso_privacidad', '2026-07-28']);
     });
   });
 
   describe('listConsentsByOwner', () => {
-    it('acota por owner_id y ordena por accepted_at desc', async () => {
-      const sql = makeSqlReturning([makeRow(), makeRow({ id: 'otro', document_type: 'terms' })]);
+    it('acota por owner_id y ordena por aceptada_en desc', async () => {
+      const sql = makeSqlReturning([makeRow(), makeRow({ id: 'otro', documento: 'terminos' })]);
       const list = await new ConsentRepository(sql).listConsentsByOwner('user-1');
       expect(list).toHaveLength(2);
+      expect(list.map((c) => c.documentType)).toEqual(['privacy_notice', 'terms']);
       const text = callText(sql);
-      expect(text).toContain('from consents');
+      expect(text).toContain('from aceptaciones_legales');
       expect(text).toMatch(/where owner_id = <param>/);
-      expect(text).toContain('order by accepted_at desc');
+      expect(text).toContain('order by aceptada_en desc');
       expect(callValues(sql)).toEqual(['user-1']);
     });
 

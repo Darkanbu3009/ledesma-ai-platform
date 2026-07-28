@@ -33,8 +33,7 @@ function makeConsent(overrides: Record<string, unknown> = {}) {
     documentType: 'privacy_notice',
     documentVersion: CURRENT_DOCUMENT_VERSIONS.privacy_notice,
     acceptedAt: '2026-06-30T00:00:00.000Z',
-    ipAddress: '10.0.0.1',
-    userAgent: 'jest',
+    ipHash: 'a'.repeat(64),
     ...overrides,
   };
 }
@@ -55,7 +54,7 @@ beforeEach(async () => {
 
 describe('auth', () => {
   it('POST /v1/consents sin JWT -> 401', async () => {
-    const res = await app.inject({ method: 'POST', url: '/v1/consents', payload: { document_type: 'privacy_notice', document_version: '2025-03-21' } });
+    const res = await app.inject({ method: 'POST', url: '/v1/consents', payload: { document_type: 'privacy_notice', document_version: CURRENT_DOCUMENT_VERSIONS.privacy_notice } });
     expect(res.statusCode).toBe(401);
     expect(recordConsent).not.toHaveBeenCalled();
   });
@@ -82,17 +81,59 @@ describe('POST /v1/consents', () => {
     expect(res.json().consent.id).toBeDefined();
   });
 
-  it('captura ip/user-agent como evidencia', async () => {
+  it('la evidencia es un HASH de la IP: nunca la IP en claro, y no guarda el user-agent', async () => {
     recordConsent.mockResolvedValue(makeConsent());
     await app.inject({
       method: 'POST',
       url: '/v1/consents',
       headers: { authorization: 'Bearer valid-user-1', 'user-agent': 'Mozilla/5.0 test' },
-      payload: { document_type: 'terms', document_version: '2025-03-21' },
+      payload: { document_type: 'terms', document_version: CURRENT_DOCUMENT_VERSIONS.terms },
     });
     const passed = recordConsent.mock.calls[0]?.[0];
-    expect(passed.userAgent).toBe('Mozilla/5.0 test');
-    expect(typeof passed.ipAddress === 'string' || passed.ipAddress === null).toBe(true);
+    // Lo que llega al repositorio es un digest hex, no una IP y no un user-agent.
+    expect(passed.ipHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(passed.ipAddress).toBeUndefined();
+    expect(passed.userAgent).toBeUndefined();
+    // Ningun campo del insumo contiene la IP del request ni el user-agent.
+    const serializado = JSON.stringify(passed);
+    expect(serializado).not.toContain('127.0.0.1');
+    expect(serializado).not.toContain('Mozilla/5.0 test');
+  });
+
+  it('AISLAMIENTO: dos titulares distintos registran cada uno bajo SU owner del token', async () => {
+    recordConsent.mockResolvedValue(makeConsent());
+    const payload = {
+      document_type: 'privacy_notice',
+      document_version: CURRENT_DOCUMENT_VERSIONS.privacy_notice,
+    };
+    await app.inject({
+      method: 'POST',
+      url: '/v1/consents',
+      headers: { authorization: 'Bearer valid-user-1' },
+      payload,
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/v1/consents',
+      headers: { authorization: 'Bearer valid-user-2' },
+      payload,
+    });
+    expect(recordConsent.mock.calls[0]?.[0].ownerId).toBe('user-1');
+    expect(recordConsent.mock.calls[1]?.[0].ownerId).toBe('user-2');
+  });
+
+  it('JWT invalido -> 401 y no registra', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/consents',
+      headers: { authorization: 'Bearer token-basura' },
+      payload: {
+        document_type: 'privacy_notice',
+        document_version: CURRENT_DOCUMENT_VERSIONS.privacy_notice,
+      },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(recordConsent).not.toHaveBeenCalled();
   });
 
   it('document_type invalido -> 400 (no registra)', async () => {
@@ -100,7 +141,7 @@ describe('POST /v1/consents', () => {
       method: 'POST',
       url: '/v1/consents',
       headers: { authorization: 'Bearer valid-user-1' },
-      payload: { document_type: 'otro', document_version: '2025-03-21' },
+      payload: { document_type: 'otro', document_version: CURRENT_DOCUMENT_VERSIONS.privacy_notice },
     });
     expect(res.statusCode).toBe(400);
     expect(recordConsent).not.toHaveBeenCalled();
@@ -132,12 +173,31 @@ describe('GET /v1/consents/me', () => {
     expect(body.current).toEqual(CURRENT_DOCUMENT_VERSIONS);
   });
 
-  it('sin ningun consentimiento -> missing exige solo privacy_notice (terms no se fuerza aun)', async () => {
+  it('sin ningun consentimiento -> missing exige AMBOS documentos', async () => {
     listConsentsByOwner.mockResolvedValue([]);
     const res = await app.inject({ method: 'GET', url: '/v1/consents/me', headers: { authorization: 'Bearer valid-user-2' } });
     expect(res.statusCode).toBe(200);
-    expect(res.json().missing).toEqual(['privacy_notice']);
-    expect(res.json().missing).not.toContain('terms');
+    expect(res.json().missing).toEqual(['privacy_notice', 'terms']);
+  });
+
+  it('AISLAMIENTO: lista SIEMPRE por el owner del token, nunca por uno del query', async () => {
+    listConsentsByOwner.mockResolvedValue([]);
+    await app.inject({
+      method: 'GET',
+      url: '/v1/consents/me?owner_id=MALICIOSO',
+      headers: { authorization: 'Bearer valid-user-2' },
+    });
+    expect(listConsentsByOwner).toHaveBeenCalledWith('user-2');
+  });
+
+  it('JWT invalido -> 401', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/consents/me',
+      headers: { authorization: 'Bearer token-basura' },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(listConsentsByOwner).not.toHaveBeenCalled();
   });
 
   it('con una version VIEJA -> ese documento sigue en missing (re-aceptar por cambio de version)', async () => {

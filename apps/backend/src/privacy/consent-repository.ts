@@ -1,51 +1,60 @@
 import type { Sql } from '../db/client.js';
-import type { DocumentType } from './documents.js';
+import {
+  COLUMN_TO_DOCUMENT_TYPE,
+  DOCUMENT_TYPE_TO_COLUMN,
+  type DocumentType,
+} from './documents.js';
 
 /**
- * Acceso a datos de los CONSENTIMIENTOS (tabla `consents`, V014). Registra la aceptacion VERSIONADA de un
- * documento por un titular. Recibe el cliente sql por inyeccion (testeable), mismo patron que
- * RecipeRepository / ScheduledTaskRepository, y SIEMPRE acota por owner_id: un consentimiento ajeno nunca
+ * Acceso a datos de las ACEPTACIONES LEGALES (tabla `aceptaciones_legales`, V039). Registra la aceptacion
+ * VERSIONADA de un documento por un titular. Recibe el cliente sql por inyeccion (testeable), mismo patron
+ * que RecipeRepository / ScheduledTaskRepository, y SIEMPRE acota por owner_id: una aceptacion ajena nunca
  * se lee ni se cuenta.
  *
- * Columnas SIEMPRE explicitas (nunca select * / returning *): si a la base le falta una columna (p.ej. V014
- * sin aplicar), Postgres falla ruidosamente en vez de devolver un consent con campos undefined.
+ * EVIDENCIA SIN DATO PERSONAL: la unica evidencia de origen que se conserva es ip_hash, un HMAC-SHA256 no
+ * reversible (privacy/ip-hash.ts). La IP en claro nunca llega a este repositorio: el endpoint la hashea
+ * antes de llamar. La tabla vieja `consents` (V014), que si guardaba ip_address y user_agent, queda
+ * congelada como historico y ya no se escribe.
+ *
+ * Este repositorio es tambien la UNICA frontera entre los dos vocabularios del documento: el contrato HTTP
+ * habla privacy_notice/terms y la columna `documento` guarda aviso_privacidad/terminos (ver documents.ts).
+ *
+ * Columnas SIEMPRE explicitas (nunca select * / returning *): si a la base le falta una columna (p.ej. V039
+ * sin aplicar), Postgres falla ruidosamente en vez de devolver una fila con campos undefined.
  */
 
-/** Un consentimiento registrado, tal como vive en la tabla `consents`. snake_case -> camelCase. */
+/** Una aceptacion registrada. Se expone con el vocabulario del contrato HTTP (camelCase, tipos ingles). */
 export interface Consent {
   id: string;
   /** Titular que acepto (sub del JWT). */
   ownerId: string;
   documentType: DocumentType;
-  /** Version aceptada (fecha ISO o semver). */
+  /** Version aceptada (fecha ISO). */
   documentVersion: string;
   acceptedAt: string;
-  /** Evidencia opcional. null = no capturada. */
-  ipAddress: string | null;
-  userAgent: string | null;
+  /** HMAC-SHA256 hex de la IP del request. null = no se capturo evidencia. NO reversible. */
+  ipHash: string | null;
 }
 
-/** Insumos para registrar un consentimiento. accepted_at lo pone la base. */
+/** Insumos para registrar una aceptacion. aceptada_en lo pone la base. */
 export interface RecordConsentInput {
   ownerId: string;
   documentType: DocumentType;
   documentVersion: string;
-  /** Evidencia opcional (IP y user-agent del request). null/ausente si no se capturan. */
-  ipAddress?: string | null;
-  userAgent?: string | null;
+  /** Hash de la IP YA calculado por el llamador. Este repositorio nunca recibe una IP en claro. */
+  ipHash?: string | null;
 }
 
 interface ConsentRow {
   id: string;
   owner_id: string;
-  document_type: string;
-  document_version: string;
-  accepted_at: Date | string;
-  ip_address: string | null;
-  user_agent: string | null;
+  documento: string;
+  version: string;
+  aceptada_en: Date | string;
+  ip_hash: string | null;
 }
 
-/** ISO de epoch: fallback no-lanzante para el timestamp not-null accepted_at. */
+/** ISO de epoch: fallback no-lanzante para el timestamp not-null aceptada_en. */
 const EPOCH_ISO = new Date(0).toISOString();
 
 /** ISO 8601 tolerante: null/invalido -> null, sin lanzar RangeError. */
@@ -59,11 +68,11 @@ function rowToConsent(row: ConsentRow): Consent {
   return {
     id: row.id,
     ownerId: row.owner_id,
-    documentType: row.document_type as DocumentType,
-    documentVersion: row.document_version,
-    acceptedAt: toIso(row.accepted_at) ?? EPOCH_ISO,
-    ipAddress: row.ip_address,
-    userAgent: row.user_agent,
+    // Una fila con un `documento` fuera del CHECK no deberia existir; si existiera, no se inventa un tipo.
+    documentType: COLUMN_TO_DOCUMENT_TYPE[row.documento] ?? (row.documento as DocumentType),
+    documentVersion: row.version,
+    acceptedAt: toIso(row.aceptada_en) ?? EPOCH_ISO,
+    ipHash: row.ip_hash,
   };
 }
 
@@ -72,42 +81,42 @@ export class ConsentRepository {
 
   /**
    * Registra la aceptacion de una version de un documento. Idempotente: aceptar la MISMA version dos veces
-   * NO duplica (ON CONFLICT DO NOTHING sobre el unique (owner_id, document_type, document_version)); en ese
-   * caso devuelve el consentimiento ya existente para que el endpoint responda de forma estable.
+   * NO duplica (ON CONFLICT DO NOTHING sobre el unique (owner_id, documento, version)); en ese caso
+   * devuelve la aceptacion ya existente para que el endpoint responda de forma estable.
    */
   async recordConsent(input: RecordConsentInput): Promise<Consent> {
+    const documento = DOCUMENT_TYPE_TO_COLUMN[input.documentType];
     const rows = await this.sql<ConsentRow[]>`
-      insert into consents (owner_id, document_type, document_version, ip_address, user_agent)
+      insert into aceptaciones_legales (owner_id, documento, version, ip_hash)
       values (
         ${input.ownerId},
-        ${input.documentType},
+        ${documento},
         ${input.documentVersion},
-        ${input.ipAddress ?? null},
-        ${input.userAgent ?? null}
+        ${input.ipHash ?? null}
       )
-      on conflict (owner_id, document_type, document_version) do nothing
-      returning id, owner_id, document_type, document_version, accepted_at, ip_address, user_agent
+      on conflict (owner_id, documento, version) do nothing
+      returning id, owner_id, documento, version, aceptada_en, ip_hash
     `;
     const row = rows[0];
     if (row) return rowToConsent(row);
-    // Ya existia (conflicto): devolvemos el consentimiento previo, acotado por owner (idempotente).
+    // Ya existia (conflicto): devolvemos la aceptacion previa, acotada por owner (idempotente).
     const existing = await this.sql<ConsentRow[]>`
-      select id, owner_id, document_type, document_version, accepted_at, ip_address, user_agent
-      from consents
+      select id, owner_id, documento, version, aceptada_en, ip_hash
+      from aceptaciones_legales
       where owner_id = ${input.ownerId}
-        and document_type = ${input.documentType}
-        and document_version = ${input.documentVersion}
+        and documento = ${documento}
+        and version = ${input.documentVersion}
     `;
     return rowToConsent(existing[0] as ConsentRow);
   }
 
-  /** Lista todos los consentimientos del titular (mas nuevos primero). */
+  /** Lista todas las aceptaciones del titular (mas nuevas primero). */
   async listConsentsByOwner(ownerId: string): Promise<Consent[]> {
     const rows = await this.sql<ConsentRow[]>`
-      select id, owner_id, document_type, document_version, accepted_at, ip_address, user_agent
-      from consents
+      select id, owner_id, documento, version, aceptada_en, ip_hash
+      from aceptaciones_legales
       where owner_id = ${ownerId}
-      order by accepted_at desc
+      order by aceptada_en desc
     `;
     return rows.map(rowToConsent);
   }

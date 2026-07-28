@@ -37,7 +37,7 @@ const linkClass =
 
 /**
  * Footer de la landing. Incluye contacto (WhatsApp, telefono, correo, Facebook) y la linea
- * legal de copyright con enlace a la pagina de privacidad (/privacidad).
+ * legal de copyright con enlaces a los documentos legales publicos (/privacidad y /terminos).
  *
  * Bloque de color brasa solido (#E5511E, token `brasa`) que cierra la pagina: la tinta
  * pasa a hueso (`cream`) / blanco para leerse sobre el fondo saturado. El logo se fuerza
@@ -109,6 +109,10 @@ export function LandingFooter(): JSX.Element {
             {' | '}
             <Link to="/privacidad" className={linkClass}>
               {t('landing.footer.politicaPrivacidad')}
+            </Link>
+            {' | '}
+            <Link to="/terminos" className={linkClass}>
+              {t('landing.footer.terminos')}
             </Link>
           </p>
         </div>

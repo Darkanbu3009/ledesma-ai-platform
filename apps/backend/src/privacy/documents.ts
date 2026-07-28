@@ -1,40 +1,64 @@
-// FUENTE DE VERDAD de las VERSIONES VIGENTES de los documentos de privacidad/terminos. El consentimiento
-// se versiona (V014, tabla consents): un titular acepta UNA version; si el documento cambia de version
-// (nueva finalidad -> nuevo consentimiento), la version nueva queda SIN aceptar hasta que la acepte otra vez.
+// FUENTE DE VERDAD de las VERSIONES VIGENTES de los documentos legales. El consentimiento se versiona
+// (V039, tabla aceptaciones_legales): un titular acepta UNA version; si el documento cambia de version
+// (nueva finalidad, nuevo encargado, cambio de texto sustantivo), la version nueva queda SIN aceptar hasta
+// que la acepte otra vez, y el gate de la consola vuelve a pedirla.
 //
-// Estas constantes las usa el gate de consentimiento del backend (missingConsents) para decidir que le
-// falta aceptar al usuario. La CONSOLA tiene su propia copia de la version para DISPLAY en las paginas de
-// aviso (apps/console/src/lib/privacy.ts). MANTENER SINCRONIZADAS ambas copias: el backend es la autoridad
-// del gate (calcula `missing`), la consola solo muestra el numero. Duplicar una constante con nota de
-// sincronia es la misma convencion que ya usa el repo para los tipos espejados backend/consola
-// (registration/types.ts <-> lib/registration.ts).
+// POR QUE UNA CONSTANTE Y NO UNA TABLA: la version tiene que subir EN EL MISMO COMMIT que el texto del
+// documento, que tambien vive en el repo (apps/console/src/content/legal/). Una tabla permitiria que el
+// numero de version y el texto publicado se desincronizaran entre despliegues, y dejaria la re-aceptacion
+// masiva de todos los usuarios a un UPDATE de distancia, sin revision de codigo.
 //
-// El texto legal NO vive aqui: lo redacta un abogado y la consola lo renderiza con placeholders marcados
-// [REVISION LEGAL PENDIENTE]. Subir una version aqui (cuando el abogado cambie el aviso) fuerza la
-// re-aceptacion de todos los usuarios de forma automatica.
+// PROCEDIMIENTO PARA SUBIR DE VERSION (los cuatro pasos van juntos en un commit):
+//   1. Editar el texto en apps/console/src/content/legal/<documento>.<idioma>.ts (es y en).
+//   2. Subir el campo `version` (y `fecha`) de ESE documento en los dos idiomas.
+//   3. Subir la misma cadena aqui, en CURRENT_DOCUMENT_VERSIONS.
+//   4. Subir la copia de display de la consola (apps/console/src/lib/privacy.ts).
+// Al desplegar, missingConsents deja de encontrar la version vigente entre las aceptadas y el ConsentGate
+// vuelve a bloquear a TODOS los usuarios hasta que acepten. No hay que tocar la base ni correr scripts.
+//
+// La CONSOLA tiene su propia copia de la version para DISPLAY en las paginas legales. El backend es la
+// AUTORIDAD del gate (calcula `missing`); la consola solo muestra el numero. Duplicar una constante con
+// nota de sincronia es la misma convencion que ya usa el repo para los tipos espejados backend/consola
+// (registration/types.ts <-> lib/registration.ts), y el test privacy-documents.test.ts la verifica.
 
 /** Tipos de documento que la plataforma versiona y para los que puede registrar consentimiento. */
 export type DocumentType = 'privacy_notice' | 'terms';
 
 /**
- * Tipos de documento cuyo consentimiento el GATE EXIGE hoy. 'terms' es un DocumentType valido (la tabla
- * consents y el endpoint lo aceptan, para cuando exista una pagina de Terminos que el usuario pueda
- * revisar), pero AUN NO se exige: forzar aceptar unos terminos inexistentes/irrevisables romperia el
- * consentimiento informado. Al publicar la pagina de Terminos, agregar 'terms' aqui.
+ * Tipos de documento cuyo consentimiento el GATE EXIGE. Los DOS: el aviso de privacidad y los terminos de
+ * servicio estan publicados en rutas PUBLICAS (/privacidad y /terminos) y son revisables antes de aceptar,
+ * que es lo que hace que el consentimiento sea informado.
  */
-export const ENFORCED_DOCUMENT_TYPES: readonly DocumentType[] = ['privacy_notice'];
+export const ENFORCED_DOCUMENT_TYPES: readonly DocumentType[] = ['privacy_notice', 'terms'];
 
 /**
  * Version VIGENTE de cada documento. Fecha ISO (YYYY-MM-DD) como esquema de versionado legible: la fecha
- * de la ultima revision legal del documento. Al cambiar una version, el gate re-solicita la aceptacion.
+ * de la ultima revision del documento. Al cambiar una version, el gate re-solicita la aceptacion.
  */
 export const CURRENT_DOCUMENT_VERSIONS: Record<DocumentType, string> = {
-  // Alineado con la entrada en vigor de la nueva LFPDPPP (21-mar-2025) como version inicial del andamiaje.
-  privacy_notice: '2025-03-21',
-  terms: '2025-03-21',
+  // Primera redaccion completa del aviso y de los terminos (sustituye al andamiaje con placeholders).
+  privacy_notice: '2026-07-28',
+  terms: '2026-07-28',
 };
 
-/** True si `type` es un DocumentType conocido (para validar input externo sin castear a ciegas). */
+/**
+ * Vocabulario que la tabla `aceptaciones_legales` (V039) usa en la columna `documento`, en espanol como el
+ * resto del dominio nuevo del repo. El contrato HTTP mantiene privacy_notice/terms (ya publicado y
+ * consumido por la consola), asi que la traduccion ocurre en el BORDE del repositorio y en ningun otro
+ * lado. Es la unica pareja de vocabularios y esta acotada a estas dos constantes.
+ */
+export const DOCUMENT_TYPE_TO_COLUMN: Record<DocumentType, string> = {
+  privacy_notice: 'aviso_privacidad',
+  terms: 'terminos',
+};
+
+/** Inversa de DOCUMENT_TYPE_TO_COLUMN, para leer filas de la base. */
+export const COLUMN_TO_DOCUMENT_TYPE: Record<string, DocumentType> = {
+  aviso_privacidad: 'privacy_notice',
+  terminos: 'terms',
+};
+
+/** True si `value` es un DocumentType conocido (para validar input externo sin castear a ciegas). */
 export function isDocumentType(value: unknown): value is DocumentType {
   return value === 'privacy_notice' || value === 'terms';
 }

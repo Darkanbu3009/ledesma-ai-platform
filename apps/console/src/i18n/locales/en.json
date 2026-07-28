@@ -145,6 +145,13 @@
       "eliminar400": "The email doesn't match your account's email. Type it exactly as it appears above.",
       "eliminar401": "Your session expired. Sign in again.",
       "eliminarGenerico": "We couldn't delete your account. Try again in a moment."
+    },
+    "legales": {
+      "titulo": "Legal documents",
+      "descripcion": "What you accepted, at which version and when.",
+      "aceptado": "Accepted on {{fecha}} · version {{version}}",
+      "pendiente": "Pending acceptance of version {{version}}",
+      "verTexto": "View text"
     }
   },
   "configuracion": {
@@ -666,86 +673,25 @@
     },
     "consentimiento": {
       "titulo": "Before you continue",
-      "kicker": "PRIVACY NOTICE",
-      "intro": "The platform operates AI agents autonomously that process data. To continue, we need your consent regarding how we handle it.",
-      "avisoSimplificadoTitulo": "Simplified notice",
-      "consultaIntegral": "See the <integral>comprehensive privacy notice</integral>.",
-      "aceptacion": "I have read and accept the platform's Privacy Notice.",
-      "error": "We couldn't record your acceptance. Try again.",
+      "kicker": "PRIVACY NOTICE AND TERMS",
+      "intro": "The platform runs AI agents that act on your behalf and process your data. To use it, we need you to read and accept these documents.",
+      "versionEtiqueta": "Version {{version}}",
+      "leerTexto": "Read full text",
+      "nota": "Check both boxes to continue. Your acceptance is recorded with the version and date.",
+      "error": "We could not record your acceptance. Please try again.",
       "registrando": "Recording...",
       "aceptar": "Accept and continue",
+      "verSimplificado": "View short form notice",
       "cerrarSesion": "Sign out"
     },
     "aviso": {
-      "placeholderTag": "Legal review pending",
-      "version": "Version {{version}}",
-      "opcional": "Optional"
+      "versionFecha": "Version {{version}} · {{fecha}}"
     },
     "avisoIntegral": {
-      "titulo": "Comprehensive Privacy Notice",
-      "subtitulo": "Full details of how your personal data is processed under the LFPDPPP and the GDPR.",
-      "secciones": {
-        "responsable": {
-          "titulo": "Identity and address of the data controller",
-          "placeholder": "Legal name of the controller, registered address and contact details (including the personal data area/officer)."
-        },
-        "datos": {
-          "titulo": "Personal data processed",
-          "placeholder": "All categories of data collected, expressly IDENTIFYING SENSITIVE personal data if any."
-        },
-        "finalidades": {
-          "titulo": "Purposes of processing",
-          "placeholder": "NECESSARY purposes (that originate/are required for the relationship) distinguished from VOLUNTARY ones (which require consent). State which require consent."
-        },
-        "derechos": {
-          "titulo": "Means to exercise the data subject's rights (ARCO)",
-          "placeholder": "Procedure and means to exercise the rights of Access, Rectification, Cancellation and Opposition (and erasure/portability under GDPR), including requirements and response times."
-        },
-        "limitar-uso": {
-          "titulo": "Means to limit the use or disclosure",
-          "placeholder": "Mechanisms to limit the use or disclosure of data (e.g. exclusion lists, withdrawal of consent)."
-        },
-        "ia": {
-          "titulo": "Use of artificial intelligence and automated decisions",
-          "placeholder": "That the platform operates AI agents autonomously; the existence of automated decisions and, when they have a significant effect, the right to HUMAN INTERVENTION and to object (GDPR Art 22). Disclosure of interaction with AI (EU AI Act Art 50)."
-        },
-        "transferencias": {
-          "titulo": "Data transfers",
-          "placeholder": "Transfers to third parties, their purposes and whether they require consent. The new LFPDPPP no longer requires disclosing them in the notice; included as good practice and under GDPR."
-        },
-        "cambios": {
-          "titulo": "Changes to the privacy notice",
-          "placeholder": "How changes to the notice and its versioning will be communicated. When the version changes, your consent is requested again."
-        }
-      },
-      "footer": "See also the <simplificado>simplified notice</simplificado> or <derechos>exercise your rights</derechos>."
+      "footer": "See also the <simplificado>short form notice</simplificado>, the <terminos>Terms of Service</terminos>, or <derechos>exercise your rights</derechos>."
     },
     "avisoSimplificado": {
-      "titulo": "Simplified Privacy Notice",
-      "subtitulo": "A summary of how we process your personal data. The comprehensive notice has the full details.",
-      "secciones": {
-        "responsable": {
-          "titulo": "Identity and address of the data controller",
-          "placeholder": "Legal name of the controller, registered address and contact details in Mexico."
-        },
-        "datos": {
-          "titulo": "Personal data processed",
-          "placeholder": "Categories of data collected, expressly stating whether SENSITIVE personal data is processed."
-        },
-        "finalidades": {
-          "titulo": "Purposes of processing",
-          "placeholder": "NECESSARY purposes (to provide the service) and VOLUNTARY ones (require consent), stating which of the latter require your consent."
-        },
-        "limitar-uso": {
-          "titulo": "Means to limit the use or disclosure",
-          "placeholder": "How you can limit the use or disclosure of your data (e.g. exclusion lists, contact mechanisms)."
-        },
-        "integral": {
-          "titulo": "Where to read the comprehensive notice",
-          "placeholder": "Link and/or location where you can read the COMPREHENSIVE PRIVACY NOTICE in full detail."
-        }
-      },
-      "footer": "See the <integral>comprehensive privacy notice</integral> for the full details."
+      "footer": "Read the <integral>full privacy notice</integral> for the complete detail."
     },
     "solicitudes": {
       "tipo": {
@@ -801,6 +747,19 @@
         "enviadaEl": "Sent on {{fecha}}"
       },
       "avisoFooter": "See the <aviso>privacy notice</aviso> to learn how we process your data."
+    },
+    "documentos": {
+      "privacy_notice": {
+        "nombre": "Privacy Notice",
+        "aceptacion": "I have read and accept the Privacy Notice."
+      },
+      "terms": {
+        "nombre": "Terms of Service",
+        "aceptacion": "I have read and accept the Terms of Service."
+      }
+    },
+    "terminos": {
+      "footer": "See also the <aviso>Privacy Notice</aviso>."
     }
   },
   "landing": {
@@ -1041,7 +1000,8 @@
       "facebookAria": "Ledesma AI Labs on Facebook",
       "copyright": "© 2026 Ledesma AI Labs. All rights reserved",
       "politicaPrivacidad": "Privacy Policy",
-      "logoInicio": "Ledesma AI Labs, go to home"
+      "logoInicio": "Ledesma AI Labs, go to home",
+      "terminos": "Terms of Service"
     },
     "capacidades": {
       "eyebrow": "For everyday life",

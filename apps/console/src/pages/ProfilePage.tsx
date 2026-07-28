@@ -18,6 +18,7 @@ import { ErrorState } from '../components/ui/ErrorState';
 import { Button } from '../components/ui/button';
 import { DangerZoneSection } from '../components/account/DangerZoneSection';
 import { PoliticaEjecucionSection } from '../components/account/PoliticaEjecucionSection';
+import { DocumentosLegalesSection } from '../components/account/DocumentosLegalesSection';
 import { focusRing } from '../lib/utils';
 
 /** Tarjeta base de los elementos del perfil: superficie blanca plana, hairline y radio comun. */
@@ -465,6 +466,8 @@ export function ProfilePage() {
           {/* Limites de las acciones que no se pueden deshacer: se configuran UNA vez y el asistente
               los respeta despues sin volver a preguntar nada. */}
           <PoliticaEjecucionSection />
+          {/* Que documentos legales acepto, en que version y cuando, con enlace al texto vigente. */}
+          <DocumentosLegalesSection />
           {/* Zona de peligro: fila punteada al final del perfil. Abre el modal de confirmacion fuerte
               (escribir el email) y, tras el borrado, cierra sesion y redirige. El email esperado sale
               de useAuth().user?.email (mismo origen que el encabezado). */}

@@ -1,25 +1,33 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Trans, useTranslation } from 'react-i18next';
-import { ShieldCheck } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { ExternalLink, ShieldCheck } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { LedesmaLogo } from '../login/LedesmaLogo';
 import { useAcceptConsents } from '../../lib/mutations';
-import { SIMPLIFIED_NOTICE, pendingConsentBodies, type ConsentsState } from '../../lib/privacy';
+import {
+  DOCUMENT_PATHS,
+  pendingConsentBodies,
+  type ConsentsState,
+  type DocumentType,
+} from '../../lib/privacy';
 
 /**
- * Pantalla de CONSENTIMIENTO (Fase 5.6). Se muestra cuando al titular le falta aceptar la version vigente
- * de algun documento (primer login o cambio de version). Presenta el AVISO SIMPLIFICADO (resumen de
- * secciones), un check EXPLICITO NO pre-marcado y enlaces al aviso integral. La aceptacion es libre,
- * especifica e informada: solo al marcar el check y confirmar se registra (POST /v1/consents por cada
- * documento faltante). No es un paywall agresivo: es una pantalla clara y el usuario puede cerrar sesion.
+ * Pantalla de CONSENTIMIENTO BLOQUEANTE. Se muestra cuando al titular le falta aceptar la version vigente
+ * de algun documento: al registrarse (primera vez) o al iniciar sesion despues de que un documento subio
+ * de version. Sin aceptar no se navega a ningun lado de la aplicacion.
  *
- * Nota: los enlaces a los avisos abren en pestana nueva (target=_blank) para no perder el estado del
- * check (estado en React, sin localStorage) al leer el documento.
+ * El consentimiento tiene que ser libre, especifico e informado, y de ahi salen las tres reglas de esta
+ * pantalla:
+ *   - UN CHECK POR DOCUMENTO, ninguno pre-marcado. Aceptar en bloque no es especifico.
+ *   - Cada documento enlaza a su TEXTO COMPLETO, en ruta publica y en pestana nueva (target=_blank) para
+ *     no perder el estado de los checks, que vive en React y no en almacenamiento local.
+ *   - El boton queda DESHABILITADO hasta que TODOS los checks pendientes esten marcados.
+ * Ademas siempre se puede cerrar sesion: no es un secuestro de la cuenta, es una condicion para usarla.
  */
 export function ConsentScreen({ state }: { state: ConsentsState }) {
   const { t } = useTranslation();
-  const [accepted, setAccepted] = useState(false);
+  const [aceptados, setAceptados] = useState<Record<string, boolean>>({});
   const acceptConsents = useAcceptConsents();
   const navigate = useNavigate();
 
@@ -30,14 +38,21 @@ export function ConsentScreen({ state }: { state: ConsentsState }) {
   }
 
   // Al montar, mueve el foco al titulo (h1, tabindex -1) para que el lector de pantalla anuncie la
-  // pantalla de consentimiento en vez de dejar el foco en el body (hallazgo B13).
+  // pantalla de consentimiento en vez de dejar el foco en el body.
   const headingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     headingRef.current?.focus();
   }, []);
 
+  const faltantes = state.missing;
+  const todosMarcados = faltantes.length > 0 && faltantes.every((tipo) => aceptados[tipo] === true);
+
+  function toggle(tipo: DocumentType, valor: boolean) {
+    setAceptados((previo) => ({ ...previo, [tipo]: valor }));
+  }
+
   function handleAccept() {
-    if (!accepted) return;
+    if (!todosMarcados) return;
     acceptConsents.mutate(pendingConsentBodies(state));
   }
 
@@ -68,49 +83,45 @@ export function ConsentScreen({ state }: { state: ConsentsState }) {
             </p>
           </div>
 
-          {/* Resumen del aviso simplificado: solo los encabezados de las secciones. El detalle esta en el
-              aviso integral (enlazado abajo). */}
-          <div className="mt-6 rounded-xl border border-line bg-field p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-soft">
-              {t('privacidad.consentimiento.avisoSimplificadoTitulo')}
-            </p>
-            <ul className="mt-2 space-y-1.5">
-              {SIMPLIFIED_NOTICE.sections.map((section) => (
-                <li key={section.id} className="flex gap-2 text-sm text-ink-soft">
-                  <span className="text-brasa">-</span>
-                  {t(`privacidad.avisoSimplificado.secciones.${section.id}.titulo`)}
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="mt-4 text-sm text-muted">
-            <Trans
-              t={t}
-              i18nKey="privacidad.consentimiento.consultaIntegral"
-              components={{
-                integral: (
+          {/* Un bloque por documento faltante: enlace al texto completo y su propio check. */}
+          <div className="mt-6 space-y-3">
+            {faltantes.map((tipo) => (
+              <div key={tipo} className="rounded-xl border border-line bg-field p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-ink">
+                      {t(`privacidad.documentos.${tipo}.nombre`)}
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted">
+                      {t('privacidad.consentimiento.versionEtiqueta', {
+                        version: state.current[tipo],
+                      })}
+                    </p>
+                  </div>
                   <a
-                    href="/aviso-de-privacidad"
+                    href={DOCUMENT_PATHS[tipo]}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="font-medium text-brasa hover:underline"
+                    className="inline-flex flex-none items-center gap-1.5 text-xs font-medium text-brasa hover:underline"
+                  >
+                    {t('privacidad.consentimiento.leerTexto')}
+                    <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                  </a>
+                </div>
+                <label className="mt-3 flex cursor-pointer items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={aceptados[tipo] === true}
+                    onChange={(e) => toggle(tipo, e.target.checked)}
+                    className="mt-0.5 h-4 w-4 flex-none accent-brasa"
                   />
-                ),
-              }}
-            />
+                  <span className="text-sm text-ink">
+                    {t(`privacidad.documentos.${tipo}.aceptacion`)}
+                  </span>
+                </label>
+              </div>
+            ))}
           </div>
-
-          {/* Check EXPLICITO, no pre-marcado. Sin el, el boton queda deshabilitado. */}
-          <label className="mt-6 flex cursor-pointer items-start gap-3">
-            <input
-              type="checkbox"
-              checked={accepted}
-              onChange={(e) => setAccepted(e.target.checked)}
-              className="mt-0.5 h-4 w-4 flex-none accent-brasa"
-            />
-            <span className="text-sm text-ink">{t('privacidad.consentimiento.aceptacion')}</span>
-          </label>
 
           {acceptConsents.isError && (
             <p className="mt-4 text-sm text-brasa" role="alert">
@@ -121,20 +132,27 @@ export function ConsentScreen({ state }: { state: ConsentsState }) {
           <button
             type="button"
             onClick={handleAccept}
-            disabled={!accepted || acceptConsents.isPending}
+            disabled={!todosMarcados || acceptConsents.isPending}
             className="mt-6 w-full rounded-lg bg-brasa px-4 py-2.5 text-sm font-medium text-white transition hover:bg-brasa-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
             {acceptConsents.isPending
               ? t('privacidad.consentimiento.registrando')
               : t('privacidad.consentimiento.aceptar')}
           </button>
+
+          <p className="mt-3 text-center text-xs text-muted-soft">
+            {t('privacidad.consentimiento.nota')}
+          </p>
         </div>
 
-        <div className="mt-6 text-center">
+        <div className="mt-6 flex items-center justify-center gap-4 text-xs">
+          <Link to="/privacidad/simplificado" className="text-muted-soft transition hover:text-ink">
+            {t('privacidad.consentimiento.verSimplificado')}
+          </Link>
           <button
             type="button"
             onClick={() => void handleSignOut()}
-            className="text-xs text-muted-soft transition hover:text-ink"
+            className="text-muted-soft transition hover:text-ink"
           >
             {t('privacidad.consentimiento.cerrarSesion')}
           </button>
