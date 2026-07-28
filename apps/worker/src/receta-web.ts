@@ -1,4 +1,5 @@
 import {
+  MAX_ESTRATEGIAS_POR_PASO,
   MAX_PASOS_RECETA,
   marcadoresDeParametros,
   ordenarEstrategias,
@@ -460,12 +461,20 @@ function adoptarEstrategiasDeCampoAdyacente(
   valores: ValoresDeParametros,
 ): PasoCensurado[] {
   return pasos.map((paso, indice) => {
-    if (!esEscrituraConDato(paso) || estrategiasUtilizables(paso, valores).length > 0) return paso;
+    // Con una estrategia ANCLADA al DOM (atributo o xpath, salidas del selector) no se adopta nada.
+    // Las derivadas de la descripcion (rol, texto) no bloquean la adopcion: el localizador del
+    // adyacente que apunto de verdad al campo es mas fuerte, y ambas listas se FUSIONAN.
+    const propias = estrategiasUtilizables(paso, valores);
+    const tieneAncla = propias.some((e) => e.tipo === 'atributo' || e.tipo === 'xpath');
+    if (!esEscrituraConDato(paso) || tieneAncla) return paso;
     const donante =
       donanteDelMismoCampo(pasos, indice, -1, paso, valores) ??
       donanteDelMismoCampo(pasos, indice, 1, paso, valores);
     if (donante === null) return paso;
-    return { ...paso, estrategias: donante.estrategias };
+    return {
+      ...paso,
+      estrategias: [...donante.estrategias, ...propias].slice(0, MAX_ESTRATEGIAS_POR_PASO),
+    };
   });
 }
 

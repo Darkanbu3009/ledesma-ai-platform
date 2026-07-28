@@ -326,6 +326,7 @@
       "timeout": "La corrida se corto por alcanzar el tiempo maximo de ejecucion."
     },
     "errorFallback": "Revisa tu key o el identificador del modelo.",
+    "errorConexion": "Se corto la conexion mientras el agente respondia. Si habia una tarea en curso, puedes ver su desenlace en Actividad.",
     "mensajeAria": "Mensaje para el agente",
     "mensajePlaceholder": "Escribe un mensaje...",
     "detener": "Detener",
