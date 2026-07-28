@@ -25,15 +25,31 @@ export interface SeguimientoTareasWeb {
   llamadas: Map<string, { name: string; jobId: string | null }>;
   /** job_ids de tareas web que la conversacion encolo o consulto y aun no vio terminar. */
   vivos: Set<string>;
+  /**
+   * job_ids que EN ESTE TURNO se vieron terminar con estado 'completada' (cierre veraz, 28 jul
+   * 2026). Se vacia al arrancar cada turno (iniciarTurnoDeTareasWeb): decide solo sobre el
+   * desenlace del turno en curso, no sobre exitos de turnos anteriores.
+   */
+  completadas: Set<string>;
 }
 
 export function crearSeguimientoTareasWeb(): SeguimientoTareasWeb {
-  return { llamadas: new Map(), vivos: new Set() };
+  return { llamadas: new Map(), vivos: new Set(), completadas: new Set() };
 }
 
 /** true si la conversacion tiene al menos una tarea web encolada que aun no se vio terminar. */
 export function hayTareaWebViva(seguimiento: SeguimientoTareasWeb): boolean {
   return seguimiento.vivos.size > 0;
+}
+
+/** true si ESTE turno vio terminar con exito al menos una tarea web. */
+export function hayTareaWebCompletada(seguimiento: SeguimientoTareasWeb): boolean {
+  return seguimiento.completadas.size > 0;
+}
+
+/** Arranque de un turno: los exitos vistos pertenecen al turno, las tareas vivas persisten. */
+export function iniciarTurnoDeTareasWeb(seguimiento: SeguimientoTareasWeb): void {
+  seguimiento.completadas.clear();
 }
 
 function stringDe(valor: unknown): string | null {
@@ -86,5 +102,6 @@ export function registrarEventoDeTareaWeb(seguimiento: SeguimientoTareasWeb, eve
   }
   if (event.isError || contenido.estado === 'completada') {
     seguimiento.vivos.delete(jobId);
+    if (!event.isError && contenido.estado === 'completada') seguimiento.completadas.add(jobId);
   }
 }

@@ -19,13 +19,16 @@ import { providerLabel } from '../lib/agents';
 import type { AttachmentRef } from '../lib/attachments';
 import { MAX_ADJUNTOS, planificarEnvio, subirArchivos } from '../lib/attachment-upload';
 import { buildRequestChat, commitTurn } from '../lib/chat-turn';
+import { cierreTrasFalloDeStream, esErrorDeCredencialOModelo } from '../lib/cierre-turno';
 import { compatibleCredentials } from '../lib/credentials';
 import { useAgent, useCredentials } from '../lib/queries';
 import { runAgentStream, type ChatMessage, type RunCredential } from '../lib/run-agent';
 import type { SseMessage } from '../lib/sse';
 import {
   crearSeguimientoTareasWeb,
+  hayTareaWebCompletada,
   hayTareaWebViva,
+  iniciarTurnoDeTareasWeb,
   registrarEventoDeTareaWeb,
 } from '../lib/tarea-web-turno';
 import { concatenarDictado, type IdiomaDictado } from '../lib/voz';
@@ -305,6 +308,7 @@ export function PlaygroundPage() {
     setRunning(true);
     assistantTextRef.current = '';
     turnClosedRef.current = false;
+    iniciarTurnoDeTareasWeb(tareasWebRef.current);
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -323,10 +327,15 @@ export function PlaygroundPage() {
         // Turno cancelado por el usuario: la vista conserva el parcial, el historial no.
         closeTurn(content, false);
       } else {
-        if (!turnClosedRef.current) {
-          setVista((items) => [...items, { kind: 'error', code: 'UNKNOWN', retryText: content }]);
+        // CIERRE VERAZ (28 jul 2026): el stream murio sin `done`. Si la tarea web del turno ya
+        // termino con exito, el fallo es posterior al desenlace: el turno cierra con el resumen
+        // del exito y sin recuadro de error. Sin desenlace, el recuadro dice CONEXION (nada
+        // verifico la key en este camino; el copy de credencial queda para los codigos reales).
+        const cierre = cierreTrasFalloDeStream(hayTareaWebCompletada(tareasWebRef.current));
+        if (!turnClosedRef.current && cierre.tipo === 'error') {
+          setVista((items) => [...items, { kind: 'error', code: cierre.code, retryText: content }]);
         }
-        closeTurn(content, false);
+        closeTurn(content, cierre.tipo === 'exito');
       }
     } finally {
       abortRef.current = null;
@@ -543,7 +552,12 @@ export function PlaygroundPage() {
                           <div className="max-w-[80%] rounded-xl border border-brasa/40 bg-brasa/10 px-4 py-2.5 text-sm text-brasa">
                             <p className="font-mono text-xs font-semibold">{item.code}</p>
                             <p className="mt-1">
-                              {item.message ?? t('playground.errorFallback')}
+                              {/* El copy de credencial SOLO ante errores reales de autenticacion o
+                                  de modelo (verificados por codigo en el backend); el resto muestra
+                                  su mensaje propio y, sin mensaje, el copy veraz de conexion. */}
+                              {esErrorDeCredencialOModelo(item.code)
+                                ? t('playground.errorFallback')
+                                : (item.message ?? t('playground.errorConexion'))}
                             </p>
                             <button
                               type="button"

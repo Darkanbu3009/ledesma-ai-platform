@@ -326,6 +326,7 @@
       "timeout": "The run was cut off after reaching the maximum execution time."
     },
     "errorFallback": "Check your key or the model identifier.",
+    "errorConexion": "The connection dropped while the agent was responding. If a task was in progress, you can check its outcome in Activity.",
     "mensajeAria": "Message for the agent",
     "mensajePlaceholder": "Type a message...",
     "detener": "Stop",
