@@ -54,6 +54,13 @@ export interface InstruccionDePaso {
   texto: string | null;
   /** Solo 'teclas'. */
   teclas: string | null;
+  /**
+   * Solo 'teclas': pulsar sobre el ELEMENTO ENFOCADO, sin localizar nada. Es la semantica real del
+   * teclado y lo que hace toda pulsacion que sigue a una escritura (el Tab que confirma un chip de
+   * destinatario cae sobre el campo que acaba de recibir el texto). Ausente = false para no obligar
+   * a los fakes; el navegador ademas lo asume cuando el paso no trae ninguna estrategia.
+   */
+  sobreElFoco?: boolean;
   /** Solo 'navegar': URL ABSOLUTA ya construida por el ejecutor sobre el dominio de la conexion. */
   url: string | null;
   /** Solo 'esperar'. */
@@ -251,8 +258,19 @@ function pasoDeTraza(
   };
 }
 
-/** Construye la instruccion de bajo nivel de un paso, con la URL ya resuelta contra el dominio. */
-function instruccionDePaso(paso: PasoSustituido, dominio: string): InstruccionDePaso | null {
+/**
+ * Construye la instruccion de bajo nivel de un paso, con la URL ya resuelta contra el dominio.
+ *
+ * `trasEscrituraExitosa` marca que el paso ANTERIOR fue una escritura que salio bien: una pulsacion
+ * de tecla en esa posicion opera sobre el campo que acaba de recibir el texto (el foco), asi que no
+ * necesita localizador ninguno. Un paso de teclas SIN estrategias tampoco lo necesita: es la forma
+ * que dejan la grabacion y los pasos 'keys' de la traza.
+ */
+function instruccionDePaso(
+  paso: PasoSustituido,
+  dominio: string,
+  trasEscrituraExitosa: boolean,
+): InstruccionDePaso | null {
   const { paso: receta } = paso;
   if (receta.accion === 'verificar') return null;
   return {
@@ -260,6 +278,8 @@ function instruccionDePaso(paso: PasoSustituido, dominio: string): InstruccionDe
     estrategias: receta.estrategias,
     texto: paso.texto,
     teclas: receta.teclas,
+    sobreElFoco:
+      receta.accion === 'teclas' && (trasEscrituraExitosa || receta.estrategias.length === 0),
     // La URL se construye AQUI, con el dominio de la conexion y la ruta relativa de la receta: una
     // receta no puede llevar la sesion del usuario a otro sitio.
     url: receta.ruta === null ? null : `https://${dominio}${receta.ruta}`,
@@ -342,6 +362,9 @@ export async function ejecutarReceta(
   // SITIO ACTIVO de la receta. Arranca en el de la conexion y solo cambia cuando un paso declara otro
   // dominio Y el job lo autorizo. Las sesiones NO se mezclan: cambiar de sitio es cambiar de sesion.
   let sitio: SitioDelPaso = { sesionExternaId: deps.sesionExternaId, dominio: deps.dominio };
+  // ¿El paso anterior fue una ESCRITURA que salio bien? Es lo que decide que una pulsacion de tecla
+  // caiga sobre el FOCO en vez de exigir localizador (ver instruccionDePaso).
+  let trasEscrituraExitosa = false;
 
   for (const sustituido of sustituidos) {
     // CANCELACION COOPERATIVA: el dueno termino la tarea desde la consola. Se corta ANTES del paso
@@ -386,6 +409,7 @@ export async function ejecutarReceta(
     }
 
     if (sustituido.paso.accion === 'verificar') {
+      trasEscrituraExitosa = false;
       const veredicto = await deps.verificar(sitio);
       traza.push(pasoDeTraza(sustituido, traza.length, 'verificado', veredicto.tipo === 'ejecutar'));
       if (veredicto.tipo === 'detener') {
@@ -403,7 +427,7 @@ export async function ejecutarReceta(
       continue;
     }
 
-    const instruccion = instruccionDePaso(sustituido, sitio.dominio);
+    const instruccion = instruccionDePaso(sustituido, sitio.dominio, trasEscrituraExitosa);
     if (instruccion === null) {
       return {
         pasos: traza,
@@ -433,6 +457,9 @@ export async function ejecutarReceta(
 
     pasosEjecutados++;
     if (resultado.estado === 'ok') {
+      // Solo una ESCRITURA que salio bien deja el foco dentro de un campo: cualquier otro paso lo
+      // pierde, y con el la licencia de la pulsacion siguiente para caer sobre el foco.
+      trasEscrituraExitosa = sustituido.paso.accion === 'escribir';
       traza.push(pasoDeTraza(sustituido, traza.length, 'determinista', true));
       // REGISTRO DE GANADORAS (V038): que estrategia del paso resolvio el elemento. Solo un indice
       // que exista dentro de las estrategias ejecutadas cuenta; el llamador lo persiste si la
@@ -484,6 +511,9 @@ export async function ejecutarReceta(
       };
     }
 
+    // El motor tambien deja el foco en el campo que acaba de llenar: la pulsacion siguiente sigue
+    // siendo una pulsacion sobre el foco.
+    trasEscrituraExitosa = sustituido.paso.accion === 'escribir';
     traza.push(pasoDeTraza(sustituido, traza.length, 'escalado', true));
 
     // AUTO REPARACION (D5): con el selector que resolvio el motor se releen del DOM las estrategias

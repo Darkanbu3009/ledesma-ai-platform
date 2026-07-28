@@ -1085,6 +1085,26 @@ export class NavegadorBrowserbase
         return { estado: 'ok', estrategias: [], indiceUsado: null, detalle: null } as const;
       }
 
+      // PULSACION SOBRE EL FOCO: una tecla actua sobre el elemento ENFOCADO, que es la semantica
+      // real del teclado y lo que ocurrio en la corrida que se aprendio (el Tab que confirma el chip
+      // del destinatario cae sobre el campo que acaba de recibir el texto). No se localiza nada: la
+      // receta 2017cfba moria aqui porque su paso de teclas exigia un xpath del compose viejo que en
+      // sesion fresca no resuelve. Tambien cubre los pasos de teclas SIN estrategias, que es la forma
+      // que dejan la grabacion y los pasos 'keys' de la traza.
+      if (
+        instruccion.accion === 'teclas' &&
+        (instruccion.sobreElFoco === true || instruccion.estrategias.length === 0)
+      ) {
+        const pulsacion =
+          instruccion.teclas === null ? null : parsearCombinacionDeTeclas(instruccion.teclas);
+        if (pulsacion === null) {
+          return { estado: 'fallo', estrategias: [], indiceUsado: null, detalle: 'combinacion de teclas no admitida' } as const;
+        }
+        await pagina.pulsar(pulsacion);
+        await pausar(PAUSA_TRAS_ACCION_MS);
+        return { estado: 'ok', estrategias: [], indiceUsado: null, detalle: null } as const;
+      }
+
       const crudo = await pagina.evaluar(expresionResolverElemento(instruccion.estrategias));
       const elemento = crudo === null || crudo === '' ? null : leerElementoResuelto(crudo);
       if (elemento === null) {

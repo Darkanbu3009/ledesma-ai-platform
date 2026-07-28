@@ -107,6 +107,19 @@ function trayectoriaSobreLaPagina(): TrayectoriaConPasos {
   };
 }
 
+/** La MISMA trayectoria, con el Tab que confirma el chip del destinatario tras escribirlo. */
+function trayectoriaConTab(): TrayectoriaConPasos {
+  const base = trayectoriaSobreLaPagina();
+  const conTab = [
+    ...base.pasos.slice(0, 4),
+    paso(99, { tipo: 'act', instruccion: 'press Tab key to confirm the recipient', metodo: 'press', argumentos: ['Tab'] }, {
+      selector: 'xpath=/html[1]/body[1]/div[32]/input[1]',
+    }),
+    ...base.pasos.slice(4),
+  ].map((fila, idx) => ({ ...fila, idx }));
+  return { ...base, pasos: conTab };
+}
+
 /**
  * Navegador determinista respaldado por la pagina jsdom: resuelve las estrategias en orden DENTRO
  * de la ventana y aplica la accion sobre el elemento resuelto. Nada de esto toca el ejecutor.
@@ -160,6 +173,7 @@ function crearNavegadorSobreLaPagina(dom: JSDOM) {
     return JSON.parse(crudo) as { ok: boolean; indice: number | null };
   }
 
+  const pulsaciones: Array<{ teclas: string | null; sobreElFoco: boolean }> = [];
   const navegador: NavegadorDeterminista = {
     ejecutarPasoDeterminista: vi.fn(
       async (_sesion: string, instruccion: InstruccionDePaso): Promise<ResultadoPasoDeterminista> => {
@@ -167,7 +181,19 @@ function crearNavegadorSobreLaPagina(dom: JSDOM) {
           navegaciones.push(instruccion.url ?? '');
           return { estado: 'ok', estrategias: [], detalle: null };
         }
-        if (instruccion.accion === 'esperar' || instruccion.accion === 'teclas') {
+        if (instruccion.accion === 'esperar') {
+          return { estado: 'ok', estrategias: [], detalle: null };
+        }
+        // MISMA regla que el navegador real (browserbase.ts): una tecla cae sobre el elemento
+        // ENFOCADO cuando el paso sigue a una escritura o no trae estrategias; en cualquier otro
+        // caso hay que localizar el elemento antes de pulsar.
+        if (instruccion.accion === 'teclas') {
+          const sobreElFoco =
+            instruccion.sobreElFoco === true || instruccion.estrategias.length === 0;
+          if (!sobreElFoco && !evaluarPaso(instruccion.estrategias, 'click', null).ok) {
+            return { estado: 'no_localizado', estrategias: [], detalle: 'sin elemento en la pagina' };
+          }
+          pulsaciones.push({ teclas: instruccion.teclas, sobreElFoco });
           return { estado: 'ok', estrategias: [], detalle: null };
         }
         const resultado = evaluarPaso(instruccion.estrategias, instruccion.accion, instruccion.texto);
@@ -179,7 +205,7 @@ function crearNavegadorSobreLaPagina(dom: JSDOM) {
     ),
     leerEstrategiasDeElemento: vi.fn(async () => []),
   };
-  return { navegador, navegaciones };
+  return { navegador, navegaciones, pulsaciones };
 }
 
 function makeEscalador(): EscaladorDePaso & { ejecutarPasoConModelo: ReturnType<typeof vi.fn> } {
@@ -253,6 +279,47 @@ describe('la receta derivada corre con el ejecutor existente sobre un DOM simula
       expect(leer(dom, `document.body.getAttribute('data-enviados')`)).toBe('1');
       expect(verificar).toHaveBeenCalledTimes(1);
       expect(alVerificar).toEqual({ para: 'ana@otra.com', enviados: null });
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('el paso de teclas corre sobre el FOCO aunque su unica estrategia sea un xpath que ya no existe', async () => {
+    // El caso de produccion de la receta 2017cfba: el Tab que confirma el destinatario quedo con UNA
+    // sola estrategia, el xpath del compose de la corrida origen (div[32]), que en sesion fresca no
+    // resuelve. Aqui la receta se fuerza a esa forma exacta y aun asi corre entera.
+    const conversion = convertirTrayectoriaPersistida([trayectoriaConTab()]);
+    expect(conversion.guardable).toBe(true);
+    if (!conversion.guardable) return;
+    const soloConXpathViejo = conversion.pasos.map((paso) =>
+      paso.accion === 'teclas'
+        ? { ...paso, estrategias: [{ tipo: 'xpath' as const, xpath: '/html[1]/body[1]/div[32]/input[1]' }] }
+        : paso,
+    );
+
+    const dom = new JSDOM(PAGINA, { url: `https://${DOMINIO}/`, runScripts: 'outside-only' });
+    try {
+      const { navegador, pulsaciones } = crearNavegadorSobreLaPagina(dom);
+      const escalador = makeEscalador();
+      const resultado = await ejecutarReceta(
+        soloConXpathViejo,
+        { destinatario: 'ana@otra.com', asunto: 'Cierre de mes', cuerpo: 'Adjunto el cierre contable' },
+        {
+          navegador,
+          escalador,
+          verificar: vi.fn(async () => ({ tipo: 'ejecutar' as const })),
+          sesionExternaId: 'ses-1',
+          apiKey: 'sk-owner',
+          dominio: DOMINIO,
+        },
+      );
+
+      expect(resultado.desenlace).toEqual({ tipo: 'completada' });
+      // Ni una escalada al motor: el Tab no necesito localizar nada.
+      expect(escalador.ejecutarPasoConModelo).not.toHaveBeenCalled();
+      expect(resultado.escalados).toBe(0);
+      expect(pulsaciones).toEqual([{ teclas: 'Tab', sobreElFoco: true }]);
+      expect(leer(dom, `document.querySelector('[aria-label="Para"]').value`)).toBe('ana@otra.com');
     } finally {
       dom.window.close();
     }

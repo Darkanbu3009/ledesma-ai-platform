@@ -426,10 +426,49 @@ function descriptorDePaso(paso: PasoCensurado): string {
   return texto.length > MAX_DESCRIPTOR_MOTIVO ? `${texto.slice(0, MAX_DESCRIPTOR_MOTIVO)}...` : texto;
 }
 
+/**
+ * VERBOS con los que un act del motor declara, AL COMIENZO de su descripcion, que escribio un texto
+ * en un campo. Solo el comienzo cuenta: "type 'x' into the body" es una escritura; "click the textbox
+ * donde se escribe el cuerpo" no lo es.
+ */
+const VERBO_DE_ESCRITURA_AL_INICIO =
+  /^(?:type|fill|enter|write|escrib(?:e|ir)|teclea(?:r)?|ingresa(?:r)?)\b/i;
+
+/** Primer texto ENTRECOMILLADO de una descripcion: lo que ese act declara haber tecleado. */
+const PATRON_TEXTO_ENTRECOMILLADO = /["'«]([^"'«»\n]{1,512})["'»]/;
+
+/**
+ * EL TEXTO QUE UN ACT DE VISION DECLARA HABER TECLEADO (FIX paso 16, caso real de produccion del 28
+ * jul 2026, trayectoria de las 18:47): el cuerpo del correo quedo registrado como un act
+ * "type 'Este correo lo envio...' into the element with aria-label "Cuerpo del mensaje"". Stagehand
+ * resolvio ese act POR VISION, asi que la fila persistida no trae playwrightArguments y queda SIN
+ * metodo, SIN argumentos y SIN selector. Con esa forma, la promocion lo clasificaba como CLICK DE
+ * FOCO y rechazaba la trayectoria entera ("el click del paso 16 ... y ninguna escritura posterior lo
+ * cubre"), cuando en realidad era la escritura del cuerpo.
+ *
+ * La UNICA constancia de esa escritura es la descripcion, y de ella sale el texto entrecomillado.
+ * Devuelve null en cuanto el paso trae metodo (ese camino no cambia), no empieza por un verbo de
+ * escritura o no entrecomilla nada: sin las tres cosas no se afirma que hubo escritura.
+ */
+export function escrituraDeclaradaEnLaDescripcion(accion: {
+  tipo: string;
+  instruccion: string | null;
+  metodo: string | null;
+  argumentos: string[];
+}): string | null {
+  if (accion.metodo !== null || accion.tipo !== 'act') return null;
+  const instruccion = accion.instruccion?.trim() ?? '';
+  if (instruccion === '' || !VERBO_DE_ESCRITURA_AL_INICIO.test(instruccion)) return null;
+  const texto = instruccion.match(PATRON_TEXTO_ENTRECOMILLADO)?.[1]?.trim() ?? '';
+  return texto === '' ? null : texto;
+}
+
 /** ¿El paso es una ESCRITURA con dato (metodo de tecleo re-ejecutable y texto registrado)? */
 function esEscrituraConDato(paso: PasoCensurado): boolean {
   const metodo = paso.accion.metodo;
-  if (metodo === null || ACCION_POR_METODO[metodo] !== 'escribir') return false;
+  // Act de VISION: sin metodo, la escritura la declara su propia descripcion (ver arriba).
+  if (metodo === null) return escrituraDeclaradaEnLaDescripcion(paso.accion) !== null;
+  if (ACCION_POR_METODO[metodo] !== 'escribir') return false;
   return paso.accion.argumentos.join(' ').trim() !== '';
 }
 
@@ -442,6 +481,8 @@ function esEscrituraConDato(paso: PasoCensurado): boolean {
  */
 function esClickDeFocoSinLocalizacion(paso: PasoCensurado): boolean {
   if (paso.accion.argumentos.join(' ').trim() !== '' || paso.valorCensurado !== null) return false;
+  // Un act de vision que declara haber ESCRITO no es un click de foco: es la escritura del campo.
+  if (escrituraDeclaradaEnLaDescripcion(paso.accion) !== null) return false;
   return (
     paso.accion.metodo === 'click' || (paso.accion.metodo === null && paso.accion.tipo === 'act')
   );
@@ -506,6 +547,54 @@ function donanteDelMismoCampo(
   return null;
 }
 
+/** ¿El paso es una PULSACION DE TECLA registrada como act del motor (metodo 'press')? */
+function esPulsacionDeTecla(paso: PasoCensurado): boolean {
+  return paso.accion.metodo === 'press';
+}
+
+/**
+ * HERENCIA DE LOCALIZADOR EN LAS PULSACIONES (FIX teclas, caso real de produccion del 28 jul 2026):
+ * una pulsacion que sigue a una escritura opera sobre el campo QUE ACABA DE RECIBIR EL TEXTO, asi que
+ * hereda TODAS las estrategias de esa escritura (atributo, rol, texto y xpath) y no solo el xpath que
+ * la traza le dejo. La receta 2017cfba fallaba justo ahi: su paso de teclas quedo con una sola
+ * estrategia, el xpath absoluto del compose de la corrida origen (div[32]), que en sesion fresca no
+ * resuelve; el paso escalaba al motor y la corrida moria en 13 segundos.
+ *
+ * Las propias del paso se conservan DETRAS de las heredadas (el orden canonico las reordena despues) y
+ * la lista se deduplica y se acota. Es la RED de la correccion, no la principal: el ejecutor pulsa
+ * sobre el foco cuando la pulsacion sigue a una escritura exitosa (ejecutor-receta.ts), que es la
+ * semantica real del teclado y no necesita localizador ninguno.
+ */
+function heredarEstrategiasEnPulsaciones(
+  pasos: PasoCensurado[],
+  valores: ValoresDeParametros,
+): PasoCensurado[] {
+  let escrituraPrevia: PasoCensurado | null = null;
+  return pasos.map((paso) => {
+    if (TIPOS_SIN_EFECTO.has(paso.accion.tipo)) return paso;
+    if (esEscrituraConDato(paso)) {
+      escrituraPrevia = paso;
+      return paso;
+    }
+    if (!esPulsacionDeTecla(paso)) {
+      escrituraPrevia = null;
+      return paso;
+    }
+    if (escrituraPrevia === null) return paso;
+    const heredadas = estrategiasUtilizables(escrituraPrevia, valores);
+    const propias = estrategiasUtilizables(paso, valores);
+    const vistas = new Set<string>();
+    const estrategias: EstrategiaLocalizacion[] = [];
+    for (const estrategia of [...heredadas, ...propias]) {
+      const clave = claveDeEstrategia(estrategia);
+      if (vistas.has(clave)) continue;
+      vistas.add(clave);
+      estrategias.push(estrategia);
+    }
+    return { ...paso, estrategias: estrategias.slice(0, MAX_ESTRATEGIAS_POR_PASO) };
+  });
+}
+
 /** ¿Los dos pasos apuntan al MISMO campo? Selector identico, o descripciones del mismo campo. */
 function apuntaAlMismoCampo(a: PasoCensurado, b: PasoCensurado): boolean {
   if (a.selector !== null && b.selector !== null && a.selector === b.selector) return true;
@@ -546,6 +635,7 @@ const CONTROLES_DE_CABECERA_DE_COMPOSE: readonly string[] = [
 /** ¿El paso es un CLICK (con o sin selector) y sin dato tecleado? */
 function esClickSinDato(paso: PasoCensurado): boolean {
   if (paso.accion.argumentos.join(' ').trim() !== '' || paso.valorCensurado !== null) return false;
+  if (escrituraDeclaradaEnLaDescripcion(paso.accion) !== null) return false;
   const metodo = paso.accion.metodo;
   if (metodo !== null) return ACCION_POR_METODO[metodo] === 'click';
   return paso.accion.tipo === 'act';
@@ -687,9 +777,9 @@ function convertirPaso(
   // 2026: "press Tab key to confirm the recipient"). Es el MISMO gesto que ya saben repetir las
   // recetas grabadas al confirmar un chip (grabacion.ts: paso 'teclas' que pulsa sobre el foco) y
   // que los pasos 'keys' de arriba: se promueve como paso 'teclas' conservando la tecla y su
-  // posicion. Si el registro trae selector, las estrategias derivadas se CONSERVAN (el ejecutor
-  // pulsa sobre ese elemento); sin selector queda una pulsacion sobre el foco del paso previo, la
-  // misma forma que dejan la grabacion y los pasos 'keys'.
+  // posicion. Sus estrategias son las HEREDADAS de la escritura previa mas las suyas propias
+  // (heredarEstrategiasEnPulsaciones), nunca el xpath solo; y el ejecutor pulsa sobre el FOCO cuando
+  // el paso sigue a una escritura exitosa, que es la semantica real del teclado.
   if (paso.accion.metodo === 'press') {
     const teclas = paso.accion.argumentos[0]?.trim();
     if (teclas === undefined || teclas === '') {
@@ -724,6 +814,26 @@ function convertirPaso(
     return {
       omitible: false,
       motivo: `paso ${paso.idx}: ${descriptorDePaso(paso)}, sin ninguna estrategia de localizacion`,
+    };
+  }
+
+  // ESCRITURA DECLARADA POR UN ACT DE VISION (FIX paso 16): sin metodo ni argumentos, el texto
+  // tecleado solo consta en la descripcion. Se promueve SOLO si ese texto es EXACTAMENTE un dato que
+  // el objetivo declaro, para que el paso viaje como MARCADOR y cada corrida lo resuelva con los
+  // suyos. Un texto que no corresponde a ningun parametro NO se guarda como literal: la descripcion
+  // es el relato del modelo, no las pulsaciones, y persistir de ahi un literal (parafraseado o
+  // recortado) haria que la receta escriba algo distinto de lo aprendido.
+  const declarada = escrituraDeclaradaEnLaDescripcion(paso.accion);
+  if (paso.accion.metodo === null && declarada !== null) {
+    const parametro = marcadorDelValor(declarada, valores);
+    if (parametro === null) {
+      return {
+        omitible: false,
+        motivo: `paso ${paso.idx}: ${descriptorDePaso(paso)}, escribio un texto que el objetivo de la corrida no declara`,
+      };
+    }
+    return {
+      promovido: { ...base, accion: 'escribir', estrategias, valor: { tipo: 'parametro', parametro } },
     };
   }
 
@@ -789,10 +899,14 @@ export function promoverTrayectoria(entrada: {
   const llenadosSinRegistro: string[] = [];
   const clicksSinLocalizacion: Array<{ idx: number; descriptor: string }> = [];
   const escriturasPromovidas: number[] = [];
-  // Primero la adopcion (una escritura sin selector toma el localizador del adyacente) y DESPUES la
-  // destilacion: el orden importa, porque el donante puede ser justo un click que la destilacion
-  // descartara por redundante.
-  const preparados = adoptarEstrategiasDeCampoAdyacente(entrada.pasos, valores);
+  // Primero la adopcion (una escritura sin selector toma el localizador del adyacente), despues la
+  // herencia de las pulsaciones (que copia las estrategias ya completas de la escritura previa) y al
+  // final la destilacion: el orden importa, porque el donante puede ser justo un click que la
+  // destilacion descartara por redundante.
+  const preparados = heredarEstrategiasEnPulsaciones(
+    adoptarEstrategiasDeCampoAdyacente(entrada.pasos, valores),
+    valores,
+  );
   for (const paso of descartarDesviosDeLaTrayectoria(preparados, valores)) {
     if (paso.exito === false) {
       return { promovida: false, motivo: 'la trayectoria contiene un paso fallido' };

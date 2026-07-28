@@ -11,7 +11,12 @@ import type { TrayectoriaConPasos, PasoTrayectoria } from '@ledesma-platform/bac
 import type { NuevaRecetaWeb, RecetaWeb } from '@ledesma-platform/backend/recetas-web';
 import { PermanentExecutionError, PromocionNoRepetibleError } from './errores.js';
 import { detectarVerboBloqueado } from './prompt-tarea-web.js';
-import { descripcionGeneralizada, firmaDeObjetivo, promoverTrayectoria } from './receta-web.js';
+import {
+  descripcionGeneralizada,
+  escrituraDeclaradaEnLaDescripcion,
+  firmaDeObjetivo,
+  promoverTrayectoria,
+} from './receta-web.js';
 import type { PasoCensurado } from './trayectoria.js';
 import type { Logger } from './logger.js';
 
@@ -134,6 +139,21 @@ const RELLENO_INICIAL = new Set([
 /** Separadores que parten una descripcion de escritura en sus campos ("message into the body"). */
 const PATRON_SEPARADOR_DE_CAMPOS = /\b(?:into|dentro)\b/gi;
 
+/**
+ * CITA TEXTUAL de un aria-label dentro de la descripcion del ACT ('... with aria-label "Cuerpo del
+ * mensaje"'). El modelo copia ahi el atributo tal como lo leyo del DOM, asi que es el nombre
+ * accesible LITERAL del elemento: mejor fuente que las palabras con las que describio la accion.
+ */
+const PATRON_ARIA_LABEL_CITADO = /aria[-\s]?label\s*(?:=|:)?\s*["'«]([^"'«»\n]{2,60})["'»]/i;
+
+/** Palabra de rol nombrada en cualquier parte de la descripcion, o null. */
+function rolCitadoEnLaDescripcion(descripcion: string): string | null {
+  const palabra = descripcion.match(
+    /\b(textbox|input|field|campo|button|boton|link|enlace|checkbox|combobox)\b/i,
+  );
+  return ROL_POR_PALABRA[(palabra?.[1] ?? '').toLowerCase()] ?? null;
+}
+
 /** Tope de estrategias derivadas de UNA descripcion (el resto de la lista lo llena el selector). */
 const MAX_ESTRATEGIAS_DE_DESCRIPCION = 3;
 
@@ -161,7 +181,10 @@ function nombreDerivadoValido(nombre: string): boolean {
 /**
  * DERIVA estrategias 'rol' y 'texto' desde la DESCRIPCION del ACT (FIX estrategias multiples, 28
  * jul 2026). La descripcion nombra el campo en lenguaje natural y es lo unico persistido que
- * sobrevive a un xpath re-renderizado. Tres formas, de la mas explicita a la mas laxa:
+ * sobrevive a un xpath re-renderizado. Cuatro formas, de la mas explicita a la mas laxa:
+ *  0. aria-label CITADO textualmente: 'type ... aria-label "Cuerpo del mensaje"' -> atributo
+ *     aria-label "Cuerpo del mensaje" (y rol con ese mismo nombre). Es el nombre accesible literal
+ *     que el modelo copio del DOM, asi que gana a cualquier nombre adivinado de las palabras;
  *  1. rol nombrado antes del campo: "click the textbox Cuerpo del mensaje" -> rol textbox,
  *     nombre "Cuerpo del mensaje";
  *  2. rol nombrado despues del campo: "click the recipients field" -> rol textbox, "recipients";
@@ -180,13 +203,17 @@ export function derivarEstrategiasDeDescripcion(accion: {
   argumentos: string[];
 }): EstrategiaLocalizacion[] {
   const metodo = accion.metodo;
+  // Act de VISION que declara la escritura en su propia descripcion (FIX paso 16): sin metodo, sin
+  // argumentos y sin selector, la descripcion es lo unico que queda, asi que tambien deriva.
+  const declarada = escrituraDeclaradaEnLaDescripcion(accion);
   const esClick = metodo !== null && METODOS_DE_CLICK_DERIVABLES.has(metodo);
-  const esEscritura = metodo !== null && METODOS_DE_ESCRITURA_DERIVABLES.has(metodo);
+  const esEscritura =
+    (metodo !== null && METODOS_DE_ESCRITURA_DERIVABLES.has(metodo)) || declarada !== null;
   if ((!esClick && !esEscritura) || accion.instruccion === null) return [];
 
   // El valor tecleado se borra de la descripcion: ninguna estrategia puede nacer del dato.
   let descripcion = accion.instruccion;
-  for (const argumento of accion.argumentos) {
+  for (const argumento of [...accion.argumentos, ...(declarada === null ? [] : [declarada])]) {
     if (argumento.trim() === '') continue;
     const escapado = argumento.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     descripcion = descripcion.replace(new RegExp(escapado, 'gi'), ' ');
@@ -200,6 +227,23 @@ export function derivarEstrategiasDeDescripcion(accion: {
     if (estrategias.some((previa) => JSON.stringify(previa) === clave)) return;
     if (estrategias.length < MAX_ESTRATEGIAS_DE_DESCRIPCION) estrategias.push(estrategia);
   };
+
+  // ARIA-LABEL CITADO: prioridad MAXIMA y salida inmediata. Es el nombre accesible literal que el
+  // modelo copio del DOM, asi que localiza por atributo estable (lo mas fuerte del contrato) y por
+  // rol con ese mismo nombre; las formas laxas de abajo, que adivinan el nombre a partir de las
+  // palabras de la accion, ya no aportan nada mejor.
+  const etiqueta = (descripcion.match(PATRON_ARIA_LABEL_CITADO)?.[1] ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (nombreDerivadoValido(etiqueta)) {
+    agregar({ tipo: 'atributo', atributo: 'aria-label', valor: etiqueta });
+    agregar({
+      tipo: 'rol',
+      rol: rolCitadoEnLaDescripcion(descripcion) ?? (esClick ? 'button' : 'textbox'),
+      nombre: etiqueta,
+    });
+    return estrategias;
+  }
 
   // Forma 1: la palabra de rol precede al nombre ("the textbox Cuerpo del mensaje").
   const rolYNombre = descripcion.match(

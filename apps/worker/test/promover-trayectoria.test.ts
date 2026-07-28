@@ -843,6 +843,23 @@ describe('convertirTrayectoriaPersistida (fixture real de 44 pasos: clicks de fo
     expect(resultado.pasosSoloXpath).toEqual([]);
   });
 
+  it('el paso de teclas hereda las estrategias de la escritura previa, no solo el xpath', () => {
+    const resultado = convertirTrayectoriaPersistida([trayectoria({ pasos: pasosGmailReal44() })]);
+    expect(resultado.guardable).toBe(true);
+    if (!resultado.guardable) return;
+    const teclas = resultado.pasos.find((p) => p.accion === 'teclas');
+    expect(teclas?.teclas).toBe('Tab');
+    // El Tab confirma el chip del destinatario: opera sobre el campo Para, asi que hereda SUS
+    // estrategias completas. Con solo el xpath del compose de la corrida origen (lo que la receta
+    // 2017cfba guardo) el paso no resolvia nada en sesion fresca.
+    expect(teclas?.estrategias[0]).toEqual({
+      tipo: 'atributo',
+      atributo: 'aria-label',
+      valor: 'Para',
+    });
+    expect(teclas?.estrategias.some((e) => e.tipo !== 'xpath')).toBe(true);
+  });
+
   it('si el clic final pierde selector y descripcion, falla nombrando el paso exacto', () => {
     const pasos = pasosGmailReal44().map((p) =>
       p.idx === 35
@@ -991,6 +1008,149 @@ describe('convertirTrayectoriaPersistida (fixture de la receta de 21 pasos: desv
     // El clic final de Enviar sobrevive con su localizador.
     const enviar = resultado.pasos[resultado.pasos.length - 1];
     expect(enviar?.estrategias[0]).toEqual({ tipo: 'atributo', atributo: 'aria-label', valor: 'Enviar' });
+  });
+});
+
+/**
+ * La trayectoria REAL de las 18:47 del 28 jul 2026 (jobOrigen 1154d570), cuya promocion seguia
+ * fallando con "el click del paso 16 (act type 'Este correo lo envio...') quedo sin ninguna
+ * estrategia de localizacion y ninguna escritura posterior lo cubre".
+ *
+ * QUE TIENE DE DISTINTO: el CUERPO del correo no se escribio con un fill resuelto por DOM sino con
+ * un act que Stagehand resolvio POR VISION, asi que su fila persistida no trae playwrightArguments y
+ * queda SIN metodo, SIN argumentos y SIN selector: lo unico que registra la escritura es su propia
+ * descripcion, que cita el texto tecleado entrecomillado y el aria-label del campo. Con esa forma la
+ * promocion lo tomaba por un CLICK DE FOCO, y como despues del paso 16 ya no hay ninguna escritura
+ * que lo cubriera (solo la verificacion y el envio), rechazaba la trayectoria entera.
+ */
+const OBJETIVO_1847 =
+  'envia un correo a martin@ejemplo.com con asunto "Prueba de la tarea aprendida" y cuerpo "Este correo lo envio la tarea aprendida"';
+
+function pasosGmailReal1847(): PasoTrayectoria[] {
+  siguienteId = 0;
+  return [
+    paso(0, { tipo: 'goto', instruccion: 'abrir el correo' }, { url: `https://${DOMINIO}/` }),
+    paso(1, { tipo: 'screenshot' }),
+    paso(2, { tipo: 'ariaTree' }),
+    paso(3, { tipo: 'act', instruccion: 'click en Redactar', metodo: 'click' }, {
+      selector: `xpath=/html[1]/body[1]/div[7]//div[@aria-label='Redactar']`,
+    }),
+    paso(4, { tipo: 'screenshot' }),
+    paso(5, { tipo: 'act', instruccion: 'click the recipients field' }),
+    paso(6, { tipo: 'act', instruccion: 'escribir el destinatario', metodo: 'fill', argumentos: ['martin@ejemplo.com'] }, {
+      selector: `xpath=/html[1]/body[1]/div[7]//input[@aria-label='Para']`,
+      valorCensurado: 'martin@ejemplo.com',
+    }),
+    // El Tab del caso real: su unico selector es el xpath POSICIONAL del compose de esa corrida.
+    paso(7, { tipo: 'act', instruccion: 'press Tab key to confirm the recipient', metodo: 'press', argumentos: ['Tab'] }, {
+      selector: 'xpath=/html[1]/body[1]/div[32]/div[1]/div[1]/div[2]/input[1]',
+    }),
+    paso(8, { tipo: 'screenshot' }),
+    paso(9, { tipo: 'act', instruccion: 'click the subject field' }),
+    paso(10, { tipo: 'act', instruccion: 'escribir el asunto', metodo: 'fill', argumentos: ['Prueba de la tarea aprendida'] }, {
+      selector: `xpath=/html[1]/body[1]/div[7]//input[@name='subjectbox']`,
+      valorCensurado: 'Prueba de la tarea aprendida',
+    }),
+    paso(11, { tipo: 'screenshot' }),
+    paso(12, { tipo: 'extract', instruccion: 'leer los campos del formulario' }),
+    paso(13, { tipo: 'act', instruccion: 'click the textbox Cuerpo del mensaje' }),
+    paso(14, { tipo: 'screenshot' }),
+    paso(15, { tipo: 'ariaTree' }),
+    // EL PASO 16: la escritura del cuerpo, resuelta por vision. Sin metodo, sin argumentos y sin
+    // selector; el texto tecleado y el aria-label del campo viven dentro de la descripcion.
+    paso(16, {
+      tipo: 'act',
+      instruccion:
+        `type 'Este correo lo envio la tarea aprendida' into the element with aria-label "Cuerpo del mensaje"`,
+    }),
+    paso(17, { tipo: 'verificacion', instruccion: 'verificacion previa: los datos coinciden con lo pedido' }),
+    paso(18, { tipo: 'act', instruccion: 'click en Enviar', metodo: 'click' }, {
+      selector: `xpath=/html[1]/body[1]/div[7]//div[@aria-label='Enviar']`,
+    }),
+    paso(19, { tipo: 'extract', instruccion: 'confirmar que el mensaje se envio' }),
+    paso(20, { tipo: 'done' }),
+  ];
+}
+
+describe('convertirTrayectoriaPersistida (fixture real de las 18:47: el cuerpo escrito por vision)', () => {
+  it('la fixture reproduce el paso 16 tal como quedo en la base: act sin metodo, sin argumentos y sin selector', () => {
+    const paso16 = pasosGmailReal1847().find((p) => p.idx === 16);
+    const accion = paso16?.accion as { tipo: string; metodo: string | null; argumentos: string[] };
+    expect(accion.tipo).toBe('act');
+    expect(accion.metodo).toBeNull();
+    expect(accion.argumentos).toEqual([]);
+    expect(paso16?.selector).toBeNull();
+    expect(paso16?.valorCensurado).toBeNull();
+  });
+
+  it('convierte la trayectoria COMPLETA: el paso 16 es la escritura del cuerpo, no un click de foco', () => {
+    const resultado = convertirTrayectoriaPersistida([
+      trayectoria({ objetivo: OBJETIVO_1847, pasos: pasosGmailReal1847() }),
+    ]);
+    expect(resultado.guardable).toBe(true);
+    if (!resultado.guardable) return;
+    expect(resultado.pasos.map((p) => p.accion)).toEqual([
+      'navegar',
+      'click',
+      'escribir',
+      'teclas',
+      'escribir',
+      'escribir',
+      'verificar',
+      'click',
+    ]);
+    const escritos = resultado.pasos.filter((p) => p.accion === 'escribir');
+    expect(escritos.map((p) => p.valor)).toEqual([
+      { tipo: 'parametro', parametro: 'destinatario' },
+      { tipo: 'parametro', parametro: 'asunto' },
+      // El cuerpo viaja como MARCADOR: el texto citado en la descripcion es EXACTAMENTE el dato que
+      // el objetivo declaro, asi que cada corrida lo resuelve con el suyo.
+      { tipo: 'parametro', parametro: 'cuerpo' },
+    ]);
+    // El aria-label citado en la descripcion es la estrategia primaria del cuerpo, por delante de
+    // cualquier nombre adivinado de las palabras de la accion.
+    const cuerpo = escritos[escritos.length - 1];
+    expect(cuerpo?.estrategias[0]).toEqual({
+      tipo: 'atributo',
+      atributo: 'aria-label',
+      valor: 'Cuerpo del mensaje',
+    });
+    expect(cuerpo?.estrategias[1]).toEqual({
+      tipo: 'rol',
+      rol: 'textbox',
+      nombre: 'Cuerpo del mensaje',
+    });
+    expect(resultado.pasosSoloXpath).toEqual([]);
+    // Ningun valor de la corrida origen queda persistido, ni siquiera el que venia dentro de la
+    // descripcion del act.
+    const serializada = JSON.stringify(resultado.pasos);
+    expect(serializada).not.toContain('Este correo lo envio');
+    expect(serializada).not.toContain('martin@ejemplo.com');
+  });
+
+  it('si el texto que el act declara no es un dato del objetivo, rechaza nombrando ese paso', () => {
+    // Falla cerrada: la descripcion es el relato del modelo, no las pulsaciones, asi que un texto
+    // que no corresponde a ningun parametro NO se guarda como literal.
+    const pasos = pasosGmailReal1847().map((p) =>
+      p.idx === 16
+        ? {
+            ...p,
+            accion: {
+              tipo: 'act',
+              instruccion: `type 'otra cosa que nadie pidio' into the element with aria-label "Cuerpo del mensaje"`,
+              metodo: null,
+              argumentos: [],
+            },
+          }
+        : p,
+    );
+    const resultado = convertirTrayectoriaPersistida([
+      trayectoria({ objetivo: OBJETIVO_1847, pasos }),
+    ]);
+    expect(resultado.guardable).toBe(false);
+    if (resultado.guardable) return;
+    expect(resultado.motivo).toContain('paso 16');
+    expect(resultado.motivo).toContain('escribio un texto que el objetivo de la corrida no declara');
   });
 });
 
