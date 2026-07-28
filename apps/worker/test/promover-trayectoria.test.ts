@@ -679,6 +679,141 @@ describe('convertirTrayectoriaPersistida (fixture real de 44 pasos: clicks de fo
   });
 });
 
+/**
+ * La trayectoria que produjo la receta REAL de 21 pasos (79622fdb, 28 jul 2026): a diferencia de la
+ * fixture de 44 pasos, aqui los desvios SI traen selector (el motor los resolvio por DOM, no por
+ * vision), asi que la regla del click de foco sin localizacion no los descartaba y cada uno se
+ * promovia como paso 'click', mas las escrituras repetidas de los campos redescubiertos. Con la
+ * DESTILACION ESTRICTA, la receta conserva solo el ultimo camino continuo y exitoso: 8 pasos.
+ */
+function pasosGmailDesviosConSelector(): PasoTrayectoria[] {
+  siguienteId = 0;
+  const SEL_PARA = `xpath=/html[1]/body[1]/div[7]//input[@aria-label='Para']`;
+  const SEL_ASUNTO = `xpath=/html[1]/body[1]/div[7]//input[@name='subjectbox']`;
+  const SEL_CUERPO = `xpath=/html[1]/body[1]/div[7]//div[@aria-label='Cuerpo del mensaje']`;
+  return [
+    paso(0, { tipo: 'goto', instruccion: 'abrir el correo' }, { url: `https://${DOMINIO}/` }),
+    paso(1, { tipo: 'screenshot' }),
+    paso(2, { tipo: 'act', instruccion: 'click en Redactar', metodo: 'click' }, {
+      selector: `xpath=/html[1]/body[1]/div[7]//div[@aria-label='Redactar']`,
+    }),
+    // Desvio: click redundante sobre el campo Para, que el fill siguiente vuelve a enfocar.
+    paso(3, { tipo: 'act', instruccion: 'click the recipients field', metodo: 'click' }, {
+      selector: SEL_PARA,
+    }),
+    paso(4, { tipo: 'act', instruccion: 'escribir el destinatario', metodo: 'fill', argumentos: ['martin@ejemplo.com'] }, {
+      selector: SEL_PARA,
+      valorCensurado: 'martin@ejemplo.com',
+    }),
+    paso(5, { tipo: 'act', instruccion: 'press Tab key to confirm the recipient', metodo: 'press', argumentos: ['Tab'] }, {
+      selector: SEL_PARA,
+    }),
+    paso(6, { tipo: 'act', instruccion: 'click the subject field', metodo: 'click' }, {
+      selector: SEL_ASUNTO,
+    }),
+    // Primer intento del asunto, anulado por el desvio de la cabecera: se reescribe en el paso 16.
+    paso(7, { tipo: 'act', instruccion: 'escribir el asunto', metodo: 'fill', argumentos: ['Reporte semanal'] }, {
+      selector: SEL_ASUNTO,
+      valorCensurado: 'Reporte semanal',
+    }),
+    // Desvios sobre los CONTROLES DE LA CABECERA del compose, con selector propio cada uno.
+    paso(8, { tipo: 'act', instruccion: 'click to expand the compose window', metodo: 'click' }, {
+      selector: `xpath=/html[1]/body[1]/div[7]//img[@aria-label='Expandir']`,
+    }),
+    paso(9, { tipo: 'act', instruccion: 'toggle full screen mode for the compose window', metodo: 'click' }, {
+      selector: `xpath=/html[1]/body[1]/div[7]//img[@aria-label='Pantalla completa']`,
+    }),
+    paso(10, { tipo: 'act', instruccion: 'click the textbox Cuerpo del mensaje', metodo: 'click' }, {
+      selector: SEL_CUERPO,
+    }),
+    paso(11, { tipo: 'act', instruccion: 'click the message body area', metodo: 'click' }, {
+      selector: SEL_CUERPO,
+    }),
+    // Primer intento del cuerpo, anulado: el compose se minimiza y hay que redescubrir los campos.
+    paso(12, { tipo: 'act', instruccion: 'escribir el cuerpo', metodo: 'fill', argumentos: ['Adjunto el resumen de la semana'] }, {
+      selector: SEL_CUERPO,
+      valorCensurado: 'Adjunto el resumen de la semana',
+    }),
+    paso(13, { tipo: 'act', instruccion: 'click Minimizar', metodo: 'click' }, {
+      selector: `xpath=/html[1]/body[1]/div[7]//img[@aria-label='Minimizar']`,
+    }),
+    paso(14, { tipo: 'act', instruccion: 'click to expand the minimized compose window', metodo: 'click' }, {
+      selector: `xpath=/html[1]/body[1]/div[7]//img[@aria-label='Expandir']`,
+    }),
+    // Redescubrimiento de campos: re-click y re-escritura del asunto y del cuerpo.
+    paso(15, { tipo: 'act', instruccion: 'click the subject field', metodo: 'click' }, {
+      selector: SEL_ASUNTO,
+    }),
+    paso(16, { tipo: 'act', instruccion: 'escribir el asunto', metodo: 'fill', argumentos: ['Reporte semanal'] }, {
+      selector: SEL_ASUNTO,
+      valorCensurado: 'Reporte semanal',
+    }),
+    paso(17, { tipo: 'act', instruccion: 'click the textbox Cuerpo del mensaje', metodo: 'click' }, {
+      selector: SEL_CUERPO,
+    }),
+    paso(18, { tipo: 'act', instruccion: 'escribir el cuerpo', metodo: 'fill', argumentos: ['Adjunto el resumen de la semana'] }, {
+      selector: SEL_CUERPO,
+      valorCensurado: 'Adjunto el resumen de la semana',
+    }),
+    paso(19, { tipo: 'act', instruccion: 'click to exit full screen', metodo: 'click' }, {
+      selector: `xpath=/html[1]/body[1]/div[7]//img[@aria-label='Salir de pantalla completa']`,
+    }),
+    paso(20, { tipo: 'verificacion', instruccion: 'verificacion previa: los datos coinciden con lo pedido' }),
+    paso(21, { tipo: 'act', instruccion: 'click en Enviar', metodo: 'click' }, {
+      selector: `xpath=/html[1]/body[1]/div[7]//div[@aria-label='Enviar']`,
+    }),
+    paso(22, { tipo: 'extract', instruccion: 'confirmar que el mensaje se envio' }),
+    paso(23, { tipo: 'done' }),
+  ];
+}
+
+describe('convertirTrayectoriaPersistida (fixture de la receta de 21 pasos: desvios CON selector)', () => {
+  it('la fixture reproduce la receta real: 21 pasos con efecto que la destilacion vieja conservaba', () => {
+    const pasos = pasosGmailDesviosConSelector();
+    // goto + verificacion + los 19 act con selector: los 21 pasos que la receta 79622fdb guardo.
+    const conEfecto = pasos.filter((p) => {
+      const tipo = (p.accion as { tipo: string }).tipo;
+      return tipo === 'goto' || tipo === 'verificacion' || (tipo === 'act' && p.selector !== null);
+    });
+    expect(conEfecto).toHaveLength(21);
+  });
+
+  it('la destilacion estricta conserva solo el ultimo camino continuo: 8 pasos, sin desvios', () => {
+    const resultado = convertirTrayectoriaPersistida([
+      trayectoria({ pasos: pasosGmailDesviosConSelector() }),
+    ]);
+    expect(resultado.guardable).toBe(true);
+    if (!resultado.guardable) return;
+    expect(resultado.pasos.length).toBeGreaterThanOrEqual(6);
+    expect(resultado.pasos.length).toBeLessThanOrEqual(10);
+    expect(resultado.pasos.map((p) => p.accion)).toEqual([
+      'navegar',
+      'click',
+      'escribir',
+      'teclas',
+      'escribir',
+      'escribir',
+      'verificar',
+      'click',
+    ]);
+    // Cada dato queda escrito UNA sola vez (la re-escritura del camino final, no el intento previo).
+    const escritos = resultado.pasos.filter((p) => p.accion === 'escribir');
+    expect(escritos.map((p) => p.valor)).toEqual([
+      { tipo: 'parametro', parametro: 'destinatario' },
+      { tipo: 'parametro', parametro: 'asunto' },
+      { tipo: 'parametro', parametro: 'cuerpo' },
+    ]);
+    // Ningun rastro de los controles de la cabecera del compose.
+    const serializada = JSON.stringify(resultado.pasos).toLowerCase();
+    expect(serializada).not.toContain('expandir');
+    expect(serializada).not.toContain('pantalla');
+    expect(serializada).not.toContain('minimizar');
+    // El clic final de Enviar sobrevive con su localizador.
+    const enviar = resultado.pasos[resultado.pasos.length - 1];
+    expect(enviar?.estrategias[0]).toEqual({ tipo: 'atributo', atributo: 'aria-label', valor: 'Enviar' });
+  });
+});
+
 describe('procesarJobDePromoverTrayectoria', () => {
   const PAYLOAD = { kind: 'promover_trayectoria', jobId: JOB_ORIGEN };
 
@@ -716,7 +851,15 @@ describe('procesarJobDePromoverTrayectoria', () => {
     expect(promovida?.ownerId).toBe(OWNER);
     expect(promovida?.dominio).toBe(DOMINIO);
     expect(promovida?.creadaDesdeTrayectoria).toBe('tray-1');
-    expect(promovida?.descripcion).toBe(OBJETIVO);
+    // FIX seleccion (28 jul 2026): la descripcion se guarda GENERALIZADA, con los valores de la
+    // corrida origen sustituidos por sus nombres de parametro. Con los valores literales dentro,
+    // el selector de tareas descartaba el match ante una peticion con datos distintos.
+    expect(promovida?.descripcion).toBe(
+      'envia un correo a <destinatario> con asunto "<asunto>" y cuerpo "<cuerpo>"',
+    );
+    expect(promovida?.descripcion).not.toContain('martin@ejemplo.com');
+    expect(promovida?.descripcion).not.toContain('Reporte semanal');
+    expect(promovida?.descripcion).not.toContain('Adjunto el resumen');
     expect(promovida?.pasos).toHaveLength(9);
     expect(resultados[0]).toMatchObject({ estado: 'ok', via: 'trayectoria', recetaId: 'receta-1' });
   });

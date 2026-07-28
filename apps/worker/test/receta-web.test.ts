@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { parsearPasosDeReceta, type EstrategiaLocalizacion } from '@ledesma-platform/shared';
 import { VALOR_CENSURADO } from '../src/censura.js';
 import {
+  descripcionGeneralizada,
   firmaDeObjetivo,
   promoverTrayectoria,
   repararEstrategias,
@@ -69,6 +70,35 @@ describe('firmaDeObjetivo (D3: criterio de equivalencia entre objetivos)', () =>
     const b = firmaDeObjetivo('paga 900 MXN de la factura');
     expect(a).toBe(b);
     expect(a).toContain('<monto>');
+  });
+});
+
+describe('descripcionGeneralizada (FIX seleccion: la descripcion sin los valores de la corrida origen)', () => {
+  it('sustituye los valores parametrizados por sus nombres de parametro, conservando el resto', () => {
+    const descripcion = descripcionGeneralizada(
+      'Envia un correo a Martin@Ejemplo.com con el asunto "Trayectoria fresca" y el cuerpo "Este correo genera la trayectoria"',
+    );
+    expect(descripcion).toBe(
+      'Envia un correo a <destinatario> con el asunto "<asunto>" y el cuerpo "<cuerpo>"',
+    );
+  });
+
+  it('ningun valor literal sobrevive, aunque el usuario lo haya escrito con otras mayusculas', () => {
+    const descripcion = descripcionGeneralizada(
+      'manda un correo a ANA@EJEMPLO.COM con asunto "Hola" y mensaje "llego el paquete de 2,400 MXN"',
+    );
+    expect(descripcion).not.toContain('ANA@EJEMPLO.COM');
+    expect(descripcion).not.toContain('Hola');
+    expect(descripcion).not.toContain('llego el paquete');
+    expect(descripcion).toContain('<destinatario>');
+    expect(descripcion).toContain('<asunto>');
+    expect(descripcion).toContain('<cuerpo>');
+  });
+
+  it('un objetivo sin parametros declarados queda tal cual', () => {
+    expect(descripcionGeneralizada('archiva el primer mensaje de la bandeja')).toBe(
+      'archiva el primer mensaje de la bandeja',
+    );
   });
 });
 
