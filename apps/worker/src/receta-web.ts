@@ -1,5 +1,6 @@
 import {
   MAX_PASOS_RECETA,
+  marcadoresDeParametros,
   ordenarEstrategias,
   parsearRuta,
   tienePasoDeVerificacion,
@@ -246,6 +247,24 @@ const TIPOS_SIN_EFECTO = new Set([
 ]);
 
 /**
+ * Tools de LLENADO DE FORMULARIO de Stagehand: 'fillForm' (resuelve cada campo con selector) y
+ * 'fillFormVision' (variante por vision, sin ningun selector). Su accion de CABECERA no actua sobre
+ * un elemento concreto, y el registro no conserva que campos lleno ni con que valores (la whitelist
+ * de trayectoria.ts no copia `fields`). Los campos que SI quedaron registrados con localizacion
+ * llegan como acciones ADYACENTES (los act sinteticos de fillForm, o los act con los que el motor
+ * completo los mismos campos despues), y ESAS son las que se promueven a pasos 'escribir'.
+ *
+ * La cabecera, por tanto, se DESCARTA, pero de forma CONDICIONADA (caso real de produccion, jul
+ * 2026: un fillFormVision en el paso 4 abortaba la conversion entera con "sin ninguna estrategia de
+ * localizacion" aunque los tres datos del objetivo quedaban cubiertos por acts posteriores con
+ * selector): la promocion solo la omite si TODOS los datos declarados del objetivo terminan
+ * cubiertos por algun paso de escritura de la receta. Si un dato quedaria sin cubrir, la conversion
+ * falla con motivo especifico (ver promoverTrayectoria) en vez de producir una receta que hace
+ * menos de lo aprendido.
+ */
+const TIPOS_LLENADO_DE_FORMULARIO = new Set(['fillForm', 'fillFormVision']);
+
+/**
  * Tipo del paso SINTETICO que deja la verificacion determinista en la traza
  * (construirPasoDeVerificacion, verificacion.ts). Se promueve como paso 'verificar': marca el punto
  * exacto del flujo donde el sistema comparo antes de ejecutar la accion irreversible (D7).
@@ -301,7 +320,7 @@ function valorDePaso(texto: string, valores: ValoresDeParametros): ValorDePaso |
  */
 type Conversion =
   | { promovido: PasoDeReceta }
-  | { omitible: true }
+  | { omitible: true; exigeCobertura?: boolean }
   | { omitible: false; motivo: string };
 
 /** Ruta relativa de una URL de la traza, si pertenece al dominio de la receta. */
@@ -366,6 +385,26 @@ function convertirPaso(
     ordenarEstrategias(paso.estrategias ?? []),
     valoresConcretos(valores),
   );
+
+  // LLENADO DE FORMULARIO (fillForm / fillFormVision): si este registro trae la escritura de UN
+  // campo localizable (estrategias, metodo de tecleo y valor), se DESCOMPONE como un paso 'escribir'
+  // normal. Si no trae nada de eso (el caso persistido: cabecera sin selector, sin metodo y sin
+  // argumentos), se descarta de forma CONDICIONADA: la promocion verifica al final que los datos del
+  // objetivo quedaron cubiertos por otros pasos (ver TIPOS_LLENADO_DE_FORMULARIO).
+  if (TIPOS_LLENADO_DE_FORMULARIO.has(tipo)) {
+    const accionDeCampo =
+      paso.accion.metodo === null ? undefined : ACCION_POR_METODO[paso.accion.metodo];
+    const texto = paso.accion.argumentos.join(' ').trim();
+    if (estrategias.length > 0 && accionDeCampo === 'escribir' && texto !== '') {
+      const valor = valorDePaso(texto, valores);
+      if (valor === null) {
+        return { omitible: false, motivo: 'escritura de un valor sensible sin parametro al que atarlo' };
+      }
+      return { promovido: { ...base, accion: 'escribir', estrategias, valor } };
+    }
+    return { omitible: true, exigeCobertura: true };
+  }
+
   if (estrategias.length === 0) {
     return { omitible: false, motivo: `paso ${tipo} sin ninguna estrategia de localizacion` };
   }
@@ -427,6 +466,7 @@ export function promoverTrayectoria(entrada: {
   }
   const valores = valoresDeParametros(extraerParametrosDeclarados(entrada.objetivo));
   const pasos: PasoDeReceta[] = [];
+  const llenadosSinRegistro: string[] = [];
   for (const paso of entrada.pasos) {
     if (paso.exito === false) {
       return { promovida: false, motivo: 'la trayectoria contiene un paso fallido' };
@@ -437,6 +477,29 @@ export function promoverTrayectoria(entrada: {
       continue;
     }
     if (!conversion.omitible) return { promovida: false, motivo: conversion.motivo };
+    if (conversion.exigeCobertura === true) llenadosSinRegistro.push(paso.accion.tipo);
+  }
+  // COBERTURA de un llenado de formulario sin registro de campos (TIPOS_LLENADO_DE_FORMULARIO): la
+  // cabecera descartada solo es inocua si cada dato que el objetivo declara termina tecleado por
+  // algun paso 'escribir' de la receta. Sin datos declarados no hay contra que verificar, asi que
+  // tampoco se puede afirmar que la receta repita lo aprendido: se rechaza con motivo especifico.
+  if (llenadosSinRegistro.length > 0) {
+    const tipoDeLlenado = llenadosSinRegistro[0] ?? 'fillForm';
+    const declarados = Object.keys(valores) as MarcadorParametro[];
+    if (declarados.length === 0) {
+      return {
+        promovida: false,
+        motivo: `paso ${tipoDeLlenado} de llenado sin campos registrados y el objetivo no declara datos con los que verificar la cobertura`,
+      };
+    }
+    const cubiertos = new Set(marcadoresDeParametros(pasos));
+    const faltantes = declarados.filter((parametro) => !cubiertos.has(parametro));
+    if (faltantes.length > 0) {
+      return {
+        promovida: false,
+        motivo: `paso ${tipoDeLlenado} de llenado sin campos registrados: ${faltantes.join(', ')} sin ningun otro paso que lo cubra`,
+      };
+    }
   }
   if (pasos.length === 0) {
     return { promovida: false, motivo: 'la trayectoria no dejo ningun paso re-ejecutable' };

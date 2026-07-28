@@ -273,6 +273,109 @@ describe('convertirTrayectoriaPersistida (fixture Gmail de 19 pasos)', () => {
   });
 });
 
+/**
+ * La trayectoria REAL del primer envio exitoso en produccion (jul 2026): identica a la fixture Gmail
+ * salvo que el paso 4 es un FILLFORMVISION (llenado por vision de Stagehand: sin selector, sin metodo
+ * y sin argumentos persistidos), seguido de los act que rellenaron Para, Asunto y Cuerpo CON selector.
+ * Antes del fix, este paso abortaba la conversion entera con "paso fillFormVision sin ninguna
+ * estrategia de localizacion".
+ */
+function pasosGmailConFillFormVision(): PasoTrayectoria[] {
+  return pasosGmail().map((p) =>
+    p.idx === 4
+      ? {
+          ...p,
+          accion: {
+            tipo: 'fillFormVision',
+            instruccion: 'llenar los campos del correo',
+            metodo: null,
+            argumentos: [],
+          },
+          selector: null,
+        }
+      : p,
+  );
+}
+
+describe('convertirTrayectoriaPersistida (fixture real con fillFormVision en el paso 4)', () => {
+  it('produce receta valida con los tres parametros: los acts posteriores cubren los datos', () => {
+    const resultado = convertirTrayectoriaPersistida([
+      trayectoria({ pasos: pasosGmailConFillFormVision() }),
+    ]);
+    expect(resultado.guardable).toBe(true);
+    if (!resultado.guardable) return;
+    // La receta queda EXACTAMENTE como la de la fixture sin fillFormVision: la cabecera del llenado
+    // por vision se omite porque Para, Asunto y Cuerpo quedaron cubiertos con selector.
+    expect(resultado.pasos.map((p) => p.accion)).toEqual([
+      'navegar',
+      'click',
+      'escribir',
+      'teclas',
+      'escribir',
+      'escribir',
+      'click',
+      'verificar',
+      'click',
+    ]);
+    const escritos = resultado.pasos.filter((p) => p.accion === 'escribir');
+    expect(escritos.map((p) => p.valor)).toEqual([
+      { tipo: 'parametro', parametro: 'destinatario' },
+      { tipo: 'parametro', parametro: 'asunto' },
+      { tipo: 'parametro', parametro: 'cuerpo' },
+    ]);
+  });
+
+  it('si un dato del objetivo queda sin cubrir por otro paso, falla con motivo especifico', () => {
+    // Sin el act del asunto (idx 7), el dato 'asunto' que el fillFormVision pudo haber llenado no
+    // queda cubierto: la conversion debe fallar diciendo el paso y el dato, no con el motivo generico.
+    const pasos = pasosGmailConFillFormVision().map((p) =>
+      p.idx === 7 ? { ...p, accion: { tipo: 'screenshot', instruccion: null, metodo: null, argumentos: [] }, selector: null, valorCensurado: null } : p,
+    );
+    const resultado = convertirTrayectoriaPersistida([trayectoria({ pasos })]);
+    expect(resultado.guardable).toBe(false);
+    if (resultado.guardable) return;
+    expect(resultado.motivo).toContain('fillFormVision');
+    expect(resultado.motivo).toContain('asunto');
+  });
+
+  it('un fillFormVision con el campo registrado (metodo, valor y selector) se descompone en escritura', () => {
+    // Futuro-compatible: si el registro trae la escritura del campo con localizacion, se promueve
+    // como paso escribir en vez de descartarse.
+    const pasos = pasosGmailConFillFormVision().map((p) =>
+      p.idx === 7
+        ? {
+            ...p,
+            accion: { tipo: 'fillFormVision', instruccion: null, metodo: 'fill', argumentos: ['Reporte semanal'] },
+            selector: `xpath=/html[1]/body[1]/div[7]//input[@name='subjectbox']`,
+            valorCensurado: 'Reporte semanal',
+          }
+        : p,
+    );
+    const resultado = convertirTrayectoriaPersistida([trayectoria({ pasos })]);
+    expect(resultado.guardable).toBe(true);
+    if (!resultado.guardable) return;
+    const escritos = resultado.pasos.filter((p) => p.accion === 'escribir');
+    expect(escritos.map((p) => p.valor)).toEqual([
+      { tipo: 'parametro', parametro: 'destinatario' },
+      { tipo: 'parametro', parametro: 'asunto' },
+      { tipo: 'parametro', parametro: 'cuerpo' },
+    ]);
+  });
+
+  it('sin datos declarados en el objetivo, un fillFormVision sin registro falla con motivo especifico', () => {
+    const resultado = convertirTrayectoriaPersistida([
+      trayectoria({
+        objetivo: 'archiva el primer mensaje de la bandeja',
+        pasos: pasosGmailConFillFormVision(),
+      }),
+    ]);
+    expect(resultado.guardable).toBe(false);
+    if (resultado.guardable) return;
+    expect(resultado.motivo).toContain('fillFormVision');
+    expect(resultado.motivo).toContain('cobertura');
+  });
+});
+
 describe('procesarJobDePromoverTrayectoria', () => {
   const PAYLOAD = { kind: 'promover_trayectoria', jobId: JOB_ORIGEN };
 
