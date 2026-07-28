@@ -405,6 +405,21 @@ function convertirPaso(
     return { omitible: true, exigeCobertura: true };
   }
 
+  // PULSACION DE TECLA registrada como act del motor (metodo 'press'; caso real de produccion, jul
+  // 2026: "press Tab key to confirm the recipient"). Es el MISMO gesto que ya saben repetir las
+  // recetas grabadas al confirmar un chip (grabacion.ts: paso 'teclas' que pulsa sobre el foco) y
+  // que los pasos 'keys' de arriba: se promueve como paso 'teclas' conservando la tecla y su
+  // posicion. Si el registro trae selector, las estrategias derivadas se CONSERVAN (el ejecutor
+  // pulsa sobre ese elemento); sin selector queda una pulsacion sobre el foco del paso previo, la
+  // misma forma que dejan la grabacion y los pasos 'keys'.
+  if (paso.accion.metodo === 'press') {
+    const teclas = paso.accion.argumentos[0]?.trim();
+    if (teclas === undefined || teclas === '') {
+      return { omitible: false, motivo: 'pulsacion sin teclas registradas' };
+    }
+    return { promovido: { ...base, accion: 'teclas', estrategias, teclas } };
+  }
+
   if (estrategias.length === 0) {
     return { omitible: false, motivo: `paso ${tipo} sin ninguna estrategia de localizacion` };
   }

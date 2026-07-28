@@ -110,6 +110,37 @@ export function esGuardadoNoRepetible(error: unknown): boolean {
   return error instanceof Error && error.message.startsWith(PROMOCION_NO_REPETIBLE_PREFIX);
 }
 
+/**
+ * El MOTIVO de un fallo permanente de guardado, clasificado para la UI. El texto tras el prefijo es
+ * el motivo del conversor del worker (estable y sin datos del usuario); aqui solo se reconocen las
+ * familias que tienen mensaje propio y el resto cae al generico de fallo permanente. null si el
+ * error no es un fallo permanente de guardado.
+ */
+export type MotivoNoRepetible =
+  /** La ejecucion incluye una accion que el sistema todavia no sabe repetir (select, arrastre...). */
+  | { tipo: 'metodo'; metodo: string }
+  /** Un paso quedo registrado sin ninguna forma de volver a encontrar su elemento. */
+  | { tipo: 'sinEstrategia' }
+  /** El registro no conserva como se llenaron todos los datos de la tarea. */
+  | { tipo: 'datoSinCubrir' }
+  /** Cualquier otro motivo permanente: mensaje generico que tampoco invita a reintentar. */
+  | { tipo: 'generico' };
+
+export function motivoDeGuardadoNoRepetible(error: unknown): MotivoNoRepetible | null {
+  if (!esGuardadoNoRepetible(error) || !(error instanceof Error)) return null;
+  const motivo = error.message.slice(PROMOCION_NO_REPETIBLE_PREFIX.length).trim();
+  const metodo = /^metodo no re-ejecutable: (.+)$/.exec(motivo);
+  // 'ninguno' es el placeholder del worker para un paso sin metodo registrado: no hay nombre util
+  // que mostrar, asi que cae al mensaje generico de fallo permanente.
+  if (metodo?.[1] !== undefined && metodo[1] !== 'ninguno') {
+    return { tipo: 'metodo', metodo: metodo[1] };
+  }
+  if (metodo !== null) return { tipo: 'generico' };
+  if (motivo.includes('sin ninguna estrategia de localizacion')) return { tipo: 'sinEstrategia' };
+  if (motivo.includes('de llenado sin campos registrados')) return { tipo: 'datoSinCubrir' };
+  return { tipo: 'generico' };
+}
+
 /** true si el job fallo porque su dueno lo termino desde la consola (etiqueta Cancelada). */
 export function esJobCancelado(job: Pick<JobActivity, 'status' | 'lastError'>): boolean {
   return job.status === 'failed' && (job.lastError?.startsWith(CANCELADO_POR_USUARIO_PREFIX) ?? false);
