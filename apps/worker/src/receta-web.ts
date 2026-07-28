@@ -116,6 +116,73 @@ export function firmaDeObjetivo(objetivo: string, dominios: readonly string[] = 
 }
 
 /**
+ * DESCRIPCION GENERALIZADA de una tarea aprendida (FIX seleccion, 28 jul 2026): el objetivo de la
+ * corrida origen con los VALORES que se parametrizaron sustituidos por sus nombres de parametro
+ * ("envia un correo a <destinatario> con asunto <asunto>"). Es lo que se persiste como `descripcion`
+ * (V037) al promover una trayectoria, y lo que el selector de tareas (eleccion-tarea.ts) le muestra
+ * al modelo.
+ *
+ * POR QUE, medido en produccion (28 jul 2026): la descripcion se guardaba con los valores LITERALES
+ * de la corrida origen (asunto "Trayectoria fresca" y su cuerpo completo). Al pedir despues el mismo
+ * tipo de correo con datos distintos, el modelo selector comparo la peticion nueva contra esa
+ * descripcion hiperespecifica, la descarto, y la tarea corrio entera por el motor libre. Con los
+ * valores sustituidos, la descripcion dice QUE hace la tarea y no CON QUE datos se aprendio.
+ *
+ * El MISMO extractor determinista de la firma decide que es un valor (un solo vocabulario); a
+ * diferencia de la firma, aqui se conservan mayusculas y puntuacion: es un texto para reconocer,
+ * no una clave de busqueda. La sustitucion es sobre texto que el propio usuario escribio: no se
+ * redacta nada nuevo.
+ */
+export function descripcionGeneralizada(objetivo: string): string {
+  const parametros = extraerParametrosDeclarados(objetivo);
+  const sustituciones: Array<{ texto: string; marcador: string }> = [];
+  for (const destinatario of parametros.destinatarios) {
+    sustituciones.push({ texto: destinatario, marcador: marcador('destinatario') });
+  }
+  if (parametros.monto !== null) {
+    sustituciones.push({ texto: parametros.monto.texto, marcador: marcador('monto') });
+  }
+  if (parametros.producto !== null) {
+    sustituciones.push({ texto: parametros.producto, marcador: marcador('producto') });
+  }
+  if (parametros.cantidad !== null) {
+    sustituciones.push({ texto: String(parametros.cantidad), marcador: marcador('cantidad') });
+  }
+  if (parametros.asunto !== null) {
+    sustituciones.push({ texto: parametros.asunto, marcador: marcador('asunto') });
+  }
+  if (parametros.cuerpo !== null) {
+    sustituciones.push({ texto: parametros.cuerpo, marcador: marcador('cuerpo') });
+  }
+  let descripcion = objetivo;
+  // Del mas largo al mas corto, igual que la firma: un valor contenido dentro de otro no rompe el
+  // reemplazo del que lo contiene. La busqueda ignora mayusculas (el extractor normaliza los
+  // correos a minusculas y el usuario pudo escribirlos de otra forma).
+  for (const { texto, marcador: reemplazo } of [...sustituciones].sort(
+    (a, b) => b.texto.length - a.texto.length,
+  )) {
+    descripcion = reemplazarSinMayusculas(descripcion, texto, reemplazo);
+  }
+  return descripcion.replace(/\s+/g, ' ').trim();
+}
+
+/** Reemplaza TODAS las apariciones de `buscado` (comparacion sin mayusculas) por `reemplazo`. */
+function reemplazarSinMayusculas(texto: string, buscado: string, reemplazo: string): string {
+  const objetivo = buscado.toLowerCase();
+  if (objetivo === '') return texto;
+  const partes: string[] = [];
+  let resto = texto;
+  for (;;) {
+    const indice = resto.toLowerCase().indexOf(objetivo);
+    if (indice === -1) break;
+    partes.push(resto.slice(0, indice), reemplazo);
+    resto = resto.slice(indice + objetivo.length);
+  }
+  partes.push(resto);
+  return partes.join('');
+}
+
+/**
  * PARAMETROS DE UNA CORRIDA, ya resueltos a texto: lo que la receta teclea en cada paso de escritura.
  * Un parametro que el objetivo de ESTA corrida no declaro queda ausente y la receta NO se puede
  * ejecutar (ver `sustituirParametros`): tecleariamos un dato de otra tarea.
@@ -436,6 +503,98 @@ function apuntaAlMismoCampo(a: PasoCensurado, b: PasoCensurado): boolean {
   return describenElMismoCampo(a.accion.instruccion, b.accion.instruccion);
 }
 
+/**
+ * DESTILACION ESTRICTA (FIX destilacion, 28 jul 2026): de la trayectoria se conserva el ULTIMO
+ * camino continuo y exitoso hacia el objetivo, no los intentos previos ni los desvios. Caso real:
+ * la receta 79622fdb quedo con 21 pasos porque los desvios de la corrida origen (pantalla completa,
+ * minimizar, expandir, re-clicks y re-escrituras de campos ya llenos) traian selector, y el filtro
+ * solo descartaba clicks SIN estrategias. Este filtro descarta, tengan selector o no:
+ *  1. pasos sobre los CONTROLES DE LA CABECERA del compose (pantalla completa, minimizar, expandir):
+ *     conmutan la vista, no acercan al objetivo, y ninguna receta debe repetirlos;
+ *  2. CLICKS sin dato sobre un campo que una ESCRITURA POSTERIOR con estrategias ya cubre (el
+ *     ejecutor determinista enfoca el localizador de esa escritura antes de teclear);
+ *  3. ESCRITURAS sobre un campo que una escritura POSTERIOR con estrategias vuelve a llenar: el
+ *     efecto de la primera quedo anulado por el desvio y solo la ultima es el camino que llego.
+ */
+const CONTROLES_DE_CABECERA_DE_COMPOSE: readonly string[] = [
+  'pantalla completa',
+  'full screen',
+  'fullscreen',
+  'minimizar',
+  'minimize',
+  'expandir',
+  'expand the compose',
+  'expand compose',
+  'maximizar',
+  'maximize',
+  'contraer',
+  'collapse',
+  'pop-out',
+  'salir de pantalla',
+  'exit full',
+];
+
+/** ¿El paso es un CLICK (con o sin selector) y sin dato tecleado? */
+function esClickSinDato(paso: PasoCensurado): boolean {
+  if (paso.accion.argumentos.join(' ').trim() !== '' || paso.valorCensurado !== null) return false;
+  const metodo = paso.accion.metodo;
+  if (metodo !== null) return ACCION_POR_METODO[metodo] === 'click';
+  return paso.accion.tipo === 'act';
+}
+
+/**
+ * ¿El paso actua sobre un CONTROL DE LA CABECERA del compose? Se decide con la instruccion del
+ * modelo y con los valores de atributo de sus estrategias (el aria-label del control), normalizados.
+ * Solo aplica a clicks sin dato: una escritura jamas se descarta por esta regla.
+ */
+function esControlDeCabeceraDeCompose(paso: PasoCensurado): boolean {
+  if (!esClickSinDato(paso)) return false;
+  const textos = [
+    paso.accion.instruccion ?? '',
+    ...(paso.estrategias ?? []).map((e) => (e.tipo === 'atributo' ? e.valor : '')),
+  ];
+  const texto = normalizarTexto(textos.join(' '));
+  return CONTROLES_DE_CABECERA_DE_COMPOSE.some((control) => texto.includes(control));
+}
+
+/** ¿Alguna ESCRITURA posterior con estrategias utilizables cubre el MISMO campo que este paso? */
+function escrituraPosteriorCubreElCampo(
+  pasos: readonly PasoCensurado[],
+  indice: number,
+  valores: ValoresDeParametros,
+): boolean {
+  const paso = pasos[indice];
+  if (paso === undefined) return false;
+  for (let i = indice + 1; i < pasos.length; i++) {
+    const posterior = pasos[i];
+    if (posterior === undefined) break;
+    if (!esEscrituraConDato(posterior)) continue;
+    if (estrategiasUtilizables(posterior, valores).length === 0) continue;
+    if (apuntaAlMismoCampo(paso, posterior)) return true;
+  }
+  return false;
+}
+
+/** Aplica la destilacion estricta: devuelve los pasos SIN los desvios documentados arriba. */
+function descartarDesviosDeLaTrayectoria(
+  pasos: PasoCensurado[],
+  valores: ValoresDeParametros,
+): PasoCensurado[] {
+  return pasos.filter((paso, indice) => {
+    // Un paso FALLIDO nunca se destila fuera: la politica sobre pasos fallidos (rechazar la
+    // trayectoria, o haberlos pre-filtrado con consentimiento) es del llamador, no de este filtro.
+    if (paso.exito === false) return true;
+    if (esControlDeCabeceraDeCompose(paso)) return false;
+    if (
+      (esClickSinDato(paso) || esEscrituraConDato(paso)) &&
+      escrituraPosteriorCubreElCampo(pasos, indice, valores)
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
 /** Ruta relativa de una URL de la traza, si pertenece al dominio de la receta. */
 function rutaDelPaso(url: string | null, dominio: string): string | null {
   if (url === null) return null;
@@ -621,7 +780,11 @@ export function promoverTrayectoria(entrada: {
   const llenadosSinRegistro: string[] = [];
   const clicksSinLocalizacion: Array<{ idx: number; descriptor: string }> = [];
   const escriturasPromovidas: number[] = [];
-  for (const paso of adoptarEstrategiasDeCampoAdyacente(entrada.pasos, valores)) {
+  // Primero la adopcion (una escritura sin selector toma el localizador del adyacente) y DESPUES la
+  // destilacion: el orden importa, porque el donante puede ser justo un click que la destilacion
+  // descartara por redundante.
+  const preparados = adoptarEstrategiasDeCampoAdyacente(entrada.pasos, valores);
+  for (const paso of descartarDesviosDeLaTrayectoria(preparados, valores)) {
     if (paso.exito === false) {
       return { promovida: false, motivo: 'la trayectoria contiene un paso fallido' };
     }

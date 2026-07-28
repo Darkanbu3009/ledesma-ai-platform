@@ -9,7 +9,7 @@ import type { TrayectoriaConPasos, PasoTrayectoria } from '@ledesma-platform/bac
 import type { NuevaRecetaWeb, RecetaWeb } from '@ledesma-platform/backend/recetas-web';
 import { PermanentExecutionError, PromocionNoRepetibleError } from './errores.js';
 import { detectarVerboBloqueado } from './prompt-tarea-web.js';
-import { firmaDeObjetivo, promoverTrayectoria } from './receta-web.js';
+import { descripcionGeneralizada, firmaDeObjetivo, promoverTrayectoria } from './receta-web.js';
 import type { PasoCensurado } from './trayectoria.js';
 import type { Logger } from './logger.js';
 
@@ -266,9 +266,12 @@ export async function procesarJobDePromoverTrayectoria(
     ownerId: job.ownerId,
     dominio: ultima.dominio,
     firmaObjetivo: conversion.firmaObjetivo,
-    // El objetivo censurado hace de descripcion (V037): es lo que la pantalla de tareas ya sabidas
-    // muestra para que el usuario RECONOZCA que guardo. No interviene en la ejecucion.
-    descripcion: ultima.objetivo,
+    // La descripcion (V037) es el objetivo GENERALIZADO: los valores parametrizados sustituidos por
+    // sus nombres de parametro. Es lo que la pantalla de tareas ya sabidas muestra y lo que el
+    // selector de tareas compara contra una peticion nueva; con los valores literales de la corrida
+    // origen dentro, el selector descartaba el match (caso real, 28 jul 2026). No interviene en la
+    // ejecucion.
+    descripcion: descripcionGeneralizada(ultima.objetivo),
     pasos: conversion.pasos,
     creadaDesdeTrayectoria: ultima.id,
     origen: 'automatica',
