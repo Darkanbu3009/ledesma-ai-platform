@@ -202,6 +202,57 @@ describe('coincideConObjetivoDeclarado', () => {
   });
 });
 
+describe('equivalencias de campo (caso literal de produccion: falso aviso de discrepancia)', () => {
+  // El aria-label real del campo Para de Gmail en espanol NO contiene el token "to": sin la tabla
+  // de equivalencias el matcher reportaba discrepancia y sugeria deshacer un tecleo correcto.
+  it('objetivo "the To field" y contexto "Destinatarios en Para" son el mismo campo', () => {
+    expect(
+      coincideConObjetivoDeclarado(
+        'type "ana@ejemplo.com" into the To field',
+        'ana@ejemplo.com',
+        'Destinatarios en Para',
+      ),
+    ).toBe(true);
+  });
+
+  it('el caso literal en lineasDeAterrizaje: conserva la linea de aterrizaje y suprime el aviso', () => {
+    const percepcion = bandeja({
+      campos: [{ contexto: 'Destinatarios en Para', valor: 'ana@ejemplo.com' }],
+    });
+    const lineas = lineasDeAterrizaje({
+      percepcion,
+      texto: 'ana@ejemplo.com',
+      descripcion: 'type "ana@ejemplo.com" into the To field',
+    });
+    expect(lineas).toHaveLength(1);
+    expect(lineas[0]).toContain('texto aterrizo en:');
+    expect(lineas[0]).toContain('Destinatarios en Para');
+  });
+
+  it('subject/asunto y body/cuerpo tambien son equivalentes', () => {
+    expect(coincideConObjetivoDeclarado('type "hola" into the Subject field', 'hola', 'Asunto')).toBe(true);
+    expect(
+      coincideConObjetivoDeclarado('type "hola" into the body', 'hola', 'div role=textbox Cuerpo del mensaje'),
+    ).toBe(true);
+  });
+
+  it('la equivalencia es por palabra completa: "to" no matchea dentro de "editor"', () => {
+    expect(
+      coincideConObjetivoDeclarado('escribe "hola" en el campo Para', 'hola', 'editor principal'),
+    ).toBe(false);
+  });
+
+  it('la discrepancia real se sigue reportando (barra de busqueda vs campo Para)', () => {
+    expect(
+      coincideConObjetivoDeclarado(
+        'type "ana@ejemplo.com" into the To field',
+        'ana@ejemplo.com',
+        'input text q gmail-search Buscar correo Search mail',
+      ),
+    ).toBe(false);
+  });
+});
+
 describe('interpretarPaso', () => {
   it('act con method click es un click; con fill es una escritura con su texto', () => {
     expect(
