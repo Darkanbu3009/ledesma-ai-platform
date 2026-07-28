@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AttachmentRef } from '../src/lib/attachments';
-import { runAgentStream } from '../src/lib/run-agent';
+import { PLAYGROUND_MAX_ITERATIONS, runAgentStream } from '../src/lib/run-agent';
 import type { SseMessage } from '../src/lib/sse';
 
 // La rama de credencial GUARDADA agrega el JWT del usuario via getAccessToken (lee la sesion de
@@ -94,7 +94,7 @@ describe('runAgentStream', () => {
     expect(headers).not.toHaveProperty('x-provider-key');
   });
 
-  it('manda exactamente { messages } en el body, sin config del agente', async () => {
+  it('manda exactamente { messages, maxIterations } en el body, sin config del agente', async () => {
     vi.stubEnv('VITE_API_URL', API_URL);
     const fetchMock = stubFetch(['event: done\ndata: {}\n\n']);
 
@@ -102,6 +102,7 @@ describe('runAgentStream', () => {
 
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
       messages: [{ role: 'user', content: 'hola' }],
+      maxIterations: PLAYGROUND_MAX_ITERATIONS,
     });
   });
 
@@ -138,6 +139,7 @@ describe('runAgentStream', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
       messages: [{ role: 'user', content: 'hola' }],
       attachments,
+      maxIterations: PLAYGROUND_MAX_ITERATIONS,
     });
   });
 
@@ -156,6 +158,7 @@ describe('runAgentStream', () => {
 
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
       messages: [{ role: 'user', content: 'hola' }],
+      maxIterations: PLAYGROUND_MAX_ITERATIONS,
     });
   });
 });

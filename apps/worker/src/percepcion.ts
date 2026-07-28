@@ -228,9 +228,26 @@ export function tokensDelObjetivoDeclarado(descripcion: string, textoTecleado: s
 }
 
 /**
+ * EQUIVALENCIAS MINIMAS entre nombres del MISMO campo de formulario en distintos idiomas o
+ * variantes (evidencia de produccion: el texto aterrizo en "Destinatarios en Para" y el objetivo
+ * declarado decia "the To field"; el matcher literal no lo reconocia y sugeria deshacer un tecleo
+ * correcto). Se usa SOLO para SUPRIMIR el aviso de discrepancia cuando el campo real y el declarado
+ * son equivalentes; jamas para afirmar una discrepancia nueva. La linea "texto aterrizo en" se
+ * conserva siempre, con o sin equivalencia.
+ */
+const CAMPOS_EQUIVALENTES: readonly (readonly string[])[] = [
+  ['to', 'para', 'destinatarios', 'recipients'],
+  ['subject', 'asunto'],
+  ['body', 'cuerpo', 'mensaje', 'message'],
+];
+
+/**
  * ¿El contexto del campo donde aterrizo el texto corresponde al objetivo que el agente declaro?
  * Best-effort deliberado: sin tokens utiles no se afirma discrepancia (la linea de aterrizaje ya
- * le muestra al agente donde quedo el texto, que es la informacion que importa).
+ * le muestra al agente donde quedo el texto, que es la informacion que importa). Un token que no
+ * aparece literal en el contexto todavia cuenta como coincidencia si el contexto contiene, COMO
+ * PALABRA, un sinonimo del mismo campo (tabla CAMPOS_EQUIVALENTES): por palabra completa y no por
+ * substring, para que un "to" dentro de "editor" no suprima un aviso legitimo.
  */
 export function coincideConObjetivoDeclarado(
   descripcion: string,
@@ -240,7 +257,13 @@ export function coincideConObjetivoDeclarado(
   const tokens = tokensDelObjetivoDeclarado(descripcion, textoTecleado);
   if (tokens.length === 0) return null;
   const contexto = contextoDelCampo.toLowerCase();
-  return tokens.some((token) => contexto.includes(token));
+  if (tokens.some((token) => contexto.includes(token))) return true;
+  const palabrasDelContexto = contexto.split(/[^\p{L}\p{N}]+/u).filter((palabra) => palabra !== '');
+  return tokens.some((token) =>
+    CAMPOS_EQUIVALENTES.some(
+      (grupo) => grupo.includes(token) && palabrasDelContexto.some((palabra) => grupo.includes(palabra)),
+    ),
+  );
 }
 
 /** Linea del click ejecutado sin efecto observable. */

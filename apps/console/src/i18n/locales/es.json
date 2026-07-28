@@ -321,6 +321,7 @@
     "usoTokens": "{{input}} in / {{output}} out tokens",
     "corte": {
       "maxIterations": "La corrida se corto por el limite de iteraciones antes de la respuesta final.",
+      "maxIterationsTareaViva": "El agente se quedo sin turnos para seguir narrando, pero tu tarea sigue ejecutandose en segundo plano. Puedes revisar su progreso en Actividad; no hace falta cancelarla ni volver a pedirla.",
       "tokenCap": "La corrida se corto por el tope de tokens acumulados del run.",
       "timeout": "La corrida se corto por alcanzar el tiempo maximo de ejecucion."
     },

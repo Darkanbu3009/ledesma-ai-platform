@@ -22,6 +22,16 @@ export type RunCredential =
   | { mode: 'paste'; apiKey: string }
   | { mode: 'saved'; credentialId: string };
 
+/**
+ * Cota de iteraciones que el Playground pide por turno. Es el CAP server-side (AGENT_LIMITS.
+ * maxIterationsCap del backend, que el contrato publico de /v1/run/:agentId ya acepta y valida);
+ * el default del motor (10) se quedaba corto para narrar tareas web de 3 a 5 minutos: cada llamada
+ * a la tool de revisar espera hasta ~25s (su long-poll, que NO conviene alargar porque esta
+ * calibrado por debajo del umbral de corte por inactividad de los proxies del SSE), asi que con 10
+ * iteraciones el chat aguantaba ~3 minutos de tarea y con 20 aguanta mas de 5.
+ */
+export const PLAYGROUND_MAX_ITERATIONS = 20;
+
 export interface RunAgentByIdParams {
   agentId: string;
   credential: RunCredential;
@@ -60,11 +70,16 @@ export async function runAgentStream(params: RunAgentByIdParams): Promise<void> 
       ...(await credentialHeaders(params.credential)),
     },
     signal: params.signal,
-    // attachments solo viaja cuando hay adjuntos: asi el envio solo-texto manda el mismo body de siempre.
+    // attachments solo viaja cuando hay adjuntos: asi el envio solo-texto manda el mismo body de
+    // siempre (mas la cota de iteraciones del Playground, ver PLAYGROUND_MAX_ITERATIONS).
     body: JSON.stringify(
       params.attachments && params.attachments.length > 0
-        ? { messages: params.messages, attachments: params.attachments }
-        : { messages: params.messages },
+        ? {
+            messages: params.messages,
+            attachments: params.attachments,
+            maxIterations: PLAYGROUND_MAX_ITERATIONS,
+          }
+        : { messages: params.messages, maxIterations: PLAYGROUND_MAX_ITERATIONS },
     ),
   });
 

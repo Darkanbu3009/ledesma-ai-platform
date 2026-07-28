@@ -18,9 +18,31 @@ describe('requireAdmin (x-admin-token, fuente unica)', () => {
     expect(() => requireAdmin(reqWith({ 'x-admin-token': 'token-super-admin' }), config)).not.toThrow();
   });
 
-  it('token incorrecto -> UNAUTHORIZED 401', () => {
+  it('token incorrecto (misma longitud) -> UNAUTHORIZED 401', () => {
+    try {
+      requireAdmin(reqWith({ 'x-admin-token': 'token-super-admiX' }), config);
+      throw new Error('deberia haber lanzado');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppError);
+      expect(err).toMatchObject({ code: 'UNAUTHORIZED', statusCode: 401 });
+    }
+  });
+
+  // La comparacion es timing-safe con chequeo de longitud previo (mismo patron que trigger-auth /
+  // relay-token): un token de longitud DISTINTA no debe lanzar por timingSafeEqual, debe dar 401.
+  it('token de longitud distinta -> UNAUTHORIZED 401 (sin lanzar por buffers desiguales)', () => {
     try {
       requireAdmin(reqWith({ 'x-admin-token': 'malo' }), config);
+      throw new Error('deberia haber lanzado');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppError);
+      expect(err).toMatchObject({ code: 'UNAUTHORIZED', statusCode: 401 });
+    }
+  });
+
+  it('token vacio -> UNAUTHORIZED 401 (el chequeo de longitud minima no deja pasar vacios)', () => {
+    try {
+      requireAdmin(reqWith({ 'x-admin-token': '' }), config);
       throw new Error('deberia haber lanzado');
     } catch (err) {
       expect(err).toBeInstanceOf(AppError);

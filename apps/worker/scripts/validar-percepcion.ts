@@ -115,13 +115,43 @@ const ESTRATEGIAS_CAMPO_PARA: EstrategiaLocalizacion[] = [
   { tipo: 'rol', rol: 'combobox', nombre: 'To recipients' },
 ];
 
-/** Estrategias del boton que DESCARTA el borrador (nunca el de enviar). */
-const ESTRATEGIAS_DESCARTAR: EstrategiaLocalizacion[] = [
-  { tipo: 'atributo', atributo: 'aria-label', valor: 'Descartar borrador' },
-  { tipo: 'atributo', atributo: 'aria-label', valor: 'Discard draft' },
-  { tipo: 'rol', rol: 'button', nombre: 'Descartar borrador' },
-  { tipo: 'rol', rol: 'button', nombre: 'Discard draft' },
-];
+/**
+ * Prefijos del aria-label del control que DESCARTA el borrador (es y en). MISMA tecnica de PREFIJO
+ * que el boton Enviar: el aria-label real de Gmail lleva sufijo de atajo (p. ej. "Descartar
+ * borrador (Ctrl-Shift-D)"), asi que la coincidencia exacta terminaba en no_localizado en las dos
+ * corridas reales y dejaba borradores huerfanos.
+ */
+const PREFIJOS_BOTON_DESCARTAR = ['Descartar borrador', 'Discard draft'];
+
+/** Prefijos del boton que CIERRA el compose guardando (fallback: ir a la carpeta de Borradores). */
+const PREFIJOS_BOTON_CERRAR = ['Guardar y cerrar', 'Save & close'];
+
+/**
+ * LOCALIZA por PREFIJO de aria-label (localizarBotonPorAriaLabel, la tecnica del boton Enviar) y
+ * CLICKEA el control usando el aria-label COMPLETO resuelto como estrategia exacta. Devuelve el
+ * aria-label clickeado, o null si no se localizo o el click no resolvio.
+ */
+async function clickPorPrefijoDeAriaLabel(
+  navegador: NavegadorBrowserbase,
+  sesionExternaId: string,
+  prefijos: string[],
+): Promise<string | null> {
+  const boton = await navegador.localizarBotonPorAriaLabel(sesionExternaId, prefijos);
+  if (boton === null) return null;
+  const estrategias: EstrategiaLocalizacion[] = [
+    { tipo: 'atributo', atributo: 'aria-label', valor: boton.ariaLabel },
+    { tipo: 'rol', rol: 'button', nombre: boton.ariaLabel },
+  ];
+  const click = await navegador.ejecutarPasoDeterminista(sesionExternaId, {
+    accion: 'click',
+    estrategias,
+    texto: null,
+    teclas: null,
+    url: null,
+    esperaMs: null,
+  });
+  return click.estado === 'ok' ? boton.ariaLabel : null;
+}
 
 async function main(): Promise<void> {
   const sql = getSql(DATABASE_URL);
@@ -180,6 +210,9 @@ async function main(): Promise<void> {
     proxyCountry: sitio.proxyCountry,
   });
   console.log(`  sesion: ${sesion.sesionExternaId}  pais observado: ${sesion.egressCountry ?? 'null'}`);
+  // Desenlace del BORRADOR: el script JAMAS termina sin decir que paso con el (exito o fallo).
+  // Se actualiza en cada hito y se imprime SIEMPRE en el cierre (el finally corre tambien al fallar).
+  let reporteBorrador = 'no se llego a abrir el compose; no deberia haber quedado ningun borrador';
   try {
     if (sesion.egressCountry !== sitio.proxyCountry) {
       throw new Error(
@@ -209,6 +242,7 @@ async function main(): Promise<void> {
     });
     console.log(`  estado del paso: ${click.estado}${click.detalle === null ? '' : ` (${click.detalle})`}`);
     if (click.estado !== 'ok') throw new Error('no se pudo localizar el boton Redactar');
+    reporteBorrador = `el compose quedo ABIERTO sin descartar; revisar Borradores de ${sitio.dominio}`;
     await esperar(ESPERA_TRAS_PASO_MS);
 
     titulo('5. Verificacion de efecto del click');
@@ -234,6 +268,9 @@ async function main(): Promise<void> {
     });
     console.log(`  estado del paso: ${escritura.estado}${escritura.detalle === null ? '' : ` (${escritura.detalle})`}`);
     if (escritura.estado !== 'ok') throw new Error('no se pudo localizar el campo Para del compose');
+    reporteBorrador =
+      `quedo un borrador SIN descartar con destinatario ${DESTINATARIO}; ` +
+      `revisar Borradores de ${sitio.dominio}`;
     await esperar(ESPERA_TRAS_PASO_MS);
 
     titulo('7. Percepcion del aterrizaje del texto');
@@ -292,24 +329,83 @@ async function main(): Promise<void> {
     }
 
     titulo('9. Descartar el borrador (nada se envia)');
-    const descarte = await navegador.ejecutarPasoDeterminista(sesion.sesionExternaId, {
-      accion: 'click',
-      estrategias: ESTRATEGIAS_DESCARTAR,
-      texto: null,
-      teclas: null,
-      url: null,
-      esperaMs: null,
-    });
-    console.log(`  estado del paso: ${descarte.estado}`);
+    // Primero, la tecnica de PREFIJO del boton Enviar aplicada al control de descartar: el
+    // aria-label real lleva sufijo de atajo y la coincidencia exacta daba no_localizado.
+    let descartadoCon = await clickPorPrefijoDeAriaLabel(
+      navegador,
+      sesion.sesionExternaId,
+      PREFIJOS_BOTON_DESCARTAR,
+    );
+    if (descartadoCon !== null) {
+      console.log(`  descartado desde el compose: click en "${descartadoCon}"`);
+    } else {
+      // FALLBACK: cerrar el compose guardando y descartar desde la carpeta de Borradores (abrir la
+      // carpeta, abrir el borrador por su destinatario, y reintentar el descarte por prefijo).
+      console.log('  el control de descartar NO se localizo en el compose; fallback via Borradores');
+      const cerradoCon = await clickPorPrefijoDeAriaLabel(
+        navegador,
+        sesion.sesionExternaId,
+        PREFIJOS_BOTON_CERRAR,
+      );
+      console.log(
+        cerradoCon !== null
+          ? `  compose cerrado guardando: click en "${cerradoCon}"`
+          : '  el boton de guardar y cerrar tampoco se localizo; se navega a Borradores igual',
+      );
+      await esperar(ESPERA_TRAS_PASO_MS);
+      const navegacion = await navegador.ejecutarPasoDeterminista(sesion.sesionExternaId, {
+        accion: 'navegar',
+        estrategias: [],
+        texto: null,
+        teclas: null,
+        url: `https://${sitio.dominio}/mail/u/0/#drafts`,
+        esperaMs: null,
+      });
+      console.log(`  abrir carpeta Borradores: ${navegacion.estado}`);
+      await esperar(ESPERA_TRAS_PASO_MS * 2);
+      const abrirBorrador = await navegador.ejecutarPasoDeterminista(sesion.sesionExternaId, {
+        accion: 'click',
+        estrategias: [{ tipo: 'texto', texto: DESTINATARIO }],
+        texto: null,
+        teclas: null,
+        url: null,
+        esperaMs: null,
+      });
+      console.log(`  abrir el borrador (fila con ${DESTINATARIO}): ${abrirBorrador.estado}`);
+      if (abrirBorrador.estado === 'ok') {
+        await esperar(ESPERA_TRAS_PASO_MS);
+        descartadoCon = await clickPorPrefijoDeAriaLabel(
+          navegador,
+          sesion.sesionExternaId,
+          PREFIJOS_BOTON_DESCARTAR,
+        );
+        console.log(
+          descartadoCon !== null
+            ? `  descartado desde Borradores: click en "${descartadoCon}"`
+            : '  el descarte tampoco se localizo dentro del borrador reabierto',
+        );
+      }
+    }
     await esperar(ESPERA_TRAS_PASO_MS);
     const final = await navegador.percibirPagina(sesion.sesionExternaId);
     const composeCerrado =
       final !== null &&
       !final.campos.some((campo) => campo.contexto.toLowerCase().includes('para') || campo.contexto.toLowerCase().includes('recipients'));
     console.log(`  compose cerrado: ${composeCerrado ? 'si' : 'no verificable'}`);
+    if (descartadoCon !== null) {
+      reporteBorrador = composeCerrado
+        ? 'DESCARTADO: no quedo ningun borrador'
+        : `DESCARTADO (click en "${descartadoCon}"), pero el cierre del compose no se pudo verificar; ` +
+          `si aparece un borrador a ${DESTINATARIO} en Borradores de ${sitio.dominio}, eliminarlo a mano`;
+    } else {
+      reporteBorrador =
+        `NO se pudo descartar: quedo un borrador huerfano con destinatario ${DESTINATARIO} ` +
+        `en la carpeta Borradores de ${sitio.dominio}; eliminarlo a mano`;
+    }
     console.log('\nVALIDACION COMPLETA: percepcion verificada contra Gmail real.');
   } finally {
-    titulo('10. Cierre de la sesion');
+    titulo('10. Desenlace del borrador y cierre de la sesion');
+    console.log(`  borrador: ${reporteBorrador}`);
     await navegador.cerrarSesion(sesion.sesionExternaId).catch((error: unknown) => {
       console.error('  no se pudo cerrar la sesion (el timeout del proveedor la cerrara):', error);
     });

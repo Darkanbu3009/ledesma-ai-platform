@@ -12,7 +12,7 @@ import type { ScheduledTask } from './scheduled-tasks';
 import type { Trigger } from './triggers';
 import type { Recipe, RecipeSummary } from './recipes';
 import type { JobActivity, JobsPage, JobStatusFilter } from './jobs';
-import { JOB_PAGE_SIZE, JOBS_REFETCH_MS, buildJobsQuery, hasInFlightJobs, isJobInFlight } from './jobs';
+import { JOB_PAGE_SIZE, JOBS_REFETCH_MS, buildJobsQuery, intervaloRefetchDeLista, isJobInFlight } from './jobs';
 import type { SitioConectado } from './sitios';
 import type { PoliticaEjecucion } from './politicas';
 import type { Trayectoria } from './trayectorias';
@@ -106,9 +106,12 @@ export function useRecipe(id: string | undefined) {
  * Cada pagina trae JOB_PAGE_SIZE jobs; getNextPageParam avanza el offset mientras el backend diga
  * hasMore. El filtro por estado va en la queryKey: cambiarlo arranca una lista nueva.
  *
- * AUTO-REFRESH PRUDENTE: refetchInterval reconsulta cada JOBS_REFETCH_MS SOLO si hay algun job en vuelo
- * (pending/running) entre los cargados; si todo esta en estado terminal, devuelve false y no toca el API
- * (no lo martillamos cuando no hay nada que pueda cambiar).
+ * AUTO-REFRESH ADAPTATIVO (semi tiempo real): refetchInterval reconsulta cada JOBS_LISTA_EN_VUELO_MS
+ * mientras haya algun job en vuelo (pending/running/pausado) entre los cargados, y baja a
+ * JOBS_LISTA_REPOSO_MS cuando todo esta en estado terminal, SIN apagarse: una tarea recien encolada
+ * desde el Playground no figura entre los cargados y con el polling apagado su tarjeta no aparecia
+ * hasta un refresh manual (ver intervaloRefetchDeLista). refetchOnWindowFocus explicito: volver a la
+ * pestana (por ejemplo tras encolar desde otra) refresca de inmediato y el intervalo se adapta solo.
  */
 export function useJobs(status: JobStatusFilter = 'all') {
   return useInfiniteQuery({
@@ -120,8 +123,9 @@ export function useJobs(status: JobStatusFilter = 'all') {
       lastPage.pagination.hasMore ? lastPage.pagination.offset + lastPage.pagination.limit : undefined,
     refetchInterval: (query) => {
       const jobs = query.state.data?.pages.flatMap((page) => page.jobs) ?? [];
-      return hasInFlightJobs(jobs) ? JOBS_REFETCH_MS : false;
+      return intervaloRefetchDeLista(jobs);
     },
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -130,8 +134,8 @@ export function useJobs(status: JobStatusFilter = 'all') {
  * motor de navegacion registradas para un job, con sus pasos censurados. Solo corre con `enabled`
  * (la tarjeta de actividad la pide recien al expandir la tarea: no se descargan pasos que nadie
  * abrio). Con `enCurso` (FIX D: el worker ahora escribe los pasos POR LOTES mientras la tarea
- * corre), el detalle se refresca solo al mismo ritmo que el historial, para mostrar el progreso
- * real; terminada la tarea, cero polling, como siempre.
+ * corre), el detalle se refresca solo cada JOBS_REFETCH_MS, para mostrar el progreso real;
+ * terminada la tarea, cero polling, como siempre.
  */
 export function useTrayectoriasDeJob(jobId: string, enabled: boolean, enCurso = false) {
   return useQuery({
