@@ -241,6 +241,34 @@ const CAMPOS_EQUIVALENTES: readonly (readonly string[])[] = [
   ['body', 'cuerpo', 'mensaje', 'message'],
 ];
 
+/** Grupos de CAMPOS_EQUIVALENTES que una descripcion nombra COMO PALABRA COMPLETA. */
+function gruposDeCampoNombrados(descripcion: string): number[] {
+  const palabras = descripcion
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((palabra) => palabra !== '');
+  const grupos: number[] = [];
+  CAMPOS_EQUIVALENTES.forEach((grupo, indice) => {
+    if (palabras.some((palabra) => grupo.includes(palabra))) grupos.push(indice);
+  });
+  return grupos;
+}
+
+/**
+ * ¿Las dos descripciones nombran el MISMO campo de formulario? Usa la tabla CAMPOS_EQUIVALENTES con
+ * el mismo criterio del matcher de arriba (palabra completa, no substring). La usa la promocion
+ * (receta-web.ts, derivacion cruzada): un paso de escritura sin localizacion solo puede adoptar el
+ * localizador de un paso adyacente cuando ambos hablan del mismo campo. Devuelve false si alguna
+ * descripcion falta o no nombra ningun campo conocido: sin evidencia no se adopta nada.
+ */
+export function describenElMismoCampo(a: string | null, b: string | null): boolean {
+  if (a === null || b === null) return false;
+  const gruposDeA = gruposDeCampoNombrados(a);
+  if (gruposDeA.length === 0) return false;
+  const gruposDeB = new Set(gruposDeCampoNombrados(b));
+  return gruposDeA.some((grupo) => gruposDeB.has(grupo));
+}
+
 /**
  * ¿El contexto del campo donde aterrizo el texto corresponde al objetivo que el agente declaro?
  * Best-effort deliberado: sin tokens utiles no se afirma discrepancia (la linea de aterrizaje ya

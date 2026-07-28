@@ -144,7 +144,7 @@ describe('promoverTrayectoria (D4: cuando una corrida se vuelve repetible)', () 
     expect(resultado.motivo).toContain('sin ninguna estrategia de localizacion');
   });
 
-  it('un click sin estrategias pero CON dato no es un click de foco: bloquea con el motivo generico', () => {
+  it('un click sin estrategias pero CON dato no es un click de foco: bloquea nombrando el paso', () => {
     const resultado = promover(
       [
         paso({ accion: { tipo: 'act', instruccion: null, metodo: 'click', argumentos: ['opcion 3'] }, estrategias: [], selector: null }),
@@ -158,7 +158,93 @@ describe('promoverTrayectoria (D4: cuando una corrida se vuelve repetible)', () 
     );
     expect(resultado.promovida).toBe(false);
     if (resultado.promovida) return;
-    expect(resultado.motivo).toBe('paso act sin ninguna estrategia de localizacion');
+    // FIX B: el motivo nombra indice y descripcion del paso, conservando la frase estable.
+    expect(resultado.motivo).toContain('paso 0');
+    expect(resultado.motivo).toContain('sin ninguna estrategia de localizacion');
+  });
+
+  it('un act SIN metodo registrado (resuelto por vision) tambien cuenta como click de foco', () => {
+    // Caso real de produccion (28 jul 2026): los acts "click the textbox Cuerpo del mensaje" y
+    // "click the message body area" persisten sin playwrightArguments, o sea sin metodo y sin
+    // selector. La regla del PR 258 exigia metodo 'click' y por eso no los descartaba.
+    const resultado = promover(
+      [
+        paso({
+          accion: { tipo: 'act', instruccion: 'click the message body area', metodo: null, argumentos: [] },
+          estrategias: [],
+          selector: null,
+        }),
+        paso({
+          idx: 1,
+          accion: { tipo: 'act', instruccion: 'escribir el cuerpo', metodo: 'fill', argumentos: ['hola'] },
+          estrategias: [ATRIBUTO, XPATH],
+        }),
+      ],
+      'abre el ultimo correo',
+    );
+    expect(resultado.promovida).toBe(true);
+    if (!resultado.promovida) return;
+    expect(resultado.pasos.map((p) => p.accion)).toEqual(['escribir']);
+  });
+
+  it('un type CON dato y SIN estrategia adopta el localizador del paso adyacente del mismo campo', () => {
+    // FIX A (derivacion cruzada, caso real de la trayectoria de 19 pasos): el type del cuerpo sin
+    // selector seguido del click del cuerpo CON selector produce un paso 'escribir' que usa el
+    // localizador del click.
+    const resultado = promover(
+      [
+        paso({
+          accion: {
+            tipo: 'act',
+            instruccion: 'type the message into the body',
+            metodo: 'type',
+            argumentos: ['hola'],
+          },
+          estrategias: [],
+          selector: null,
+        }),
+        paso({
+          idx: 1,
+          accion: { tipo: 'act', instruccion: 'click the textbox Cuerpo del mensaje', metodo: 'click', argumentos: [] },
+          estrategias: [ATRIBUTO, XPATH],
+          selector: '/html[1]/body[1]/div[2]',
+        }),
+      ],
+      'abre el ultimo correo',
+    );
+    expect(resultado.promovida).toBe(true);
+    if (!resultado.promovida) return;
+    expect(resultado.pasos.map((p) => p.accion)).toEqual(['escribir', 'click']);
+    expect(resultado.pasos[0]?.estrategias).toEqual([ATRIBUTO, XPATH]);
+  });
+
+  it('un type CON dato, SIN estrategia y SIN adyacente que cubra el campo bloquea nombrando el paso', () => {
+    const resultado = promover(
+      [
+        paso({
+          accion: {
+            tipo: 'act',
+            instruccion: 'type the message into the body',
+            metodo: 'type',
+            argumentos: ['hola'],
+          },
+          estrategias: [],
+          selector: null,
+        }),
+        paso({
+          idx: 1,
+          accion: { tipo: 'act', instruccion: 'click the subject field', metodo: 'click', argumentos: [] },
+          estrategias: [ATRIBUTO, XPATH],
+          selector: '/html[1]/body[1]/div[3]',
+        }),
+      ],
+      'abre el ultimo correo',
+    );
+    expect(resultado.promovida).toBe(false);
+    if (resultado.promovida) return;
+    expect(resultado.motivo).toContain('paso 0');
+    expect(resultado.motivo).toContain('type the message into the body');
+    expect(resultado.motivo).toContain('sin estrategia y sin paso adyacente que cubra el campo');
   });
 
   it('un paso FALLIDO dentro de una corrida exitosa invalida la receta', () => {

@@ -19,6 +19,7 @@ import {
   normalizarTexto,
   type ParametrosDeclarados,
 } from './parametros-objetivo.js';
+import { describenElMismoCampo } from './percepcion.js';
 import type { PasoCensurado } from './trayectoria.js';
 
 /**
@@ -325,6 +326,116 @@ type Conversion =
   | { omitible: true; exigeCobertura?: boolean; clickSinLocalizacion?: boolean }
   | { omitible: false; motivo: string };
 
+/** Estrategias del paso que la receta puede usar: ordenadas y sin las que dependen del valor (D8). */
+function estrategiasUtilizables(
+  paso: PasoCensurado,
+  valores: ValoresDeParametros,
+): EstrategiaLocalizacion[] {
+  return estrategiasIndependientesDelValor(
+    ordenarEstrategias(paso.estrategias ?? []),
+    valoresConcretos(valores),
+  );
+}
+
+/** Tope del descriptor de un paso dentro de un motivo de rechazo. */
+const MAX_DESCRIPTOR_MOTIVO = 80;
+
+/**
+ * DESCRIPTOR de un paso para los motivos de rechazo (FIX B): metodo (o tipo) mas la instruccion que
+ * el modelo registro, acotado. La instruccion ya viene censurada desde la traza (trayectoria.ts), asi
+ * que el motivo no filtra valores del usuario que la traza no muestre ya.
+ */
+function descriptorDePaso(paso: PasoCensurado): string {
+  const cabeza = paso.accion.metodo ?? paso.accion.tipo;
+  const instruccion = paso.accion.instruccion?.trim() ?? '';
+  // Sin duplicar la cabeza cuando la instruccion ya empieza con ella ("type the message...").
+  const texto =
+    instruccion === ''
+      ? cabeza
+      : instruccion.toLowerCase().startsWith(cabeza.toLowerCase())
+        ? instruccion
+        : `${cabeza} ${instruccion}`;
+  return texto.length > MAX_DESCRIPTOR_MOTIVO ? `${texto.slice(0, MAX_DESCRIPTOR_MOTIVO)}...` : texto;
+}
+
+/** ¿El paso es una ESCRITURA con dato (metodo de tecleo re-ejecutable y texto registrado)? */
+function esEscrituraConDato(paso: PasoCensurado): boolean {
+  const metodo = paso.accion.metodo;
+  if (metodo === null || ACCION_POR_METODO[metodo] !== 'escribir') return false;
+  return paso.accion.argumentos.join(' ').trim() !== '';
+}
+
+/**
+ * ¿El paso es un CLICK DE FOCO candidato a descartarse? Sin estrategias, sin dato tecleado y con
+ * metodo 'click', o SIN metodo siendo un 'act' (caso real de produccion, 28 jul 2026: los acts
+ * "click the textbox Cuerpo del mensaje" y "click the message body area" persisten SIN
+ * playwrightArguments cuando Stagehand los resolvio por vision, asi que su fila no trae metodo ni
+ * selector; la regla del PR 258 exigia metodo 'click' y por eso nunca los descarto).
+ */
+function esClickDeFocoSinLocalizacion(paso: PasoCensurado): boolean {
+  if (paso.accion.argumentos.join(' ').trim() !== '' || paso.valorCensurado !== null) return false;
+  return (
+    paso.accion.metodo === 'click' || (paso.accion.metodo === null && paso.accion.tipo === 'act')
+  );
+}
+
+/**
+ * DERIVACION CRUZADA (FIX A, caso real de produccion, 28 jul 2026): un paso de ESCRITURA con dato y
+ * sin ninguna estrategia adopta el localizador de un paso ADYACENTE (click o escritura) que apunte
+ * al MISMO campo. El mismo campo se reconoce por selector identico o por descripcion equivalente
+ * (tabla de equivalencias de campos de percepcion.ts). Caso concreto: la trayectoria de 19 pasos
+ * traia el type del cuerpo sin selector seguido del click del cuerpo CON selector; la receta escribe
+ * el cuerpo con el selector de ese click. Si ningun adyacente cubre el campo, el paso queda como
+ * estaba y la conversion lo rechaza con su indice y descripcion.
+ */
+function adoptarEstrategiasDeCampoAdyacente(
+  pasos: PasoCensurado[],
+  valores: ValoresDeParametros,
+): PasoCensurado[] {
+  return pasos.map((paso, indice) => {
+    if (!esEscrituraConDato(paso) || estrategiasUtilizables(paso, valores).length > 0) return paso;
+    const donante =
+      donanteDelMismoCampo(pasos, indice, -1, paso, valores) ??
+      donanteDelMismoCampo(pasos, indice, 1, paso, valores);
+    if (donante === null) return paso;
+    return { ...paso, estrategias: donante.estrategias };
+  });
+}
+
+/**
+ * El paso ADYACENTE en una direccion que puede DONAR su localizador: el primer paso con accion sobre
+ * un elemento (los que solo miran se saltan), siempre que sea un click o una escritura con
+ * estrategias utilizables y del MISMO campo. El paso sintetico de verificacion y las navegaciones
+ * cortan la busqueda: adoptar un localizador cruzando la verificacion (o un cambio de pagina) podria
+ * atar la escritura al elemento de la accion irreversible.
+ */
+function donanteDelMismoCampo(
+  pasos: PasoCensurado[],
+  indice: number,
+  direccion: -1 | 1,
+  receptor: PasoCensurado,
+  valores: ValoresDeParametros,
+): PasoCensurado | null {
+  for (let i = indice + direccion; i >= 0 && i < pasos.length; i += direccion) {
+    const candidato = pasos[i];
+    if (candidato === undefined) return null;
+    const tipo = candidato.accion.tipo;
+    if (TIPOS_SIN_EFECTO.has(tipo)) continue;
+    const metodo = candidato.accion.metodo;
+    if (metodo === null || ACCION_POR_METODO[metodo] === undefined) return null;
+    if (!apuntaAlMismoCampo(receptor, candidato)) return null;
+    const estrategias = estrategiasUtilizables(candidato, valores);
+    return estrategias.length > 0 ? { ...candidato, estrategias } : null;
+  }
+  return null;
+}
+
+/** ¿Los dos pasos apuntan al MISMO campo? Selector identico, o descripciones del mismo campo. */
+function apuntaAlMismoCampo(a: PasoCensurado, b: PasoCensurado): boolean {
+  if (a.selector !== null && b.selector !== null && a.selector === b.selector) return true;
+  return describenElMismoCampo(a.accion.instruccion, b.accion.instruccion);
+}
+
 /** Ruta relativa de una URL de la traza, si pertenece al dominio de la receta. */
 function rutaDelPaso(url: string | null, dominio: string): string | null {
   if (url === null) return null;
@@ -383,10 +494,7 @@ function convertirPaso(
   // que DEPENDEN de un dato concreto de esta corrida se descartan antes de contarlas: localizar por
   // el valor tecleado no sirve con otro valor, y ademas dejaria ese dato persistido dentro de la
   // localizacion, que es exactamente lo que un paso parametrizado no puede hacer (D8).
-  const estrategias = estrategiasIndependientesDelValor(
-    ordenarEstrategias(paso.estrategias ?? []),
-    valoresConcretos(valores),
-  );
+  const estrategias = estrategiasUtilizables(paso, valores);
 
   // LLENADO DE FORMULARIO (fillForm / fillFormVision): si este registro trae la escritura de UN
   // campo localizable (estrategias, metodo de tecleo y valor), se DESCOMPONE como un paso 'escribir'
@@ -428,14 +536,27 @@ function convertirPaso(
     // exitosa de 44 pasos). Un click sin estrategias y SIN dato solo pone el foco: el ejecutor
     // determinista ya hace click sobre el localizador del paso de escritura antes de teclear
     // (browserbase.ts, ejecutarPasoDeterminista), asi que un click de foco previo a una escritura
-    // con selector es redundante. Se descarta de forma CONDICIONADA: la promocion verifica al final
-    // que una escritura posterior lo cubre (ver promoverTrayectoria); un click sin estrategias al
-    // que ninguna escritura sigue (un envio, una navegacion por click) si bloquea, con el paso
-    // exacto en el motivo.
-    if (paso.accion.metodo === 'click' && paso.accion.argumentos.join(' ').trim() === '') {
+    // con selector es redundante. Cubre tambien el act SIN metodo (resuelto por vision, sin
+    // playwrightArguments persistidos), que es la forma real con la que esos clicks llegaron de la
+    // base. Se descarta de forma CONDICIONADA: la promocion verifica al final que una escritura
+    // posterior lo cubre (ver promoverTrayectoria); un click sin estrategias al que ninguna
+    // escritura sigue (un envio, una navegacion por click) si bloquea, con el paso exacto.
+    if (esClickDeFocoSinLocalizacion(paso)) {
       return { omitible: true, clickSinLocalizacion: true };
     }
-    return { omitible: false, motivo: `paso ${tipo} sin ninguna estrategia de localizacion` };
+    // ESCRITURA con dato sin localizacion: la derivacion cruzada (FIX A) ya intento adoptar el
+    // localizador de un paso adyacente del mismo campo antes de llegar aqui. Sin adyacente que lo
+    // cubra, el rechazo procede con el indice y la descripcion del paso que bloqueo (FIX B).
+    if (esEscrituraConDato(paso)) {
+      return {
+        omitible: false,
+        motivo: `paso ${paso.idx}: ${descriptorDePaso(paso)}, sin estrategia y sin paso adyacente que cubra el campo`,
+      };
+    }
+    return {
+      omitible: false,
+      motivo: `paso ${paso.idx}: ${descriptorDePaso(paso)}, sin ninguna estrategia de localizacion`,
+    };
   }
 
   const accion = paso.accion.metodo === null ? undefined : ACCION_POR_METODO[paso.accion.metodo];
@@ -498,9 +619,9 @@ export function promoverTrayectoria(entrada: {
   const valores = valoresDeParametros(extraerParametrosDeclarados(entrada.objetivo));
   const pasos: PasoDeReceta[] = [];
   const llenadosSinRegistro: string[] = [];
-  const clicksSinLocalizacion: number[] = [];
+  const clicksSinLocalizacion: Array<{ idx: number; descriptor: string }> = [];
   const escriturasPromovidas: number[] = [];
-  for (const paso of entrada.pasos) {
+  for (const paso of adoptarEstrategiasDeCampoAdyacente(entrada.pasos, valores)) {
     if (paso.exito === false) {
       return { promovida: false, motivo: 'la trayectoria contiene un paso fallido' };
     }
@@ -512,17 +633,19 @@ export function promoverTrayectoria(entrada: {
     }
     if (!conversion.omitible) return { promovida: false, motivo: conversion.motivo };
     if (conversion.exigeCobertura === true) llenadosSinRegistro.push(paso.accion.tipo);
-    if (conversion.clickSinLocalizacion === true) clicksSinLocalizacion.push(paso.idx);
+    if (conversion.clickSinLocalizacion === true) {
+      clicksSinLocalizacion.push({ idx: paso.idx, descriptor: descriptorDePaso(paso) });
+    }
   }
   // COBERTURA de un click de foco descartado (convertirPaso): solo es inocuo si una ESCRITURA
   // POSTERIOR con estrategias lo cubre (el ejecutor enfoca el localizador de esa escritura antes de
   // teclear). Un click sin estrategias al que ninguna escritura sigue puede ser el click con efecto
   // propio (enviar, confirmar): la conversion falla nombrando el paso exacto.
-  for (const idxClick of clicksSinLocalizacion) {
-    if (!escriturasPromovidas.some((idxEscritura) => idxEscritura > idxClick)) {
+  for (const click of clicksSinLocalizacion) {
+    if (!escriturasPromovidas.some((idxEscritura) => idxEscritura > click.idx)) {
       return {
         promovida: false,
-        motivo: `el click del paso ${idxClick} quedo sin ninguna estrategia de localizacion y ninguna escritura posterior lo cubre`,
+        motivo: `el click del paso ${click.idx} (${click.descriptor}) quedo sin ninguna estrategia de localizacion y ninguna escritura posterior lo cubre`,
       };
     }
   }

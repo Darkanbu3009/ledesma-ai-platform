@@ -417,12 +417,135 @@ describe('convertirTrayectoriaPersistida (fixture real: fillFormVision en el pas
 });
 
 /**
+ * La trayectoria REAL de 19 pasos del 27 jul 2026 (el otro caso de produccion que la promocion
+ * rechazaba con "paso act sin ninguna estrategia de localizacion"): el TYPE del cuerpo llego CON el
+ * dato pero SIN selector (paso 13), seguido del click del MISMO campo CON selector (paso 14). La
+ * derivacion cruzada (FIX A) debe hacer que el paso de escritura del cuerpo adopte el localizador
+ * del click del paso 14.
+ */
+function pasosGmailReal19(): PasoTrayectoria[] {
+  siguienteId = 0;
+  return [
+    paso(0, { tipo: 'goto', instruccion: 'abrir el correo' }, { url: `https://${DOMINIO}/` }),
+    paso(1, { tipo: 'screenshot' }),
+    paso(2, { tipo: 'ariaTree' }),
+    paso(3, { tipo: 'act', instruccion: 'click en Redactar', metodo: 'click' }, {
+      selector: `xpath=/html[1]/body[1]/div[7]//div[@aria-label='Redactar']`,
+    }),
+    paso(4, { tipo: 'screenshot' }),
+    paso(5, { tipo: 'act', instruccion: 'escribir el destinatario', metodo: 'fill', argumentos: ['martin@ejemplo.com'] }, {
+      selector: `xpath=/html[1]/body[1]/div[7]//input[@aria-label='Para']`,
+      valorCensurado: 'martin@ejemplo.com',
+    }),
+    paso(6, { tipo: 'act', instruccion: 'press Tab key to confirm the recipient', metodo: 'press', argumentos: ['Tab'] }, {
+      selector: `xpath=/html[1]/body[1]/div[7]//input[@aria-label='Para']`,
+    }),
+    paso(7, { tipo: 'act', instruccion: 'escribir el asunto', metodo: 'fill', argumentos: ['Reporte semanal'] }, {
+      selector: `xpath=/html[1]/body[1]/div[7]//input[@name='subjectbox']`,
+      valorCensurado: 'Reporte semanal',
+    }),
+    paso(8, { tipo: 'screenshot' }),
+    paso(9, { tipo: 'extract', instruccion: 'leer los campos del formulario' }),
+    paso(10, { tipo: 'scroll' }),
+    paso(11, { tipo: 'screenshot' }),
+    paso(12, { tipo: 'think' }),
+    // El paso culpable del caso real: el type del cuerpo trae el dato pero llego SIN selector.
+    paso(13, { tipo: 'act', instruccion: 'type the message into the body', metodo: 'type', argumentos: ['Adjunto el resumen de la semana'] }, {
+      valorCensurado: 'Adjunto el resumen de la semana',
+    }),
+    // Y el click del MISMO campo con selector propio, inmediatamente despues.
+    paso(14, { tipo: 'act', instruccion: 'click the textbox Cuerpo del mensaje', metodo: 'click' }, {
+      selector: `xpath=/html[1]/body[1]/div[7]//div[@aria-label='Cuerpo del mensaje']`,
+    }),
+    paso(15, { tipo: 'verificacion', instruccion: 'verificacion previa: los datos coinciden con lo pedido' }),
+    paso(16, { tipo: 'act', instruccion: 'click en Enviar', metodo: 'click' }, {
+      selector: `xpath=/html[1]/body[1]/div[7]//div[@aria-label='Enviar']`,
+    }),
+    paso(17, { tipo: 'extract', instruccion: 'confirmar que el mensaje se envio' }),
+    paso(18, { tipo: 'done' }),
+  ];
+}
+
+describe('convertirTrayectoriaPersistida (fixture real de 19 pasos: type del cuerpo sin selector)', () => {
+  it('la fixture reproduce el caso real: 19 pasos, con el type del cuerpo sin selector en el 13', () => {
+    const pasos = pasosGmailReal19();
+    expect(pasos).toHaveLength(19);
+    const culpable = pasos[13];
+    expect((culpable?.accion as { metodo: string | null }).metodo).toBe('type');
+    expect(culpable?.selector).toBeNull();
+    expect(culpable?.valorCensurado).not.toBeNull();
+    expect(pasos[14]?.selector).not.toBeNull();
+  });
+
+  it('convierte la trayectoria COMPLETA: el cuerpo se escribe con el localizador del click del 14', () => {
+    const resultado = convertirTrayectoriaPersistida([trayectoria({ pasos: pasosGmailReal19() })]);
+    expect(resultado.guardable).toBe(true);
+    if (!resultado.guardable) return;
+    // La receta queda en el rango esperado (6 a 10 pasos) con el flujo esencial completo.
+    expect(resultado.pasos.length).toBeGreaterThanOrEqual(6);
+    expect(resultado.pasos.length).toBeLessThanOrEqual(10);
+    expect(resultado.pasos.map((p) => p.accion)).toEqual([
+      'navegar',
+      'click',
+      'escribir',
+      'teclas',
+      'escribir',
+      'escribir',
+      'click',
+      'verificar',
+      'click',
+    ]);
+    const escritos = resultado.pasos.filter((p) => p.accion === 'escribir');
+    expect(escritos.map((p) => p.valor)).toEqual([
+      { tipo: 'parametro', parametro: 'destinatario' },
+      { tipo: 'parametro', parametro: 'asunto' },
+      { tipo: 'parametro', parametro: 'cuerpo' },
+    ]);
+    // FIX A: la escritura del cuerpo adopta las estrategias derivadas del selector del paso 14.
+    const cuerpo = escritos[escritos.length - 1];
+    expect(cuerpo?.estrategias[0]).toEqual({
+      tipo: 'atributo',
+      atributo: 'aria-label',
+      valor: 'Cuerpo del mensaje',
+    });
+    // Ningun valor concreto queda persistido en ningun paso.
+    const serializada = JSON.stringify(resultado.pasos);
+    expect(serializada).not.toContain('martin@ejemplo.com');
+    expect(serializada).not.toContain('Adjunto el resumen de la semana');
+  });
+
+  it('sin adyacente que cubra el campo, rechaza nombrando el paso 13 y su descripcion (FIX B)', () => {
+    // El click del 14 apunta a OTRO campo: la derivacion cruzada no puede adoptar su localizador.
+    const pasos = pasosGmailReal19().map((p) =>
+      p.idx === 14
+        ? {
+            ...p,
+            accion: { tipo: 'act', instruccion: 'click the subject field', metodo: 'click', argumentos: [] },
+            selector: `xpath=/html[1]/body[1]/div[7]//input[@name='subjectbox']`,
+          }
+        : p,
+    );
+    const resultado = convertirTrayectoriaPersistida([trayectoria({ pasos })]);
+    expect(resultado.guardable).toBe(false);
+    if (resultado.guardable) return;
+    expect(resultado.motivo).toContain('paso 13');
+    expect(resultado.motivo).toContain('type the message into the body');
+    expect(resultado.motivo).toContain('sin estrategia y sin paso adyacente que cubra el campo');
+  });
+});
+
+/**
  * La trayectoria REAL del segundo caso de produccion (28 jul 2026): el envio exitoso de 44 pasos que
  * la promocion rechazaba con "paso act sin ninguna estrategia de localizacion". Los pasos culpables
  * son acts de CLICK sin selector y sin dato: clicks de FOCO sobre el campo que un fill posterior con
  * selector propio vuelve a enfocar ("click the textbox Cuerpo del mensaje", "click the message body
  * area") y DESVIOS de la corrida (expandir el compose, pantalla completa) que ninguna receta debe
  * repetir. La escritura de cada campo SI tiene selector, y el clic final de Enviar tambien.
+ *
+ * FIEL A LA BASE (correccion del 28 jul): esos acts se resolvieron POR VISION, o sea SIN
+ * playwrightArguments, y la fila persistida no trae NI metodo NI selector (trayectoria.ts,
+ * accionDeFila). La regla del PR 258 exigia metodo 'click' y por eso en produccion seguian
+ * bloqueando la conversion con el motivo generico.
  */
 function pasosGmailReal44(): PasoTrayectoria[] {
   siguienteId = 0;
@@ -437,7 +560,7 @@ function pasosGmailReal44(): PasoTrayectoria[] {
     paso(5, { tipo: 'screenshot' }),
     paso(6, { tipo: 'ariaTree' }),
     // Click de FOCO sin selector: el fill del destinatario (paso 8) enfoca su propio localizador.
-    paso(7, { tipo: 'act', instruccion: 'click the recipients field', metodo: 'click' }),
+    paso(7, { tipo: 'act', instruccion: 'click the recipients field' }),
     paso(8, { tipo: 'act', instruccion: 'escribir el destinatario', metodo: 'fill', argumentos: ['martin@ejemplo.com'] }, {
       selector: `xpath=/html[1]/body[1]/div[7]//input[@aria-label='Para']`,
       valorCensurado: 'martin@ejemplo.com',
@@ -446,7 +569,7 @@ function pasosGmailReal44(): PasoTrayectoria[] {
       selector: `xpath=/html[1]/body[1]/div[7]//input[@aria-label='Para']`,
     }),
     paso(10, { tipo: 'screenshot' }),
-    paso(11, { tipo: 'act', instruccion: 'click the subject field', metodo: 'click' }),
+    paso(11, { tipo: 'act', instruccion: 'click the subject field' }),
     paso(12, { tipo: 'act', instruccion: 'escribir el asunto', metodo: 'fill', argumentos: ['Reporte semanal'] }, {
       selector: `xpath=/html[1]/body[1]/div[7]//input[@name='subjectbox']`,
       valorCensurado: 'Reporte semanal',
@@ -455,13 +578,13 @@ function pasosGmailReal44(): PasoTrayectoria[] {
     paso(14, { tipo: 'extract', instruccion: 'leer los campos del formulario' }),
     // DESVIOS sin selector: agrandar el compose y ponerlo en pantalla completa. No aportan dato y
     // el flujo que importa (escribir el cuerpo) queda cubierto por el fill del paso 21.
-    paso(15, { tipo: 'act', instruccion: 'click to expand the compose window', metodo: 'click' }),
+    paso(15, { tipo: 'act', instruccion: 'click to expand the compose window' }),
     paso(16, { tipo: 'screenshot' }),
-    paso(17, { tipo: 'act', instruccion: 'toggle full screen mode for the compose window', metodo: 'click' }),
+    paso(17, { tipo: 'act', instruccion: 'toggle full screen mode for the compose window' }),
     paso(18, { tipo: 'screenshot' }),
     // Los dos clicks de FOCO del caso real, sobre el cuerpo del mensaje, sin selector ninguno.
-    paso(19, { tipo: 'act', instruccion: 'click the textbox Cuerpo del mensaje', metodo: 'click' }),
-    paso(20, { tipo: 'act', instruccion: 'click the message body area', metodo: 'click' }),
+    paso(19, { tipo: 'act', instruccion: 'click the textbox Cuerpo del mensaje' }),
+    paso(20, { tipo: 'act', instruccion: 'click the message body area' }),
     paso(21, { tipo: 'act', instruccion: 'escribir el cuerpo', metodo: 'fill', argumentos: ['Adjunto el resumen de la semana'] }, {
       selector: 'xpath=/html[1]/body[1]/div[7]/div[3]/div[2]/div[1]/div[2]',
       valorCensurado: 'Adjunto el resumen de la semana',
@@ -494,11 +617,17 @@ function pasosGmailReal44(): PasoTrayectoria[] {
 }
 
 describe('convertirTrayectoriaPersistida (fixture real de 44 pasos: clicks de foco y desvios sin selector)', () => {
-  it('la fixture reproduce el caso real: 44 pasos, con los clicks culpables sin selector', () => {
+  it('la fixture reproduce el caso real: 44 pasos, con los clicks culpables sin metodo ni selector', () => {
     const pasos = pasosGmailReal44();
     expect(pasos).toHaveLength(44);
+    // Fieles a la fila persistida: un act resuelto por vision no trae playwrightArguments, asi que
+    // queda sin metodo Y sin selector (fue lo que la regla del PR 258, que exigia metodo 'click',
+    // nunca descarto en produccion).
     const sinSelector = pasos.filter(
-      (p) => (p.accion as { metodo: string | null }).metodo === 'click' && p.selector === null,
+      (p) =>
+        (p.accion as { tipo: string; metodo: string | null }).tipo === 'act' &&
+        (p.accion as { metodo: string | null }).metodo === null &&
+        p.selector === null,
     );
     expect(sinSelector.map((p) => p.idx)).toEqual([7, 11, 15, 17, 19, 20]);
   });
