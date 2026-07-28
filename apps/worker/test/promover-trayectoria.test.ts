@@ -4,6 +4,8 @@ import type { PasoTrayectoria, TrayectoriaConPasos } from '@ledesma-platform/bac
 import type { NuevaRecetaWeb, RecetaWeb } from '@ledesma-platform/backend/recetas-web';
 import {
   convertirTrayectoriaPersistida,
+  derivarEstrategiasDeDescripcion,
+  derivarEstrategiasDePaso,
   derivarEstrategiasDeSelector,
   pasosCensuradosDesdeTrayectorias,
   procesarJobDePromoverTrayectoria,
@@ -167,6 +169,110 @@ describe('derivarEstrategiasDeSelector', () => {
   });
 });
 
+describe('derivarEstrategiasDeDescripcion (FIX estrategias multiples, 28 jul 2026)', () => {
+  it('un click sin palabra de rol deriva boton y texto visible', () => {
+    expect(
+      derivarEstrategiasDeDescripcion({ tipo: 'act', instruccion: 'click en Enviar', metodo: 'click', argumentos: [] }),
+    ).toEqual([
+      { tipo: 'rol', rol: 'button', nombre: 'Enviar' },
+      { tipo: 'texto', texto: 'Enviar' },
+    ]);
+  });
+
+  it('el rol nombrado ANTES del campo se deriva con el nombre completo', () => {
+    expect(
+      derivarEstrategiasDeDescripcion({
+        tipo: 'act',
+        instruccion: 'click the textbox Cuerpo del mensaje',
+        metodo: 'click',
+        argumentos: [],
+      }),
+    ).toEqual([{ tipo: 'rol', rol: 'textbox', nombre: 'Cuerpo del mensaje' }]);
+  });
+
+  it('el rol nombrado DESPUES del campo se deriva con su mapeo', () => {
+    expect(
+      derivarEstrategiasDeDescripcion({
+        tipo: 'act',
+        instruccion: 'click the recipients field',
+        metodo: 'click',
+        argumentos: [],
+      }),
+    ).toEqual([{ tipo: 'rol', rol: 'textbox', nombre: 'recipients' }]);
+  });
+
+  it('una escritura deriva un textbox por campo nombrado, sin el valor tecleado', () => {
+    expect(
+      derivarEstrategiasDeDescripcion({
+        tipo: 'act',
+        instruccion: 'type Reporte semanal into the subject field',
+        metodo: 'fill',
+        argumentos: ['Reporte semanal'],
+      }),
+    ).toEqual([{ tipo: 'rol', rol: 'textbox', nombre: 'subject' }]);
+    expect(
+      derivarEstrategiasDeDescripcion({
+        tipo: 'act',
+        instruccion: 'type the message into the body',
+        metodo: 'type',
+        argumentos: ['hola'],
+      }),
+    ).toEqual([
+      { tipo: 'rol', rol: 'textbox', nombre: 'message' },
+      { tipo: 'rol', rol: 'textbox', nombre: 'body' },
+    ]);
+  });
+
+  it('sin instruccion, o con un metodo que no es click ni escritura, no deriva nada', () => {
+    expect(
+      derivarEstrategiasDeDescripcion({ tipo: 'act', instruccion: null, metodo: 'click', argumentos: [] }),
+    ).toEqual([]);
+    expect(
+      derivarEstrategiasDeDescripcion({
+        tipo: 'act',
+        instruccion: 'press Tab key to confirm the recipient',
+        metodo: 'press',
+        argumentos: ['Tab'],
+      }),
+    ).toEqual([]);
+    expect(
+      derivarEstrategiasDeDescripcion({
+        tipo: 'act',
+        instruccion: 'click the message body area',
+        metodo: null,
+        argumentos: [],
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe('derivarEstrategiasDePaso', () => {
+  it('combina atributos del selector, derivadas de la descripcion y el xpath al FINAL', () => {
+    const estrategias = derivarEstrategiasDePaso(
+      `xpath=/html[1]/body[1]/div[7]//input[@aria-label='Para']`,
+      { tipo: 'act', instruccion: 'escribir el destinatario', metodo: 'fill', argumentos: ['a@b.com'] },
+    );
+    expect(estrategias).toEqual([
+      { tipo: 'atributo', atributo: 'aria-label', valor: 'Para' },
+      { tipo: 'rol', rol: 'textbox', nombre: 'destinatario' },
+      { tipo: 'xpath', xpath: `/html[1]/body[1]/div[7]//input[@aria-label='Para']` },
+    ]);
+  });
+
+  it('un xpath posicional puro con descripcion deja de ser la unica estrategia', () => {
+    const estrategias = derivarEstrategiasDePaso('xpath=/html[1]/body[1]/div[31]/div[2]', {
+      tipo: 'act',
+      instruccion: 'escribir el cuerpo',
+      metodo: 'fill',
+      argumentos: ['hola'],
+    });
+    expect(estrategias).toEqual([
+      { tipo: 'rol', rol: 'textbox', nombre: 'cuerpo' },
+      { tipo: 'xpath', xpath: '/html[1]/body[1]/div[31]/div[2]' },
+    ]);
+  });
+});
+
 describe('pasosCensuradosDesdeTrayectorias', () => {
   it('descarta los pasos fallidos y renumera los idx de forma continua', () => {
     const pasos = pasosCensuradosDesdeTrayectorias([trayectoria()]);
@@ -266,10 +372,42 @@ describe('convertirTrayectoriaPersistida (fixture Gmail de 19 pasos)', () => {
     expect(resultado.guardable).toBe(false);
   });
 
-  it('rechaza un paso con efecto sin selector del que derivar estrategias', () => {
+  it('un click sin selector pero con descripcion se promueve con las estrategias derivadas de ella', () => {
     const pasos = pasosGmail().map((p) => (p.idx === 15 ? { ...p, selector: null } : p));
     const resultado = convertirTrayectoriaPersistida([trayectoria({ pasos })]);
+    expect(resultado.guardable).toBe(true);
+    if (!resultado.guardable) return;
+    const enviar = resultado.pasos[resultado.pasos.length - 1];
+    expect(enviar?.estrategias).toEqual([
+      { tipo: 'rol', rol: 'button', nombre: 'Enviar' },
+      { tipo: 'texto', texto: 'Enviar' },
+    ]);
+  });
+
+  it('rechaza un paso con efecto sin selector NI descripcion de la que derivar estrategias', () => {
+    const pasos = pasosGmail().map((p) =>
+      p.idx === 15
+        ? { ...p, selector: null, accion: { tipo: 'act', instruccion: null, metodo: 'click', argumentos: [] } }
+        : p,
+    );
+    const resultado = convertirTrayectoriaPersistida([trayectoria({ pasos })]);
     expect(resultado.guardable).toBe(false);
+  });
+
+  it('un paso que solo tiene xpath se conserva y queda reportado en pasosSoloXpath', () => {
+    // El click de Redactar pierde la instruccion: su selector posicional puro es lo unico que queda.
+    const pasos = pasosGmail().map((p) =>
+      p.idx === 3
+        ? { ...p, accion: { tipo: 'act', instruccion: null, metodo: 'click', argumentos: [] } }
+        : p,
+    );
+    const resultado = convertirTrayectoriaPersistida([trayectoria({ pasos })]);
+    expect(resultado.guardable).toBe(true);
+    if (!resultado.guardable) return;
+    expect(resultado.pasos[1]?.estrategias).toEqual([
+      { tipo: 'xpath', xpath: '/html[1]/body[1]/div[7]/div[3]/div[1]/div[2]/div[1]/div[1]' },
+    ]);
+    expect(resultado.pasosSoloXpath).toEqual(['paso 1 (click)']);
   });
 });
 
@@ -514,23 +652,43 @@ describe('convertirTrayectoriaPersistida (fixture real de 19 pasos: type del cue
     expect(serializada).not.toContain('Adjunto el resumen de la semana');
   });
 
-  it('sin adyacente que cubra el campo, rechaza nombrando el paso 13 y su descripcion (FIX B)', () => {
-    // El click del 14 apunta a OTRO campo: la derivacion cruzada no puede adoptar su localizador.
-    const pasos = pasosGmailReal19().map((p) =>
-      p.idx === 14
-        ? {
-            ...p,
-            accion: { tipo: 'act', instruccion: 'click the subject field', metodo: 'click', argumentos: [] },
-            selector: `xpath=/html[1]/body[1]/div[7]//input[@name='subjectbox']`,
-          }
-        : p,
-    );
+  it('sin adyacente que cubra el campo NI descripcion, rechaza nombrando el paso 13 (FIX B)', () => {
+    // El click del 14 apunta a OTRO campo y el type del 13 pierde su instruccion: ni la derivacion
+    // cruzada ni la derivacion por descripcion tienen de donde sacar un localizador.
+    const pasos = pasosGmailReal19().map((p) => {
+      if (p.idx === 13) {
+        return {
+          ...p,
+          accion: { tipo: 'act', instruccion: null, metodo: 'type', argumentos: ['Adjunto el resumen de la semana'] },
+        };
+      }
+      if (p.idx === 14) {
+        return {
+          ...p,
+          accion: { tipo: 'act', instruccion: 'click the subject field', metodo: 'click', argumentos: [] },
+          selector: `xpath=/html[1]/body[1]/div[7]//input[@name='subjectbox']`,
+        };
+      }
+      return p;
+    });
     const resultado = convertirTrayectoriaPersistida([trayectoria({ pasos })]);
     expect(resultado.guardable).toBe(false);
     if (resultado.guardable) return;
     expect(resultado.motivo).toContain('paso 13');
-    expect(resultado.motivo).toContain('type the message into the body');
     expect(resultado.motivo).toContain('sin estrategia y sin paso adyacente que cubra el campo');
+  });
+
+  it('Para, Asunto, Cuerpo y Enviar llevan al menos una estrategia que no es xpath', () => {
+    const resultado = convertirTrayectoriaPersistida([trayectoria({ pasos: pasosGmailReal19() })]);
+    expect(resultado.guardable).toBe(true);
+    if (!resultado.guardable) return;
+    const escritos = resultado.pasos.filter((p) => p.accion === 'escribir');
+    const enviar = resultado.pasos[resultado.pasos.length - 1];
+    expect(escritos).toHaveLength(3);
+    for (const paso of [...escritos, enviar]) {
+      expect(paso?.estrategias.some((e) => e.tipo !== 'xpath')).toBe(true);
+    }
+    expect(resultado.pasosSoloXpath).toEqual([]);
   });
 });
 
@@ -667,8 +825,30 @@ describe('convertirTrayectoriaPersistida (fixture real de 44 pasos: clicks de fo
     expect(serializada).not.toContain('pantalla');
   });
 
-  it('si el clic final pierde el selector, falla nombrando el paso exacto en vez de descartarlo', () => {
-    const pasos = pasosGmailReal44().map((p) => (p.idx === 35 ? { ...p, selector: null } : p));
+  it('Para, Asunto, Cuerpo y Enviar llevan al menos una estrategia que no es xpath', () => {
+    const resultado = convertirTrayectoriaPersistida([trayectoria({ pasos: pasosGmailReal44() })]);
+    expect(resultado.guardable).toBe(true);
+    if (!resultado.guardable) return;
+    const escritos = resultado.pasos.filter((p) => p.accion === 'escribir');
+    const enviar = resultado.pasos[resultado.pasos.length - 1];
+    expect(escritos).toHaveLength(3);
+    for (const paso of [...escritos, enviar]) {
+      expect(paso?.estrategias.some((e) => e.tipo !== 'xpath')).toBe(true);
+    }
+    // El cuerpo, cuyo selector es un xpath posicional puro (el caso que rompio la receta e62b0791),
+    // deriva su rol de la descripcion del ACT y deja el xpath como ultimo recurso.
+    const cuerpo = escritos[escritos.length - 1];
+    expect(cuerpo?.estrategias[0]).toEqual({ tipo: 'rol', rol: 'textbox', nombre: 'cuerpo' });
+    expect(cuerpo?.estrategias[cuerpo.estrategias.length - 1]?.tipo).toBe('xpath');
+    expect(resultado.pasosSoloXpath).toEqual([]);
+  });
+
+  it('si el clic final pierde selector y descripcion, falla nombrando el paso exacto', () => {
+    const pasos = pasosGmailReal44().map((p) =>
+      p.idx === 35
+        ? { ...p, selector: null, accion: { tipo: 'act', instruccion: null, metodo: 'click', argumentos: [] } }
+        : p,
+    );
     const resultado = convertirTrayectoriaPersistida([trayectoria({ pasos })]);
     expect(resultado.guardable).toBe(false);
     if (resultado.guardable) return;
@@ -894,6 +1074,17 @@ describe('procesarJobDePromoverTrayectoria', () => {
     expect(`${error.name}: ${error.message}`).toMatch(
       /^PROMOCION_NO_REPETIBLE: la ultima trayectoria termino fallida/,
     );
+  });
+
+  it('reporta en el resultado del job los pasos que quedaron solo con xpath', async () => {
+    const pasos = pasosGmail().map((p) =>
+      p.idx === 3
+        ? { ...p, accion: { tipo: 'act', instruccion: null, metodo: 'click', argumentos: [] } }
+        : p,
+    );
+    const { deps, resultados } = makeDeps({ trayectorias: [trayectoria({ pasos })] });
+    await procesarJobDePromoverTrayectoria(deps, makeJob(PAYLOAD));
+    expect(resultados[0]).toMatchObject({ estado: 'ok', pasosSoloXpath: ['paso 1 (click)'] });
   });
 
   it('el caso real de produccion (press Tab) convierte y guarda en vez de fallar', async () => {

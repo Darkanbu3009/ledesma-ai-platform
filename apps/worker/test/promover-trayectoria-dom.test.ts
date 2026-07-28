@@ -129,8 +129,15 @@ function crearNavegadorSobreLaPagina(dom: JSDOM) {
           } else if (e.tipo === 'xpath') {
             el = document.evaluate(e.xpath, document, null, 9, null).singleNodeValue;
           } else if (e.tipo === 'texto') {
+            // El mas PROFUNDO con ese texto exacto, como el resolutor real: el ancestro tambien
+            // contiene el texto y clicarlo caeria en otra zona.
             for (const c of document.querySelectorAll('*')) {
-              if (c.textContent && c.textContent.trim() === e.texto) { el = c; break; }
+              if (!c.textContent || c.textContent.trim() !== e.texto) continue;
+              let tieneHijoIgual = false;
+              for (const h of c.querySelectorAll('*')) {
+                if (h.textContent && h.textContent.trim() === e.texto) { tieneHijoIgual = true; break; }
+              }
+              if (!tieneHijoIgual) { el = c; break; }
             }
           }
           if (el) return { el: el, indice: i };

@@ -193,13 +193,38 @@ ${AYUDANTES_DOM}
     const vivos = Array.prototype.filter.call(encontrados, visible);
     return vivos.length === 1 ? vivos[0] : null;
   }
+  // Marcas invisibles de direccion de texto (LRM, RLM, aislantes bidi, BOM) que sitios como Gmail
+  // incrustan en el nombre accesible (el boton Enviar las lleva): se retiran antes de comparar.
+  function claveDeNombre(texto) {
+    return String(texto == null ? '' : texto)
+      .replace(/[\\u200e\\u200f\\u061c\\u202a-\\u202e\\u2066-\\u2069\\ufeff]/g, '')
+      .replace(/\\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  }
+  // Nombre accesible matcheado POR PREFIJO: el nombre buscado puede ser un recorte del real
+  // ("Enviar" encuentra "Enviar (Ctrl+Intro)", "destinatario" encuentra "Destinatarios en Para").
+  // El prefijo solo vale si termina en un limite de palabra o si al nombre real solo le sobra el
+  // plural: "Para" NO encuentra "Parar reproduccion".
+  function nombreCoincide(delElemento, buscado) {
+    const nombre = claveDeNombre(delElemento);
+    const objetivo = claveDeNombre(buscado);
+    if (nombre === '' || objetivo === '') return false;
+    if (nombre === objetivo) return true;
+    if (nombre.indexOf(objetivo) !== 0) return false;
+    const resto = nombre.slice(objetivo.length);
+    return /^[^\\p{L}\\p{N}]/u.test(resto) || /^s(?:[^\\p{L}\\p{N}]|$)/u.test(resto);
+  }
   function porRol(estrategia) {
     const candidatos = [];
     for (const el of document.querySelectorAll('*')) {
       if (!visible(el)) continue;
-      if (rolDe(el) === estrategia.rol && nombreDe(el) === estrategia.nombre) candidatos.push(el);
+      if (rolDe(el) === estrategia.rol && nombreCoincide(nombreDe(el), estrategia.nombre)) candidatos.push(el);
     }
-    return candidatos.length === 1 ? candidatos[0] : null;
+    if (candidatos.length === 1) return candidatos[0];
+    // Con varios candidatos por prefijo, la coincidencia EXACTA desempata; sin exacta unica, nada.
+    const exactos = candidatos.filter((el) => claveDeNombre(nombreDe(el)) === claveDeNombre(estrategia.nombre));
+    return exactos.length === 1 ? exactos[0] : null;
   }
   function porTexto(estrategia) {
     const candidatos = [];

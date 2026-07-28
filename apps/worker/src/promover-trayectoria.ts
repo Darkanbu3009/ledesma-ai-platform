@@ -1,10 +1,12 @@
 import {
   esAtributoEstable,
+  MAX_ESTRATEGIAS_POR_PASO,
   parsePromoverTrayectoriaJobPayload,
   type EstrategiaLocalizacion,
   type Job,
   type PasoDeReceta,
 } from '@ledesma-platform/shared';
+import { VALOR_CENSURADO } from './censura.js';
 import type { TrayectoriaConPasos, PasoTrayectoria } from '@ledesma-platform/backend/trayectorias';
 import type { NuevaRecetaWeb, RecetaWeb } from '@ledesma-platform/backend/recetas-web';
 import { PermanentExecutionError, PromocionNoRepetibleError } from './errores.js';
@@ -30,10 +32,20 @@ import type { Logger } from './logger.js';
  *    estrategia 'xpath' del paso. Si el xpath trae predicados de atributo estable (@aria-label, @id,
  *    @name, @data-*), se derivan ADEMAS estrategias 'atributo', que quedan ANTES del xpath (leccion
  *    de los ids dinamicos de Gmail: el orden del contrato prioriza atributo/rol sobre xpath).
- *  - Rol accesible y texto visible NO se pueden derivar: solo existian en las observaciones en
- *    memoria. La receta derivada nace mas fragil que una observada, y la AUTO REPARACION (D5) la
- *    enriquece en su primera re-ejecucion: al escalar un paso se leen del DOM las estrategias
- *    frescas y quedan persistidas.
+ *  - La DESCRIPCION del ACT (accion.instruccion, censurada) nombra el campo en lenguaje natural
+ *    ("click the textbox Cuerpo del mensaje", "escribir el destinatario"): de ella se derivan
+ *    estrategias 'rol' (nombre accesible matcheado POR PREFIJO por el resolutor, tolerando marcas
+ *    invisibles de direccion como las del boton Enviar de Gmail) y 'texto'. Caso real de produccion
+ *    (28 jul 2026): la receta e62b0791 quedo con UNA sola estrategia por paso (el xpath absoluto de
+ *    la corrida origen, atado a un compose re-renderizado por los desvios) y en sesion fresca no
+ *    resolvio nada; con estrategias derivadas de la descripcion la receta sobrevive al cambio de
+ *    posicion del DOM.
+ *  - La percepcion de campos que corrio durante la corrida NO se persiste (pasos_trayectoria no
+ *    tiene columna): sus aria-labels solo llegan aqui indirectamente, cuando el modelo los cito en
+ *    la descripcion del ACT. La AUTO REPARACION (D5) sigue enriqueciendo la receta en su primera
+ *    re-ejecucion: al escalar un paso se leen del DOM las estrategias frescas y quedan persistidas.
+ *  - Un paso que quedo SOLO con xpath se conserva asi (mejor un ultimo recurso que nada) y se
+ *    reporta en el resultado de la promocion (`pasosSoloXpath`), para que la fragilidad sea visible.
  *
  * DECISIONES DE FILTRADO (distintas de la promocion automatica, a proposito):
  *  - Los pasos con exito === false se DESCARTAN en lugar de invalidar la trayectoria: el desenlace
@@ -83,6 +95,178 @@ export function derivarEstrategiasDeSelector(selector: string | null): Estrategi
   return estrategias;
 }
 
+/** Metodos de la traza cuya descripcion admite derivar la localizacion de un CLICK. */
+const METODOS_DE_CLICK_DERIVABLES = new Set(['click', 'dblclick', 'tap']);
+
+/** Metodos de la traza cuya descripcion admite derivar la localizacion de una ESCRITURA. */
+const METODOS_DE_ESCRITURA_DERIVABLES = new Set(['fill', 'type', 'setValue']);
+
+/** Palabra de ROL dentro de una descripcion, mapeada al rol accesible que nombra. */
+const ROL_POR_PALABRA: Readonly<Record<string, string>> = {
+  textbox: 'textbox',
+  input: 'textbox',
+  field: 'textbox',
+  campo: 'textbox',
+  casilla: 'textbox',
+  box: 'textbox',
+  area: 'textbox',
+  button: 'button',
+  boton: 'button',
+  link: 'link',
+  enlace: 'link',
+  checkbox: 'checkbox',
+  combobox: 'combobox',
+};
+
+/**
+ * Palabras INICIALES de una descripcion que no identifican al elemento (verbos de la accion,
+ * preposiciones y articulos). Se retiran solo del comienzo, de forma iterativa: un "de" interno
+ * ("opciones de envio") forma parte del nombre y se conserva.
+ */
+const RELLENO_INICIAL = new Set([
+  'click', 'clic', 'clicar', 'clickear', 'press', 'pulsa', 'pulsar', 'presiona', 'presionar',
+  'toca', 'tocar', 'tap', 'select', 'selecciona', 'seleccionar', 'open', 'abrir', 'abre',
+  'escribe', 'escribir', 'type', 'fill', 'enter', 'write', 'teclea', 'teclear', 'haz', 'hacer',
+  'on', 'en', 'in', 'into', 'sobre', 'to', 'at', 'the', 'el', 'la', 'los', 'las', 'un', 'una',
+  'a', 'al',
+]);
+
+/** Separadores que parten una descripcion de escritura en sus campos ("message into the body"). */
+const PATRON_SEPARADOR_DE_CAMPOS = /\b(?:into|dentro)\b/gi;
+
+/** Tope de estrategias derivadas de UNA descripcion (el resto de la lista lo llena el selector). */
+const MAX_ESTRATEGIAS_DE_DESCRIPCION = 3;
+
+/** Tope de longitud de un nombre derivado de una descripcion. */
+const MAX_NOMBRE_DERIVADO = 60;
+
+/** Quita del comienzo del texto las palabras de relleno, y de los extremos comillas y puntuacion. */
+function limpiarNombreDerivado(texto: string): string {
+  let limpio = texto.replace(/["'`]/g, ' ').replace(/\s+/g, ' ').trim();
+  for (;;) {
+    const primera = limpio.split(' ')[0] ?? '';
+    if (primera === '' || !RELLENO_INICIAL.has(primera.toLowerCase())) break;
+    limpio = limpio.slice(primera.length).trim();
+  }
+  return limpio.replace(/[.,;:!?]+$/, '').trim();
+}
+
+/** ¿El nombre derivado sirve como estrategia (acotado, con letras y sin marcas de censura)? */
+function nombreDerivadoValido(nombre: string): boolean {
+  if (nombre.length < 2 || nombre.length > MAX_NOMBRE_DERIVADO) return false;
+  if (nombre.includes(VALOR_CENSURADO)) return false;
+  return /\p{L}/u.test(nombre);
+}
+
+/**
+ * DERIVA estrategias 'rol' y 'texto' desde la DESCRIPCION del ACT (FIX estrategias multiples, 28
+ * jul 2026). La descripcion nombra el campo en lenguaje natural y es lo unico persistido que
+ * sobrevive a un xpath re-renderizado. Tres formas, de la mas explicita a la mas laxa:
+ *  1. rol nombrado antes del campo: "click the textbox Cuerpo del mensaje" -> rol textbox,
+ *     nombre "Cuerpo del mensaje";
+ *  2. rol nombrado despues del campo: "click the recipients field" -> rol textbox, "recipients";
+ *  3. sin palabra de rol: un click deriva boton mas texto visible ("click en Enviar" -> rol button
+ *     "Enviar" y texto "Enviar"); una escritura deriva un textbox por cada campo nombrado
+ *     ("type the message into the body" -> "message" y "body").
+ * El resolutor matchea el nombre POR PREFIJO del nombre accesible (localizacion.ts), tolerando
+ * marcas invisibles de direccion y el plural: "destinatario" encuentra "Destinatarios en Para".
+ * Los valores tecleados se retiran de la descripcion ANTES de derivar (jamas se localiza por el
+ * dato) y el filtro de dependencia del valor (D8) vuelve a comprobarlo despues.
+ */
+export function derivarEstrategiasDeDescripcion(accion: {
+  tipo: string;
+  instruccion: string | null;
+  metodo: string | null;
+  argumentos: string[];
+}): EstrategiaLocalizacion[] {
+  const metodo = accion.metodo;
+  const esClick = metodo !== null && METODOS_DE_CLICK_DERIVABLES.has(metodo);
+  const esEscritura = metodo !== null && METODOS_DE_ESCRITURA_DERIVABLES.has(metodo);
+  if ((!esClick && !esEscritura) || accion.instruccion === null) return [];
+
+  // El valor tecleado se borra de la descripcion: ninguna estrategia puede nacer del dato.
+  let descripcion = accion.instruccion;
+  for (const argumento of accion.argumentos) {
+    if (argumento.trim() === '') continue;
+    const escapado = argumento.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    descripcion = descripcion.replace(new RegExp(escapado, 'gi'), ' ');
+  }
+  descripcion = descripcion.replace(/\s+/g, ' ').trim();
+  if (descripcion === '' || descripcion.includes(VALOR_CENSURADO)) return [];
+
+  const estrategias: EstrategiaLocalizacion[] = [];
+  const agregar = (estrategia: EstrategiaLocalizacion): void => {
+    const clave = JSON.stringify(estrategia);
+    if (estrategias.some((previa) => JSON.stringify(previa) === clave)) return;
+    if (estrategias.length < MAX_ESTRATEGIAS_DE_DESCRIPCION) estrategias.push(estrategia);
+  };
+
+  // Forma 1: la palabra de rol precede al nombre ("the textbox Cuerpo del mensaje").
+  const rolYNombre = descripcion.match(
+    /\b(textbox|input|button|boton|link|enlace|checkbox|combobox)\b[\s:]+(.{2,80}?)$/i,
+  );
+  if (rolYNombre !== null) {
+    const rol = ROL_POR_PALABRA[(rolYNombre[1] ?? '').toLowerCase()];
+    const nombre = limpiarNombreDerivado(rolYNombre[2] ?? '');
+    if (rol !== undefined && nombreDerivadoValido(nombre)) {
+      agregar({ tipo: 'rol', rol, nombre });
+      if (rol === 'button' && esClick) agregar({ tipo: 'texto', texto: nombre });
+      return estrategias;
+    }
+  }
+
+  // Forma 2: la palabra de rol sigue al nombre ("the recipients field").
+  const nombreYRol = limpiarNombreDerivado(descripcion).match(
+    /^(.{2,80}?)\s+\b(field|button|box|area|campo|boton|casilla|textbox|input)\b/i,
+  );
+  if (nombreYRol !== null) {
+    const rol = ROL_POR_PALABRA[(nombreYRol[2] ?? '').toLowerCase()];
+    const nombre = limpiarNombreDerivado(nombreYRol[1] ?? '');
+    if (rol !== undefined && nombreDerivadoValido(nombre)) {
+      agregar({ tipo: 'rol', rol, nombre });
+      if (rol === 'button' && esClick) agregar({ tipo: 'texto', texto: nombre });
+      return estrategias;
+    }
+  }
+
+  // Forma 3, click: lo que queda tras el relleno es el nombre del control ("click en Enviar").
+  if (esClick) {
+    const nombre = limpiarNombreDerivado(descripcion);
+    if (nombreDerivadoValido(nombre)) {
+      agregar({ tipo: 'rol', rol: 'button', nombre });
+      agregar({ tipo: 'texto', texto: nombre });
+    }
+    return estrategias;
+  }
+
+  // Forma 3, escritura: cada tramo separado por preposiciones nombra un campo candidato.
+  for (const tramo of descripcion.split(PATRON_SEPARADOR_DE_CAMPOS)) {
+    const nombre = limpiarNombreDerivado(tramo);
+    if (nombreDerivadoValido(nombre)) agregar({ tipo: 'rol', rol: 'textbox', nombre });
+  }
+  return estrategias;
+}
+
+/**
+ * Las estrategias COMPLETAS de un paso persistido: los atributos estables embebidos en el xpath,
+ * las derivadas de la descripcion del ACT (rol y texto) y el xpath al FINAL, como ultimo recurso.
+ */
+export function derivarEstrategiasDePaso(
+  selector: string | null,
+  accion: {
+    tipo: string;
+    instruccion: string | null;
+    metodo: string | null;
+    argumentos: string[];
+  },
+): EstrategiaLocalizacion[] {
+  const delSelector = derivarEstrategiasDeSelector(selector);
+  const atributos = delSelector.filter((e) => e.tipo === 'atributo');
+  const xpath = delSelector.filter((e) => e.tipo === 'xpath');
+  const deDescripcion = derivarEstrategiasDeDescripcion(accion);
+  return [...atributos, ...deDescripcion, ...xpath].slice(0, MAX_ESTRATEGIAS_POR_PASO);
+}
+
 /** La `accion` jsonb de un paso persistido, leida con tolerancia (una fila rara no debe lanzar). */
 function accionDeFila(crudo: unknown): PasoCensurado['accion'] {
   const objeto = typeof crudo === 'object' && crudo !== null ? (crudo as Record<string, unknown>) : {};
@@ -119,14 +303,15 @@ export function pasosCensuradosDesdeTrayectorias(
 }
 
 function pasoCensuradoDesdeFila(fila: PasoTrayectoria, idx: number): PasoCensurado {
+  const accion = accionDeFila(fila.accion);
   return {
     idx,
-    accion: accionDeFila(fila.accion),
+    accion,
     selector: fila.selector,
     valorCensurado: fila.valorCensurado,
     url: fila.url,
     exito: true,
-    estrategias: derivarEstrategiasDeSelector(fila.selector),
+    estrategias: derivarEstrategiasDePaso(fila.selector, accion),
     dominio: null,
   };
 }
@@ -141,6 +326,12 @@ export interface GuardadoAceptado {
   guardable: true;
   pasos: PasoDeReceta[];
   firmaObjetivo: string;
+  /**
+   * Pasos de la receta que quedaron SOLO con la estrategia xpath (ni el selector traia atributos
+   * estables ni la descripcion permitio derivar rol o texto). Se conservan (mejor un ultimo recurso
+   * que nada), pero la fragilidad se reporta en el resultado del job para que sea visible.
+   */
+  pasosSoloXpath: string[];
 }
 
 export type ResultadoDeGuardado = GuardadoAceptado | GuardadoRechazado;
@@ -180,6 +371,9 @@ export function convertirTrayectoriaPersistida(
     guardable: true,
     pasos: promocion.pasos,
     firmaObjetivo: firmaDeObjetivo(ultima.objetivo),
+    pasosSoloXpath: promocion.pasos
+      .filter((paso) => paso.estrategias.length > 0 && paso.estrategias.every((e) => e.tipo === 'xpath'))
+      .map((paso) => `paso ${paso.idx} (${paso.accion})`),
   };
 }
 
@@ -281,6 +475,7 @@ export async function procesarJobDePromoverTrayectoria(
     estado: 'ok',
     via: 'trayectoria',
     recetaId: receta?.id ?? null,
+    ...(conversion.pasosSoloXpath.length > 0 ? { pasosSoloXpath: conversion.pasosSoloXpath } : {}),
   });
   deps.logger.info('promocion de trayectoria: la tarea quedo guardada como aprendida', {
     jobId: job.id,
@@ -288,5 +483,6 @@ export async function procesarJobDePromoverTrayectoria(
     dominio: ultima.dominio,
     recetaId: receta?.id ?? null,
     pasos: conversion.pasos.length,
+    pasosSoloXpath: conversion.pasosSoloXpath.length,
   });
 }
