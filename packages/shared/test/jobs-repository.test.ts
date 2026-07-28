@@ -433,6 +433,51 @@ describe('JobsRepository', () => {
     });
   });
 
+  describe('borrarTerminalDeOwner', () => {
+    it('borra un job terminal PROPIO en un solo DELETE atomico (owner + id + estado terminal)', async () => {
+      const sql = makeSqlSequence([[{ id: 'job-1' }]]);
+      const resultado = await new JobsRepository(sql).borrarTerminalDeOwner('job-1', 'user-1');
+      expect(resultado).toBe('borrado');
+      const texto = sqlTextOf(sql, 0);
+      expect(texto).toContain('delete from jobs');
+      expect(texto).toContain('owner_id = ');
+      expect(texto).toContain("status in ('completed', 'failed')");
+      expect(sqlValuesOf(sql, 0)).toEqual(['job-1', 'user-1']);
+      // Con el DELETE aplicado no hace falta la segunda consulta.
+      expect(llamadas(sql)).toBe(1);
+    });
+
+    it('un job existente en estado NO terminal responde no_terminal sin borrarlo', async () => {
+      const sql = makeSqlSequence([[], [{ id: 'job-1' }]]);
+      const resultado = await new JobsRepository(sql).borrarTerminalDeOwner('job-1', 'user-1');
+      expect(resultado).toBe('no_terminal');
+    });
+
+    it('un job ajeno o inexistente responde no_encontrado (idempotencia del doble borrado)', async () => {
+      const sql = makeSqlSequence([[], []]);
+      const resultado = await new JobsRepository(sql).borrarTerminalDeOwner('job-1', 'user-ajeno');
+      expect(resultado).toBe('no_encontrado');
+    });
+  });
+
+  describe('buscarPromocionEnVuelo', () => {
+    it('busca el job de promocion pending/running del owner para el job de origen', async () => {
+      const sql = makeSqlReturning([{ id: 'job-promo' }]);
+      const id = await new JobsRepository(sql).buscarPromocionEnVuelo('user-1', 'job-origen');
+      expect(id).toBe('job-promo');
+      const texto = sqlText(sql);
+      expect(texto).toContain("status in ('pending', 'running')");
+      expect(texto).toContain("payload->>'kind' = ");
+      expect(texto).toContain("payload->>'jobId' = ");
+      expect(sqlValues(sql)).toEqual(['user-1', 'promover_trayectoria', 'job-origen']);
+    });
+
+    it('sin promocion en vuelo devuelve null', async () => {
+      const sql = makeSqlReturning([]);
+      expect(await new JobsRepository(sql).buscarPromocionEnVuelo('user-1', 'job-origen')).toBeNull();
+    });
+  });
+
   describe('rowToJob', () => {
     it('mapea timestamps nullables a null y conserva ISO en los not-null', async () => {
       const sql = makeSqlReturning([

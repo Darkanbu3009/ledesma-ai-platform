@@ -1740,6 +1740,7 @@
     "card": {
       "agenteEliminado": "Deleted agent",
       "sistema": "Platform task",
+      "eliminar": "Delete the record of this activity",
       "fin": "Finished: {{fecha}}",
       "intentos_one": "{{count}} attempt",
       "intentos_other": "{{count}} attempts",
@@ -2076,6 +2077,14 @@
     "confirmar": "Yes, end it",
     "cancelar": "Keep waiting",
     "error": "We could not end the task. Refresh and try again."
+  },
+  "confirmarEliminarActividad": {
+    "titulo": "Delete this activity",
+    "detalle": "The record of this activity will be deleted and this cannot be undone. Nothing changes on the site where it ran.",
+    "conservaTarea": "The learned task derived from this run is kept.",
+    "confirmar": "Yes, delete it",
+    "cancelar": "Cancel",
+    "error": "We could not delete the activity. Refresh and try again."
   },
   "estadoCancelada": "Canceled",
   "estadoDetenida": "Stopped",

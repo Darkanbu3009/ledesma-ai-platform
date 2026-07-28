@@ -12,6 +12,7 @@ vi.mock('../src/lib/queries', () => ({
 vi.mock('../src/lib/mutations', () => ({
   useTerminarJob: () => ({ isPending: false, isError: false, mutate: vi.fn() }),
   useGuardarTareaAprendida: () => ({ isPending: false, isError: false, isSuccess: false, mutate: vi.fn() }),
+  useEliminarActividad: () => ({ isPending: false, isError: false, mutate: vi.fn() }),
 }));
 
 import i18n from '../src/i18n';

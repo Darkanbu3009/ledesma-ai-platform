@@ -87,19 +87,24 @@ function toJobActivity(
  * momento se tuvo el plan que los crea, pero mirar lo que ya corrio no es una funcion premium (a
  * diferencia de CREAR recetas/tareas, que si gatea por tier en sus rutas).
  *
- * NO expone el payload completo ni permite reintentar/borrar (eso es un PR futuro): es una vista de solo
- * lectura. Permite inyectar el verifier y el repo en tests (sin red ni DB en CI).
+ * NO expone el payload completo ni permite reintentar. Ademas de la lectura hay dos acciones del
+ * dueno: cancelar un job en vuelo (POST :id/cancelar) y ELIMINAR una actividad terminada (DELETE
+ * :id, que borra tambien su registro de trayectorias y conserva la receta derivada). Permite
+ * inyectar el verifier y el repo en tests (sin red ni DB en CI).
  */
 export function jobsRoutes(
   config: Env,
   deps?: {
     verifier?: JwtVerifier;
-    jobsRepo?: Pick<JobsRepository, 'listByOwner' | 'getSummaryForOwner' | 'cancelarPorUsuario'>;
+    jobsRepo?: Pick<
+      JobsRepository,
+      'listByOwner' | 'getSummaryForOwner' | 'cancelarPorUsuario' | 'borrarTerminalDeOwner'
+    >;
     aprobacionesRepo?: Pick<
       AprobacionesWebRepository,
       'cerrarPendientePorCancelacion' | 'registrarIntervencion'
     >;
-    trayectoriasRepo?: Pick<TrayectoriasWebRepository, 'resumenDeGuardadoPorJobs'>;
+    trayectoriasRepo?: Pick<TrayectoriasWebRepository, 'resumenDeGuardadoPorJobs' | 'borrarPorJob'>;
   },
 ) {
   return async function (app: FastifyInstance): Promise<void> {
@@ -215,6 +220,39 @@ export function jobsRoutes(
 
         const job = await jobsRepo.getSummaryForOwner(params.data.id, user.id);
         return reply.send({ job: job ? toJobActivity(job) : null });
+      },
+    );
+
+    // ELIMINAR una actividad TERMINADA del historial (completada, fallida, cancelada o detenida).
+    // Ownership por owner_id a nivel de query (el backend escribe con rol de servicio: RLS no es la
+    // barrera aqui); un job ajeno o inexistente responde 404 sin distincion, y el segundo DELETE del
+    // mismo id tambien (idempotencia por 404). Un job en vuelo responde 409: para eso existe
+    // Terminar tarea. Se borran el job y su registro (trayectorias_web + pasos, cascade V030);
+    // la receta_web derivada NO se toca (referencia de auditoria sin FK, V035) y nada se toca en el
+    // sitio externo. El borrado de trayectorias corre DESPUES del DELETE atomico del job: si
+    // fallara, las trayectorias huerfanas las recoge su propia retencion (30 dias, V030).
+    app.delete(
+      '/v1/jobs/:id',
+      async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+        const user = await requireUser(request, verifier);
+        const params = JobIdParamSchema.safeParse(request.params);
+        if (!params.success) {
+          throw new AppError('VALIDATION_ERROR', 400, 'Invalid job id', params.error.issues);
+        }
+
+        const resultado = await jobsRepo.borrarTerminalDeOwner(params.data.id, user.id);
+        if (resultado === 'no_encontrado') {
+          throw new AppError('NOT_FOUND', 404, 'Job not found');
+        }
+        if (resultado === 'no_terminal') {
+          throw new AppError(
+            'CONFLICT',
+            409,
+            'La tarea sigue en curso; terminala antes de eliminar su registro',
+          );
+        }
+        await trayectoriasRepo.borrarPorJob(params.data.id, user.id);
+        return reply.code(204).send();
       },
     );
   };

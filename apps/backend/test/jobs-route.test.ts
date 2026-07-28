@@ -29,8 +29,11 @@ const verifier: JwtVerifier = {
 const listByOwner = vi.fn();
 const getSummaryForOwner = vi.fn();
 const cancelarPorUsuario = vi.fn();
+const borrarTerminalDeOwner = vi.fn();
 const cerrarPendientePorCancelacion = vi.fn();
 const registrarIntervencion = vi.fn();
+const resumenDeGuardadoPorJobs = vi.fn();
+const borrarPorJob = vi.fn();
 
 /** Resumen de job tal como lo devuelve JobsRepository.listByOwner (camelCase, sin payload). */
 function makeJobSummary(overrides: Record<string, unknown> = {}) {
@@ -56,8 +59,9 @@ async function makeApp(): Promise<FastifyInstance> {
   await app.register(
     jobsRoutes(config, {
       verifier,
-      jobsRepo: { listByOwner, getSummaryForOwner, cancelarPorUsuario },
+      jobsRepo: { listByOwner, getSummaryForOwner, cancelarPorUsuario, borrarTerminalDeOwner },
       aprobacionesRepo: { cerrarPendientePorCancelacion, registrarIntervencion },
+      trayectoriasRepo: { resumenDeGuardadoPorJobs, borrarPorJob },
     }),
   );
   return app;
@@ -69,8 +73,11 @@ beforeEach(async () => {
   listByOwner.mockResolvedValue([]);
   getSummaryForOwner.mockResolvedValue(null);
   cancelarPorUsuario.mockResolvedValue({ resultado: 'no_encontrado' });
+  borrarTerminalDeOwner.mockResolvedValue('no_encontrado');
   cerrarPendientePorCancelacion.mockResolvedValue(null);
   registrarIntervencion.mockResolvedValue(undefined);
+  resumenDeGuardadoPorJobs.mockResolvedValue(new Map());
+  borrarPorJob.mockResolvedValue(0);
   app = await makeApp();
 });
 
@@ -404,5 +411,74 @@ describe('POST /v1/jobs/:id/cancelar (terminar desde la consola)', () => {
     // La cancelacion viajo con el owner del token (user-2), no con el dueno real del job.
     expect(cancelarPorUsuario).toHaveBeenCalledWith(JOB_ID, 'user-2');
     expect(cerrarPendientePorCancelacion).not.toHaveBeenCalled();
+  });
+});
+
+describe('DELETE /v1/jobs/:id (eliminar una actividad terminada)', () => {
+  function del(id: string = JOB_ID, token: string | null = 'valid-user-1') {
+    return app.inject({
+      method: 'DELETE',
+      url: `/v1/jobs/${id}`,
+      ...(token !== null ? { headers: { authorization: `Bearer ${token}` } } : {}),
+    });
+  }
+
+  it('sin token: 401 y no se toca ningun repositorio', async () => {
+    const res = await del(JOB_ID, null);
+    expect(res.statusCode).toBe(401);
+    expect(borrarTerminalDeOwner).not.toHaveBeenCalled();
+    expect(borrarPorJob).not.toHaveBeenCalled();
+  });
+
+  it('borra un job terminal PROPIO junto con su registro de trayectorias y responde 204', async () => {
+    borrarTerminalDeOwner.mockResolvedValue('borrado');
+    borrarPorJob.mockResolvedValue(1);
+    const res = await del();
+    expect(res.statusCode).toBe(204);
+    // Ownership por owner_id a nivel de query: el owner sale SIEMPRE del token.
+    expect(borrarTerminalDeOwner).toHaveBeenCalledWith(JOB_ID, 'user-1');
+    expect(borrarPorJob).toHaveBeenCalledWith(JOB_ID, 'user-1');
+  });
+
+  it('un job ajeno responde 404 sin revelar nada y sin borrar trayectorias', async () => {
+    // El repo, acotado por owner_id, responde no_encontrado para el job ajeno.
+    borrarTerminalDeOwner.mockResolvedValue('no_encontrado');
+    const res = await del(JOB_ID, 'valid-user-2');
+    expect(res.statusCode).toBe(404);
+    expect(borrarTerminalDeOwner).toHaveBeenCalledWith(JOB_ID, 'user-2');
+    expect(borrarPorJob).not.toHaveBeenCalled();
+  });
+
+  it('un job en estado NO terminal (en vuelo) responde 409 y no borra nada', async () => {
+    borrarTerminalDeOwner.mockResolvedValue('no_terminal');
+    const res = await del();
+    expect(res.statusCode).toBe(409);
+    expect(borrarPorJob).not.toHaveBeenCalled();
+  });
+
+  it('DOBLE BORRADO: el segundo DELETE del mismo id responde 404 (idempotencia)', async () => {
+    borrarTerminalDeOwner.mockResolvedValueOnce('borrado').mockResolvedValueOnce('no_encontrado');
+    const primero = await del();
+    const segundo = await del();
+    expect(primero.statusCode).toBe(204);
+    expect(segundo.statusCode).toBe(404);
+    // El borrado de trayectorias corrio solo la primera vez.
+    expect(borrarPorJob).toHaveBeenCalledTimes(1);
+  });
+
+  it('LA RECETA DERIVADA SOBREVIVE: la ruta no recibe ni toca ningun repositorio de recetas', async () => {
+    // Garantia estructural: jobsRoutes no tiene acceso a recetas_web; el borrado solo alcanza el job
+    // (borrarTerminalDeOwner) y sus trayectorias (borrarPorJob, cuya query no toca recetas_web y
+    // cuyo vinculo creada_desde_trayectoria es una referencia de auditoria SIN FK, V035).
+    borrarTerminalDeOwner.mockResolvedValue('borrado');
+    const res = await del();
+    expect(res.statusCode).toBe(204);
+    expect(borrarPorJob).toHaveBeenCalledWith(JOB_ID, 'user-1');
+  });
+
+  it('un id que no es un uuid se rechaza antes de tocar la base', async () => {
+    const res = await del('no-soy-un-uuid');
+    expect(res.statusCode).toBe(400);
+    expect(borrarTerminalDeOwner).not.toHaveBeenCalled();
   });
 });

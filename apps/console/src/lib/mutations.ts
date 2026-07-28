@@ -583,6 +583,21 @@ export function useTerminarJob() {
   });
 }
 
+/**
+ * ELIMINAR una actividad TERMINADA del historial (DELETE /v1/jobs/:id): borra el job y su registro
+ * (trayectorias y pasos). La tarea aprendida derivada se conserva (el backend no la toca) y nada se
+ * toca en el sitio externo. La UI SIEMPRE lo dispara tras una confirmacion explicita
+ * (EliminarActividadDialog); un job en vuelo responde 409 (para eso existe Terminar tarea). Al exito
+ * invalida ['jobs'] y la tarjeta desaparece sin refresh.
+ */
+export function useEliminarActividad() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/v1/jobs/${id}`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['jobs'] }),
+  });
+}
+
 /** Cada cuanto y hasta cuando se sondea el job de guardado de una tarea aprendida. */
 const GUARDAR_TAREA_POLL_MS = 1500;
 const GUARDAR_TAREA_POLL_MAX_MS = 12_000;

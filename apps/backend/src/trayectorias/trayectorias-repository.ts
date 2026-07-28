@@ -303,6 +303,22 @@ export class TrayectoriasWebRepository {
     return resumen;
   }
 
+  /**
+   * BORRA las trayectorias de un job (y sus pasos, por la FK on delete cascade de V030) cuando el
+   * dueno elimina esa actividad desde la consola. Acotado por owner_id, como toda escritura. Las
+   * recetas_web derivadas NO se tocan: `creada_desde_trayectoria` es una referencia de auditoria sin
+   * FK (V035), asi que la tarea aprendida sobrevive al borrado de su registro de origen. Devuelve
+   * cuantas trayectorias se borraron (0 si el job no tenia registro).
+   */
+  async borrarPorJob(jobId: string, ownerId: string): Promise<number> {
+    const rows = await this.sql<Array<{ id: string }>>`
+      delete from trayectorias_web
+      where job_id = ${jobId} and owner_id = ${ownerId}
+      returning id
+    `;
+    return rows.length;
+  }
+
   async listarPorJobConPasos(jobId: string, ownerId: string): Promise<TrayectoriaConPasos[]> {
     const cabeceras = await this.sql<TrayectoriaRow[]>`
       select id, owner_id, job_id, connection_id, dominio, objetivo, estado, iniciada_en,

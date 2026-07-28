@@ -16,6 +16,7 @@ const useTerminarJob = vi.fn(() => ({ isPending: false, isError: false, mutate: 
 vi.mock('../src/lib/mutations', () => ({
   useTerminarJob: () => useTerminarJob(),
   useGuardarTareaAprendida: () => ({ isPending: false, isError: false, isSuccess: false, mutate: vi.fn() }),
+  useEliminarActividad: () => ({ isPending: false, isError: false, mutate: vi.fn() }),
 }));
 
 import { JobActivityCard } from '../src/components/activity/JobActivityCard';

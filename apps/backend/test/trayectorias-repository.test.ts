@@ -214,3 +214,26 @@ describe('TrayectoriasWebRepository.listarPorJobConPasos', () => {
     expect(sql.calls).toHaveLength(1);
   });
 });
+
+describe('TrayectoriasWebRepository.borrarPorJob (FIX D: eliminar una actividad)', () => {
+  it('borra las trayectorias del job ACOTADO por owner y devuelve cuantas borro', async () => {
+    const sql = makeSql((text) =>
+      text.includes('delete from trayectorias_web') ? [{ id: 'tray-1' }, { id: 'tray-2' }] : [],
+    );
+    const borradas = await new TrayectoriasWebRepository(sql).borrarPorJob('job-1', 'user-1');
+    expect(borradas).toBe(2);
+    const [llamada] = sql.calls;
+    expect(llamada?.text).toContain('delete from trayectorias_web');
+    expect(llamada?.text).toContain('job_id = ');
+    expect(llamada?.text).toContain('owner_id = ');
+    expect(llamada?.values).toEqual(['job-1', 'user-1']);
+    // Los pasos caen por la FK on delete cascade de V030; recetas_web no se toca (la unica query es
+    // el delete de trayectorias_web: la tarea aprendida derivada sobrevive).
+    expect(sql.calls).toHaveLength(1);
+  });
+
+  it('un job sin registro (o ajeno) devuelve 0 sin efectos', async () => {
+    const sql = makeSql(() => []);
+    expect(await new TrayectoriasWebRepository(sql).borrarPorJob('job-x', 'user-ajeno')).toBe(0);
+  });
+});

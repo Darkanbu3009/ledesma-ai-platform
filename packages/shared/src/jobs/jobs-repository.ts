@@ -60,6 +60,9 @@ export type ResultadoCancelacion =
   | { resultado: 'conflicto' }
   | { resultado: 'no_encontrado' };
 
+/** Desenlace de borrarTerminalDeOwner: borrado, en un estado no terminal, o inexistente/ajeno. */
+export type ResultadoBorradoJob = 'borrado' | 'no_terminal' | 'no_encontrado';
+
 /** Fila cruda de la tabla `jobs` (snake_case). */
 interface JobRow {
   id: string;
@@ -621,6 +624,30 @@ export class JobsRepository {
       select id from jobs where id = ${id} and owner_id = ${ownerId}
     `;
     return existe.length > 0 ? { resultado: 'conflicto' } : { resultado: 'no_encontrado' };
+  }
+
+  /**
+   * BORRADO de una actividad por su DUENO desde la consola: elimina un job PROPIO que ya esta en
+   * estado TERMINAL ('completed' o 'failed'; una cancelada o detenida es un 'failed' con prefijo).
+   * Un job en vuelo (pending/running/pausado) NO se borra: para eso existe Terminar tarea, y borrar
+   * un registro que todavia se mueve dejaria al worker escribiendo sobre una fila inexistente.
+   *
+   * ATOMICO: el DELETE exige owner, id y estado terminal en el mismo WHERE, asi una carrera con una
+   * transicion de estado afecta 0 filas y se distingue despues (no_terminal vs no_encontrado). Un
+   * job ajeno responde 'no_encontrado', identico a uno inexistente (jamas se toca ni se revela).
+   * El segundo DELETE del mismo id tambien responde 'no_encontrado': idempotencia por 404.
+   */
+  async borrarTerminalDeOwner(id: string, ownerId: string): Promise<ResultadoBorradoJob> {
+    const borrados = await this.sql<Array<{ id: string }>>`
+      delete from jobs
+      where id = ${id} and owner_id = ${ownerId} and status in ('completed', 'failed')
+      returning id
+    `;
+    if (borrados.length > 0) return 'borrado';
+    const existe = await this.sql<Array<{ id: string }>>`
+      select id from jobs where id = ${id} and owner_id = ${ownerId}
+    `;
+    return existe.length > 0 ? 'no_terminal' : 'no_encontrado';
   }
 
   /**

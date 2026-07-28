@@ -12,6 +12,7 @@ import {
   Loader2,
   MessageSquare,
   Sparkles,
+  Trash2,
   XCircle,
 } from 'lucide-react';
 import { formatRunAt } from '../../lib/schedule';
@@ -30,7 +31,8 @@ import {
   type JobStatus,
 } from '../../lib/jobs';
 import { detencionDeJob, textoDeDetencion } from '../../lib/politicas';
-import { useGuardarTareaAprendida, useTerminarJob } from '../../lib/mutations';
+import { useEliminarActividad, useGuardarTareaAprendida, useTerminarJob } from '../../lib/mutations';
+import { EliminarActividadDialog } from './EliminarActividadDialog';
 import { TerminarTareaDialog } from './TerminarTareaDialog';
 import { TrayectoriaDetalle } from './TrayectoriaDetalle';
 
@@ -104,6 +106,11 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
   const [confirmandoTerminar, setConfirmandoTerminar] = useState(false);
   const terminar = useTerminarJob();
   const terminable = isJobInFlight(job.status);
+  // ELIMINAR ACTIVIDAD: solo en estados terminales (completada, fallida, cancelada, detenida); un
+  // job en vuelo no muestra el icono (para eso existe Terminar tarea). Confirmacion obligatoria
+  // (estado derivado del click, sin useEffect), mismo patron que Terminar.
+  const [confirmandoEliminar, setConfirmandoEliminar] = useState(false);
+  const eliminar = useEliminarActividad();
   // GUARDAR COMO TAREA APRENDIDA (Fase F): solo en tareas web EXITOSAS del motor libre que el
   // backend marco como guardables. El guardado es SIEMPRE una decision del usuario (nada se guarda
   // solo); tras guardarse, la tarjeta muestra la marca y la tarea aparece en "Ya sabe hacer".
@@ -285,6 +292,17 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
               {t('avisoTareaLenta.boton')}
             </button>
           )}
+          {!terminable && (
+            <button
+              type="button"
+              onClick={() => setConfirmandoEliminar(true)}
+              aria-label={t('actividad.card.eliminar')}
+              title={t('actividad.card.eliminar')}
+              className="inline-flex items-center justify-center rounded-lg border border-line bg-line-soft p-1.5 text-muted transition hover:border-brasa-line hover:text-brasa"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -355,6 +373,16 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
           {...(terminar.isError ? { error: t('confirmarTerminar.error') } : {})}
           onConfirm={() => terminar.mutate(job.id, { onSuccess: () => setConfirmandoTerminar(false) })}
           onCancel={() => setConfirmandoTerminar(false)}
+        />
+      )}
+
+      {confirmandoEliminar && (
+        <EliminarActividadDialog
+          conservaTareaAprendida={guardadaComoTarea}
+          busy={eliminar.isPending}
+          {...(eliminar.isError ? { error: t('confirmarEliminarActividad.error') } : {})}
+          onConfirm={() => eliminar.mutate(job.id, { onSuccess: () => setConfirmandoEliminar(false) })}
+          onCancel={() => setConfirmandoEliminar(false)}
         />
       )}
     </div>
