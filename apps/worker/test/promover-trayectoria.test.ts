@@ -275,37 +275,52 @@ describe('convertirTrayectoriaPersistida (fixture Gmail de 19 pasos)', () => {
 
 /**
  * La trayectoria REAL del primer envio exitoso en produccion (jul 2026): identica a la fixture Gmail
- * salvo que el paso 4 es un FILLFORMVISION (llenado por vision de Stagehand: sin selector, sin metodo
- * y sin argumentos persistidos), seguido de los act que rellenaron Para, Asunto y Cuerpo CON selector.
- * Antes del fix, este paso abortaba la conversion entera con "paso fillFormVision sin ninguna
- * estrategia de localizacion".
+ * salvo dos pasos. El paso 4 es un FILLFORMVISION (llenado por vision de Stagehand: sin selector, sin
+ * metodo y sin argumentos persistidos), seguido de los act que rellenaron Para, Asunto y Cuerpo CON
+ * selector. Y el paso 6 es el act REAL "press Tab key to confirm the recipient" (metodo 'press' con
+ * la tecla en argumentos y el selector del campo Para), no el paso sintetico 'keys'. Antes de los
+ * fixes, el primero abortaba la conversion con "paso fillFormVision sin ninguna estrategia de
+ * localizacion" y el segundo con "metodo no re-ejecutable: press".
  */
 function pasosGmailConFillFormVision(): PasoTrayectoria[] {
-  return pasosGmail().map((p) =>
-    p.idx === 4
-      ? {
-          ...p,
-          accion: {
-            tipo: 'fillFormVision',
-            instruccion: 'llenar los campos del correo',
-            metodo: null,
-            argumentos: [],
-          },
-          selector: null,
-        }
-      : p,
-  );
+  return pasosGmail().map((p) => {
+    if (p.idx === 4) {
+      return {
+        ...p,
+        accion: {
+          tipo: 'fillFormVision',
+          instruccion: 'llenar los campos del correo',
+          metodo: null,
+          argumentos: [],
+        },
+        selector: null,
+      };
+    }
+    if (p.idx === 6) {
+      return {
+        ...p,
+        accion: {
+          tipo: 'act',
+          instruccion: 'press Tab key to confirm the recipient',
+          metodo: 'press',
+          argumentos: ['Tab'],
+        },
+        selector: `xpath=/html[1]/body[1]/div[7]//input[@aria-label='Para']`,
+      };
+    }
+    return p;
+  });
 }
 
-describe('convertirTrayectoriaPersistida (fixture real con fillFormVision en el paso 4)', () => {
-  it('produce receta valida con los tres parametros: los acts posteriores cubren los datos', () => {
+describe('convertirTrayectoriaPersistida (fixture real: fillFormVision en el paso 4 y press Tab en el 6)', () => {
+  it('convierte la trayectoria COMPLETA: fillFormVision descompuesto, press Tab, acts y clic final', () => {
     const resultado = convertirTrayectoriaPersistida([
       trayectoria({ pasos: pasosGmailConFillFormVision() }),
     ]);
     expect(resultado.guardable).toBe(true);
     if (!resultado.guardable) return;
-    // La receta queda EXACTAMENTE como la de la fixture sin fillFormVision: la cabecera del llenado
-    // por vision se omite porque Para, Asunto y Cuerpo quedaron cubiertos con selector.
+    // La cabecera del llenado por vision se omite porque Para, Asunto y Cuerpo quedaron cubiertos
+    // con selector, y el press Tab se promueve como paso 'teclas' EN SU POSICION.
     expect(resultado.pasos.map((p) => p.accion)).toEqual([
       'navegar',
       'click',
@@ -323,6 +338,31 @@ describe('convertirTrayectoriaPersistida (fixture real con fillFormVision en el 
       { tipo: 'parametro', parametro: 'asunto' },
       { tipo: 'parametro', parametro: 'cuerpo' },
     ]);
+  });
+
+  it('el press Tab conserva la tecla y la localizacion del campo sobre el que se pulso', () => {
+    const resultado = convertirTrayectoriaPersistida([
+      trayectoria({ pasos: pasosGmailConFillFormVision() }),
+    ]);
+    expect(resultado.guardable).toBe(true);
+    if (!resultado.guardable) return;
+    const teclas = resultado.pasos.find((p) => p.accion === 'teclas');
+    expect(teclas?.teclas).toBe('Tab');
+    // El selector del act se conserva como estrategias: el ejecutor pulsa sobre ese elemento (el
+    // mismo gesto con el que las recetas grabadas confirman un chip de destinatario).
+    expect(teclas?.estrategias[0]).toEqual({ tipo: 'atributo', atributo: 'aria-label', valor: 'Para' });
+  });
+
+  it('un press sin tecla registrada rechaza con motivo especifico', () => {
+    const pasos = pasosGmailConFillFormVision().map((p) =>
+      p.idx === 6
+        ? { ...p, accion: { tipo: 'act', instruccion: null, metodo: 'press', argumentos: [] } }
+        : p,
+    );
+    const resultado = convertirTrayectoriaPersistida([trayectoria({ pasos })]);
+    expect(resultado.guardable).toBe(false);
+    if (resultado.guardable) return;
+    expect(resultado.motivo).toContain('pulsacion sin teclas registradas');
   });
 
   it('si un dato del objetivo queda sin cubrir por otro paso, falla con motivo especifico', () => {
@@ -435,9 +475,28 @@ describe('procesarJobDePromoverTrayectoria', () => {
 
   it('falla permanente con el prefijo estable y el motivo especifico si no se puede convertir', async () => {
     const { deps } = makeDeps({ trayectorias: [trayectoria({ estado: 'fallida' })] });
-    await expect(procesarJobDePromoverTrayectoria(deps, makeJob(PAYLOAD))).rejects.toThrow(
+    const error = await procesarJobDePromoverTrayectoria(deps, makeJob(PAYLOAD)).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(Error);
+    if (!(error instanceof Error)) return;
+    // El prefijo estable viaja en el NAME del error: describeError (execution.ts) arma el
+    // last_error como `${name}: ${message}`, asi que el job persistido EMPIEZA con el prefijo que
+    // la consola detecta (startsWith). Con el prefijo dentro del message no alcanzaba: el name
+    // PermanentExecutionError quedaba delante y la UI caia al mensaje generico de reintento.
+    expect(`${error.name}: ${error.message}`).toMatch(
       /^PROMOCION_NO_REPETIBLE: la ultima trayectoria termino fallida/,
     );
+  });
+
+  it('el caso real de produccion (press Tab) convierte y guarda en vez de fallar', async () => {
+    const { deps, promovidas } = makeDeps({
+      trayectorias: [trayectoria({ pasos: pasosGmailConFillFormVision() })],
+    });
+    await procesarJobDePromoverTrayectoria(deps, makeJob(PAYLOAD));
+    expect(promovidas).toHaveLength(1);
+    expect(promovidas[0]?.pasos.some((p) => p.accion === 'teclas' && p.teclas === 'Tab')).toBe(true);
   });
 
   it('rechaza un payload invalido sin tocar la base', async () => {
