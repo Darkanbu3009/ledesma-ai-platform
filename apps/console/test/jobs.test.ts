@@ -127,3 +127,45 @@ describe('cierres del cupo irreversible (prefijos estables del worker)', () => {
     expect(esJobBloqueadoPorReintentos(makeJob({ status: 'failed', lastError: null }))).toBe(false);
   });
 });
+
+describe('motivoDeGuardadoNoRepetible (fallo permanente del guardado, por familia)', () => {
+  it('clasifica el metodo no re-ejecutable con su nombre', async () => {
+    const { motivoDeGuardadoNoRepetible } = await import('../src/lib/jobs');
+    const motivo = motivoDeGuardadoNoRepetible(
+      new Error('PROMOCION_NO_REPETIBLE: metodo no re-ejecutable: select'),
+    );
+    expect(motivo).toEqual({ tipo: 'metodo', metodo: 'select' });
+  });
+
+  it("el placeholder 'ninguno' del worker cae al generico (no hay nombre util que mostrar)", async () => {
+    const { motivoDeGuardadoNoRepetible } = await import('../src/lib/jobs');
+    expect(
+      motivoDeGuardadoNoRepetible(new Error('PROMOCION_NO_REPETIBLE: metodo no re-ejecutable: ninguno')),
+    ).toEqual({ tipo: 'generico' });
+  });
+
+  it('clasifica el paso sin estrategia y el dato sin cubrir', async () => {
+    const { motivoDeGuardadoNoRepetible } = await import('../src/lib/jobs');
+    expect(
+      motivoDeGuardadoNoRepetible(
+        new Error('PROMOCION_NO_REPETIBLE: paso act sin ninguna estrategia de localizacion'),
+      ),
+    ).toEqual({ tipo: 'sinEstrategia' });
+    expect(
+      motivoDeGuardadoNoRepetible(
+        new Error(
+          'PROMOCION_NO_REPETIBLE: paso fillFormVision de llenado sin campos registrados: asunto sin ningun otro paso que lo cubra',
+        ),
+      ),
+    ).toEqual({ tipo: 'datoSinCubrir' });
+  });
+
+  it('cualquier otro motivo permanente cae al generico; un error sin prefijo devuelve null', async () => {
+    const { motivoDeGuardadoNoRepetible } = await import('../src/lib/jobs');
+    expect(
+      motivoDeGuardadoNoRepetible(new Error('PROMOCION_NO_REPETIBLE: la ultima trayectoria termino fallida')),
+    ).toEqual({ tipo: 'generico' });
+    expect(motivoDeGuardadoNoRepetible(new Error('fetch failed'))).toBeNull();
+    expect(motivoDeGuardadoNoRepetible('texto suelto')).toBeNull();
+  });
+});

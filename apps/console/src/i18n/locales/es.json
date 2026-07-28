@@ -1791,7 +1791,10 @@
       "guardada": "Guardada como tarea aprendida",
       "detalle": "La próxima vez que pidas esta tarea se hará sin volver a analizar el sitio.",
       "error": "No se pudo guardar la tarea aprendida. Inténtalo de nuevo.",
-      "errorNoRepetible": "Esta ejecución incluye un paso que todavía no se puede convertir en repetible, así que no se puede guardar como tarea aprendida."
+      "errorNoRepetible": "Esta ejecución incluye un paso que todavía no se puede convertir en repetible, así que no se puede guardar como tarea aprendida.",
+      "motivoMetodo": "Esta ejecución incluye una acción de tipo {{metodo}} que el sistema todavía no sabe repetir, así que no se puede guardar como tarea aprendida.",
+      "motivoSinEstrategia": "Un paso de esta ejecución quedó registrado sin una forma de volver a encontrar el elemento que usó, así que no se puede guardar como tarea aprendida.",
+      "motivoDatoSinCubrir": "El registro de esta ejecución no conserva cómo se llenó cada dato de la tarea, así que no se puede guardar como tarea aprendida."
     }
   },
   "multisitio": {

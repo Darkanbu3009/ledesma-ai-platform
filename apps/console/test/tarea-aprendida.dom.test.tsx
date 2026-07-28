@@ -110,25 +110,64 @@ describe('etiqueta de tarea aprendida', () => {
 describe('fallo del guardado como tarea aprendida (FIX C)', () => {
   const guardable = () => makeJob({ guardableComoTarea: true });
 
-  it('un fallo PERMANENTE (prefijo PROMOCION_NO_REPETIBLE) muestra el motivo real sin invitar a reintentar', () => {
+  it('un dato sin cubrir muestra su motivo, sin invitar a reintentar y sin filtrar lo tecnico', () => {
     guardarState.isError = true;
     guardarState.error = new Error(
       'PROMOCION_NO_REPETIBLE: paso fillFormVision de llenado sin campos registrados: asunto sin ningun otro paso que lo cubra',
     );
     render(<JobActivityCard job={guardable()} agentName={null} />);
     expect(
-      screen.getByText(/incluye un paso que todavía no se puede convertir en repetible/),
+      screen.getByText(/no conserva cómo se llenó cada dato de la tarea/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Inténtalo de nuevo/)).not.toBeInTheDocument();
     // El motivo tecnico interno no se filtra a la pantalla.
     expect(screen.queryByText(/fillFormVision/)).not.toBeInTheDocument();
   });
 
-  it('cualquier otro fallo conserva el mensaje generico con reintento', () => {
+  it('un metodo no soportado nombra la accion y NO deja el boton reintentable', () => {
+    guardarState.isError = true;
+    guardarState.error = new Error('PROMOCION_NO_REPETIBLE: metodo no re-ejecutable: select');
+    render(<JobActivityCard job={guardable()} agentName={null} />);
+    expect(
+      screen.getByText(/una acción de tipo select que el sistema todavía no sabe repetir/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Inténtalo de nuevo/)).not.toBeInTheDocument();
+    // Fallo permanente: el boton de guardar desaparece (reintentar no cambia el resultado).
+    expect(
+      screen.queryByRole('button', { name: /Guardar como tarea aprendida/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('un paso sin forma de reencontrar su elemento muestra su motivo propio', () => {
+    guardarState.isError = true;
+    guardarState.error = new Error(
+      'PROMOCION_NO_REPETIBLE: paso act sin ninguna estrategia de localizacion',
+    );
+    render(<JobActivityCard job={guardable()} agentName={null} />);
+    expect(
+      screen.getByText(/sin una forma de volver a encontrar el elemento/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Inténtalo de nuevo/)).not.toBeInTheDocument();
+  });
+
+  it('un motivo permanente sin familia propia usa el generico no repetible', () => {
+    guardarState.isError = true;
+    guardarState.error = new Error('PROMOCION_NO_REPETIBLE: la ultima trayectoria termino fallida');
+    render(<JobActivityCard job={guardable()} agentName={null} />);
+    expect(
+      screen.getByText(/incluye un paso que todavía no se puede convertir en repetible/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Inténtalo de nuevo/)).not.toBeInTheDocument();
+  });
+
+  it('cualquier otro fallo conserva el mensaje generico con reintento y el boton sigue disponible', () => {
     guardarState.isError = true;
     guardarState.error = new Error('fetch failed');
     render(<JobActivityCard job={guardable()} agentName={null} />);
     expect(screen.getByText(/No se pudo guardar la tarea aprendida/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Guardar como tarea aprendida/ }),
+    ).toBeInTheDocument();
   });
 
   it('en ingles el fallo permanente usa la clave EN', async () => {
@@ -138,6 +177,16 @@ describe('fallo del guardado como tarea aprendida (FIX C)', () => {
     render(<JobActivityCard job={guardable()} agentName={null} />);
     expect(
       screen.getByText(/includes a step that cannot be made repeatable yet/),
+    ).toBeInTheDocument();
+  });
+
+  it('en ingles el metodo no soportado usa la clave EN con el nombre de la accion', async () => {
+    await i18n.changeLanguage('en');
+    guardarState.isError = true;
+    guardarState.error = new Error('PROMOCION_NO_REPETIBLE: metodo no re-ejecutable: select');
+    render(<JobActivityCard job={guardable()} agentName={null} />);
+    expect(
+      screen.getByText(/includes a select action that the system cannot repeat yet/),
     ).toBeInTheDocument();
   });
 

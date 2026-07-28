@@ -18,7 +18,6 @@ import {
 import { formatRunAt } from '../../lib/schedule';
 import {
   AVISO_TAREA_LENTA_MS,
-  esGuardadoNoRepetible,
   esJobBloqueadoPorReintentos,
   esJobCancelado,
   esJobDetenido,
@@ -26,6 +25,7 @@ import {
   isJobInFlight,
   jobStatusLabel,
   jobTypeLabel,
+  motivoDeGuardadoNoRepetible,
   msEnEjecucion,
   type JobActivity,
   type JobStatus,
@@ -116,7 +116,12 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
   // solo); tras guardarse, la tarjeta muestra la marca y la tarea aparece en "Ya sabe hacer".
   const guardar = useGuardarTareaAprendida();
   const guardadaComoTarea = job.guardadaComoTarea === true || guardar.isSuccess;
-  const guardableComoTarea = job.guardableComoTarea === true && !guardadaComoTarea;
+  // Fallo PERMANENTE del guardado (prefijo PROMOCION_NO_REPETIBLE): lo registrado no se puede
+  // volver repetible, asi que el boton desaparece (reintentar no puede cambiar el resultado) y el
+  // mensaje explica el motivo real sin invitar a reintentar.
+  const motivoNoRepetible = guardar.isError ? motivoDeGuardadoNoRepetible(guardar.error) : null;
+  const guardableComoTarea =
+    job.guardableComoTarea === true && !guardadaComoTarea && motivoNoRepetible === null;
   const cancelada = esJobCancelado(job);
   const detenida = esJobDetenido(job);
   // DETENIDA ANTES DE EJECUTAR: el sistema comparo lo que el usuario pidio con lo que habia en el
@@ -348,13 +353,20 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
               </span>
             )}
           </div>
-          {/* El fallo PERMANENTE (lo registrado no se puede volver repetible) lleva su propio
-              mensaje y NO invita a reintentar: reintentar no puede cambiar el resultado. */}
-          {guardableComoTarea && guardar.isError && (
+          {/* El fallo PERMANENTE (lo registrado no se puede volver repetible) lleva su mensaje por
+              MOTIVO y NO invita a reintentar: reintentar no puede cambiar el resultado (y el boton
+              ya no esta). Solo el fallo transitorio conserva el generico con reintento. */}
+          {guardar.isError && !guardadaComoTarea && (
             <p className="mt-1.5 text-[12px] text-brasa">
-              {esGuardadoNoRepetible(guardar.error)
-                ? t('actividad.guardarTarea.errorNoRepetible')
-                : t('actividad.guardarTarea.error')}
+              {motivoNoRepetible === null
+                ? t('actividad.guardarTarea.error')
+                : motivoNoRepetible.tipo === 'metodo'
+                  ? t('actividad.guardarTarea.motivoMetodo', { metodo: motivoNoRepetible.metodo })
+                  : motivoNoRepetible.tipo === 'sinEstrategia'
+                    ? t('actividad.guardarTarea.motivoSinEstrategia')
+                    : motivoNoRepetible.tipo === 'datoSinCubrir'
+                      ? t('actividad.guardarTarea.motivoDatoSinCubrir')
+                      : t('actividad.guardarTarea.errorNoRepetible')}
             </p>
           )}
           {pasosAbiertos && (
