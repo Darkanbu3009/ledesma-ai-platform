@@ -363,7 +363,12 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
                 : motivoNoRepetible.tipo === 'metodo'
                   ? t('actividad.guardarTarea.motivoMetodo', { metodo: motivoNoRepetible.metodo })
                   : motivoNoRepetible.tipo === 'sinEstrategia'
-                    ? t('actividad.guardarTarea.motivoSinEstrategia')
+                    ? motivoNoRepetible.paso !== undefined && motivoNoRepetible.descripcion !== undefined
+                      ? t('actividad.guardarTarea.motivoSinEstrategiaPaso', {
+                          paso: motivoNoRepetible.paso,
+                          descripcion: motivoNoRepetible.descripcion,
+                        })
+                      : t('actividad.guardarTarea.motivoSinEstrategia')
                     : motivoNoRepetible.tipo === 'datoSinCubrir'
                       ? t('actividad.guardarTarea.motivoDatoSinCubrir')
                       : t('actividad.guardarTarea.errorNoRepetible')}
