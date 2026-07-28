@@ -317,10 +317,12 @@ function valorDePaso(texto: string, valores: ValoresDeParametros): ValorDePaso |
  * Un paso de la trayectoria como paso de receta, o null si NO es re-ejecutable. `null` con
  * `omitible: true` significa "este paso no hace falta para repetir la tarea" (una lectura, un
  * screenshot); con `omitible: false`, "esta tarea no se puede repetir sin el modelo".
+ * `clickSinLocalizacion` marca un click de FOCO descartado de forma condicionada: la promocion
+ * verifica al final que una escritura posterior con estrategias cubre su efecto.
  */
 type Conversion =
   | { promovido: PasoDeReceta }
-  | { omitible: true; exigeCobertura?: boolean }
+  | { omitible: true; exigeCobertura?: boolean; clickSinLocalizacion?: boolean }
   | { omitible: false; motivo: string };
 
 /** Ruta relativa de una URL de la traza, si pertenece al dominio de la receta. */
@@ -421,6 +423,18 @@ function convertirPaso(
   }
 
   if (estrategias.length === 0) {
+    // CLICK DE FOCO (caso real de produccion, jul 2026: acts "click the textbox Cuerpo del mensaje"
+    // y "click the message body area" sin selector abortaban la conversion de una trayectoria
+    // exitosa de 44 pasos). Un click sin estrategias y SIN dato solo pone el foco: el ejecutor
+    // determinista ya hace click sobre el localizador del paso de escritura antes de teclear
+    // (browserbase.ts, ejecutarPasoDeterminista), asi que un click de foco previo a una escritura
+    // con selector es redundante. Se descarta de forma CONDICIONADA: la promocion verifica al final
+    // que una escritura posterior lo cubre (ver promoverTrayectoria); un click sin estrategias al
+    // que ninguna escritura sigue (un envio, una navegacion por click) si bloquea, con el paso
+    // exacto en el motivo.
+    if (paso.accion.metodo === 'click' && paso.accion.argumentos.join(' ').trim() === '') {
+      return { omitible: true, clickSinLocalizacion: true };
+    }
     return { omitible: false, motivo: `paso ${tipo} sin ninguna estrategia de localizacion` };
   }
 
@@ -458,7 +472,9 @@ export type ResultadoDePromocion = PromocionAceptada | PromocionRechazada;
  * PROMUEVE una trayectoria a los pasos de una receta (D4). Solo se promueve si TODOS los pasos con
  * efecto sobre la pagina son re-ejecutables y tienen al menos una estrategia de localizacion valida;
  * un solo paso que no lo sea descarta la trayectoria entera (una receta a la que le falta un paso
- * hace una tarea distinta de la aprendida).
+ * hace una tarea distinta de la aprendida). La UNICA excepcion es el click de FOCO sin estrategias
+ * cubierto por una escritura posterior (ver convertirPaso): su unico efecto es el que la escritura
+ * conservada ya repite.
  *
  * Los pasos que el motor ejecuto para MIRAR (extract, ariaTree, screenshot, think, done) se omiten:
  * existian para informar al modelo, que en la ejecucion determinista no participa.
@@ -482,17 +498,33 @@ export function promoverTrayectoria(entrada: {
   const valores = valoresDeParametros(extraerParametrosDeclarados(entrada.objetivo));
   const pasos: PasoDeReceta[] = [];
   const llenadosSinRegistro: string[] = [];
+  const clicksSinLocalizacion: number[] = [];
+  const escriturasPromovidas: number[] = [];
   for (const paso of entrada.pasos) {
     if (paso.exito === false) {
       return { promovida: false, motivo: 'la trayectoria contiene un paso fallido' };
     }
     const conversion = convertirPaso(paso, entrada.dominio, valores, pasos.length);
     if ('promovido' in conversion) {
+      if (conversion.promovido.accion === 'escribir') escriturasPromovidas.push(paso.idx);
       pasos.push(conversion.promovido);
       continue;
     }
     if (!conversion.omitible) return { promovida: false, motivo: conversion.motivo };
     if (conversion.exigeCobertura === true) llenadosSinRegistro.push(paso.accion.tipo);
+    if (conversion.clickSinLocalizacion === true) clicksSinLocalizacion.push(paso.idx);
+  }
+  // COBERTURA de un click de foco descartado (convertirPaso): solo es inocuo si una ESCRITURA
+  // POSTERIOR con estrategias lo cubre (el ejecutor enfoca el localizador de esa escritura antes de
+  // teclear). Un click sin estrategias al que ninguna escritura sigue puede ser el click con efecto
+  // propio (enviar, confirmar): la conversion falla nombrando el paso exacto.
+  for (const idxClick of clicksSinLocalizacion) {
+    if (!escriturasPromovidas.some((idxEscritura) => idxEscritura > idxClick)) {
+      return {
+        promovida: false,
+        motivo: `el click del paso ${idxClick} quedo sin ninguna estrategia de localizacion y ninguna escritura posterior lo cubre`,
+      };
+    }
   }
   // COBERTURA de un llenado de formulario sin registro de campos (TIPOS_LLENADO_DE_FORMULARIO): la
   // cabecera descartada solo es inocua si cada dato que el objetivo declara termina tecleado por

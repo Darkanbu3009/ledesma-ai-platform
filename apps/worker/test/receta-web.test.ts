@@ -106,6 +106,61 @@ describe('promoverTrayectoria (D4: cuando una corrida se vuelve repetible)', () 
     expect(resultado.motivo).toContain('estrategia');
   });
 
+  it('un click de FOCO sin estrategias se descarta si una escritura posterior lo cubre', () => {
+    // Caso real de produccion (jul 2026): "click the textbox Cuerpo del mensaje" sin selector antes
+    // del fill del mismo campo con selector propio. El ejecutor enfoca el localizador de la
+    // escritura antes de teclear, asi que el click de foco es redundante.
+    const resultado = promover(
+      [
+        paso({ estrategias: [] , selector: null }),
+        paso({
+          idx: 1,
+          accion: { tipo: 'act', instruccion: null, metodo: 'fill', argumentos: ['hola'] },
+          estrategias: [ATRIBUTO, XPATH],
+        }),
+      ],
+      'abre el ultimo correo',
+    );
+    expect(resultado.promovida).toBe(true);
+    if (!resultado.promovida) return;
+    expect(resultado.pasos.map((p) => p.accion)).toEqual(['escribir']);
+  });
+
+  it('un click sin estrategias al que NINGUNA escritura sigue bloquea nombrando el paso exacto', () => {
+    const resultado = promover(
+      [
+        paso({
+          accion: { tipo: 'act', instruccion: null, metodo: 'fill', argumentos: ['hola'] },
+          estrategias: [ATRIBUTO, XPATH],
+        }),
+        paso({ idx: 1, estrategias: [], selector: null }),
+      ],
+      'abre el ultimo correo',
+    );
+    expect(resultado.promovida).toBe(false);
+    if (resultado.promovida) return;
+    expect(resultado.motivo).toContain('paso 1');
+    // La frase estable que la consola ya clasifica como "sin estrategia" se conserva.
+    expect(resultado.motivo).toContain('sin ninguna estrategia de localizacion');
+  });
+
+  it('un click sin estrategias pero CON dato no es un click de foco: bloquea con el motivo generico', () => {
+    const resultado = promover(
+      [
+        paso({ accion: { tipo: 'act', instruccion: null, metodo: 'click', argumentos: ['opcion 3'] }, estrategias: [], selector: null }),
+        paso({
+          idx: 1,
+          accion: { tipo: 'act', instruccion: null, metodo: 'fill', argumentos: ['hola'] },
+          estrategias: [ATRIBUTO, XPATH],
+        }),
+      ],
+      'abre el ultimo correo',
+    );
+    expect(resultado.promovida).toBe(false);
+    if (resultado.promovida) return;
+    expect(resultado.motivo).toBe('paso act sin ninguna estrategia de localizacion');
+  });
+
   it('un paso FALLIDO dentro de una corrida exitosa invalida la receta', () => {
     expect(promover([paso({ exito: false })], 'abre el correo').promovida).toBe(false);
   });
