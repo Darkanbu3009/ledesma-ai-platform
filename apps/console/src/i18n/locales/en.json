@@ -321,6 +321,7 @@
     "usoTokens": "{{input}} in / {{output}} out tokens",
     "corte": {
       "maxIterations": "The run was cut off by the iteration limit before the final answer.",
+      "maxIterationsTareaViva": "The agent ran out of turns to keep narrating, but your task is still running in the background. You can check its progress in Activity; there is no need to cancel it or request it again.",
       "tokenCap": "The run was cut off by the accumulated token cap.",
       "timeout": "The run was cut off after reaching the maximum execution time."
     },

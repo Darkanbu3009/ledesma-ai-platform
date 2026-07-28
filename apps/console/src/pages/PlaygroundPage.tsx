@@ -23,6 +23,11 @@ import { compatibleCredentials } from '../lib/credentials';
 import { useAgent, useCredentials } from '../lib/queries';
 import { runAgentStream, type ChatMessage, type RunCredential } from '../lib/run-agent';
 import type { SseMessage } from '../lib/sse';
+import {
+  crearSeguimientoTareasWeb,
+  hayTareaWebViva,
+  registrarEventoDeTareaWeb,
+} from '../lib/tarea-web-turno';
 import { concatenarDictado, type IdiomaDictado } from '../lib/voz';
 import { PlaygroundCredential } from '../components/agents/PlaygroundCredential';
 import { VozDictado } from '../components/agents/VozDictado';
@@ -131,7 +136,14 @@ type ViewItem =
   | { kind: 'user'; text: string; attachments?: AttachmentRef[] }
   | { kind: 'assistant'; text: string }
   | { kind: 'tool'; id: string; name: string; isError: boolean }
-  | { kind: 'usage'; inputTokens: number; outputTokens: number; stopReason: string }
+  | {
+      kind: 'usage';
+      inputTokens: number;
+      outputTokens: number;
+      stopReason: string;
+      /** Al momento del stop habia una tarea web encolada por la conversacion aun sin terminar. */
+      tareaWebViva: boolean;
+    }
   | { kind: 'error'; code: string; message?: string; retryText: string };
 
 /**
@@ -175,6 +187,9 @@ export function PlaygroundPage() {
   const [subiendo, setSubiendo] = useState(false);
   const [adjuntoError, setAdjuntoError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Tareas web vivas de la conversacion (logica pura en tarea-web-turno.ts): persiste entre turnos,
+  // porque una tarea encolada en un turno puede seguir corriendo cuando otro turno se corta.
+  const tareasWebRef = useRef(crearSeguimientoTareasWeb());
   const assistantTextRef = useRef('');
   const turnClosedRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -244,6 +259,8 @@ export function PlaygroundPage() {
       return;
     }
     const event = message.event;
+    // Seguimiento de tareas web encoladas/consultadas por las tools de sitios (para el corte veraz).
+    registrarEventoDeTareaWeb(tareasWebRef.current, event);
     switch (event.type) {
       case 'text_delta':
         appendDelta(event.text);
@@ -268,6 +285,7 @@ export function PlaygroundPage() {
             inputTokens: event.usage.inputTokens,
             outputTokens: event.usage.outputTokens,
             stopReason: event.reason,
+            tareaWebViva: hayTareaWebViva(tareasWebRef.current),
           },
         ]);
         break;
@@ -498,7 +516,13 @@ export function PlaygroundPage() {
                         </div>
                       );
                     case 'usage': {
-                      const corteLabel = CORTE_LABEL[item.stopReason];
+                      // Corte por iteraciones CON una tarea web aun corriendo: el mensaje generico
+                      // hacia creer que la tarea fallo (y en produccion provoco cancelar un job
+                      // sano); este dice que la tarea sigue y donde verla, sin pedir cancelar nada.
+                      const corteLabel =
+                        item.stopReason === 'max_iterations' && item.tareaWebViva
+                          ? 'playground.corte.maxIterationsTareaViva'
+                          : CORTE_LABEL[item.stopReason];
                       return (
                         <div key={i} className="space-y-1 text-center text-xs">
                           {corteLabel !== undefined && (
