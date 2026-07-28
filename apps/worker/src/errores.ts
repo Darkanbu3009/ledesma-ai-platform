@@ -115,6 +115,29 @@ export class GuardiaBloqueoReintentosError extends PermanentExecutionError {
 }
 
 /**
+ * Nombre-prefijo ESTABLE del guardado como tarea aprendida que NO se puede convertir en repetible.
+ * Mismo mecanismo que los anteriores: describeError construye el last_error como `${name}: ${message}`,
+ * asi que el job de promocion queda empezando EXACTAMENTE con `PROMOCION_NO_REPETIBLE: ` (el
+ * PROMOCION_NO_REPETIBLE_PREFIX de shared que la consola detecta con startsWith). Lanzar un
+ * PermanentExecutionError generico con el prefijo DENTRO del mensaje no sirve: el name 'PermanentExecutionError'
+ * quedaria delante y la consola caeria al mensaje generico que invita a reintentar.
+ */
+export const PREFIJO_PROMOCION_NO_REPETIBLE = 'PROMOCION_NO_REPETIBLE';
+
+/**
+ * Fallo PERMANENTE de la promocion de una trayectoria persistida: lo registrado no alcanza para
+ * repetir la tarea (un metodo sin re-ejecucion, un paso sin estrategia, un dato sin cubrir).
+ * `message` es el motivo del conversor, especifico y sin datos del usuario (la trayectoria ya viene
+ * censurada). Reintentar no cambia el resultado: va directo a 'failed'.
+ */
+export class PromocionNoRepetibleError extends PermanentExecutionError {
+  constructor(motivo: string) {
+    super(motivo);
+    this.name = PREFIJO_PROMOCION_NO_REPETIBLE;
+  }
+}
+
+/**
  * La GUARDIA DE ACCION del worker BLOQUEO una accion del agente ANTES de que llegara al navegador: la
  * verificacion determinista comparo lo que hay en la pagina contra lo que declaro el objetivo y no
  * coincidio (o la politica del usuario no la permite). `message` es el mensaje de la detencion ya

@@ -1,14 +1,13 @@
 import {
   esAtributoEstable,
   parsePromoverTrayectoriaJobPayload,
-  PROMOCION_NO_REPETIBLE_PREFIX,
   type EstrategiaLocalizacion,
   type Job,
   type PasoDeReceta,
 } from '@ledesma-platform/shared';
 import type { TrayectoriaConPasos, PasoTrayectoria } from '@ledesma-platform/backend/trayectorias';
 import type { NuevaRecetaWeb, RecetaWeb } from '@ledesma-platform/backend/recetas-web';
-import { PermanentExecutionError } from './errores.js';
+import { PermanentExecutionError, PromocionNoRepetibleError } from './errores.js';
 import { detectarVerboBloqueado } from './prompt-tarea-web.js';
 import { firmaDeObjetivo, promoverTrayectoria } from './receta-web.js';
 import type { PasoCensurado } from './trayectoria.js';
@@ -205,17 +204,6 @@ export interface PromocionTrayectoriaDeps {
 }
 
 /**
- * last_error del job de promocion cuando lo registrado no alcanza para repetir la tarea: el prefijo
- * ESTABLE (la consola lo mapea a su mensaje i18n, sin invitar a reintentar) mas el motivo del
- * conversor, que es especifico y legible ("paso fillFormVision de llenado sin campos registrados:
- * asunto sin ningun otro paso que lo cubra") y no arrastra datos del usuario (la trayectoria ya
- * viene censurada).
- */
-function errorNoRepetible(motivo: string): string {
-  return `${PROMOCION_NO_REPETIBLE_PREFIX}${motivo}`;
-}
-
-/**
  * kind:'promover_trayectoria': punto de entrada del job. Lanza en fallo (execution.ts decide el
  * cierre); el llamador marca completed. IDEMPOTENTE ante el doble guardado: si ya existe una receta
  * creada desde estas trayectorias, termina ok sin crear otra (el endpoint tambien lo rechaza antes
@@ -268,7 +256,10 @@ export async function procesarJobDePromoverTrayectoria(
       jobOrigenId,
       motivo: conversion.motivo,
     });
-    throw new PermanentExecutionError(errorNoRepetible(conversion.motivo));
+    // PromocionNoRepetibleError lleva el prefijo estable en su `name`: describeError (execution.ts)
+    // construye el last_error como `${name}: ${message}`, asi que el job queda empezando con
+    // PROMOCION_NO_REPETIBLE_PREFIX y la consola muestra el motivo real sin invitar a reintentar.
+    throw new PromocionNoRepetibleError(conversion.motivo);
   }
 
   const receta = await deps.recetas.promover({
