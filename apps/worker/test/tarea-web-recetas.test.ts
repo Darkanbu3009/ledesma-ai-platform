@@ -622,10 +622,10 @@ describe('una receta que se rinde a mitad no contamina la sesion del motor (CAMB
     expect(recetas.marcarObsoleta).toHaveBeenCalledWith('rec-1', 'user-1');
   });
 
-  it('si la pagina no se puede devolver a su estado inicial, la tarea se corta sin llamar al motor', async () => {
+  it('si la pagina no se puede devolver a su estado inicial, el motor libre continua igual', async () => {
     const recetas = makeRecetas(makeReceta([pasoClick(0), pasoClick(1), pasoClick(2)]));
     const motor = makeMotor();
-    // Los pasos 1 y 2 no localizan (la receta se rinde) y la renavegacion posterior (indice 3) falla.
+    // Los pasos 1 y 2 no localizan (la receta se rinde) y la renavegacion posterior falla siempre.
     const determinista: NavegadorDeterminista = {
       ejecutarPasoDeterminista: vi.fn(async (_sesion: string, instruccion: InstruccionDePaso) =>
         instruccion.accion === 'navegar'
@@ -634,12 +634,50 @@ describe('una receta que se rinde a mitad no contamina la sesion del motor (CAMB
       ),
       leerEstrategiasDeElemento: vi.fn(async () => [...ESTRATEGIAS]),
     };
+    const deps = makeDeps({ recetas, motor, determinista });
 
-    await expect(
-      procesarTareaWeb(makeDeps({ recetas, motor, determinista }), makeJob('abre el ultimo correo')),
-    ).rejects.toThrow(/estado inicial/);
+    await procesarTareaWeb(deps, makeJob('abre el ultimo correo'));
 
-    expect(motor.ejecutar).not.toHaveBeenCalled();
+    // El reset se intenta (primero mas un reintento) y, sin conseguirlo, la tarea NO se corta: el
+    // motor libre arranca desde el estado actual de la pagina.
+    const navegaciones = (determinista.ejecutarPasoDeterminista as ReturnType<typeof vi.fn>).mock.calls
+      .map((llamada) => llamada[1] as InstruccionDePaso)
+      .filter((instruccion) => instruccion.accion === 'navegar');
+    expect(navegaciones).toHaveLength(2);
+    expect(motor.ejecutar).toHaveBeenCalledTimes(1);
+  });
+
+  it('un TIMEOUT de la renavegacion tampoco mata el job: el motor libre continua', async () => {
+    const recetas = makeRecetas(makeReceta([pasoClick(0), pasoClick(1), pasoClick(2)]));
+    const motor = makeMotor();
+    // La renavegacion NUNCA responde (el caso real: "timeout esperando la respuesta CDP de
+    // Page.navigate"). Antes de este FIX el job terminaba en fallo permanente con el motor sin usar.
+    const determinista: NavegadorDeterminista = {
+      ejecutarPasoDeterminista: vi.fn(async (_sesion: string, instruccion: InstruccionDePaso) =>
+        instruccion.accion === 'navegar'
+          ? new Promise<never>(() => {})
+          : { estado: 'no_localizado' as const, estrategias: [], detalle: null },
+      ),
+      leerEstrategiasDeElemento: vi.fn(async () => [...ESTRATEGIAS]),
+    };
+    const logger = makeLogger();
+    const deps = makeDeps({ recetas, motor, determinista, logger });
+
+    vi.useFakeTimers();
+    try {
+      const corrida = procesarTareaWeb(deps, makeJob('abre el ultimo correo'));
+      // Los dos intentos vencen su tope corto sin que nadie conteste.
+      await vi.advanceTimersByTimeAsync(30_000);
+      await corrida;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(motor.ejecutar).toHaveBeenCalledTimes(1);
+    const avisos = (logger.warn as ReturnType<typeof vi.fn>).mock.calls.map(
+      (llamada) => String(llamada[0]),
+    );
+    expect(avisos.some((aviso) => aviso.includes('el reset previo al motor se omitio'))).toBe(true);
   });
 
   it('una receta que se rinde tras tocar la pagina se JUBILA aunque no llegue al umbral de D6', async () => {

@@ -1499,12 +1499,41 @@ type DesenlaceDelCaminoPorReceta =
    */
   | { tipo: 'seguir_con_motor'; paginaTocada: boolean };
 
+/** Tope de espera de UN intento del reset previo al motor: corto a proposito (ver renavegarAInicio). */
+const TIMEOUT_DEL_RESET_MS = 8_000;
+
+/** Intentos del reset previo al motor: el primero mas UN reintento. Dos timeouts ya son respuesta. */
+const INTENTOS_DEL_RESET = 2;
+
+/** Espera acotada de una promesa. La original sigue su curso sin dejar rechazos sin manejar. */
+async function conTiempoLimite<T>(promesa: Promise<T>, ms: number, que: string): Promise<T> {
+  promesa.catch(() => undefined);
+  let temporizador: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promesa,
+      new Promise<never>((_, reject) => {
+        temporizador = setTimeout(() => reject(new Error(`timeout de ${ms}ms en ${que}`)), ms);
+      }),
+    ]);
+  } finally {
+    if (temporizador !== undefined) clearTimeout(temporizador);
+  }
+}
+
 /**
- * DEVUELVE la pagina a la URL de inicio de la tarea despues de que la ejecucion por receta la
- * tocara y se rindiera (CAMBIO 6). Entregarle al motor una pagina a medio camino es peor que no
- * usar la receta: el motor razona sobre un estado que no pidio y puede repetir o completar a medias
- * una accion ya hecha. Si la renavegacion NO se puede hacer, se ABORTA con un error propio en vez
- * de continuar: es la unica forma de garantizar que el motor arranca desde un estado conocido.
+ * DEVUELVE la pagina a la URL de inicio de la tarea despues de que la ejecucion por receta la tocara
+ * y se rindiera (CAMBIO 6). Entregarle al motor una pagina a medio camino es peor que empezar
+ * limpio: el motor razona sobre un estado que no pidio.
+ *
+ * TOLERANTE (FIX fallback, caso real de produccion del 28 jul 2026): este reset SE OMITE si no sale.
+ * Antes cortaba la tarea con un fallo PERMANENTE, y en produccion la receta cedio correctamente al
+ * motor libre pero el job murio igual con "timeout esperando la respuesta CDP de Page.navigate": la
+ * red de seguridad se mataba con su propio paso de preparacion. Ahora se intenta con un tope corto y
+ * un reintento y, si aun asi no vuelve, se CONTINUA con el motor desde donde este la pagina (el motor
+ * percibe el estado real antes de actuar, y su guardia sigue verificando toda accion irreversible).
+ * Una navegacion que no responde JAMAS produce un fallo permanente del job teniendo el motor
+ * disponible. Devuelve true si la pagina volvio al inicio, false si el reset se omitio.
  */
 async function renavegarAInicio(
   deps: TareaWebDeps,
@@ -1512,44 +1541,42 @@ async function renavegarAInicio(
   sitio: SitioConectado,
   sesionExternaId: string,
   url: string,
-): Promise<void> {
-  const mensajeDeCorte =
-    'lo aprendido de este sitio se agoto a mitad de camino y la pagina no se pudo devolver a su ' +
-    'estado inicial; la tarea NO continua sobre una pagina a medio camino. Vuelve a pedirla';
+): Promise<boolean> {
   const determinista = deps.determinista;
-  if (!determinista) throw new PermanentExecutionError(mensajeDeCorte);
-  let estado: 'ok' | 'no_localizado' | 'fallo';
-  try {
-    const resultado = await determinista.ejecutarPasoDeterminista(sesionExternaId, {
-      accion: 'navegar',
-      estrategias: [],
-      texto: null,
-      teclas: null,
-      url,
-      esperaMs: null,
-    });
-    estado = resultado.estado;
-  } catch (error) {
-    deps.logger.error('tarea web: fallo al devolver la pagina a su estado inicial tras la receta', {
-      jobId: job.id,
-      connectionId: sitio.id,
-      err: describir(error),
-    });
-    throw new PermanentExecutionError(mensajeDeCorte);
+  let motivo = 'el worker no tiene navegador determinista con el que renavegar';
+  for (let intento = 1; determinista && intento <= INTENTOS_DEL_RESET; intento++) {
+    try {
+      const resultado = await conTiempoLimite(
+        determinista.ejecutarPasoDeterminista(sesionExternaId, {
+          accion: 'navegar',
+          estrategias: [],
+          texto: null,
+          teclas: null,
+          url,
+          esperaMs: null,
+        }),
+        TIMEOUT_DEL_RESET_MS,
+        'la renavegacion al inicio',
+      );
+      if (resultado.estado === 'ok') {
+        deps.logger.info('tarea web: pagina devuelta a su estado inicial antes de arrancar el motor', {
+          jobId: job.id,
+          connectionId: sitio.id,
+          dominio: sitio.dominio,
+          intento,
+        });
+        return true;
+      }
+      motivo = `la renavegacion termino ${resultado.estado}`;
+    } catch (error) {
+      motivo = describir(error);
+    }
   }
-  if (estado !== 'ok') {
-    deps.logger.error('tarea web: la pagina no volvio a su estado inicial tras la receta', {
-      jobId: job.id,
-      connectionId: sitio.id,
-      estado,
-    });
-    throw new PermanentExecutionError(mensajeDeCorte);
-  }
-  deps.logger.info('tarea web: pagina devuelta a su estado inicial antes de arrancar el motor', {
-    jobId: job.id,
-    connectionId: sitio.id,
-    dominio: sitio.dominio,
-  });
+  deps.logger.warn(
+    'tarea web: el reset previo al motor se omitio; la tarea sigue con el motor desde el estado actual de la pagina',
+    { jobId: job.id, connectionId: sitio.id, dominio: sitio.dominio, motivo },
+  );
+  return false;
 }
 
 /**
@@ -2278,7 +2305,8 @@ export async function procesarTareaWeb(
       if (porReceta.paginaTocada) {
         // Se devuelven a su inicio TODOS los sitios que la receta llego a tocar, no solo el de
         // arranque: una receta multisitio pudo dejar a medio camino la pagina de otro sitio, y el
-        // motor terminaria razonando ahi sobre un estado que no pidio.
+        // motor terminaria razonando ahi sobre un estado que no pidio. El reset es TOLERANTE: si no
+        // sale, se omite y la tarea sigue con el motor (ver renavegarAInicio).
         for (const abierto of gestor.abiertos()) {
           await renavegarAInicio(
             deps,
