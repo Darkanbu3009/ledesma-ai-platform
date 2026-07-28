@@ -1789,7 +1789,8 @@
       "guardando": "Saving the learned task",
       "guardada": "Saved as a learned task",
       "detalle": "Next time you ask for this task it will run without analyzing the site again.",
-      "error": "The learned task could not be saved. Please try again."
+      "error": "The learned task could not be saved. Please try again.",
+      "errorNoRepetible": "This run includes a step that cannot be made repeatable yet, so it cannot be saved as a learned task."
     }
   },
   "multisitio": {

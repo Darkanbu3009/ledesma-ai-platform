@@ -595,8 +595,11 @@ function esperarMs(ms: number): Promise<void> {
  * GUARDAR COMO TAREA APRENDIDA (POST /v1/tareas-ensenadas/desde-job): convierte el exito de una
  * tarea web del motor libre en una tarea que el sistema ya sabe hacer. El backend solo ENCOLA (202 +
  * jobId del job de conversion); aca se sondea ese job unos segundos para poder reportar el desenlace
- * real en la misma interaccion. Si la conversion falla, la mutacion falla con su mensaje; si sigue
- * en proceso al agotar el sondeo, se da por aceptada y el refetch del historial la refleja despues.
+ * real en la misma interaccion. Si la conversion falla, la mutacion falla con el last_error del job
+ * (con su prefijo estable: la tarjeta distingue el fallo permanente PROMOCION_NO_REPETIBLE del
+ * transitorio, ver esGuardadoNoRepetible); si sigue en proceso al agotar el sondeo, se da por
+ * aceptada y el refetch del historial la refleja despues. Una tarea YA GUARDADA responde 200 con
+ * status 'ya_guardada' (idempotencia del endpoint) y se trata como exito, sin sondear nada.
  * Al terminar invalida ['jobs'] (la tarjeta pasa a "guardada") y ['tareas-ensenadas'] (la tarea
  * aparece en la pantalla de lo que ya sabe hacer).
  */
@@ -604,10 +607,11 @@ export function useGuardarTareaAprendida() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (jobId: string) => {
-      const aceptado = await apiFetch<{ status: string; jobId: string }>(
+      const aceptado = await apiFetch<{ status: string; jobId?: string }>(
         '/v1/tareas-ensenadas/desde-job',
         { method: 'POST', body: JSON.stringify({ jobId }) },
       );
+      if (aceptado.status === 'ya_guardada' || aceptado.jobId === undefined) return null;
       const limite = Date.now() + GUARDAR_TAREA_POLL_MAX_MS;
       while (Date.now() < limite) {
         const { job } = await apiFetch<{ job: JobActivity }>(`/v1/jobs/${aceptado.jobId}`);

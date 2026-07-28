@@ -40,6 +40,8 @@ export interface GuardarTareaAprendidaDeps {
   jobs: {
     getSummaryForOwner(id: string, ownerId: string): Promise<JobSummary | null>;
     createJob(input: CreateJobInput): Promise<Job>;
+    /** Job de promocion pending/running del owner para este job de origen, o null. */
+    buscarPromocionEnVuelo(ownerId: string, jobOrigenId: string): Promise<string | null>;
   };
   trayectorias: {
     listarPorJob(jobId: string, ownerId: string): Promise<TrayectoriaWeb[]>;
@@ -84,6 +86,9 @@ export type ResultadoDeEncolado =
  * Evalua y, si el job es guardable, ENCOLA el job de promocion (kind 'promover_trayectoria', sin
  * agente ni credencial: no ejecuta ningun modelo). El worker re-verifica el doble guardado antes de
  * escribir (segunda capa, para la carrera entre dos encolados).
+ *
+ * IDEMPOTENTE ante el doble click: si ya hay un job de promocion EN VUELO para este mismo job de
+ * origen, se devuelve ese en lugar de encolar otro (un segundo POST no produce un segundo job).
  */
 export async function encolarGuardadoDeJob(
   deps: GuardarTareaAprendidaDeps,
@@ -92,6 +97,8 @@ export async function encolarGuardadoDeJob(
 ): Promise<ResultadoDeEncolado> {
   const evaluacion = await evaluarGuardadoDeJob(deps, ownerId, jobId);
   if (!evaluacion.guardable) return { encolado: false, motivo: evaluacion.motivo };
+  const enVuelo = await deps.jobs.buscarPromocionEnVuelo(ownerId, jobId);
+  if (enVuelo !== null) return { encolado: true, jobId: enVuelo };
   const job = await deps.jobs.createJob({
     agentId: null,
     ownerId,

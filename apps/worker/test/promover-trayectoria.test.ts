@@ -433,10 +433,10 @@ describe('procesarJobDePromoverTrayectoria', () => {
     );
   });
 
-  it('falla permanente si la trayectoria no se puede convertir', async () => {
+  it('falla permanente con el prefijo estable y el motivo especifico si no se puede convertir', async () => {
     const { deps } = makeDeps({ trayectorias: [trayectoria({ estado: 'fallida' })] });
     await expect(procesarJobDePromoverTrayectoria(deps, makeJob(PAYLOAD))).rejects.toThrow(
-      /no se puede guardar/,
+      /^PROMOCION_NO_REPETIBLE: la ultima trayectoria termino fallida/,
     );
   });
 

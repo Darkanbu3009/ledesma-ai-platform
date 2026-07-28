@@ -1789,7 +1789,8 @@
       "guardando": "Guardando la tarea aprendida",
       "guardada": "Guardada como tarea aprendida",
       "detalle": "La próxima vez que pidas esta tarea se hará sin volver a analizar el sitio.",
-      "error": "No se pudo guardar la tarea aprendida. Inténtalo de nuevo."
+      "error": "No se pudo guardar la tarea aprendida. Inténtalo de nuevo.",
+      "errorNoRepetible": "Esta ejecución incluye un paso que todavía no se puede convertir en repetible, así que no se puede guardar como tarea aprendida."
     }
   },
   "multisitio": {

@@ -17,6 +17,7 @@ import {
 import { formatRunAt } from '../../lib/schedule';
 import {
   AVISO_TAREA_LENTA_MS,
+  esGuardadoNoRepetible,
   esJobBloqueadoPorReintentos,
   esJobCancelado,
   esJobDetenido,
@@ -329,8 +330,14 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
               </span>
             )}
           </div>
+          {/* El fallo PERMANENTE (lo registrado no se puede volver repetible) lleva su propio
+              mensaje y NO invita a reintentar: reintentar no puede cambiar el resultado. */}
           {guardableComoTarea && guardar.isError && (
-            <p className="mt-1.5 text-[12px] text-brasa">{t('actividad.guardarTarea.error')}</p>
+            <p className="mt-1.5 text-[12px] text-brasa">
+              {esGuardadoNoRepetible(guardar.error)
+                ? t('actividad.guardarTarea.errorNoRepetible')
+                : t('actividad.guardarTarea.error')}
+            </p>
           )}
           {pasosAbiertos && (
             <div className="mt-2.5">

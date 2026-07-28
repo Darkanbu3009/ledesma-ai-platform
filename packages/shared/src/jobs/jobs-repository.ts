@@ -184,6 +184,26 @@ export class JobsRepository {
   }
 
   /**
+   * IDEMPOTENCIA del guardado de una tarea aprendida: el job de PROMOCION en vuelo (pending o
+   * running) del owner para el MISMO job de origen, si existe. El endpoint lo devuelve en lugar de
+   * encolar otro: un doble click (dos POST antes de que el primero termine) produce UN solo job de
+   * conversion en vez de dos tarjetas fallidas. Acotado por owner_id, como toda lectura.
+   */
+  async buscarPromocionEnVuelo(ownerId: string, jobOrigenId: string): Promise<string | null> {
+    const rows = await this.sql<Array<{ id: string }>>`
+      select id
+      from jobs
+      where owner_id = ${ownerId}
+        and status in ('pending', 'running')
+        and payload->>'kind' = ${PROMOVER_TRAYECTORIA_JOB_KIND}
+        and payload->>'jobId' = ${jobOrigenId}
+      order by created_at asc
+      limit 1
+    `;
+    return rows[0]?.id ?? null;
+  }
+
+  /**
    * PEEK de solo lectura: el proximo job ELEGIBLE (pending y cuyo scheduled_for ya vencio o es ASAP),
    * sin tomarlo. No bloquea ni cambia estado: util para inspeccionar la cola (p.ej. el esqueleto del
    * worker). Para TOMAR un job de forma segura entre varios workers, usar claimNextJob.
