@@ -240,5 +240,190 @@ export function instalarNormalizadorDeElementId(stagehand: unknown, logger: Logg
   return true;
 }
 
+/**
+ * MIDDLEWARE DE MODELO (FIX B y C, jul 2026). La instalacion de arriba envuelve el cliente LLM DE
+ * INSTANCIA de un Stagehand ya inicializado, pero Stagehand puede crear MAS clientes por su cuenta
+ * (resolveLlmClient ante cualquier override de modelo por llamada) y el rescate solo actua DESPUES
+ * del rechazo de esquema. Este middleware entra por el UNICO punto de paso obligatorio que la API
+ * publica de Stagehand ofrece: `model.middleware` (construirOpcionesStagehand), que LLMProvider
+ * aplica con wrapLanguageModel a TODO LanguageModelV2 que cree para esa instancia -- el cliente
+ * inicial, los overrides por llamada y el modelo del bucle del agente. Ningun camino, presente o
+ * futuro, puede nacer sin el.
+ *
+ *  - FIX B (wrapGenerate): normaliza el elementId pelon en la salida cruda ANTES de que el esquema
+ *    de act/observe la valide, con la MISMA regla conservadora del rescate: solo con un unico frame
+ *    en el prompt. El fallo ya no llega a producirse; el rescate de instancia queda de segunda red.
+ *  - FIX C (transformParams): las llamadas de inferencia con esquema (act, observe, extract) viajan
+ *    sin ninguna marca de cache de prompt (el cliente aisdk de Stagehand no marca nada; en
+ *    produccion, 28 jul 2026, cachedInputTokens llego en 0). Se marca el ULTIMO mensaje de sistema
+ *    como cacheable -- el mismo patron del bucle del agente (costo-modelo.ts): el prefijo estable
+ *    (tools + system, identico llamada a llamada) deja de pagarse como entrada nueva. Las llamadas
+ *    que YA llevan una marca (las del bucle del agente, marcadas por prepareStep) no se tocan.
+ *
+ * Tipos ESTRUCTURALES a proposito (mismo criterio que costo-modelo.ts): el worker no depende del
+ * paquete `ai`; el unico punto que cruza estos tipos con los reales es construirOpcionesStagehand.
+ */
+
+/** Forma estructural de un mensaje del prompt del AI SDK (LanguageModelV2Prompt). */
+interface MensajeDePrompt {
+  role?: string;
+  content?: unknown;
+  providerOptions?: Record<string, Record<string, unknown>> | undefined;
+}
+
+/** Forma estructural de los parametros de una llamada del AI SDK (LanguageModelV2CallOptions). */
+export interface ParametrosDeLlamadaDeModelo {
+  prompt?: unknown;
+  [clave: string]: unknown;
+}
+
+/** Forma estructural de una parte generada: texto directo o tool-call con el JSON en `input`. */
+interface ParteGenerada {
+  type?: string;
+  text?: unknown;
+  input?: unknown;
+}
+
+/** Resultado estructural de doGenerate: solo se toca `content`, el resto viaja intacto. */
+export interface ResultadoDeGeneracion {
+  content?: unknown;
+  [clave: string]: unknown;
+}
+
+export interface MiddlewareDeModelo {
+  transformParams(opciones: {
+    type: string;
+    params: ParametrosDeLlamadaDeModelo;
+  }): Promise<ParametrosDeLlamadaDeModelo>;
+  wrapGenerate(opciones: {
+    doGenerate: () => PromiseLike<ResultadoDeGeneracion>;
+    params: ParametrosDeLlamadaDeModelo;
+  }): Promise<ResultadoDeGeneracion>;
+}
+
+/** elementId pelon dentro del JSON crudo de una salida ("elementId":"123", sin prefijo de frame). */
+const PATRON_ID_PELON_EN_JSON = /("elementId"\s*:\s*")(\d+)(")/g;
+
+/** Normaliza los elementId pelones de un texto JSON crudo, sin parsearlo (la validacion viene despues). */
+export function normalizarIdsPelonesEnTexto(texto: string): { texto: string; normalizados: string[] } {
+  const normalizados: string[] = [];
+  const normalizado = texto.replace(
+    PATRON_ID_PELON_EN_JSON,
+    (_todo, antes: string, id: string, despues: string) => {
+      normalizados.push(id);
+      return `${antes}0-${id}${despues}`;
+    },
+  );
+  return { texto: normalizado, normalizados };
+}
+
+/** ¿Algun mensaje del prompt YA lleva una marca de cache de Anthropic? (el bucle del agente marca). */
+function llevaMarcaDeCache(prompt: readonly unknown[]): boolean {
+  return prompt.some((mensaje) => {
+    const opciones = (mensaje as MensajeDePrompt | null)?.providerOptions;
+    return opciones?.['anthropic']?.['cacheControl'] !== undefined;
+  });
+}
+
+/**
+ * FIX C: marca el ULTIMO mensaje de sistema como fin del prefijo cacheable. Devuelve los mismos
+ * parametros si la llamada ya lleva marcas (bucle del agente) o no tiene mensaje de sistema.
+ */
+export function conCacheEnElPrefijo(params: ParametrosDeLlamadaDeModelo): ParametrosDeLlamadaDeModelo {
+  const prompt = params.prompt;
+  if (!Array.isArray(prompt) || llevaMarcaDeCache(prompt)) return params;
+  let ultimoSistema = -1;
+  for (let i = 0; i < prompt.length; i++) {
+    if ((prompt[i] as MensajeDePrompt | null)?.role === 'system') ultimoSistema = i;
+  }
+  if (ultimoSistema === -1) return params;
+  const mensajes = prompt.map((mensaje, i) => {
+    if (i !== ultimoSistema) return mensaje as unknown;
+    const original = mensaje as MensajeDePrompt;
+    return {
+      ...original,
+      providerOptions: {
+        ...(original.providerOptions ?? {}),
+        anthropic: {
+          ...(original.providerOptions?.['anthropic'] ?? {}),
+          cacheControl: { type: 'ephemeral' },
+        },
+      },
+    };
+  });
+  return { ...params, prompt: mensajes };
+}
+
+/**
+ * FIX B: normaliza los elementId pelones de las partes generadas (texto directo y tool-calls, que es
+ * donde viaja la salida estructurada con Anthropic). Devuelve null si no habia nada que normalizar.
+ * Misma regla conservadora del rescate: solo con un UNICO frame en el prompt; con varios frames (o
+ * sin ids rotulados que lo demuestren) no se toca nada y la validacion decide.
+ */
+export function normalizarSalidaGenerada(
+  resultado: ResultadoDeGeneracion,
+  prompt: unknown,
+  logger: Logger,
+): ResultadoDeGeneracion | null {
+  const contenido = resultado.content;
+  if (!Array.isArray(contenido)) return null;
+  const pelones: string[] = [];
+  for (const parte of contenido) {
+    const { text, input } = (parte ?? {}) as ParteGenerada;
+    for (const texto of [text, input]) {
+      if (typeof texto !== 'string') continue;
+      pelones.push(...normalizarIdsPelonesEnTexto(texto).normalizados);
+    }
+  }
+  if (pelones.length === 0) return null;
+  if (!hayUnSoloFrame(prompt)) {
+    logger.warn(
+      'tarea web: el modelo devolvio un elementId sin prefijo pero la pagina tiene varios frames; no se normaliza',
+      { elementIds: pelones },
+    );
+    return null;
+  }
+  const nuevoContenido = contenido.map((parte) => {
+    const { text, input } = (parte ?? {}) as ParteGenerada;
+    if (typeof text === 'string' && normalizarIdsPelonesEnTexto(text).normalizados.length > 0) {
+      return { ...(parte as object), text: normalizarIdsPelonesEnTexto(text).texto };
+    }
+    if (typeof input === 'string' && normalizarIdsPelonesEnTexto(input).normalizados.length > 0) {
+      return { ...(parte as object), input: normalizarIdsPelonesEnTexto(input).texto };
+    }
+    return parte as unknown;
+  });
+  // Solo numeros del arbol de accesibilidad: la normalizacion no arrastra contenido de la pagina.
+  logger.warn(
+    'tarea web: el modelo devolvio elementId sin prefijo y habia un solo frame; se normalizo a 0-<id>',
+    { elementIds: pelones.map((id) => `${id} -> 0-${id}`) },
+  );
+  return { ...resultado, content: nuevoContenido };
+}
+
+/**
+ * El middleware que construirOpcionesStagehand cuelga de `model.middleware`. Nunca lanza: cualquier
+ * duda deja pasar la llamada tal cual (es una red de seguridad, no un requisito).
+ */
+export function crearMiddlewareDeModelo(logger: Logger): MiddlewareDeModelo {
+  return {
+    transformParams: async ({ params }) => {
+      try {
+        return conCacheEnElPrefijo(params);
+      } catch {
+        return params;
+      }
+    },
+    wrapGenerate: async ({ doGenerate, params }) => {
+      const resultado = await doGenerate();
+      try {
+        return normalizarSalidaGenerada(resultado, params.prompt, logger) ?? resultado;
+      } catch {
+        return resultado;
+      }
+    },
+  };
+}
+
 /** Exportado para los tests: el patron que el esquema del motor acepta. */
 export { PATRON_ID_VALIDO };

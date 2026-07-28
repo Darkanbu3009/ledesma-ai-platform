@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import {
+  crearMiddlewareDeModelo,
   hayUnSoloFrame,
   instalarNormalizadorDeElementId,
   normalizarIdsPelones,
+  normalizarIdsPelonesEnTexto,
   rescatarSalidaConIdPelon,
   textoDeFalloDeEsquema,
 } from '../src/normalizador-elementid.js';
@@ -178,5 +180,106 @@ describe('instalarNormalizadorDeElementId', () => {
   it('un stagehand sin llmClient no rompe nada: simplemente no se instala', () => {
     expect(instalarNormalizadorDeElementId({}, logger)).toBe(false);
     expect(instalarNormalizadorDeElementId(null, logger)).toBe(false);
+  });
+});
+
+describe('crearMiddlewareDeModelo (FIX B: normalizacion ANTES de validar, en todos los clientes)', () => {
+  const middleware = crearMiddlewareDeModelo(logger);
+
+  /** Prompt del AI SDK con el arbol de UN solo frame (la forma que ve el middleware). */
+  const promptUnFrame = [
+    { role: 'system', content: 'instrucciones del sistema' },
+    {
+      role: 'user',
+      content: [{ type: 'text', text: 'Tree:\n[0-1] RootWebArea\n  [0-5627] textarea: Cuerpo' }],
+    },
+  ];
+
+  it('el caso del log de produccion: elementId 5627 en un tool-call se normaliza a 0-5627 y valida', async () => {
+    // La salida estructurada de Anthropic viaja como tool-call con el JSON en `input`.
+    const salida = {
+      content: [
+        {
+          type: 'tool-call',
+          toolCallId: 'call-1',
+          toolName: 'json',
+          input: JSON.stringify({
+            action: { elementId: '5627', description: 'cuerpo del mensaje', method: 'click', arguments: [] },
+            twoStep: false,
+          }),
+        },
+      ],
+      finishReason: 'stop',
+    };
+    const resultado = await middleware.wrapGenerate({
+      doGenerate: async () => salida,
+      params: { prompt: promptUnFrame },
+    });
+    const parte = (resultado.content as Array<{ input: string }>)[0];
+    const parseado = esquemaAct.parse(JSON.parse(parte?.input ?? ''));
+    expect(parseado.action?.elementId).toBe('0-5627');
+  });
+
+  it('con VARIOS frames en el prompt no se toca la salida (0-<id> seria una adivinanza)', async () => {
+    const salida = {
+      content: [{ type: 'text', text: '{"action":{"elementId":"5627"},"twoStep":false}' }],
+    };
+    const resultado = await middleware.wrapGenerate({
+      doGenerate: async () => salida,
+      params: {
+        prompt: [{ role: 'user', content: [{ type: 'text', text: 'Tree:\n[0-1] a\n[1-40] b' }] }],
+      },
+    });
+    expect(resultado).toBe(salida);
+  });
+
+  it('una salida sin ids pelones viaja intacta (misma referencia, cero costo)', async () => {
+    const salida = { content: [{ type: 'text', text: '{"action":{"elementId":"0-9"},"twoStep":true}' }] };
+    const resultado = await middleware.wrapGenerate({
+      doGenerate: async () => salida,
+      params: { prompt: promptUnFrame },
+    });
+    expect(resultado).toBe(salida);
+  });
+
+  it('FIX C: una llamada de inferencia sin marcas de cache gana la marca en su mensaje de sistema', async () => {
+    const params = await middleware.transformParams({
+      type: 'generate',
+      params: { prompt: promptUnFrame, temperature: 0 },
+    });
+    const prompt = params.prompt as Array<{ role: string; providerOptions?: Record<string, unknown> }>;
+    expect(prompt[0]?.providerOptions).toEqual({ anthropic: { cacheControl: { type: 'ephemeral' } } });
+    expect(prompt[1]?.providerOptions).toBeUndefined();
+    expect(params['temperature']).toBe(0);
+  });
+
+  it('FIX C: las llamadas del bucle del agente (ya marcadas por prepareStep) no se tocan', async () => {
+    const marcado = [
+      { role: 'system', content: 'sistema' },
+      {
+        role: 'user',
+        content: 'objetivo',
+        providerOptions: { anthropic: { cacheControl: { type: 'ephemeral' } } },
+      },
+    ];
+    const params = { prompt: marcado };
+    expect(await middleware.transformParams({ type: 'generate', params })).toBe(params);
+  });
+
+  it('FIX C: sin mensaje de sistema no hay prefijo estable que marcar', async () => {
+    const params = { prompt: [{ role: 'user', content: 'hola' }] };
+    expect(await middleware.transformParams({ type: 'generate', params })).toBe(params);
+  });
+});
+
+describe('normalizarIdsPelonesEnTexto', () => {
+  it('normaliza todos los elementId pelones del texto y deja el resto intacto', () => {
+    const { texto, normalizados } = normalizarIdsPelonesEnTexto(
+      '{"action":{"elementId":"5627"},"otros":[{"elementId":"0-4"},{"elementId": "88"}]}',
+    );
+    expect(normalizados).toEqual(['5627', '88']);
+    expect(texto).toContain('"elementId":"0-5627"');
+    expect(texto).toContain('"elementId": "0-88"');
+    expect(texto).toContain('"elementId":"0-4"');
   });
 });

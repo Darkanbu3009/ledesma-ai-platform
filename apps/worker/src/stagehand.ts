@@ -24,7 +24,7 @@ import {
   type ControlDePercepcion,
   type PerceptorDePagina,
 } from './percepcion.js';
-import { instalarNormalizadorDeElementId } from './normalizador-elementid.js';
+import { crearMiddlewareDeModelo, instalarNormalizadorDeElementId } from './normalizador-elementid.js';
 import type { EscaladorDePaso, ResultadoEscalada } from './ejecutor-receta.js';
 import type { AccionCrudaDeMotor } from './trayectoria.js';
 import type {
@@ -88,14 +88,31 @@ export function construirOpcionesStagehand(params: {
   sesionExternaId: string;
   model: string;
   modelApiKey: string;
+  /**
+   * Logger del middleware de modelo (FIX B y C). `model.middleware` es el UNICO punto de paso
+   * obligatorio de la API de Stagehand: LLMProvider lo aplica a TODO LanguageModelV2 que cree para
+   * esta instancia (cliente inicial, overrides por llamada y bucle del agente), asi que ningun
+   * camino puede nacer sin la normalizacion de elementId ni sin la marca de cache del prefijo.
+   * Opcional solo para los tests de esta configuracion, que no ejecutan ninguna llamada.
+   */
+  logger?: Logger;
 }): V3Options {
+  const modelo: NonNullable<V3Options['model']> = {
+    modelName: params.model,
+    apiKey: params.modelApiKey,
+  };
+  if (params.logger !== undefined) {
+    // Tipos estructurales del worker contra los del AI SDK: este es el UNICO punto en que se cruzan
+    // (mismo criterio que los mensajes de costo-modelo.ts en prepareStep).
+    (modelo as { middleware?: unknown }).middleware = crearMiddlewareDeModelo(params.logger);
+  }
   return {
     env: 'BROWSERBASE',
     apiKey: params.apiKey,
     projectId: params.projectId,
     browserbaseSessionID: params.sesionExternaId,
     keepAlive: true,
-    model: { modelName: params.model, apiKey: params.modelApiKey },
+    model: modelo,
     disableAPI: true,
     experimental: true,
     disablePino: true,
@@ -936,12 +953,15 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
         sesionExternaId: params.sesionExternaId,
         model: params.model,
         modelApiKey: params.apiKey,
+        // El logger activa el middleware de modelo (FIX B y C): normalizacion de elementId antes de
+        // validar y cache de prompt del prefijo en las llamadas de inferencia con esquema.
+        logger: this.config.logger,
       }),
     );
     await stagehand.init();
-    // RED DE SEGURIDAD (FIX C): si el modelo devuelve un elementId sin el prefijo de frame y la
-    // pagina tiene un solo frame, se normaliza a 0-<id> en vez de dejar que el rechazo de esquema
-    // gire hasta el corte. Complementa al parche de patches/ (que evita OFRECER ids sin prefijo).
+    // SEGUNDA RED (FIX C del PR anterior): rescate post-rechazo sobre el cliente de instancia. El
+    // middleware de modelo ya normaliza ANTES de validar; esto cubre la forma interna vieja si la
+    // libreria cambiara la aplicacion del middleware.
     instalarNormalizadorDeElementId(stagehand, this.config.logger);
     // PERCEPCION (FIX A y B): el control lee la huella y los campos tras cada paso que toca la
     // pagina y sus lineas viajan al agente en el siguiente prepareStep. Solo si el handler cableo
@@ -1125,11 +1145,13 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
         sesionExternaId: params.sesionExternaId,
         model: this.config.model,
         modelApiKey: params.apiKey,
+        // Mismo middleware que la corrida del agente (FIX B y C): la escalada tambien pasa por el
+        // esquema de act y sus llamadas tampoco llevaban cache de prompt.
+        logger: this.config.logger,
       }),
     );
     await stagehand.init();
-    // Misma red de seguridad que la corrida del agente (FIX C): una escalada tambien pasa por el
-    // esquema de act y el modelo tambien puede devolver el id sin prefijo.
+    // Segunda red, igual que en la corrida del agente: rescate post-rechazo de instancia.
     instalarNormalizadorDeElementId(stagehand, this.config.logger);
     try {
       // Misma envoltura que la del agente (CAMBIO 2): un rechazo de esquema es intermitente y aca

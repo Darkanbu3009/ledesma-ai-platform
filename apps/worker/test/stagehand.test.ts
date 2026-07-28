@@ -78,6 +78,24 @@ describe('construirOpcionesStagehand', () => {
   it('el constructor de Stagehand acepta las opciones sin lanzar', () => {
     expect(() => new Stagehand(opciones)).not.toThrow();
   });
+
+  it('con logger, el modelo lleva el middleware de normalizacion y cache (FIX B y C)', () => {
+    const conLogger = construirOpcionesStagehand({
+      apiKey: 'bb-test',
+      projectId: 'proj-test',
+      sesionExternaId: 'ses-1',
+      model: 'anthropic/claude-sonnet-4-6',
+      modelApiKey: 'sk-test',
+      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    });
+    const modelo = conLogger.model as { middleware?: { transformParams?: unknown; wrapGenerate?: unknown } };
+    expect(typeof modelo.middleware?.transformParams).toBe('function');
+    expect(typeof modelo.middleware?.wrapGenerate).toBe('function');
+    // Y el constructor real de Stagehand tambien las acepta con el middleware puesto.
+    expect(() => new Stagehand(conLogger)).not.toThrow();
+    // Sin logger (los tests de arriba), el modelo queda exactamente como antes.
+    expect((opciones.model as { middleware?: unknown }).middleware).toBeUndefined();
+  });
 });
 
 function makeLogger(): Logger {
