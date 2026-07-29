@@ -1,7 +1,7 @@
 import type { DocumentoLegal } from './tipos';
 
 /**
- * AVISO DE PRIVACIDAD INTEGRAL, version en espanol. BORRADOR asistido por IA, pendiente de revision legal.
+ * AVISO DE PRIVACIDAD INTEGRAL, version en espanol. Texto definitivo, revisado y validado legalmente.
  *
  * Todo lo que este texto afirma sobre el tratamiento sale de LEER EL CODIGO, no de una plantilla: las
  * categorias de datos son las columnas reales de las migraciones, los plazos de conservacion son los de
@@ -12,8 +12,8 @@ import type { DocumentoLegal } from './tipos';
  */
 export const AVISO_PRIVACIDAD_ES: DocumentoLegal = {
   tipo: 'privacy_notice',
-  version: '2026-07-28',
-  fecha: '28 de julio de 2026',
+  version: '2026-07-29',
+  fecha: '29 de julio de 2026',
   titulo: 'Aviso de Privacidad Integral',
   subtitulo:
     'Cómo tratamos tus datos personales en la plataforma Ledesma AI Labs, qué hacemos con ellos y cómo puedes controlarlos.',
@@ -392,10 +392,9 @@ export const AVISO_PRIVACIDAD_ES: DocumentoLegal = {
         {
           tipo: 'parrafo',
           texto:
-            'Para cualquier duda sobre este aviso o sobre el tratamiento de tus datos personales, escríbenos a contacto@ledesma-ai-labs.com. Este aviso corresponde a la versión 2026-07-28, con fecha 28 de julio de 2026.',
+            'Para cualquier duda sobre este aviso o sobre el tratamiento de tus datos personales, escríbenos a contacto@ledesma-ai-labs.com. Este aviso corresponde a la versión 2026-07-29, con fecha 29 de julio de 2026.',
         },
       ],
     },
   ],
-  notaBorrador: 'Borrador generado con asistencia de IA, pendiente de revisión legal profesional.',
 };

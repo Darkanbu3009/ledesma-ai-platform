@@ -98,16 +98,27 @@ describe('paginas legales publicas (sin sesion)', () => {
     expect(enlace).toHaveAttribute('href', '/privacidad');
   });
 
-  it('las tres paginas llevan al pie la NOTA DE BORRADOR visible', () => {
-    const nota = 'Borrador generado con asistencia de IA, pendiente de revisión legal profesional.';
-    for (const Pagina of [PrivacyNoticePage, PrivacySimplifiedNoticePage, TermsPage]) {
-      const { unmount } = render(
-        <MemoryRouter>
-          <Pagina />
-        </MemoryRouter>,
-      );
-      expect(screen.getByText(nota)).toBeInTheDocument();
-      unmount();
+  it('NINGUNA pagina legal muestra la nota de borrador, en ninguno de los dos idiomas', async () => {
+    // Los textos son definitivos desde la version 2026-07-29. Este test falla si la nota reaparece.
+    const rastros = [
+      /[Bb]orrador generado con asistencia/,
+      /pendiente de revisi[oó]n legal/i,
+      /AI assisted draft/i,
+      /pending professional legal review/i,
+    ];
+    for (const idioma of ['es', 'en']) {
+      await i18n.changeLanguage(idioma);
+      for (const Pagina of [PrivacyNoticePage, PrivacySimplifiedNoticePage, TermsPage]) {
+        const { unmount } = render(
+          <MemoryRouter>
+            <Pagina />
+          </MemoryRouter>,
+        );
+        for (const rastro of rastros) {
+          expect(screen.queryByText(rastro)).toBeNull();
+        }
+        unmount();
+      }
     }
   });
 
@@ -134,7 +145,7 @@ describe('paginas legales publicas (sin sesion)', () => {
     );
     expect(screen.getByRole('heading', { level: 1, name: 'Privacy Notice' })).toBeInTheDocument();
     expect(
-      screen.getByText('AI assisted draft, pending professional legal review.'),
+      screen.getByText(new RegExp(`version ${PRIVACY_NOTICE_VERSION}, dated`)),
     ).toBeInTheDocument();
     unmount();
 

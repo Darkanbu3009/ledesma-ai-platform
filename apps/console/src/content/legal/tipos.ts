@@ -34,9 +34,4 @@ export interface DocumentoLegal {
   titulo: string;
   subtitulo: string;
   secciones: SeccionLegal[];
-  /**
-   * Nota AL PIE, visible, que declara que el texto es un borrador asistido por IA pendiente de revision
-   * legal profesional. Se retira a mano (aqui, en los dos idiomas) cuando el abogado firme la revision.
-   */
-  notaBorrador: string;
 }

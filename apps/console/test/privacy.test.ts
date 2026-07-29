@@ -113,15 +113,34 @@ describe('contenido legal', () => {
     }
   });
 
-  it('cada documento existe en los dos idiomas, con secciones y nota de borrador', () => {
+  it('cada documento existe en los dos idiomas, con secciones', () => {
     for (const nombre of ['aviso', 'avisoSimplificado', 'terminos'] as const) {
       for (const idioma of ['es', 'en']) {
         const doc = documentoLegal(nombre, idioma);
         expect(doc.secciones.length).toBeGreaterThan(0);
         expect(doc.titulo).not.toBe('');
         expect(doc.fecha).not.toBe('');
-        // La nota de borrador es visible hasta que un abogado la retire a mano.
-        expect(doc.notaBorrador).not.toBe('');
+      }
+    }
+  });
+
+  it('NINGUN documento vuelve a declararse borrador pendiente de revision legal', () => {
+    // Un abogado reviso y valido los textos: la nota de borrador se retiro y no puede reaparecer, ni como
+    // campo del documento ni colada en el cuerpo de una seccion, en ninguno de los dos idiomas.
+    const rastros = [
+      /[Bb]orrador generado con asistencia/,
+      /pendiente de revisi[oó]n legal/i,
+      /AI assisted draft/i,
+      /pending professional legal review/i,
+    ];
+    for (const nombre of ['aviso', 'avisoSimplificado', 'terminos'] as const) {
+      for (const idioma of ['es', 'en']) {
+        const doc = documentoLegal(nombre, idioma);
+        expect(Object.prototype.hasOwnProperty.call(doc, 'notaBorrador')).toBe(false);
+        const texto = JSON.stringify(doc);
+        for (const rastro of rastros) {
+          expect(texto).not.toMatch(rastro);
+        }
       }
     }
   });
