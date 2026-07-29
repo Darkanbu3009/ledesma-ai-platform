@@ -58,7 +58,7 @@ import {
 } from './verificacion.js';
 import type { SubidorDeScreenshots } from './storage.js';
 import { censurarObjetivo, censurarTexto } from './censura.js';
-import type { PerceptorDePagina, PercepcionDePagina } from './percepcion.js';
+import type { ObjetivoDeLectura, PerceptorDePagina, PercepcionDePagina } from './percepcion.js';
 import {
   extraerPasosCensurados,
   type AccionCrudaDeMotor,
@@ -84,6 +84,7 @@ import {
   entradasDeCorridaPorReceta,
   entradasServibles,
   hashDeOrigen,
+  pasosConEstrategiasPercibidas,
   pistasParaPaso,
   valoresTecleadosDeLaCorrida,
   type EntradaConocida,
@@ -228,8 +229,14 @@ export interface NavegadorParaTarea {
    * MISMO lector de chips de la verificacion. OPCIONAL para no romper los fakes de los tests: sin
    * este metodo la tarea corre exactamente como antes (cero percepcion). Nunca lanza: null = no se
    * pudo leer.
+   *
+   * `objetivo` (ATLAS DE SITIOS) pide que la MISMA evaluacion devuelva ademas las estrategias del
+   * elemento que el paso toco: mismo viaje al navegador, mismo costo, un dato mas.
    */
-  percibirPagina?(sesionExternaId: string): Promise<PercepcionDePagina | null>;
+  percibirPagina?(
+    sesionExternaId: string,
+    objetivo?: ObjetivoDeLectura | undefined,
+  ): Promise<PercepcionDePagina | null>;
   /** LEE el texto visible de la pagina (o del elemento del selector), acotado y sin tocarla. */
   leerTextoVisible(sesionExternaId: string, selector?: string): Promise<string>;
   /**
@@ -413,6 +420,12 @@ export interface ResultadoMotor {
   mensaje: string;
   /** Acciones ejecutadas, en orden. Vacia si el motor no llego a ejecutar ninguna. */
   acciones: AccionCrudaDeMotor[];
+  /**
+   * ATLAS DE SITIOS: las estrategias que la PERCEPCION leyo del elemento de cada paso, UNA lista por
+   * accion de `acciones` y en su mismo orden. Ausente cuando el motor no lleva percepcion cableada;
+   * una cantidad que no cuadre con `acciones` se descarta entera (extraerPasosCensurados).
+   */
+  estrategiasPorAccion?: EstrategiaLocalizacion[][] | undefined;
   /** Tokens reportados por el motor (usage). null = no reportados. */
   tokensIn: number | null;
   tokensOut: number | null;
@@ -565,10 +578,11 @@ export interface TareaWebDeps {
    */
   atlas?: { repo: RepositorioAtlasParaWorker; clave: string } | undefined;
   /**
-   * OBSERVADOR DE PASOS (TAREA_WEB_OBSERVADOR_PASOS): apagado por defecto. Encendido, cada paso del
-   * motor abre una conexion CDP para leer del DOM las estrategias de localizacion del elemento
-   * (recetas mas ricas, corrida mas cara y mas fragil). Apagado, la tarea corre igual y las recetas
-   * se promueven solo con lo que la traza del motor ya trae.
+   * OBSERVADOR DE PASOS (TAREA_WEB_OBSERVADOR_PASOS): apagado por defecto. Encendido, cada accion
+   * CON ELEMENTO RESUELTO abre una conexion CDP para leer del DOM sus estrategias de localizacion
+   * (recetas mas ricas, corrida mas cara y mas fragil), y con ellas se habilita la promocion
+   * automatica a recetas. Apagado, la tarea corre igual y no se promueve ninguna receta nueva. El
+   * ATLAS DE SITIOS no depende de esto: lo alimenta la percepcion, que ya lee la pagina igual.
    */
   observadorPasos?: boolean | undefined;
   /** Notifica por correo la aprobacion pendiente/expirada (best-effort). OPCIONAL. */
@@ -2727,12 +2741,17 @@ export async function procesarTareaWeb(
     // exitosos son evidencia de como esta hecho cada sitio que uso, asi que se agregan anonimos al
     // aprendizaje comun. Va DESPUES de la promocion y con la misma regla: aprender es una mejora, no
     // parte del desenlace, y su fallo se traga adentro.
+    //
+    // Las estrategias del motor libre las lee la PERCEPCION, en la evaluacion que ya corre despues
+    // de cada paso, y llegan en un campo aparte para no alterar en nada lo que ve la promocion de
+    // arriba: `pasosConEstrategiasPercibidas` es el unico punto donde se pasan a donde el agregador
+    // las busca.
     await registrarEnAtlasBestEffort(
       deps,
       job,
       entradasDeCorridaLibre({
         dominio: sitio.dominio,
-        pasos: pasosDelJob,
+        pasos: pasosConEstrategiasPercibidas(pasosDelJob),
         valores: valoresTecleadosDeLaCorrida(
           valoresDeParametros(extraerParametrosDeclarados(textoParametros)),
           pasosDelJob,
@@ -2954,7 +2973,7 @@ async function guardarTrayectoriaBestEffort(
   objetivo: string,
   estado: EstadoTrayectoria,
   iniciadaEn: Date,
-  resultado: Pick<ResultadoMotor, 'acciones' | 'tokensIn' | 'tokensOut'>,
+  resultado: Pick<ResultadoMotor, 'acciones' | 'tokensIn' | 'tokensOut' | 'estrategiasPorAccion'>,
   /** Pasos SINTETICOS que van ANTES de los del motor (la ejecucion por receta pasa los suyos). */
   pasosPrevios: PasoCensurado[] = [],
   /** Pasos SINTETICOS de la verificacion previa, con el lugar de la corrida en que ocurrieron. */
@@ -2973,7 +2992,7 @@ async function guardarTrayectoriaBestEffort(
   const pasos = [
     ...pasosPrevios,
     ...intercalarVerificaciones(
-      extraerPasosCensurados(resultado.acciones, observaciones),
+      extraerPasosCensurados(resultado.acciones, observaciones, resultado.estrategiasPorAccion ?? []),
       verificaciones,
     ),
     // MULTISITIO: TODOS los pasos de un tramo pertenecen al mismo sitio (un cambio de sitio TERMINA
@@ -3168,8 +3187,9 @@ async function ejecutarMotorConRegistro(
  * OBSERVADOR de pasos (CAMBIO 1). Por cada accion que el motor ejecuta, le pide al navegador las
  * estrategias de localizacion del elemento que toco y las acumula EN ORDEN. Devuelve undefined si el
  * camino determinista no esta cableado (sin el, no hay nada que observar ni receta que promover) o
- * si el observador esta APAGADO (TAREA_WEB_OBSERVADOR_PASOS, default false): cada observacion abre
- * una conexion CDP nueva durante la corrida y eso solo se paga cuando el despliegue lo pide.
+ * si el observador esta APAGADO (TAREA_WEB_OBSERVADOR_PASOS, default false): cada accion CON
+ * ELEMENTO RESUELTO abre una conexion CDP mas, ADEMAS de la que la percepcion ya abre despues de
+ * cada paso que toca la pagina, y eso solo se paga cuando el despliegue lo pide.
  *
  * BEST-EFFORT en los dos sentidos:
  *  - Un fallo de lectura acumula una observacion VACIA, para no desalinear el orden con las acciones.
@@ -3259,7 +3279,7 @@ async function ejecutarMotor(
   const percibirPagina = deps.navegador.percibirPagina?.bind(deps.navegador);
   const perceptor: PerceptorDePagina | undefined =
     percibirPagina !== undefined
-      ? { percibir: () => percibirPagina(sesionExternaId) }
+      ? { percibir: (objetivo?: ObjetivoDeLectura | undefined) => percibirPagina(sesionExternaId, objetivo) }
       : undefined;
   const controller = new AbortController();
   let expiroDeadline = false;

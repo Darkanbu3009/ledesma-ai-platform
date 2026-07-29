@@ -19,6 +19,7 @@ import type {
   NavegadorDeterminista,
 } from '../src/ejecutor-receta.js';
 import { claveDelAtlas, hashDeOrigen, PREFIJO_MAPA } from '../src/atlas-sitios.js';
+import type { ObjetivoDeLectura } from '../src/percepcion.js';
 import type { RepositorioPoliticasParaWorker } from '../src/verificacion.js';
 import { makeAprobacionesRepo } from './aprobaciones-fakes.js';
 import type { Logger } from '../src/logger.js';
@@ -558,5 +559,195 @@ describe('agregador del atlas (camino por receta)', () => {
     await procesarTareaWeb(deps, makeJob('abre el ultimo correo'));
 
     expect(atlas.repo.registrarObservacion).not.toHaveBeenCalled();
+  });
+
+  it('con el observador APAGADO el camino por receta sigue alimentando el atlas igual', async () => {
+    const atlas = makeAtlas();
+    const receta = makeReceta([
+      {
+        idx: 0,
+        accion: 'click',
+        estrategias: [ID_DINAMICO, ROL_REDACTAR],
+        valor: null,
+        teclas: null,
+        ruta: null,
+        esperaMs: null,
+      },
+    ]);
+    const deps = makeDeps({
+      atlas: { repo: atlas.repo, clave: CLAVE },
+      recetas: makeRecetas(receta),
+      determinista: makeDeterminista([ROL_REDACTAR], 1),
+      navegador: makeNavegadorConPercepcion(),
+      observadorPasos: false,
+    });
+
+    await expect(procesarTareaWeb(deps, makeJob('abre el ultimo correo'))).resolves.toBe('completada');
+
+    expect(atlas.filas).toEqual([
+      {
+        dominio: DOMINIO,
+        claseDeElemento: CLASE_REDACTAR,
+        estrategias: [ROL_REDACTAR],
+        corroboraciones: 1,
+        origenesHash: [hashDeOrigen('user-1', CLAVE)],
+      },
+    ]);
+  });
+});
+
+// -------------------------------------------------------------------------------------------------
+// AGREGADOR: camino del motor libre CON EL OBSERVADOR APAGADO (la fuente es la percepcion)
+// -------------------------------------------------------------------------------------------------
+
+/** Navegador que SI expone percepcion: con objetivo de lectura devuelve ademas las estrategias. */
+function makeNavegadorConPercepcion(): NavegadorParaTarea {
+  return {
+    ...makeNavegador(),
+    percibirPagina: vi.fn(async (_sesion: string, objetivo?: ObjetivoDeLectura | undefined) => ({
+      url: `https://${DOMINIO}/inbox`,
+      titulo: 'Recibidos',
+      nodos: 3200,
+      foco: 'div button Redactar role=button',
+      campos: [],
+      ...(objetivo !== undefined ? { estrategias: [ROL_REDACTAR] } : {}),
+    })),
+  };
+}
+
+/**
+ * Motor fake que corre UN act de click y usa la percepcion igual que el adaptador real: una sola
+ * lectura por paso, con el objetivo de lectura dentro, y lo leido viaja en `estrategiasPorAccion`.
+ */
+function makeMotorConPercepcion(): MotorDeTareaWeb {
+  return {
+    ejecutar: vi.fn(async (params: { perceptor?: { percibir(o?: ObjetivoDeLectura): Promise<unknown> } }) => {
+      const percepcion = (await params.perceptor?.percibir({
+        tipo: 'xpath',
+        xpath: '/html[1]/body[1]/button[1]',
+      })) as { estrategias?: EstrategiaLocalizacion[] } | null | undefined;
+      return {
+        exito: true,
+        completado: true,
+        mensaje: 'listo',
+        acciones: [
+          {
+            type: 'act',
+            action: 'click Redactar',
+            pageUrl: `https://${DOMINIO}/inbox`,
+            playwrightArguments: { selector: SELECTOR, method: 'click', arguments: [] },
+          },
+        ],
+        estrategiasPorAccion: [percepcion?.estrategias ?? []],
+        tokensIn: 1000,
+        tokensOut: 100,
+      };
+    }),
+  } as unknown as MotorDeTareaWeb;
+}
+
+describe('agregador del atlas (motor libre alimentado por la percepcion)', () => {
+  it('con TAREA_WEB_OBSERVADOR_PASOS apagado, la corrida del motor SI aporta al atlas', async () => {
+    const atlas = makeAtlas();
+    const determinista = makeDeterminista([ROL_REDACTAR]);
+    const deps = makeDeps({
+      atlas: { repo: atlas.repo, clave: CLAVE },
+      navegador: makeNavegadorConPercepcion(),
+      motor: makeMotorConPercepcion(),
+      determinista,
+      observadorPasos: false,
+    });
+
+    await expect(procesarTareaWeb(deps, makeJob('abre el correo de martin@ejemplo.com'))).resolves.toBe(
+      'completada',
+    );
+
+    expect(atlas.filas).toEqual([
+      {
+        dominio: DOMINIO,
+        claseDeElemento: CLASE_REDACTAR,
+        estrategias: [ROL_REDACTAR],
+        corroboraciones: 1,
+        origenesHash: [hashDeOrigen('user-1', CLAVE)],
+      },
+    ]);
+    // Y no se pago ni una lectura del observador: la fuente fue la percepcion.
+    expect(determinista.leerEstrategiasDeElemento).not.toHaveBeenCalled();
+  });
+
+  it('lo que escribe no lleva valores del usuario ni nada que apunte a el', async () => {
+    const atlas = makeAtlas();
+    const deps = makeDeps({
+      atlas: { repo: atlas.repo, clave: CLAVE },
+      navegador: makeNavegadorConPercepcion(),
+      motor: makeMotorConPercepcion(),
+      observadorPasos: false,
+    });
+
+    await procesarTareaWeb(deps, makeJob('abre el correo de martin@ejemplo.com'));
+
+    const serializado = JSON.stringify(atlas.observaciones);
+    expect(serializado).not.toContain('user-1');
+    expect(serializado).not.toContain('job-1');
+    expect(serializado).not.toContain('martin@ejemplo.com');
+    expect(serializado).not.toContain('ses-1');
+  });
+
+  it('esta fuente NO enciende la promocion automatica a recetas', async () => {
+    const atlas = makeAtlas();
+    const recetas = makeRecetas();
+    const deps = makeDeps({
+      atlas: { repo: atlas.repo, clave: CLAVE },
+      navegador: makeNavegadorConPercepcion(),
+      motor: makeMotorConPercepcion(),
+      recetas,
+      observadorPasos: false,
+    });
+
+    await procesarTareaWeb(deps, makeJob('abre el ultimo correo'));
+
+    // El atlas aprendio, la promocion sigue exactamente como estaba: sin estrategias en la traza,
+    // esa corrida no se convierte en receta (encenderlo es TAREA_WEB_OBSERVADOR_PASOS, no esto).
+    expect(atlas.repo.registrarObservacion).toHaveBeenCalled();
+    expect(recetas.promover).not.toHaveBeenCalled();
+  });
+
+  it('una percepcion que no devuelve estrategias deja la corrida como antes', async () => {
+    const atlas = makeAtlas();
+    const navegador = {
+      ...makeNavegador(),
+      percibirPagina: vi.fn(async () => ({
+        url: `https://${DOMINIO}/inbox`,
+        titulo: 'Recibidos',
+        nodos: 3200,
+        foco: null,
+        campos: [],
+      })),
+    } as NavegadorParaTarea;
+    const deps = makeDeps({
+      atlas: { repo: atlas.repo, clave: CLAVE },
+      navegador,
+      motor: makeMotorConPercepcion(),
+      observadorPasos: false,
+    });
+
+    await expect(procesarTareaWeb(deps, makeJob('abre el ultimo correo'))).resolves.toBe('completada');
+    expect(atlas.repo.registrarObservacion).not.toHaveBeenCalled();
+  });
+
+  it('un fallo del agregador con esta fuente tampoco cambia el desenlace del job', async () => {
+    const atlas = makeAtlas();
+    atlas.repo.registrarObservacion = vi.fn(async () => {
+      throw new Error('la base no respondio');
+    });
+    const deps = makeDeps({
+      atlas: { repo: atlas.repo, clave: CLAVE },
+      navegador: makeNavegadorConPercepcion(),
+      motor: makeMotorConPercepcion(),
+      observadorPasos: false,
+    });
+
+    await expect(procesarTareaWeb(deps, makeJob('abre el ultimo correo'))).resolves.toBe('completada');
+    expect(deps.guardarResultado).toHaveBeenCalledWith('job-1', expect.objectContaining({ estado: 'ok' }));
   });
 });

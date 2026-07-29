@@ -14,6 +14,7 @@ import {
   MAX_LINEAS_MAPA,
   MAX_NOMBRE_ATLAS,
   parsearEntradaDelAtlas,
+  pasosConEstrategiasPercibidas,
   pistasParaPaso,
   PREFIJO_MAPA,
   valoresTecleadosDeLaCorrida,
@@ -329,6 +330,45 @@ describe('agregador', () => {
       valores: [],
     });
     expect(entradas).toHaveLength(1);
+  });
+
+  it('las estrategias que leyo la PERCEPCION llegan al agregador sin cambiarle la logica', () => {
+    const pasos = [pasoTraza({ estrategias: [], estrategiasPercibidas: [ROL_ENVIAR] })];
+    // Tal como llegan (campo aparte), el agregador no ve nada: es lo que garantiza que la promocion
+    // a receta tampoco vea nada nuevo.
+    expect(entradasDeCorridaLibre({ dominio: 'mail.ejemplo.com', pasos, valores: [] })).toEqual([]);
+    expect(
+      entradasDeCorridaLibre({
+        dominio: 'mail.ejemplo.com',
+        pasos: pasosConEstrategiasPercibidas(pasos),
+        valores: [],
+      }),
+    ).toEqual([
+      {
+        dominio: 'mail.ejemplo.com',
+        claseDeElemento: 'click|rol:button|enviar',
+        estrategias: [ROL_ENVIAR],
+      },
+    ]);
+  });
+
+  it('un paso que YA traia estrategias (observador encendido) se deja intacto', () => {
+    const pasos = [pasoTraza({ estrategias: [ARIA_ENVIAR], estrategiasPercibidas: [ROL_ENVIAR] })];
+    expect(pasosConEstrategiasPercibidas(pasos)[0]?.estrategias).toEqual([ARIA_ENVIAR]);
+  });
+
+  it('la paranoia de valores se aplica igual a lo que leyo la percepcion', () => {
+    const pasos = pasosConEstrategiasPercibidas([
+      pasoTraza({
+        accion: { tipo: 'act', instruccion: 'escribe', metodo: 'fill', argumentos: ['Enviar todo'] },
+        estrategias: [],
+        estrategiasPercibidas: [ROL_ENVIAR],
+      }),
+    ]);
+    // 'Enviar' esta CONTENIDO en el valor tecleado: la estrategia se cae y no queda entrada.
+    expect(
+      entradasDeCorridaLibre({ dominio: 'mail.ejemplo.com', pasos, valores: ['Enviar todo'] }),
+    ).toEqual([]);
   });
 });
 

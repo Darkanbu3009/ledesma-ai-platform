@@ -20,9 +20,11 @@ import type {
 import {
   construirExpresionPercepcion,
   parsearPercepcion,
+  type ObjetivoDeLectura,
   type PercepcionDePagina,
 } from './percepcion.js';
 import {
+  AYUDANTES_DOM,
   EXPRESION_VACIAR_CAMPO_ENFOCADO,
   expresionLeerEstrategias,
   expresionResolverElemento,
@@ -289,6 +291,18 @@ export const EXPRESION_LEER_CAMPOS = String.raw`(() => {
  * ejecuta tal cual sobre una pagina real igual que hace con EXPRESION_LEER_CAMPOS.
  */
 export const EXPRESION_PERCEPCION = construirExpresionPercepcion(EXPRESION_LEER_CAMPOS);
+
+/**
+ * La MISMA expresion de percepcion mas la lectura de las estrategias del elemento tocado (ATLAS DE
+ * SITIOS). Se compone aqui, que es donde ya viven las dos mitades: el lector de campos de la
+ * verificacion y los ayudantes de DOM de la localizacion. Exportada SOLO para el test de DOM.
+ */
+export function expresionPercepcionConEstrategias(objetivo: ObjetivoDeLectura): string {
+  return construirExpresionPercepcion(EXPRESION_LEER_CAMPOS, {
+    ayudantes: AYUDANTES_DOM,
+    objetivo,
+  });
+}
 
 /** Lo que devuelve localizar el boton de una accion por rol y aria-label (modo simulacro, FASE 3). */
 export interface BotonLocalizado {
@@ -939,10 +953,20 @@ export class NavegadorBrowserbase
    * de campos de la verificacion (chips, tokens y pills incluidos; ver EXPRESION_LEER_CAMPOS).
    * Solo lectura en el mundo aislado. Best-effort: cualquier fallo devuelve null y ese paso queda
    * sin percepcion; jamas cambia el desenlace de la tarea.
+   *
+   * `objetivo` (ATLAS DE SITIOS) agrega a ESTA MISMA evaluacion la lectura de las estrategias del
+   * elemento que el paso toco. Es la MISMA conexion CDP: la percepcion ya la abria despues de cada
+   * paso y el dato del elemento estaba ahi, sin leerse. Sin el parametro, la expresion evaluada es
+   * exactamente la de siempre.
    */
-  async percibirPagina(sesionExternaId: string): Promise<PercepcionDePagina | null> {
+  async percibirPagina(
+    sesionExternaId: string,
+    objetivo?: ObjetivoDeLectura | undefined,
+  ): Promise<PercepcionDePagina | null> {
     try {
-      const crudo = await this.evaluarEnLaPagina(sesionExternaId, EXPRESION_PERCEPCION);
+      const expresion =
+        objetivo === undefined ? EXPRESION_PERCEPCION : expresionPercepcionConEstrategias(objetivo);
+      const crudo = await this.evaluarEnLaPagina(sesionExternaId, expresion);
       return parsearPercepcion(crudo);
     } catch {
       return null;

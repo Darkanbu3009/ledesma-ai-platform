@@ -329,6 +329,25 @@ export function entradasDeCorridaLibre(params: {
 }
 
 /**
+ * Los pasos de una corrida del MOTOR LIBRE con las estrategias que la PERCEPCION leyo del DOM
+ * puestas donde el agregador las busca. Es el unico punto que conecta las dos cosas, y existe para
+ * que ni `entradasDeCorridaLibre` ni ningun otro lector cambien:
+ *
+ *  - La promocion a receta lee `estrategias` y NO ve nada nuevo: sigue promoviendo exactamente las
+ *    mismas corridas que antes de este cambio (encender esa via es una decision de producto propia,
+ *    que vive en TAREA_WEB_OBSERVADOR_PASOS).
+ *  - Un paso que YA traia estrategias (observador de pasos encendido) se deja intacto: esas las
+ *    leyo el observador contra el selector del motor y son al menos tan buenas como estas.
+ */
+export function pasosConEstrategiasPercibidas(pasos: readonly PasoCensurado[]): PasoCensurado[] {
+  return pasos.map((paso) => {
+    const percibidas = paso.estrategiasPercibidas ?? [];
+    if (paso.estrategias.length > 0 || percibidas.length === 0) return paso;
+    return { ...paso, estrategias: percibidas };
+  });
+}
+
+/**
  * TODOS los valores tecleados de una corrida, que es contra lo que se aplica la paranoia del
  * invariante 4: los parametros que el objetivo declaro MAS los textos que los pasos de escritura de
  * la traza registraron. Los dos, porque un paso puede haber tecleado algo que el extractor no

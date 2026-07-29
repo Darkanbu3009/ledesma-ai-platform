@@ -1,5 +1,6 @@
 import { Stagehand, tool } from '@browserbasehq/stagehand';
 import type { AgentExecuteOptions, V3Options } from '@browserbasehq/stagehand';
+import type { EstrategiaLocalizacion } from '@ledesma-platform/shared';
 import { z } from 'zod';
 import {
   AccionBloqueadaError,
@@ -740,11 +741,19 @@ export function construirOpcionesDeEjecucion(params: {
    * queda exactamente como antes: cero lecturas extra y cero mensajes extra.
    */
   percepcion?: ControlDePercepcion | undefined;
+  /**
+   * ATLAS DE SITIOS: recibe, por cada evento del bucle, UNA lista de estrategias POR ACCION que ese
+   * evento empuja a la traza del motor (la primera lleva lo que la percepcion leyo del elemento
+   * tocado y el resto van vacias). Emitir una por accion es lo que mantiene el emparejamiento
+   * posicional con la traza; sin percepcion cableada no se pasa, y entonces no se emite nada.
+   */
+  registrarEstrategias?: ((porAccion: EstrategiaLocalizacion[][]) => void) | undefined;
 }): AgentExecuteOptions {
   const observador = params.observador;
   const registrarAccion = params.registrarAccion;
   const registrarConsumo = params.registrarConsumo;
   const percepcion = params.percepcion;
+  const registrarEstrategias = params.registrarEstrategias;
   // PREPARACION POR PASO (cache de prompt + system por su canal + ventana de historial). Tiene
   // estado (la longitud del envio anterior), asi que se crea uno por corrida.
   const preparador = crearPreparadorDePaso({ historialPasos: params.historialPasos });
@@ -807,11 +816,20 @@ export function construirOpcionesDeEjecucion(params: {
               // antes de la siguiente llamada al modelo, asi que las lineas quedan listas para el
               // prepareStep que sigue. alTerminarPaso nunca lanza (best-effort interno).
               if (percepcion !== undefined) {
-                await percepcion.alTerminarPaso({
+                const estrategias = await percepcion.alTerminarPaso({
                   actionName: evento.actionName,
                   actionArgs: evento.actionArgs,
                   toolOutput: { result: evento.toolOutput.result },
                 });
+                // ATLAS DE SITIOS: una entrada POR ACCION empujada por este evento (una tool puede
+                // empujar varias: fillForm empuja la suya mas una por campo). Lo leido pertenece a
+                // la primera, que es la accion de la tool; las demas van vacias para que la traza y
+                // esta lista sigan cuadrando en cantidad y en orden.
+                registrarEstrategias?.(
+                  pasosObservadosDeEvidencia(evento).map((_, indice) =>
+                    indice === 0 ? estrategias : [],
+                  ),
+                );
               }
               if (observador === undefined) return;
               try {
@@ -982,6 +1000,10 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
     // La huella INICIAL es el "antes" del primer paso (el primer click de la corrida tambien tiene
     // que poder reportarse sin efecto). Best-effort: si falla, el primer paso queda sin comparacion.
     if (percepcion !== undefined) await percepcion.inicializar();
+    // ATLAS DE SITIOS: lo que la percepcion leyo del elemento de cada paso, UNA lista por accion de
+    // la traza y en su mismo orden. Se acumula aqui y viaja en el resultado; el handler decide que
+    // hace con ello (agregarlo al aprendizaje comun, best-effort y despues del desenlace).
+    const estrategiasPorAccion: EstrategiaLocalizacion[][] = [];
     // El reporte se emite en el `finally`: una corrida que LANZA (deadline, cancelacion o corte por
     // esquema) es justo donde mas hace falta saber cuanto se gasto antes de cortarse.
     const consumo = crearAcumuladorDeConsumo();
@@ -1069,6 +1091,13 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
               conGuardia: params.guardia !== undefined,
               historialPasos: params.historialPasos,
               percepcion,
+              ...(percepcion !== undefined
+                ? {
+                    registrarEstrategias: (porAccion: EstrategiaLocalizacion[][]): void => {
+                      estrategiasPorAccion.push(...porAccion);
+                    },
+                  }
+                : {}),
               ...(params.reportarConsumo !== undefined
                 ? { registrarConsumo: (paso) => consumo.registrarPaso(paso) }
                 : {}),
@@ -1098,6 +1127,9 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
           // El paso del cambio se agrega a mano: la tool lanzo, asi que Stagehand no la empujo a su
           // traza y la trayectoria del tramo quedaria sin el paso que explica por que termino.
           acciones: [...(resultado.actions ?? []), ...(pasoDelCambio !== null ? [pasoDelCambio] : [])],
+          // Nadie percibio el paso del cambio: su ranura va vacia para que la lista siga teniendo
+          // una entrada por accion de la traza.
+          estrategiasPorAccion: [...estrategiasPorAccion, ...(pasoDelCambio !== null ? [[]] : [])],
           tokensIn: resultado.usage?.input_tokens ?? null,
           tokensOut: resultado.usage?.output_tokens ?? null,
           cambioDeSitio: cambio,
@@ -1112,6 +1144,7 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
         completado: resultado.completed,
         mensaje: resultado.message,
         acciones: resultado.actions ?? [],
+        estrategiasPorAccion,
         tokensIn: resultado.usage?.input_tokens ?? null,
         tokensOut: resultado.usage?.output_tokens ?? null,
         cambioDeSitio: null,

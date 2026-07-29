@@ -102,9 +102,12 @@ const EnvSchema = z.object({
   //   no deja margen para que el agente reaccione dentro del deadline.
   TAREA_WEB_TOOL_TIMEOUT_SECONDS: z.coerce.number().int().min(30).max(300).default(90),
   //   TAREA_WEB_OBSERVADOR_PASOS: enciende el OBSERVADOR de pasos (lee del DOM las estrategias de
-  //   localizacion de cada paso mientras el motor corre). APAGADO por defecto porque abre UNA
-  //   conexion CDP nueva por paso durante la corrida; con el apagado, las recetas se siguen
-  //   promoviendo pero SIN estrategias enriquecidas (ver README del worker).
+  //   localizacion mientras el motor corre) Y con el la PROMOCION AUTOMATICA A RECETAS, que es una
+  //   decision de producto distinta y de radio mayor. APAGADO por defecto. El costo es una conexion
+  //   CDP por ACCION CON ELEMENTO RESUELTO, no por paso (goto, screenshot, extract o think no abren
+  //   ninguna), y desde la percepcion (27 jul 2026) esa conexion ya se paga de forma incondicional
+  //   despues de cada paso que toca la pagina: encenderlo DUPLICA una lectura que ya existe. El
+  //   ATLAS DE SITIOS no depende de este flag (lo alimenta la percepcion). Ver README del worker.
   TAREA_WEB_OBSERVADOR_PASOS: z
     .enum(['true', 'false'])
     .default('false')
