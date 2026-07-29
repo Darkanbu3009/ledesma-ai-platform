@@ -26,9 +26,9 @@ export type RunCredential =
  * Cota de iteraciones que el Playground pide por turno. Es el CAP server-side (AGENT_LIMITS.
  * maxIterationsCap del backend, que el contrato publico de /v1/run/:agentId ya acepta y valida);
  * el default del motor (10) se quedaba corto para narrar tareas web de 3 a 5 minutos: cada llamada
- * a la tool de revisar espera hasta ~25s (su long-poll, que NO conviene alargar porque esta
- * calibrado por debajo del umbral de corte por inactividad de los proxies del SSE), asi que con 10
- * iteraciones el chat aguantaba ~3 minutos de tarea y con 20 aguanta mas de 5.
+ * a la tool de revisar espera hasta ~45s (su long-poll, calibrado con margen por debajo del umbral
+ * de corte por inactividad de los proxies del SSE; subirlo mas exigiria un latido en el stream),
+ * asi que con 20 iteraciones el chat aguanta bastante mas de 5 minutos de tarea.
  */
 export const PLAYGROUND_MAX_ITERATIONS = 20;
 

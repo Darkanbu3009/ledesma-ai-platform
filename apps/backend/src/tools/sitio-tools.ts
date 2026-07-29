@@ -119,8 +119,9 @@ export const SITIO_TOOLS: readonly ToolDefinition[] = [
     name: SITIO_TOOL_REVISAR,
     description:
       'Consulta el resultado de una tarea encolada con platform_ejecutar_tarea_en_sitio, usando su job_id. ' +
-      'Esta tool ESPERA internamente mientras la tarea sigue corriendo (hasta ~25 segundos por llamada), ' +
-      'asi que una sola llamada suele bastar; si aun asi devuelve en_proceso, vuelve a llamarla.',
+      'Esta tool ESPERA internamente mientras la tarea sigue corriendo (hasta ~45 segundos por llamada) y ' +
+      'responde en cuanto la tarea termina, asi que una sola llamada suele bastar. Llamala UNA vez y espera ' +
+      'su respuesta; solo si devuelve en_proceso vuelve a llamarla.',
     inputSchema: revisarSchema,
   },
   {
@@ -227,14 +228,22 @@ const MENSAJE_RECONECTAR =
  * modelo a rellamarla de inmediato y quemar las iteraciones del loop), el ejecutor espera
  * internamente re-consultando el job cada INTERVALO hasta agotar la VENTANA.
  *
- * La ventana es 25s A PROPOSITO: el SSE del run no emite ningun byte mientras una tool ejecuta
- * (sse-runner solo escribe AgentEvents), y los proxies intermedios cortan conexiones inactivas
- * (umbrales tipicos de 30-60s). 25s queda por debajo del umbral mas agresivo comun; una tarea mas
- * larga simplemente consume otra llamada de la tool (otra iteracion), no rompe el stream. El
- * timeout de pared del run (600s) sigue mandando: su abort llega por el AbortSignal y corta la
- * espera de inmediato.
+ * LA VENTANA ES 45s (antes 25s) POR COSTO, medido en produccion: una corrida por tarea aprendida
+ * dura ~30s y gasta 0 tokens, pero cada llamada de esta tool reenvia el contexto entero del chat al
+ * modelo, asi que las revisiones son casi todo el costo del turno. Con 25s una tarea de 30s no cabia
+ * NUNCA en una sola espera (la primera vencia a los 25s y hacia falta una segunda llamada); con 45s
+ * cabe entera y el turno tipico baja a UNA revision. El retorno es ANTICIPADO: en cuanto el job deja
+ * pending/running se responde, asi que alargar la ventana no alarga ninguna tarea.
+ *
+ * EL TECHO lo pone el stream: el SSE del run no emite ningun byte mientras una tool ejecuta
+ * (sse-runner solo escribe AgentEvents) y los proxies intermedios cortan conexiones inactivas
+ * (Railway delante del backend). 45s deja margen holgado bajo el umbral de 60s que es el mas bajo
+ * de los habituales en ese tramo; subir de ahi exigiria un latido en el SSE, que es otro cambio.
+ * Una tarea mas larga simplemente consume otra llamada de la tool, no rompe el stream. El timeout
+ * de pared del run (600s) sigue mandando: su abort llega por el AbortSignal y corta la espera de
+ * inmediato.
  */
-export const REVISAR_ESPERA_MAX_MS = 25_000;
+export const REVISAR_ESPERA_MAX_MS = 45_000;
 export const REVISAR_ESPERA_INTERVALO_MS = 3_000;
 
 /** Espera dormida que se corta al instante si el signal aborta (nunca rechaza). */
