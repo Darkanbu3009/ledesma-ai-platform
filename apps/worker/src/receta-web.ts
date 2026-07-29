@@ -48,6 +48,23 @@ function marcador(parametro: MarcadorParametro): string {
 const PUNTUACION = /[.,;:!?"'`()[\]{}<>|/\\*_~#$%^&+=@-]+/g;
 
 /**
+ * TOKEN INTERMEDIO que marca la POSICION de un valor mientras la firma todavia tiene puntuacion por
+ * retirar. Solo letras y digitos: sobrevive al barrido de PUNTUACION intacto, asi que el marcador
+ * definitivo se pone al final por su token y NUNCA hay que reconocerlo por su nombre.
+ *
+ * POR QUE EXISTE (bug real de produccion, receta ad0731c8): la firma insertaba `<asunto>` ANTES de
+ * retirar la puntuacion, los corchetes se iban con ella (son puntuacion) y despues se reponian
+ * buscando la palabra desnuda rodeada de espacios. Esa busqueda no distingue el VALOR sustituido de
+ * la palabra con la que el usuario NOMBRA el campo, y ademas la sustitucion dejaba dobles espacios
+ * al comerse las comillas, asi que cada dato producia DOS marcadores: "con el asunto X" firmaba
+ * "con el <asunto> <asunto>" y "el siguiente cuerpo del mensaje Y" firmaba "el siguiente <cuerpo>
+ * del mensaje <cuerpo>". La firma quedaba sin la palabra del rotulo y con un marcador de mas.
+ */
+function tokenDeValor(indice: number): string {
+  return `zz${indice}valorzz`;
+}
+
+/**
  * FIRMA DE UN OBJETIVO (D3): el objetivo normalizado (minusculas, sin acentos, sin puntuacion, con
  * los espacios colapsados) y con los PARAMETROS CONCRETOS sustituidos por marcadores.
  *
@@ -99,19 +116,24 @@ export function firmaDeObjetivo(objetivo: string, dominios: readonly string[] = 
   }
 
   let firma = normalizarTexto(objetivo);
+  // Cada valor deja UN token sin puntuacion en SU posicion. Un valor que no aparece en el texto
+  // normalizado no deja token, y por tanto tampoco deja marcador: la firma solo marca lo que hay.
+  const tokens: Array<{ token: string; marcador: string }> = [];
   for (const { texto, marcador: reemplazo } of [...sustituciones].sort(
     (a, b) => b.texto.length - a.texto.length,
   )) {
     const normalizado = normalizarTexto(texto);
-    if (normalizado === '') continue;
-    firma = firma.split(normalizado).join(reemplazo);
+    if (normalizado === '' || !firma.includes(normalizado)) continue;
+    const token = tokenDeValor(tokens.length);
+    tokens.push({ token, marcador: reemplazo });
+    firma = firma.split(normalizado).join(` ${token} `);
   }
-  // La puntuacion se retira DESPUES de sustituir (los correos y los montos la llevan dentro) y los
-  // marcadores se vuelven a poner porque sus corchetes tambien son puntuacion.
+  // La puntuacion se retira DESPUES de sustituir (los correos y los montos la llevan dentro). Los
+  // tokens la atraviesan enteros y recien entonces se cambian por su marcador: la palabra con la que
+  // el objetivo nombra al campo ("asunto", "cuerpo") queda como texto y jamas se convierte en uno.
   firma = firma.replace(PUNTUACION, ' ');
-  for (const { marcador: reemplazo } of sustituciones) {
-    const desnudo = reemplazo.slice(1, -1);
-    firma = firma.split(` ${desnudo} `).join(` ${reemplazo} `);
+  for (const { token, marcador: reemplazo } of tokens) {
+    firma = firma.split(token).join(reemplazo);
   }
   return `${firma.replace(/\s+/g, ' ').trim()}${sufijoDeDominios(dominios)}`;
 }

@@ -1345,6 +1345,14 @@ const MENSAJE_EFECTO_PROBABLE =
 
 /**
  * CAMINO POR RECETA (CAMBIO 5): busca la receta ACTIVA de este owner, dominio y firma de objetivo.
+ *
+ * SE PRUEBAN DOS FIRMAS, las dos EXACTAS, las dos deterministas y ninguna cuesta un token: la del
+ * objetivo que redacto el modelo conversacional y la del TEXTO LITERAL del usuario. Son textos
+ * distintos (el modelo parafrasea) y la receta pudo quedar guardada bajo cualquiera de los dos: las
+ * aprendidas solas firman el objetivo del modelo, las ensenadas desde una grabacion firman la
+ * descripcion que escribio la persona. Probar las dos no relaja nada -- sigue siendo igualdad
+ * exacta de firma canonica, y la receta encontrada pasa por el mismo `recetaAplicable`.
+ *
  * Devuelve null (y la tarea corre con el motor, como siempre) cuando:
  *  - el camino determinista no esta cableado entero;
  *  - no hay receta para esa firma, o sus pasos no validan (una receta manipulada se ignora);
@@ -1357,19 +1365,23 @@ async function buscarRecetaAplicable(
   job: Job,
   sitio: SitioConectado,
   objetivo: string,
+  textoParametros: string,
   verboBloqueado: string | null,
   dominios: readonly string[],
 ): Promise<RecetaWeb | null> {
   if (!deps.recetas || !deps.determinista || !deps.escalador) return null;
-  let receta: RecetaWeb | null;
+  // La firma incorpora el CONJUNTO DE DOMINIOS de la tarea: lo aprendido cruzando dos sitios no
+  // puede confundirse con lo aprendido en uno solo, aunque el objetivo se lea igual.
+  const firmas = [firmaDeObjetivo(objetivo, dominios)];
+  const firmaDelUsuario = firmaDeObjetivo(textoParametros, dominios);
+  if (!firmas.includes(firmaDelUsuario)) firmas.push(firmaDelUsuario);
+
+  let receta: RecetaWeb | null = null;
   try {
-    // La firma incorpora el CONJUNTO DE DOMINIOS de la tarea: lo aprendido cruzando dos sitios no
-    // puede confundirse con lo aprendido en uno solo, aunque el objetivo se lea igual.
-    receta = await deps.recetas.buscarActiva(
-      job.ownerId,
-      sitio.dominio,
-      firmaDeObjetivo(objetivo, dominios),
-    );
+    for (const firma of firmas) {
+      receta = await deps.recetas.buscarActiva(job.ownerId, sitio.dominio, firma);
+      if (receta !== null) break;
+    }
   } catch (error) {
     deps.logger.warn('tarea web: no se pudo consultar lo aprendido del sitio; se ejecuta con el motor', {
       jobId: job.id,
@@ -2264,6 +2276,7 @@ export async function procesarTareaWeb(
       job,
       sitio,
       objetivo,
+      textoParametros,
       verboBloqueado,
       dominiosAutorizados,
     );
