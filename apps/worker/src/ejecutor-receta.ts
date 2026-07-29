@@ -27,6 +27,13 @@ import type { PasoCensurado } from './trayectoria.js';
  * el selector que el motor resolvio; con el, el ejecutor vuelve a leer del DOM las estrategias
  * actuales y REPARA el paso (auto reparacion). El resto de la receta sigue corriendo en determinista.
  *
+ * PISTA DEL ATLAS DE SITIOS (V040), ANTES de escalar: entre "mis estrategias fallaron" y "escalo al
+ * motor" se prueban las formas de localizar que la plataforma vio funcionar en ESTE dominio para un
+ * elemento de la misma clase (aprendidas de ejecuciones exitosas de cualquier usuario, sin ningun dato
+ * de nadie). Es una PISTA y nada mas: si tampoco resuelve, el paso escala igual que antes. Lo que el
+ * atlas puede cambiar es COMO se encuentra un elemento, jamas si una accion se ejecuta -- el paso
+ * `verificar` y la verificacion determinista que resuelve no lo consultan ni lo conocen.
+ *
  * OBSOLESCENCIA (D6): si mas de la mitad de los pasos requirio escalada, la receta ya no describe el
  * sitio: se marca 'obsoleta' y esta corrida ABANDONA el camino de receta. El llamador la completa con
  * el motor como siempre y la siguiente corrida exitosa genera una receta nueva.
@@ -122,6 +129,18 @@ export interface EscaladorDePaso {
     apiKey: string;
     signal?: AbortSignal | undefined;
   }): Promise<ResultadoEscalada>;
+}
+
+/**
+ * PUERTO del ATLAS DE SITIOS (V040) hacia el ejecutor: dado un paso cuyas estrategias propias no
+ * encontraron su elemento, que OTRAS formas de localizarlo vio funcionar la plataforma en este
+ * dominio. Puro y sincrono (lo aprendido del dominio ya se leyo al arrancar la tarea): no abre nada,
+ * no consulta la base a mitad de un paso y no puede fallar.
+ *
+ * Ausente = la ejecucion por receta corre exactamente como antes de V040.
+ */
+export interface PistasDelAtlas {
+  pistasParaPaso(paso: PasoDeReceta): EstrategiaLocalizacion[];
 }
 
 /** Veredicto del paso `verificar` que resuelve el llamador (verificacion determinista + politica). */
@@ -232,7 +251,7 @@ export function construirInstruccionDeEscalada(paso: PasoSustituido): string | n
 function pasoDeTraza(
   paso: PasoSustituido,
   idx: number,
-  resultado: 'determinista' | 'escalado' | 'verificado' | 'detenido',
+  resultado: 'determinista' | 'escalado' | 'verificado' | 'detenido' | 'atlas',
   exito: boolean,
 ): PasoCensurado {
   const { paso: receta } = paso;
@@ -318,6 +337,12 @@ export interface EjecucionPorRecetaDeps {
    * no autorizo.
    */
   cambiarASitio?: ((dominio: string) => Promise<string | null>) | undefined;
+  /**
+   * ATLAS DE SITIOS (V040): las pistas de localizacion agregadas del dominio. Se consultan SOLO
+   * cuando las estrategias propias de un paso fallaron y SOLO para encontrar el elemento. Ausente =
+   * la ejecucion corre como antes de V040.
+   */
+  atlas?: PistasDelAtlas | undefined;
   signal?: AbortSignal | undefined;
 }
 
@@ -484,6 +509,46 @@ export async function ejecutarReceta(
         );
       }
       continue;
+    }
+
+    // PISTA DEL ATLAS DE SITIOS (V040): las estrategias propias del paso no encontraron el elemento.
+    // ANTES de declararlo no localizado y pagar una escalada al motor, se prueban las formas de
+    // localizar que la plataforma vio funcionar en este dominio para un elemento de la misma clase.
+    //
+    // Solo en 'no_localizado' a proposito: un 'fallo' encontro el elemento y rompio al ACTUAR sobre
+    // el, asi que reintentar con otro localizador seria buscar un elemento distinto para hacerle lo
+    // que fallo en este.
+    //
+    // Un paso resuelto por el atlas NO registra ganadora (la estrategia que lo resolvio no es del
+    // paso, asi que no hay indice que promover) y, por lo mismo, no vuelve al atlas como
+    // corroboracion: una entrada no se corrobora a si misma. Lo que si hace es REPARAR el paso, para
+    // que la proxima corrida de esta receta ya la lleve como estrategia propia.
+    if (resultado.estado === 'no_localizado') {
+      const pistas = deps.atlas?.pistasParaPaso(sustituido.paso) ?? [];
+      if (pistas.length > 0) {
+        const conAtlas = await deps.navegador
+          .ejecutarPasoDeterminista(sitio.sesionExternaId, { ...instruccion, estrategias: pistas })
+          .catch(
+            (): ResultadoPasoDeterminista => ({
+              estado: 'fallo',
+              estrategias: [],
+              detalle: 'el navegador no pudo ejecutar el paso con la pista del atlas',
+            }),
+          );
+        if (conAtlas.estado === 'ok') {
+          trasEscrituraExitosa = sustituido.paso.accion === 'escribir';
+          traza.push(pasoDeTraza(sustituido, traza.length, 'atlas', true));
+          if (conAtlas.estrategias.length > 0) {
+            reparados = repararEstrategias(
+              reparados ?? pasos,
+              sustituido.paso.idx,
+              conAtlas.estrategias,
+              sustituido.texto,
+            );
+          }
+          continue;
+        }
+      }
     }
 
     // El paso no resolvio su elemento: ESCALADA SELECTIVA de ESE paso (D5), en la sesion del sitio

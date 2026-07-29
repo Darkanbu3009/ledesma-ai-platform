@@ -126,6 +126,14 @@ const EnvSchema = z.object({
     .min(HISTORIAL_PASOS_MIN)
     .max(HISTORIAL_PASOS_MAX)
     .default(HISTORIAL_PASOS_DEFAULT),
+  // ATLAS DE SITIOS (V040): secreto con el que el worker calcula el HMAC del ORIGEN de cada
+  // observacion, lo unico que permite contar cuantos usuarios DISTINTOS produjeron una estructura sin
+  // saber quienes son. OPCIONAL a proposito: el atlas queda ACTIVO desde el merge, sin flags, asi que
+  // un despliegue que no agregue nada tiene que poder contar igual. Sin esta variable la clave se
+  // DERIVA de VAULT_SECRET con una etiqueta de separacion de dominio (claveDelAtlas, atlas-sitios.ts):
+  // derivacion de una sola via, la clave del atlas jamas permite reconstruir el secreto de la boveda.
+  // Configurarla despues solo hace que los origenes se vuelvan a contar desde cero.
+  ATLAS_SITIOS_SECRET: z.string().min(32).optional(),
 });
 
 export type WorkerEnv = z.infer<typeof EnvSchema>;

@@ -304,8 +304,12 @@ export function sustituirParametros(
  * Metodos de Playwright (los que registra la traza del motor) mapeados a la accion determinista que
  * los repite. Lo que no esta aqui NO se promueve: `select` de un combo nativo, arrastres y demas
  * necesitan primitivas que este ejecutor no tiene, y prometer que los repite seria mentir.
+ *
+ * EXPORTADO para que el ATLAS DE SITIOS (atlas-sitios.ts) clasifique un paso de la traza con EL MISMO
+ * vocabulario con el que lo clasifica la promocion. Dos mapeos distintos harian que la clase de
+ * elemento que escribe el camino libre no coincidiera con la que busca el camino por receta.
  */
-const ACCION_POR_METODO: Readonly<Record<string, 'click' | 'escribir'>> = {
+export const ACCION_POR_METODO: Readonly<Record<string, 'click' | 'escribir'>> = {
   click: 'click',
   dblclick: 'click',
   check: 'click',

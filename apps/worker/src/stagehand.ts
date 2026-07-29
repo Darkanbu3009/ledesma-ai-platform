@@ -942,6 +942,8 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
     guardia?: GuardiaDeAccion | undefined;
     cambiador?: CambiadorDeSitio | undefined;
     perceptor?: PerceptorDePagina | undefined;
+    /** Bloque "mapa conocido del sitio" (atlas, V040): viaja por la cola de percepcion. */
+    mapaDelSitio?: readonly string[] | undefined;
     historialPasos: number;
     modoScreenshots: ModoScreenshots;
     reportarConsumo?: ((consumo: ConsumoDeCorrida) => void) | undefined;
@@ -971,6 +973,9 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
       perceptor !== undefined
         ? crearControlDePercepcion({
             percibir: () => perceptor.percibir(),
+            // ATLAS DE SITIOS (V040): el mapa se encola aqui y sale en el primer turno, dentro del
+            // mismo tope por turno que el resto de la percepcion.
+            ...(params.mapaDelSitio !== undefined ? { mapaDelSitio: params.mapaDelSitio } : {}),
             logger: this.config.logger,
           })
         : undefined;

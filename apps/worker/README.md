@@ -107,6 +107,7 @@ Este proceso **no se despliega** aun; solo debe compilar y poder correrse localm
 | `TAREA_WEB_OBSERVADOR_PASOS` | no | `false` | Observador de pasos: `true` o `false` (ver abajo). |
 | `TAREA_WEB_SCREENSHOTS` | no | `cambios` | Cuando se captura la pantalla: `siempre`, `cambios` o `minimo` (ver abajo). |
 | `TAREA_WEB_HISTORIAL_PASOS` | no | `8` | Pasos de conversacion que se reenvian al modelo en cada llamada (3..40). |
+| `ATLAS_SITIOS_SECRET` | no | derivado de `VAULT_SECRET` | Secreto del HMAC de origen del atlas de sitios (32+, ver abajo). |
 | `WORKER_POLL_INTERVAL_MS` | no | `5000` | Cada cuanto consulta la cola. |
 | `LOG_LEVEL` | no | `info` | Nivel de log. |
 
@@ -219,6 +220,27 @@ paso re-ejecutable que guardar). Lo demas no cambia: las recetas YA aprendidas s
 de forma determinista, se reparan y se jubilan igual, y la trayectoria se sigue registrando. Se
 enciende (`TAREA_WEB_OBSERVADOR_PASOS=true`) en los despliegues donde interese volver a aprender
 recetas nuevas.
+
+### Atlas de sitios (`ATLAS_SITIOS_SECRET`, V040)
+
+El worker agrega, POR DOMINIO, las estrategias de localizacion que GANARON en ejecuciones exitosas de
+cualquier usuario, y se las ofrece como PISTAS a todo agente que opere despues en ese dominio (mapa
+en el contexto de percepcion del motor libre; estrategias de fallback en el ejecutor de recetas). No
+tiene flag: queda activo en cuanto la migracion V040 esta aplicada, y sin ella el worker corre igual
+(la lectura falla, se loguea y la tarea sigue sin pistas).
+
+`aprendizaje_sitios` NO tiene `owner_id` ni ninguna columna de tenencia. Para poder contar cuantos
+usuarios DISTINTOS produjeron una estructura sin saber quienes son, cada observacion aporta un
+HMAC-SHA256 del owner calculado con este secreto, que vive SOLO en el worker. Es opcional: sin la
+variable, la clave se deriva de `VAULT_SECRET` con una etiqueta de separacion de dominio
+(`claveDelAtlas`, `src/atlas-sitios.ts`), derivacion de una sola via que jamas permite reconstruir el
+secreto de la boveda. Configurar la variable despues solo hace que los origenes se cuenten de nuevo
+desde cero.
+
+**Interaccion con `TAREA_WEB_OBSERVADOR_PASOS`**: el camino por RECETA alimenta el atlas siempre (las
+ganadoras las informa el ejecutor determinista). El camino del MOTOR LIBRE necesita las estrategias
+que lee el observador, asi que con el observador apagado (el default) una corrida con motor no aporta
+nada al atlas, por la misma razon por la que tampoco se promueve a receta.
 
 ### Costo por corrida (`TAREA_WEB_SCREENSHOTS` y `TAREA_WEB_HISTORIAL_PASOS`)
 

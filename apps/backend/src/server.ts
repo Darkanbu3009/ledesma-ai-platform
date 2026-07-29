@@ -34,6 +34,7 @@ import { consentRoutes } from './routes/consents.js';
 import { dataSubjectRequestRoutes } from './routes/data-requests.js';
 import { processingRecordRoutes } from './routes/processing-records.js';
 import { retentionRoutes } from './routes/retention.js';
+import { adminAtlasSitiosRoutes } from './routes/admin-atlas-sitios.js';
 import { securityPlugin } from './plugins/security.js';
 import { registerErrorHandler } from './errors/error-handler.js';
 import { loggerRedaction, loggerSerializers } from './logger.js';
@@ -147,6 +148,10 @@ export async function buildServer(config: Env, options: BuildServerOptions = {})
   await app.register(dataSubjectRequestRoutes(config));
   await app.register(processingRecordRoutes(config));
   await app.register(retentionRoutes(config));
+  // Atlas de sitios (V040): administracion MINIMA del aprendizaje colectivo, purgar por dominio lo
+  // que la plataforma aprendio de la estructura de un sitio. Sin endpoint de lectura y sin UI de
+  // usuario en esta fase; la tabla no tiene dueno al que mostrarsela.
+  await app.register(adminAtlasSitiosRoutes(config));
 
   return app;
 }
