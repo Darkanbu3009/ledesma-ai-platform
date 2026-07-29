@@ -5,8 +5,9 @@ import {
   type EstrategiaLocalizacion,
   type PasoDeReceta,
 } from '@ledesma-platform/shared';
-import { estrategiasIndependientesDelValor } from './localizacion.js';
+import { estrategiasIndependientesDelValor, sanearEstrategias } from './localizacion.js';
 import { normalizarTexto } from './parametros-objetivo.js';
+import { derivarEstrategiasDeSelector } from './promover-trayectoria.js';
 import { ACCION_POR_METODO, type ValoresDeParametros } from './receta-web.js';
 import type { PasoCensurado } from './trayectoria.js';
 
@@ -345,6 +346,37 @@ export function pasosConEstrategiasPercibidas(pasos: readonly PasoCensurado[]): 
     if (paso.estrategias.length > 0 || percibidas.length === 0) return paso;
     return { ...paso, estrategias: percibidas };
   });
+}
+
+/**
+ * COMPLEMENTO POR SELECTOR: lo que se puede aprender del PROPIO SELECTOR que el motor resolvio, sin
+ * volver a tocar el DOM. Es la unica fuente que alcanza a las ACCIONES FINALES, que destruyen su
+ * propio contexto: al enviar un correo Gmail desmonta el compose, asi que cuando corre la lectura de
+ * percepcion (que es DESPUES de la accion) ni el xpath del boton resuelve ni el foco apunta a el, y
+ * ninguna lectura posterior puede alcanzarlo. Extraer los predicados de atributo del selector es
+ * PARSEAR UN STRING, asi que funciona igual con el elemento ya desaparecido, y el valor es LITERAL
+ * del sitio (no una parafrasis del modelo, que es lo que el atlas descarta como fuente).
+ *
+ * Reusa `derivarEstrategiasDeSelector` (promover-trayectoria.ts), que es la misma extraccion que ya
+ * alimenta la promocion de trayectorias persistidas, y aplica ENCIMA la regla de este modulo: solo
+ * sobrevive lo que el atlas puede guardar, o sea `aria-label` y `data-*`. Cae por tanto el xpath (la
+ * ruta del DOM de una sesion, que no describe el sitio para nadie mas) y caen `id` y `name` (los
+ * ids por sesion de Gmail que motivaron el filtro). Lista vacia = el selector era posicional puro y
+ * no habia nada literal que aprender de el.
+ *
+ * Lo derivado pasa por el MISMO saneo que la percepcion aplica a lo que lee del DOM
+ * (`sanearEstrategias`, que es lo que corre `parsearPercepcion` sobre la lectura): un `aria-label`
+ * con un dato sensible dentro no puede entrar a una tabla GLOBAL por la puerta que la otra fuente si
+ * cierra. La paranoia de VALORES no corre aqui a proposito: estas estrategias viajan por el mismo
+ * campo `estrategiasPercibidas` que las de la percepcion, asi que pasan por `estrategiasParaElAtlas`
+ * como todas las demas (dos veces, texto completo y truncado a MAX_NOMBRE_ATLAS). Un solo lugar
+ * decide, y es el mismo para las dos fuentes.
+ */
+export function estrategiasDelSelectorParaElAtlas(
+  selector: string | null,
+): EstrategiaLocalizacion[] {
+  const derivadas = derivarEstrategiasDeSelector(selector).filter(esEstrategiaDeAtlas);
+  return derivadas.length === 0 ? [] : sanearEstrategias(JSON.stringify(derivadas));
 }
 
 /**
