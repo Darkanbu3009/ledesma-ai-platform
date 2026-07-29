@@ -13,7 +13,9 @@ import { AprobacionesWebRepository } from '@ledesma-platform/backend/aprobacione
 import { PoliticasEjecucionRepository } from '@ledesma-platform/backend/politicas';
 import { TrayectoriasWebRepository } from '@ledesma-platform/backend/trayectorias';
 import { RecetasWebRepository } from '@ledesma-platform/backend/recetas-web';
+import { AprendizajeSitiosRepository } from '@ledesma-platform/backend/aprendizaje-sitios';
 import { GrabacionesRepository } from '@ledesma-platform/backend/grabaciones';
+import { claveDelAtlas } from './atlas-sitios.js';
 import { crearNotificadorAprobaciones, type BarridoAprobacionesDeps } from './aprobaciones.js';
 import { crearSubidorDeScreenshots } from './storage.js';
 import { parseEnv, type WorkerEnv } from './env.js';
@@ -177,6 +179,17 @@ function main(): void {
       // motor, y solo cuando la firma exacta del objetivo no encontro nada. Corre con la key del
       // OWNER (la misma de la corrida) y con el mismo modelo de navegacion.
       elector: crearElectorDeTareaEnsenada({ model: config.TAREA_WEB_MODEL, logger }),
+      // ATLAS DE SITIOS (V040): el aprendizaje COLECTIVO sobre la estructura de cada dominio, con su
+      // clave HMAC de origen. ACTIVO desde el merge y sin flag: la clave se deriva de VAULT_SECRET
+      // cuando el despliegue no configura ATLAS_SITIOS_SECRET, asi que no hace falta tocar nada. La
+      // tabla es global y NO tiene owner_id (ver V040): aqui no hay ni forma de pasarle uno.
+      atlas: {
+        repo: new AprendizajeSitiosRepository(sql),
+        clave: claveDelAtlas({
+          secretoDedicado: config.ATLAS_SITIOS_SECRET,
+          vaultSecret: config.VAULT_SECRET,
+        }),
+      },
       // Observador de pasos APAGADO por defecto (TAREA_WEB_OBSERVADOR_PASOS): encendido abre una
       // conexion CDP por paso durante la corrida.
       observadorPasos: config.TAREA_WEB_OBSERVADOR_PASOS,

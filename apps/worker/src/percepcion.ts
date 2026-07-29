@@ -431,13 +431,20 @@ export interface ControlDePercepcion {
  * leida DESPUES del paso anterior (entre pasos nadie mas toca la pagina: solo actua el agente), y la
  * inicial se toma al arrancar la corrida. Todo es best-effort: si una lectura falla, ese paso queda
  * sin percepcion y la tarea sigue igual.
+ *
+ * `mapaDelSitio` (ATLAS DE SITIOS, V040) es el bloque "mapa conocido del sitio" que el handler arma
+ * con lo que la plataforma ya observo en ese dominio. Entra por ESTA cola, y no por un canal nuevo,
+ * justamente para que quede DENTRO del presupuesto de contexto que ya existe (MAX_LINEAS_POR_TURNO):
+ * se encola al inicializar y viaja en el primer turno como una linea mas. Ausente o vacio = la
+ * corrida queda exactamente como antes de V040.
  */
 export function crearControlDePercepcion(params: {
   percibir: () => Promise<PercepcionDePagina | null>;
+  mapaDelSitio?: readonly string[] | undefined;
   logger?: Logger | undefined;
 }): ControlDePercepcion {
   let previa: PercepcionDePagina | null = null;
-  let cola: string[] = [];
+  let cola: string[] = [...(params.mapaDelSitio ?? [])];
 
   const percibirSeguro = async (): Promise<PercepcionDePagina | null> => {
     try {

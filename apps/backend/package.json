@@ -31,6 +31,10 @@
     "./grabaciones": {
       "types": "./dist/grabaciones/index.d.ts",
       "import": "./dist/grabaciones/index.js"
+    },
+    "./aprendizaje-sitios": {
+      "types": "./dist/aprendizaje-sitios/index.d.ts",
+      "import": "./dist/aprendizaje-sitios/index.js"
     }
   },
   "scripts": {

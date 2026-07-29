@@ -75,8 +75,20 @@ import {
   recetaAplicable,
   type EscaladorDePaso,
   type NavegadorDeterminista,
+  type PistasDelAtlas,
   type VeredictoDeVerificacion,
 } from './ejecutor-receta.js';
+import {
+  bloqueDelMapa,
+  entradasDeCorridaLibre,
+  entradasDeCorridaPorReceta,
+  entradasServibles,
+  hashDeOrigen,
+  pistasParaPaso,
+  valoresTecleadosDeLaCorrida,
+  type EntradaConocida,
+  type EntradaDeAtlas,
+} from './atlas-sitios.js';
 import {
   aplicarPromociones,
   evaluarPromociones,
@@ -353,6 +365,12 @@ export interface MotorDeTareaWeb {
      * aterrizo el texto tecleado). Ausente cuando el navegador no expone percepcion: cero cambio.
      */
     perceptor?: PerceptorDePagina | undefined;
+    /**
+     * ATLAS DE SITIOS (V040): bloque "mapa conocido del sitio" (estructura ya observada en este
+     * dominio por la plataforma) que se adjunta al contexto de PERCEPCION del agente, dentro del
+     * presupuesto por turno que ese canal ya tiene. Ausente o vacio = cero cambio respecto de V039.
+     */
+    mapaDelSitio?: readonly string[] | undefined;
     /** Ventana de historial que se reenvia al modelo en cada llamada (TAREA_WEB_HISTORIAL_PASOS). */
     historialPasos: number;
     /** Cuando se toma una captura de pantalla durante la corrida (TAREA_WEB_SCREENSHOTS). */
@@ -464,6 +482,32 @@ export interface RepositorioRecetasParaWorker {
   ): Promise<boolean>;
 }
 
+/**
+ * Subconjunto del AprendizajeSitiosRepository (V040) que la tarea web usa: el ATLAS DE SITIOS, la
+ * estructura de cada dominio agregada de las ejecuciones exitosas de CUALQUIER usuario. Puerto propio
+ * (no la clase) con el mismo criterio que el resto: para que los tests pasen fakes sin base y para que
+ * quede a la vista lo unico que este handler puede hacerle al atlas.
+ *
+ * Lo que NO hay aqui, y es el punto: ningun metodo recibe ni devuelve owner_id, id de trayectoria, de
+ * receta o de job. Una entrada del atlas no tiene dueno; la unica dimension es el dominio.
+ */
+export interface RepositorioAtlasParaWorker {
+  listarPorDominio(dominio: string): Promise<
+    Array<{
+      claseDeElemento: string;
+      estrategias: unknown;
+      corroboraciones: number;
+      origenesHash: unknown;
+    }>
+  >;
+  registrarObservacion(observacion: {
+    dominio: string;
+    claseDeElemento: string;
+    estrategias: unknown;
+    origenHash: string;
+  }): Promise<void>;
+}
+
 /** Dependencias del job de tarea web. index.ts cablea las reales; los tests pasan fakes. */
 export interface TareaWebDeps {
   repo: RepositorioSitiosParaTarea;
@@ -510,6 +554,16 @@ export interface TareaWebDeps {
    * pero SOLO por coincidencia exacta de firma, que es como funcionaba antes de este cambio.
    */
   elector?: ElectorDeTareaEnsenada | undefined;
+  /**
+   * ATLAS DE SITIOS (V040): el APRENDIZAJE COLECTIVO sobre la estructura de cada dominio. Va con su
+   * CLAVE HMAC (claveDelAtlas, atlas-sitios.ts), que es lo que permite contar origenes distintos sin
+   * identificar a ninguno; las dos juntas o ninguna, porque sin clave no hay con que contar.
+   *
+   * OPCIONAL con el mismo criterio que el resto del cableado (`trayectorias`, `recetas`): sin la
+   * migracion aplicada el worker corre igual, no lee ni escribe nada y las tareas se comportan
+   * exactamente como antes de V040.
+   */
+  atlas?: { repo: RepositorioAtlasParaWorker; clave: string } | undefined;
   /**
    * OBSERVADOR DE PASOS (TAREA_WEB_OBSERVADOR_PASOS): apagado por defecto. Encendido, cada paso del
    * motor abre una conexion CDP para leer del DOM las estrategias de localizacion del elemento
@@ -1624,6 +1678,8 @@ async function ejecutarPorReceta(
      * Ausente = el extractor determinista sobre el texto del usuario, como siempre.
      */
     datos?: { valores: ValoresDeParametros; parametros: ParametrosDeclarados } | undefined;
+    /** ATLAS DE SITIOS (V040): pistas de localizacion del dominio. Ausente = como antes de V040. */
+    atlas?: LectorDelAtlas | null | undefined;
   },
 ): Promise<DesenlaceDelCaminoPorReceta> {
   const recetas = deps.recetas;
@@ -1633,66 +1689,74 @@ async function ejecutarPorReceta(
     return { tipo: 'seguir_con_motor', paginaTocada: false };
   }
 
-  const iniciadaEn = new Date();
-  const resultado = await ejecutarReceta(
-    receta.pasos,
+  // Los VALORES de esta corrida se resuelven UNA vez: son los que la receta teclea y, por eso mismo,
+  // los que ninguna estrategia puede llevar dentro al llegar al atlas (paranoia de valores, V040).
+  const valores =
     opciones.datos?.valores ??
-      valoresDeParametros(extraerParametrosDeclarados(opciones.textoParametros)),
-    {
-      navegador: determinista,
-      escalador,
-      // El paso `verificar` de la receta resuelve con la MISMA funcion que el camino con motor. Una
-      // verificacion INCOMPLETA aqui SI detiene: la receta repite un flujo cerrado, no tiene con que
-      // "seguir llenando campos"; si al llegar a este punto faltan datos, lo aprendido ya no sirve.
-      verificar: async (activo): Promise<VeredictoDeVerificacion> => {
-        // La verificacion corre contra el DOM del sitio en el que la receta esta AHORA, con el
-        // dominio de ESE sitio (la politica del usuario se aplica por dominio).
-        const sitioActivo = opciones.gestor?.porDominio(activo.dominio) ?? sitio;
-        const { veredicto } = await resolverVerificacion(
-          deps,
-          job,
-          sitioActivo,
-          activo.sesionExternaId,
-          {
-            politica: opciones.politica,
-            verboBloqueado: opciones.verboBloqueado,
-            textoParametros: opciones.textoParametros,
-            // Los datos que la eleccion resolvio son los MISMOS que se comparan contra la pagina.
-            parametros: opciones.datos?.parametros ?? null,
-          },
-        );
-        if (veredicto.tipo === 'ejecutar') return { tipo: 'ejecutar' };
-        return {
-          tipo: 'detener',
-          mensaje:
-            veredicto.tipo === 'incompleto'
-              ? mensajeDeDetencion(detencionPorDatosIncompletos(veredicto.faltantes))
-              : mensajeDeDetencion(veredicto),
-        };
-      },
-      sesionExternaId,
-      apiKey: opciones.apiKey,
-      dominio: sitio.dominio,
-      // CAMBIO DE SITIO DE UNA RECETA: solo hacia un sitio que ESTE job autorizo. Sin gestor (o con
-      // un dominio que no esta en la lista) devuelve null y la receta se abandona: una receta
-      // manipulada no puede llevar la sesion del usuario a un sitio que la tarea no autorizo.
-      cambiarASitio: async (dominio: string): Promise<string | null> => {
-        const destino = opciones.gestor?.porDominio(dominio);
-        if (destino === undefined || opciones.gestor === undefined) return null;
-        try {
-          return (await opciones.gestor.abrir(destino)).sesionExternaId;
-        } catch (error) {
-          deps.logger.warn('tarea web: no se pudo abrir el otro sitio de lo aprendido; se sigue con el motor', {
-            jobId: job.id,
-            dominio,
-            err: describir(error),
-          });
-          return null;
-        }
-      },
-      signal: opciones.control?.signal,
+    valoresDeParametros(extraerParametrosDeclarados(opciones.textoParametros));
+
+  const iniciadaEn = new Date();
+  const resultado = await ejecutarReceta(receta.pasos, valores, {
+    navegador: determinista,
+    escalador,
+    // El paso `verificar` de la receta resuelve con la MISMA funcion que el camino con motor. Una
+    // verificacion INCOMPLETA aqui SI detiene: la receta repite un flujo cerrado, no tiene con que
+    // "seguir llenando campos"; si al llegar a este punto faltan datos, lo aprendido ya no sirve.
+    //
+    // NO RECIBE EL ATLAS, y es deliberado: lo que se compara contra la pagina antes de una accion
+    // irreversible sale del objetivo de ESTA corrida y del DOM de ese momento, jamas de lo que la
+    // plataforma aprendio de otros. La verificacion es ignorante del atlas.
+    verificar: async (activo): Promise<VeredictoDeVerificacion> => {
+      // La verificacion corre contra el DOM del sitio en el que la receta esta AHORA, con el
+      // dominio de ESE sitio (la politica del usuario se aplica por dominio).
+      const sitioActivo = opciones.gestor?.porDominio(activo.dominio) ?? sitio;
+      const { veredicto } = await resolverVerificacion(
+        deps,
+        job,
+        sitioActivo,
+        activo.sesionExternaId,
+        {
+          politica: opciones.politica,
+          verboBloqueado: opciones.verboBloqueado,
+          textoParametros: opciones.textoParametros,
+          // Los datos que la eleccion resolvio son los MISMOS que se comparan contra la pagina.
+          parametros: opciones.datos?.parametros ?? null,
+        },
+      );
+      if (veredicto.tipo === 'ejecutar') return { tipo: 'ejecutar' };
+      return {
+        tipo: 'detener',
+        mensaje:
+          veredicto.tipo === 'incompleto'
+            ? mensajeDeDetencion(detencionPorDatosIncompletos(veredicto.faltantes))
+            : mensajeDeDetencion(veredicto),
+      };
     },
-  );
+    sesionExternaId,
+    apiKey: opciones.apiKey,
+    dominio: sitio.dominio,
+    // CAMBIO DE SITIO DE UNA RECETA: solo hacia un sitio que ESTE job autorizo. Sin gestor (o con
+    // un dominio que no esta en la lista) devuelve null y la receta se abandona: una receta
+    // manipulada no puede llevar la sesion del usuario a un sitio que la tarea no autorizo.
+    cambiarASitio: async (dominio: string): Promise<string | null> => {
+      const destino = opciones.gestor?.porDominio(dominio);
+      if (destino === undefined || opciones.gestor === undefined) return null;
+      try {
+        return (await opciones.gestor.abrir(destino)).sesionExternaId;
+      } catch (error) {
+        deps.logger.warn('tarea web: no se pudo abrir el otro sitio de lo aprendido; se sigue con el motor', {
+          jobId: job.id,
+          dominio,
+          err: describir(error),
+        });
+        return null;
+      }
+    },
+    // ATLAS DE SITIOS (V040): pistas de localizacion para los pasos cuyas estrategias propias fallen.
+    // Solo eso: encontrar un elemento. El paso `verificar` de arriba no lo recibe ni lo conoce.
+    ...(opciones.atlas ? { atlas: opciones.atlas.pistas(sitio.dominio) } : {}),
+    signal: opciones.control?.signal,
+  });
 
   const completada = resultado.desenlace.tipo === 'completada';
 
@@ -1717,6 +1781,24 @@ async function ejecutarPorReceta(
   const promociones = completada
     ? await promoverEstrategiasBestEffort(deps, job, receta, resultado.ganadoras)
     : [];
+
+  // ATLAS DE SITIOS (V040): la corrida cerro con exito, asi que las estrategias que GANARON en cada
+  // paso son evidencia de como esta hecho el sitio, no de que hizo este usuario. Se agregan anonimas
+  // al aprendizaje comun (dominio, clase de elemento, estrategias y un hash de origen no reversible)
+  // con la MISMA fuente que la auto reparacion: `resultado.ganadoras`, que solo trae los pasos que
+  // resolvieron su elemento sin motor. Best-effort total: el desenlace ya esta decidido.
+  if (completada) {
+    await registrarEnAtlasBestEffort(
+      deps,
+      job,
+      entradasDeCorridaPorReceta({
+        dominio: sitio.dominio,
+        pasos: receta.pasos,
+        ganadoras: resultado.ganadoras,
+        valores: valoresTecleadosDeLaCorrida(valores),
+      }),
+    );
+  }
 
   await guardarTrayectoriaBestEffort(
     deps,
@@ -1945,6 +2027,96 @@ async function promoverRecetaBestEffort(
     });
   } catch (error) {
     deps.logger.warn('tarea web: no se pudo guardar lo aprendido (se ignora, best-effort)', {
+      jobId: job.id,
+      err: describir(error),
+    });
+  }
+}
+
+/**
+ * LECTOR DEL ATLAS DE SITIOS (V040) de ESTA corrida: lo que la plataforma ya observo de la estructura
+ * de los dominios que la tarea autoriza, filtrado por la regla de corroboracion contra el hash del
+ * origen de esta corrida (atlas-sitios.ts: dos origenes distintos, o el propio origen).
+ *
+ * Se lee UNA vez por tarea, al arrancar, y no se vuelve a consultar: los inyectores son sincronos
+ * (una pista no puede costarle una query a la mitad de un paso) y lo aprendido de un dominio no cambia
+ * dentro de la misma corrida de forma relevante.
+ *
+ * BEST-EFFORT de punta a punta: un fallo de lectura deja ese dominio SIN pistas y la tarea corre
+ * exactamente como antes de V040.
+ */
+interface LectorDelAtlas {
+  /** Entradas servibles a este origen para ese dominio. Vacio si no hay o si la lectura fallo. */
+  entradasDe(dominio: string): EntradaConocida[];
+  /** Puerto sincrono para el ejecutor de recetas. `dominioBase` es el de los pasos sin dominio propio. */
+  pistas(dominioBase: string): PistasDelAtlas;
+}
+
+async function crearLectorDelAtlas(
+  deps: TareaWebDeps,
+  job: Job,
+  dominios: readonly string[],
+): Promise<LectorDelAtlas | null> {
+  const atlas = deps.atlas;
+  if (atlas === undefined || dominios.length === 0) return null;
+  const hashDelOrigen = hashDeOrigen(job.ownerId, atlas.clave);
+  const porDominio = new Map<string, EntradaConocida[]>();
+  for (const dominio of dominios) {
+    try {
+      const crudas = await atlas.repo.listarPorDominio(dominio);
+      porDominio.set(dominio, entradasServibles(crudas, hashDelOrigen));
+    } catch (error) {
+      deps.logger.warn('tarea web: no se pudo leer lo aprendido del sitio (se sigue sin pistas)', {
+        jobId: job.id,
+        dominio,
+        err: describir(error),
+      });
+    }
+  }
+  const entradasDe = (dominio: string): EntradaConocida[] => porDominio.get(dominio) ?? [];
+  return {
+    entradasDe,
+    pistas: (dominioBase: string): PistasDelAtlas => ({
+      pistasParaPaso: (paso) => pistasParaPaso(paso, entradasDe(paso.dominio ?? dominioBase)),
+    }),
+  };
+}
+
+/**
+ * AGREGA al ATLAS DE SITIOS lo que la corrida acaba de demostrar sobre la ESTRUCTURA de un sitio.
+ *
+ * Lo unico que se escribe por entrada es dominio, clase de elemento, estrategias y el HASH del
+ * origen. No hay parametro en esta funcion, ni columna en la tabla, para un owner, un valor tecleado
+ * o un id de trayectoria: las entradas ya llegan armadas por atlas-sitios.ts, que descarta toda
+ * estrategia que coincida con un valor de la corrida y trunca los nombres accesibles.
+ *
+ * BEST-EFFORT TOTAL, y es una linea roja: el desenlace del job YA esta decidido cuando se llama a
+ * esto. Cualquier fallo se loguea aqui adentro y no se propaga. Aprender es una mejora, jamas parte
+ * del desenlace de la tarea del usuario.
+ */
+async function registrarEnAtlasBestEffort(
+  deps: TareaWebDeps,
+  job: Job,
+  entradas: readonly EntradaDeAtlas[],
+): Promise<void> {
+  const atlas = deps.atlas;
+  if (atlas === undefined || entradas.length === 0) return;
+  try {
+    const origenHash = hashDeOrigen(job.ownerId, atlas.clave);
+    for (const entrada of entradas) {
+      await atlas.repo.registrarObservacion({
+        dominio: entrada.dominio,
+        claseDeElemento: entrada.claseDeElemento,
+        estrategias: entrada.estrategias,
+        origenHash,
+      });
+    }
+    deps.logger.info('tarea web: la estructura observada del sitio quedo en el aprendizaje comun', {
+      jobId: job.id,
+      entradas: entradas.length,
+    });
+  } catch (error) {
+    deps.logger.warn('tarea web: no se pudo agregar lo observado del sitio (se ignora, best-effort)', {
       jobId: job.id,
       err: describir(error),
     });
@@ -2251,6 +2423,13 @@ export async function procesarTareaWeb(
   // multisitio crea una guardia por tramo y el cupo NO se reabre al volver a un sitio ya visitado.
   const registro: RegistroDeSitios = crearRegistroDeSitios();
 
+  // ATLAS DE SITIOS (V040): lo que la plataforma ya observo de la ESTRUCTURA de los dominios que esta
+  // tarea autoriza, ya filtrado por la regla de corroboracion contra el origen de esta corrida. Se lee
+  // UNA sola vez, antes de abrir ninguna sesion, y alimenta los DOS inyectores: el mapa que viaja al
+  // contexto de percepcion del motor libre y las pistas de localizacion del ejecutor de recetas.
+  // Best-effort: sin cableado o sin entradas servibles, la tarea corre exactamente como antes de V040.
+  const atlas = await crearLectorDelAtlas(deps, job, dominiosAutorizados);
+
   // Las sesiones de la corrida INICIAL se cierran SIEMPRE: la verificacion determinista resuelve en
   // la misma corrida (ejecuta o detiene) y ya no queda nadie esperando para decidir sobre esas
   // paginas. La sesion que SI sobrevive es la de un checkpoint de aprobacion humana, y esa la abre y
@@ -2310,6 +2489,7 @@ export async function procesarTareaWeb(
         // AUTORIZADA de ESTE job: una receta que nombre un sitio que esta tarea no autoriza se
         // abandona y la tarea la termina el motor.
         gestor,
+        atlas,
         ...(elegida !== null
           ? { datos: { valores: elegida.valores, parametros: elegida.parametros } }
           : {}),
@@ -2384,6 +2564,10 @@ export async function procesarTareaWeb(
             cambiador,
             maxPasos: pasosRestantes,
             timeoutMs: Math.max(0, finEnMs - Date.now()),
+            // ATLAS DE SITIOS (V040): el mapa del sitio en el que corre ESTE tramo. Se recalcula por
+            // tramo porque una tarea multisitio cambia de dominio, y el mapa es por dominio. Vacio
+            // cuando no hay entradas servibles para este origen: el contexto queda como antes.
+            mapaDelSitio: bloqueDelMapa(atlas?.entradasDe(enCurso.sitio.dominio) ?? []),
           },
         ));
       } catch (error) {
@@ -2537,6 +2721,23 @@ export async function procesarTareaWeb(
       pasosDelJob,
       verboBloqueado,
       dominiosAutorizados,
+    );
+    // ATLAS DE SITIOS (V040): esta corrida llego hasta aqui, o sea que salio bien Y -- si pedia una
+    // accion irreversible -- su efecto quedo CONFIRMADO (los dos cortes de arriba). Sus pasos
+    // exitosos son evidencia de como esta hecho cada sitio que uso, asi que se agregan anonimos al
+    // aprendizaje comun. Va DESPUES de la promocion y con la misma regla: aprender es una mejora, no
+    // parte del desenlace, y su fallo se traga adentro.
+    await registrarEnAtlasBestEffort(
+      deps,
+      job,
+      entradasDeCorridaLibre({
+        dominio: sitio.dominio,
+        pasos: pasosDelJob,
+        valores: valoresTecleadosDeLaCorrida(
+          valoresDeParametros(extraerParametrosDeclarados(textoParametros)),
+          pasosDelJob,
+        ),
+      }),
     );
     // `sesionExternaId` queda EN EL RESULTADO del job: es la unica forma de encontrar despues la
     // grabacion de la sesion en el proveedor a partir de una tarea concreta.
@@ -2879,6 +3080,8 @@ async function ejecutarMotorConRegistro(
     cambiador?: CambiadorDeSitio | undefined;
     maxPasos?: number | undefined;
     timeoutMs?: number | undefined;
+    /** ATLAS DE SITIOS (V040): bloque "mapa conocido del sitio" de ESTE tramo. Vacio = sin mapa. */
+    mapaDelSitio?: readonly string[] | undefined;
   },
 ): Promise<{ resultado: ResultadoMotor; desenlace: DesenlaceTareaWeb }> {
   const iniciadaEn = new Date();
@@ -2914,6 +3117,7 @@ async function ejecutarMotorConRegistro(
       },
       extra?.cambiador,
       { maxPasos: extra?.maxPasos ?? deps.maxPasos, timeoutMs: extra?.timeoutMs ?? deps.runTimeoutMs },
+      extra?.mapaDelSitio,
     );
   } catch (error) {
     loguearConsumo(deps, job, sitio, consumo, 'cortada');
@@ -3044,6 +3248,9 @@ async function ejecutarMotor(
   // PRESUPUESTO de ESTE tramo: lo que le queda a la TAREA de pasos y de deadline de pared. Con un
   // solo sitio hay un solo tramo y son deps.maxPasos y deps.runTimeoutMs enteros.
   presupuesto?: { maxPasos: number; timeoutMs: number } | undefined,
+  // ATLAS DE SITIOS (V040): el bloque "mapa conocido del sitio" que se adjunta al contexto de
+  // percepcion. Ausente o vacio = el motor corre exactamente como antes de V040.
+  mapaDelSitio?: readonly string[] | undefined,
 ): Promise<ResultadoMotor> {
   const maxPasos = presupuesto?.maxPasos ?? deps.maxPasos;
   const timeoutMs = presupuesto?.timeoutMs ?? deps.runTimeoutMs;
@@ -3077,6 +3284,7 @@ async function ejecutarMotor(
       guardia,
       ...(cambiador !== undefined ? { cambiador } : {}),
       ...(perceptor !== undefined ? { perceptor } : {}),
+      ...(mapaDelSitio !== undefined && mapaDelSitio.length > 0 ? { mapaDelSitio } : {}),
       historialPasos: deps.historialPasos,
       modoScreenshots: deps.modoScreenshots,
       reportarConsumo,
