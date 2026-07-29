@@ -818,30 +818,38 @@ export function construirOpcionesDeEjecucion(params: {
               // antes de la siguiente llamada al modelo, asi que las lineas quedan listas para el
               // prepareStep que sigue. alTerminarPaso nunca lanza (best-effort interno).
               if (percepcion !== undefined) {
-                const estrategias = await percepcion.alTerminarPaso({
-                  actionName: evento.actionName,
-                  actionArgs: evento.actionArgs,
-                  toolOutput: { result: evento.toolOutput.result },
-                });
                 // ATLAS DE SITIOS: una entrada POR ACCION empujada por este evento (una tool puede
-                // empujar varias: fillForm empuja la suya mas una por campo). Lo leido pertenece a
-                // la primera, que es la accion de la tool; las demas parten vacias para que la traza
-                // y esta lista sigan cuadrando en cantidad y en orden.
-                //
-                // LA PERCEPCION ES LA FUENTE PRIMARIA, y el SELECTOR solo la COMPLEMENTA: cuando la
-                // lectura no devolvio nada para una accion (elemento ya destruido, no resoluble o no
-                // enfocable) se derivan los predicados de atributo del selector que el motor resolvio
-                // para ESA accion. Nunca la reemplaza ni la mezcla: donde la percepcion dio algo, eso
-                // es lo que viaja, tal cual. Es lo que cubre las acciones finales, que destruyen su
-                // propio contexto y que ninguna lectura posterior puede alcanzar (el boton Enviar).
-                registrarEstrategias?.(
-                  pasosObservadosDeEvidencia(evento).map((paso, indice) => {
+                // empujar varias: fillForm empuja la suya mas una por campo). Las ranuras se calculan
+                // ANTES de leer y se emiten SIEMPRE, aunque la lectura falle: el emparejamiento con
+                // la traza es POSICIONAL, asi que un evento que no emitiera las suyas correria de
+                // lugar a todas las siguientes y el aprendizaje entero de la corrida se descartaria.
+                const ranuras = pasosObservadosDeEvidencia(evento);
+                let porAccion = ranuras.map((): EstrategiaLocalizacion[] => []);
+                try {
+                  const estrategias = await percepcion.alTerminarPaso({
+                    actionName: evento.actionName,
+                    actionArgs: evento.actionArgs,
+                    toolOutput: { result: evento.toolOutput.result },
+                  });
+                  // Lo leido pertenece a la PRIMERA ranura, que es la accion de la tool; las demas
+                  // quedan como estaban.
+                  //
+                  // LA PERCEPCION ES LA FUENTE PRIMARIA, y el SELECTOR solo la COMPLEMENTA: cuando la
+                  // lectura no devolvio nada para una accion (elemento ya destruido, no resoluble o no
+                  // enfocable) se derivan los predicados de atributo del selector que el motor resolvio
+                  // para ESA accion. Nunca la reemplaza ni la mezcla: donde la percepcion dio algo, eso
+                  // es lo que viaja, tal cual. Es lo que cubre las acciones finales, que destruyen su
+                  // propio contexto y que ninguna lectura posterior puede alcanzar (el boton Enviar).
+                  porAccion = ranuras.map((paso, indice) => {
                     const percibidas = indice === 0 ? estrategias : [];
                     return percibidas.length > 0
                       ? percibidas
                       : estrategiasDelSelectorParaElAtlas(paso.selector);
-                  }),
-                );
+                  });
+                } catch {
+                  // una lectura rota cuesta el dato del atlas de ESE evento, jamas la alineacion
+                }
+                registrarEstrategias?.(porAccion);
               }
               if (observador === undefined) return;
               try {
@@ -947,6 +955,61 @@ export function pasosObservadosDeEvidencia(evento: {
   return [{ selector: null, punto: null }];
 }
 
+/**
+ * CONTROL DE PERCEPCION de una corrida, cableado sobre el perceptor que expone el navegador.
+ *
+ * Existe como funcion PROPIA Y EXPORTADA por una razon concreta: el OBJETIVO DE LECTURA del atlas
+ * tiene que llegar HASTA el adaptador del navegador. Hasta el 29 jul 2026 este cableado llamaba a
+ * `percibir()` sin reenviarlo, asi que `percibirPagina` armaba la expresion de siempre (la que NO
+ * lee estrategias), `alTerminarPaso` devolvia lista vacia en todos los pasos y toda corrida del
+ * motor libre llegaba al agregador sin una sola estrategia: cero entradas en el aprendizaje comun.
+ * Nada de eso se podia fijar en un test porque vivia dentro de `ejecutar`, que ningun test
+ * instancia (necesita Stagehand y una sesion real); aca si.
+ */
+export function crearPercepcionDeCorrida(params: {
+  perceptor: PerceptorDePagina | undefined;
+  /** Bloque "mapa conocido del sitio" (atlas): viaja por la cola de percepcion. */
+  mapaDelSitio?: readonly string[] | undefined;
+  logger?: Logger | undefined;
+}): ControlDePercepcion | undefined {
+  const perceptor = params.perceptor;
+  if (perceptor === undefined) return undefined;
+  return crearControlDePercepcion({
+    // El objetivo viaja INTACTO: es lo unico que hace que la evaluacion que ya corre despues de cada
+    // paso traiga ademas las estrategias del elemento tocado (lectura fusionada, percepcion.ts).
+    percibir: (objetivo) => perceptor.percibir(objetivo),
+    ...(params.mapaDelSitio !== undefined ? { mapaDelSitio: params.mapaDelSitio } : {}),
+    ...(params.logger !== undefined ? { logger: params.logger } : {}),
+  });
+}
+
+/**
+ * UNA RANURA POR ACCION DE LA TRAZA, que es la condicion para que `extraerPasosCensurados`
+ * (trayectoria.ts) empareje por posicion en vez de descartar la lista entera.
+ *
+ * Lo que emiten los eventos es siempre un PREFIJO de la traza: Stagehand empuja las acciones de una
+ * tool y JUSTO DESPUES emite su `step_finished`, y este adaptador emite una ranura por cada accion
+ * empujada. Lo que la traza puede tener de mas son acciones que NINGUN evento anuncia:
+ *  - `done` SINTETICA: cuando el modelo cierra el bucle sin llamar a la tool, `ensureDone`
+ *    (v3AgentHandler) la agrega a `state.actions` sin emitir evidencia.
+ *  - el paso del CAMBIO DE SITIO, que agrega a mano este mismo adaptador.
+ * Sin rellenar esas ranuras las cantidades no cuadran y se pierde el aprendizaje de la corrida
+ * COMPLETA por una accion final que nadie podia percibir.
+ *
+ * Si llegaran MAS ranuras que acciones (ningun camino conocido lo produce) se devuelve lista vacia:
+ * ahi el desfase no esta en la cola, la correspondencia por posicion ya no es confiable y el
+ * criterio de siempre es no aprender nada antes que atribuirle a un paso el elemento de otro.
+ */
+export function ranurasPorAccion(
+  emitidas: readonly EstrategiaLocalizacion[][],
+  acciones: number,
+): EstrategiaLocalizacion[][] {
+  if (emitidas.length > acciones) return [];
+  const ranuras = [...emitidas];
+  while (ranuras.length < acciones) ranuras.push([]);
+  return ranuras;
+}
+
 export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
   constructor(
     private readonly config: {
@@ -998,17 +1061,13 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
     // PERCEPCION (FIX A y B): el control lee la huella y los campos tras cada paso que toca la
     // pagina y sus lineas viajan al agente en el siguiente prepareStep. Solo si el handler cableo
     // un perceptor; sin el, cero lecturas extra.
-    const perceptor = params.perceptor;
-    const percepcion =
-      perceptor !== undefined
-        ? crearControlDePercepcion({
-            percibir: () => perceptor.percibir(),
-            // ATLAS DE SITIOS (V040): el mapa se encola aqui y sale en el primer turno, dentro del
-            // mismo tope por turno que el resto de la percepcion.
-            ...(params.mapaDelSitio !== undefined ? { mapaDelSitio: params.mapaDelSitio } : {}),
-            logger: this.config.logger,
-          })
-        : undefined;
+    // ATLAS DE SITIOS (V040): el mapa se encola en el control y sale en el primer turno, dentro del
+    // mismo tope por turno que el resto de la percepcion.
+    const percepcion = crearPercepcionDeCorrida({
+      perceptor: params.perceptor,
+      ...(params.mapaDelSitio !== undefined ? { mapaDelSitio: params.mapaDelSitio } : {}),
+      logger: this.config.logger,
+    });
     // La huella INICIAL es el "antes" del primer paso (el primer click de la corrida tambien tiene
     // que poder reportarse sin efecto). Best-effort: si falla, el primer paso queda sin comparacion.
     if (percepcion !== undefined) await percepcion.inicializar();
@@ -1130,18 +1189,22 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
       const cambio = cambiador?.solicitado() ?? null;
       if (cambio !== null) {
         const pasoDelCambio = cambiador?.paso() ?? null;
+        // El paso del cambio se agrega a mano: la tool lanzo, asi que Stagehand no la empujo a su
+        // traza y la trayectoria del tramo quedaria sin el paso que explica por que termino.
+        const acciones = [
+          ...(resultado.actions ?? []),
+          ...(pasoDelCambio !== null ? [pasoDelCambio] : []),
+        ];
         return {
           // Ni exito ni DONE: el tramo se corto a proposito. Quien decide que pasa despues es el
           // handler, que ve `cambioDeSitio` antes que cualquier otra cosa.
           exito: false,
           completado: false,
           mensaje: cambio.resumen,
-          // El paso del cambio se agrega a mano: la tool lanzo, asi que Stagehand no la empujo a su
-          // traza y la trayectoria del tramo quedaria sin el paso que explica por que termino.
-          acciones: [...(resultado.actions ?? []), ...(pasoDelCambio !== null ? [pasoDelCambio] : [])],
+          acciones,
           // Nadie percibio el paso del cambio: su ranura va vacia para que la lista siga teniendo
           // una entrada por accion de la traza.
-          estrategiasPorAccion: [...estrategiasPorAccion, ...(pasoDelCambio !== null ? [[]] : [])],
+          estrategiasPorAccion: ranurasPorAccion(estrategiasPorAccion, acciones.length),
           tokensIn: resultado.usage?.input_tokens ?? null,
           tokensOut: resultado.usage?.output_tokens ?? null,
           cambioDeSitio: cambio,
@@ -1151,12 +1214,15 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
       // (una por tool ejecutada, con playwrightArguments.selector en 'act'/'fillForm') y `usage`
       // (tokens). Se devuelven CRUDAS: la censura y la persistencia son del handler (trayectoria.ts),
       // este adaptador no decide que se guarda.
+      const acciones = resultado.actions ?? [];
       return {
         exito: resultado.success && resultado.completed,
         completado: resultado.completed,
         mensaje: resultado.message,
-        acciones: resultado.actions ?? [],
-        estrategiasPorAccion,
+        acciones,
+        // La traza puede cerrar con la accion `done` que sintetiza Stagehand sin emitir evidencia:
+        // su ranura va vacia para que las cantidades cuadren (ver ranurasPorAccion).
+        estrategiasPorAccion: ranurasPorAccion(estrategiasPorAccion, acciones.length),
         tokensIn: resultado.usage?.input_tokens ?? null,
         tokensOut: resultado.usage?.output_tokens ?? null,
         cambioDeSitio: null,

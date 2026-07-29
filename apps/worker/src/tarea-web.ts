@@ -86,6 +86,7 @@ import {
   hashDeOrigen,
   pasosConEstrategiasPercibidas,
   pistasParaPaso,
+  resumenDeCorridaLibre,
   valoresTecleadosDeLaCorrida,
   type EntradaConocida,
   type EntradaDeAtlas,
@@ -2746,18 +2747,27 @@ export async function procesarTareaWeb(
     // de cada paso, y llegan en un campo aparte para no alterar en nada lo que ve la promocion de
     // arriba: `pasosConEstrategiasPercibidas` es el unico punto donde se pasan a donde el agregador
     // las busca.
-    await registrarEnAtlasBestEffort(
-      deps,
-      job,
-      entradasDeCorridaLibre({
+    const corridaLibre = {
+      dominio: sitio.dominio,
+      pasos: pasosConEstrategiasPercibidas(pasosDelJob),
+      valores: valoresTecleadosDeLaCorrida(
+        valoresDeParametros(extraerParametrosDeclarados(textoParametros)),
+        pasosDelJob,
+      ),
+    };
+    const entradasLibres = entradasDeCorridaLibre(corridaLibre);
+    // OBSERVABILIDAD (29 jul 2026): una corrida exitosa que clickea y escribe y NO deja nada en el
+    // aprendizaje comun es una anomalia, y hasta hoy salia sin una sola linea de log porque
+    // `registrarEnAtlasBestEffort` corta antes de escribir cuando la lista viene vacia. El resumen
+    // dice en cual de los filtros se perdio el dato, que es lo que hubo que reconstruir a mano.
+    if (entradasLibres.length === 0) {
+      deps.logger.info('tarea web: la corrida del motor no dejo nada para el aprendizaje comun', {
+        jobId: job.id,
         dominio: sitio.dominio,
-        pasos: pasosConEstrategiasPercibidas(pasosDelJob),
-        valores: valoresTecleadosDeLaCorrida(
-          valoresDeParametros(extraerParametrosDeclarados(textoParametros)),
-          pasosDelJob,
-        ),
-      }),
-    );
+        ...resumenDeCorridaLibre(corridaLibre),
+      });
+    }
+    await registrarEnAtlasBestEffort(deps, job, entradasLibres);
     // `sesionExternaId` queda EN EL RESULTADO del job: es la unica forma de encontrar despues la
     // grabacion de la sesion en el proveedor a partir de una tarea concreta.
     await deps.guardarResultado(job.id, {

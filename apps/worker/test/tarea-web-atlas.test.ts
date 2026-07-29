@@ -735,6 +735,48 @@ describe('agregador del atlas (motor libre alimentado por la percepcion)', () =>
     expect(atlas.repo.registrarObservacion).not.toHaveBeenCalled();
   });
 
+  it('una corrida que no deja nada LO DICE, con el contador de cada filtro', async () => {
+    // El silencio de este caso es lo que obligo a auditar la corrida de produccion del 29 jul 2026:
+    // el agregador corta antes de escribir cuando la lista viene vacia y no quedaba rastro de en que
+    // eslabon se habia perdido el dato.
+    const atlas = makeAtlas();
+    const logger = makeLogger();
+    const navegador = {
+      ...makeNavegador(),
+      percibirPagina: vi.fn(async () => ({
+        url: `https://${DOMINIO}/inbox`,
+        titulo: 'Recibidos',
+        nodos: 3200,
+        foco: null,
+        campos: [],
+      })),
+    } as NavegadorParaTarea;
+    const deps = makeDeps({
+      atlas: { repo: atlas.repo, clave: CLAVE },
+      navegador,
+      motor: makeMotorConPercepcion(),
+      observadorPasos: false,
+      logger,
+    });
+
+    await procesarTareaWeb(deps, makeJob('abre el ultimo correo'));
+
+    expect(logger.info).toHaveBeenCalledWith(
+      'tarea web: la corrida del motor no dejo nada para el aprendizaje comun',
+      expect.objectContaining({
+        jobId: 'job-1',
+        dominio: DOMINIO,
+        pasos: 1,
+        conEstrategias: 0,
+        clasificables: 0,
+        conClase: 0,
+        sinTipoAdmitido: 0,
+        porParanoiaDeValores: 0,
+        sinNombreUtilizable: 0,
+      }),
+    );
+  });
+
   it('un fallo del agregador con esta fuente tampoco cambia el desenlace del job', async () => {
     const atlas = makeAtlas();
     atlas.repo.registrarObservacion = vi.fn(async () => {
