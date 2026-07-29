@@ -10,12 +10,12 @@ import type { DocumentoLegal } from './tipos';
 // Comparte VERSION con el aviso integral: es el mismo documento en dos niveles de detalle, y aceptar el
 // aviso de privacidad cubre a los dos.
 
-const VERSION = '2026-07-28';
+const VERSION = '2026-07-29';
 
 export const AVISO_SIMPLIFICADO_ES: DocumentoLegal = {
   tipo: 'privacy_notice',
   version: VERSION,
-  fecha: '28 de julio de 2026',
+  fecha: '29 de julio de 2026',
   titulo: 'Aviso de Privacidad Simplificado',
   subtitulo:
     'Resumen de cómo tratamos tus datos personales. El aviso integral tiene el detalle completo y es el que rige.',
@@ -91,13 +91,12 @@ export const AVISO_SIMPLIFICADO_ES: DocumentoLegal = {
       ],
     },
   ],
-  notaBorrador: 'Borrador generado con asistencia de IA, pendiente de revisión legal profesional.',
 };
 
 export const AVISO_SIMPLIFICADO_EN: DocumentoLegal = {
   tipo: 'privacy_notice',
   version: VERSION,
-  fecha: 'July 28, 2026',
+  fecha: 'July 29, 2026',
   titulo: 'Short Form Privacy Notice',
   subtitulo:
     'A summary of how we process your personal data. The full notice has the complete detail and is the one that governs.',
@@ -173,5 +172,4 @@ export const AVISO_SIMPLIFICADO_EN: DocumentoLegal = {
       ],
     },
   ],
-  notaBorrador: 'AI assisted draft, pending professional legal review.',
 };

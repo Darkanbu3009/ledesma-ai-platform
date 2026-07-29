@@ -1,7 +1,7 @@
 import type { DocumentoLegal } from './tipos';
 
 /**
- * TERMS OF SERVICE, English version. AI assisted DRAFT, pending professional legal review.
+ * TERMS OF SERVICE, English version. Final text, reviewed and validated by counsel.
  *
  * Faithful translation of terminos.es.ts. The Spanish version is the one that governs. Section 7
  * (collective learning) must say exactly the same as the secondary purpose in the privacy notice; if you
@@ -9,8 +9,8 @@ import type { DocumentoLegal } from './tipos';
  */
 export const TERMINOS_EN: DocumentoLegal = {
   tipo: 'terms',
-  version: '2026-07-28',
-  fecha: 'July 28, 2026',
+  version: '2026-07-29',
+  fecha: 'July 29, 2026',
   titulo: 'Terms of Service',
   subtitulo:
     'The rules of the agreement between you and Ledesma AI Labs for using the platform: what we give you, what is on you, and what happens when something goes wrong.',
@@ -282,10 +282,9 @@ export const TERMINOS_EN: DocumentoLegal = {
         {
           tipo: 'parrafo',
           texto:
-            'For any question about these terms, write to us at contacto@ledesma-ai-labs.com or visit https://www.ledesma-ai-labs.com. These terms correspond to version 2026-07-28, dated July 28, 2026.',
+            'For any question about these terms, write to us at contacto@ledesma-ai-labs.com or visit https://www.ledesma-ai-labs.com. These terms correspond to version 2026-07-29, dated July 29, 2026.',
         },
       ],
     },
   ],
-  notaBorrador: 'AI assisted draft, pending professional legal review.',
 };

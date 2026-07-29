@@ -10,10 +10,6 @@ import type { BloqueLegal, DocumentoLegal, SeccionLegal } from '../../content/le
  *
  * El contenido llega como DATO (content/legal), nunca como children: asi el mismo texto se publica aqui,
  * se puede exportar y se testea sin montar la pagina entera.
- *
- * La NOTA DE BORRADOR va al pie, visible y con contraste suficiente para que nadie la confunda con letra
- * chica. Se retira editando `notaBorrador` en los archivos de contenido (los dos idiomas) cuando el abogado
- * firme la revision.
  */
 
 function Bloque({ bloque }: { bloque: BloqueLegal }) {
@@ -83,12 +79,7 @@ export function LegalDocument({ doc, footer }: { doc: DocumentoLegal; footer?: R
           </div>
         </div>
 
-        {/* Nota de borrador: visible, no letra chica. Se retira desde los archivos de contenido. */}
-        <p className="mt-6 rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-brasa">
-          {doc.notaBorrador}
-        </p>
-
-        {footer && <div className="mt-4 text-sm text-muted">{footer}</div>}
+        {footer && <div className="mt-6 text-sm text-muted">{footer}</div>}
       </div>
     </div>
   );

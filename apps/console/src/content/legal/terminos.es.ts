@@ -1,7 +1,7 @@
 import type { DocumentoLegal } from './tipos';
 
 /**
- * TERMINOS DE SERVICIO, version en espanol. BORRADOR asistido por IA, pendiente de revision legal.
+ * TERMINOS DE SERVICIO, version en espanol. Texto definitivo, revisado y validado legalmente.
  *
  * La clausula de aprendizaje colectivo (seccion 7) tiene que decir EXACTAMENTE lo mismo que la finalidad
  * secundaria del aviso de privacidad (aviso-privacidad.es.ts, seccion 4). Si una cambia, la otra cambia en
@@ -11,8 +11,8 @@ import type { DocumentoLegal } from './tipos';
  */
 export const TERMINOS_ES: DocumentoLegal = {
   tipo: 'terms',
-  version: '2026-07-28',
-  fecha: '28 de julio de 2026',
+  version: '2026-07-29',
+  fecha: '29 de julio de 2026',
   titulo: 'Términos de Servicio',
   subtitulo:
     'Las reglas del acuerdo entre tú y Ledesma AI Labs para usar la plataforma: qué te damos, qué te toca a ti y qué pasa cuando algo sale mal.',
@@ -284,10 +284,9 @@ export const TERMINOS_ES: DocumentoLegal = {
         {
           tipo: 'parrafo',
           texto:
-            'Para cualquier duda sobre estos términos, escríbenos a contacto@ledesma-ai-labs.com o visita https://www.ledesma-ai-labs.com. Estos términos corresponden a la versión 2026-07-28, con fecha 28 de julio de 2026.',
+            'Para cualquier duda sobre estos términos, escríbenos a contacto@ledesma-ai-labs.com o visita https://www.ledesma-ai-labs.com. Estos términos corresponden a la versión 2026-07-29, con fecha 29 de julio de 2026.',
         },
       ],
     },
   ],
-  notaBorrador: 'Borrador generado con asistencia de IA, pendiente de revisión legal profesional.',
 };

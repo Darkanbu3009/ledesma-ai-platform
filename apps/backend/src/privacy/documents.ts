@@ -36,9 +36,10 @@ export const ENFORCED_DOCUMENT_TYPES: readonly DocumentType[] = ['privacy_notice
  * de la ultima revision del documento. Al cambiar una version, el gate re-solicita la aceptacion.
  */
 export const CURRENT_DOCUMENT_VERSIONS: Record<DocumentType, string> = {
-  // Primera redaccion completa del aviso y de los terminos (sustituye al andamiaje con placeholders).
-  privacy_notice: '2026-07-28',
-  terms: '2026-07-28',
+  // Texto definitivo del aviso y de los terminos, ya revisado y validado legalmente (retira la nota de
+  // borrador asistido por IA que llevaba la version 2026-07-28 al pie).
+  privacy_notice: '2026-07-29',
+  terms: '2026-07-29',
 };
 
 /**

@@ -1,7 +1,7 @@
 import type { DocumentoLegal } from './tipos';
 
 /**
- * PRIVACY NOTICE, English version. AI assisted DRAFT, pending professional legal review.
+ * PRIVACY NOTICE, English version. Final text, reviewed and validated by counsel.
  *
  * Faithful translation of aviso-privacidad.es.ts. The Spanish version is the one that governs under
  * Mexican law; this one exists so users outside Mexico can read the same commitments. If you edit one,
@@ -10,8 +10,8 @@ import type { DocumentoLegal } from './tipos';
  */
 export const AVISO_PRIVACIDAD_EN: DocumentoLegal = {
   tipo: 'privacy_notice',
-  version: '2026-07-28',
-  fecha: 'July 28, 2026',
+  version: '2026-07-29',
+  fecha: 'July 29, 2026',
   titulo: 'Privacy Notice',
   subtitulo:
     'How we process your personal data on the Ledesma AI Labs platform, what we do with it, and how you stay in control of it.',
@@ -390,10 +390,9 @@ export const AVISO_PRIVACIDAD_EN: DocumentoLegal = {
         {
           tipo: 'parrafo',
           texto:
-            'For any question about this notice or about the processing of your personal data, write to us at contacto@ledesma-ai-labs.com. This notice corresponds to version 2026-07-28, dated July 28, 2026.',
+            'For any question about this notice or about the processing of your personal data, write to us at contacto@ledesma-ai-labs.com. This notice corresponds to version 2026-07-29, dated July 29, 2026.',
         },
       ],
     },
   ],
-  notaBorrador: 'AI assisted draft, pending professional legal review.',
 };
