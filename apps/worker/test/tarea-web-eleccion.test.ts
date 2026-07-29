@@ -12,6 +12,7 @@ import type {
   TareaWebDeps,
 } from '../src/tarea-web.js';
 import type { EscaladorDePaso, NavegadorDeterminista } from '../src/ejecutor-receta.js';
+import { firmaDeObjetivo } from '../src/receta-web.js';
 import type { ElectorDeTareaEnsenada } from '../src/eleccion-tarea.js';
 import type { CampoDeLaPagina, RepositorioPoliticasParaWorker } from '../src/verificacion.js';
 import { makeAprobacionesRepo } from './aprobaciones-fakes.js';
@@ -332,8 +333,9 @@ describe('el agente elige entre las tareas que el usuario ya enseno', () => {
     const resultado = await procesarTareaWeb(deps, makeJob());
 
     expect(resultado).toBe('completada');
-    // La firma exacta no encontro nada y por eso se consulto: UNA sola vez, sin bucle.
-    expect(recetas.buscarActiva).toHaveBeenCalledTimes(1);
+    // Las DOS firmas exactas (la del objetivo del modelo y la del texto del usuario) no encontraron
+    // nada, y por eso se consulto: UNA sola vez, sin bucle.
+    expect(recetas.buscarActiva).toHaveBeenCalledTimes(2);
     expect(elector.consultar).toHaveBeenCalledTimes(1);
     // La tarea corrio con lo aprendido: sus cuatro pasos menos el de verificacion.
     expect(determinista.ejecutarPasoDeterminista).toHaveBeenCalledTimes(3);
@@ -435,6 +437,164 @@ describe('el agente elige entre las tareas que el usuario ya enseno', () => {
     );
 
     expect(recetas.listarActivas).not.toHaveBeenCalled();
+    expect(motor.ejecutar).toHaveBeenCalled();
+  });
+});
+
+/**
+ * VIA RAPIDA POR FIRMA CANONICA (FIX firma, jul 2026). La firma sustituye cada dato declarado por UN
+ * marcador en la posicion de su valor, asi que dos pedidos con la MISMA estructura y datos distintos
+ * firman igual: se encuentra lo aprendido y se ejecuta con los valores nuevos, extraidos por el
+ * extractor determinista. Cero llamadas al modelo, ni al selector ni al motor.
+ *
+ * ALCANCE, explicito: es igualdad ESTRUCTURAL de firma, no equivalencia de significado. Un fraseo
+ * libre de la misma tarea firma distinto y sigue yendo al selector con modelo.
+ */
+describe('via rapida: misma estructura con OTROS valores (FIX firma canonica)', () => {
+  const plantilla = (destinatario: string, asunto: string, cuerpo: string): string =>
+    `Enviar un correo electronico a ${destinatario} con el asunto "${asunto}" y el siguiente ` +
+    `cuerpo del mensaje "${cuerpo}". La tarea termina cuando el correo haya sido enviado exitosamente.`;
+
+  /** Los valores con los que se aprendio la receta (corrida origen de produccion). */
+  const APRENDIDA = plantilla(
+    'omar.ledesm91@gmail.com',
+    'Trayectoria fresca',
+    'Este correo lo envio el sistema',
+  );
+  /** El pedido NUEVO: misma estructura, los tres datos distintos. */
+  const NUEVO_DESTINATARIO = 'ana@ejemplo.com';
+  const NUEVO_ASUNTO = 'Paquete';
+  const NUEVO_CUERPO = 'Ya llego el paquete';
+  const NUEVA = plantilla(NUEVO_DESTINATARIO, NUEVO_ASUNTO, NUEVO_CUERPO);
+
+  const PAGINA_CON_LOS_NUEVOS: CampoDeLaPagina[] = [
+    { contexto: 'input para destinatario to', valor: NUEVO_DESTINATARIO },
+    { contexto: 'input asunto subjectbox', valor: NUEVO_ASUNTO },
+    { contexto: 'textarea cuerpo del mensaje body', valor: NUEVO_CUERPO },
+  ];
+
+  function makeJobConObjetivo(objetivo: string, textoUsuario?: string): Job {
+    const job = makeJob();
+    return {
+      ...job,
+      payload: {
+        kind: 'tarea_web',
+        connectionId: CONNECTION_ID,
+        objetivo,
+        ...(textoUsuario === undefined ? {} : { textoUsuario }),
+      },
+    };
+  }
+
+  /** La receta de enviar correo: los tres datos como parametros, con su punto de verificacion. */
+  function makeRecetaDeCorreo(firmaObjetivo: string): RecetaWeb {
+    const pasos = parsearPasosDeReceta([
+      {
+        idx: 0,
+        accion: 'escribir',
+        estrategias: [{ tipo: 'atributo', atributo: 'name', valor: 'to' }],
+        valor: { tipo: 'parametro', parametro: 'destinatario' },
+        teclas: null,
+        ruta: null,
+        esperaMs: null,
+      },
+      {
+        idx: 1,
+        accion: 'escribir',
+        estrategias: [{ tipo: 'atributo', atributo: 'name', valor: 'subjectbox' }],
+        valor: { tipo: 'parametro', parametro: 'asunto' },
+        teclas: null,
+        ruta: null,
+        esperaMs: null,
+      },
+      {
+        idx: 2,
+        accion: 'escribir',
+        estrategias: [{ tipo: 'atributo', atributo: 'name', valor: 'body' }],
+        valor: { tipo: 'parametro', parametro: 'cuerpo' },
+        teclas: null,
+        ruta: null,
+        esperaMs: null,
+      },
+      { idx: 3, accion: 'verificar', estrategias: [], valor: null, teclas: null, ruta: null, esperaMs: null },
+      {
+        idx: 4,
+        accion: 'click',
+        estrategias: [{ tipo: 'atributo', atributo: 'id', valor: 'enviar' }],
+        valor: null,
+        teclas: null,
+        ruta: null,
+        esperaMs: null,
+      },
+    ]);
+    if (pasos === null) throw new Error('los pasos del fixture no validan contra el contrato');
+    return { ...makeTareaEnsenada(null), id: 'rec-correo-1', firmaObjetivo, pasos };
+  }
+
+  /** Repositorio que solo devuelve la receta cuando la firma consultada es EXACTAMENTE la suya. */
+  function makeRecetasPorFirma(receta: RecetaWeb): ReturnType<typeof makeRecetas> {
+    const recetas = makeRecetas([]);
+    return {
+      ...recetas,
+      buscarActiva: vi.fn(async (_ownerId: string, _dominio: string, firma: string) =>
+        firma === receta.firmaObjetivo ? receta : null,
+      ),
+    };
+  }
+
+  it('encuentra lo aprendido y teclea los TRES datos nuevos, sin selector y sin motor', async () => {
+    const recetas = makeRecetasPorFirma(makeRecetaDeCorreo(firmaDeObjetivo(APRENDIDA)));
+    const determinista = makeDeterminista();
+    const motor = makeMotor();
+    const elector = makeElector(RESPUESTA_CORRECTA);
+
+    const resultado = await procesarTareaWeb(
+      makeDeps({
+        recetas,
+        determinista,
+        motor,
+        elector,
+        navegador: makeNavegador(PAGINA_CON_LOS_NUEVOS),
+      }),
+      makeJobConObjetivo(NUEVA),
+    );
+
+    expect(resultado).toBe('completada');
+    expect(elector.consultar).not.toHaveBeenCalled();
+    expect(motor.ejecutar).not.toHaveBeenCalled();
+    const tecleados = determinista.ejecutarPasoDeterminista.mock.calls
+      .map((llamada) => (llamada[1] as { texto: string | null }).texto)
+      .filter((texto): texto is string => texto !== null);
+    expect(tecleados).toEqual([NUEVO_DESTINATARIO, NUEVO_ASUNTO, NUEVO_CUERPO]);
+  });
+
+  it('tambien se prueba la firma del TEXTO LITERAL del usuario, no solo la del objetivo del modelo', async () => {
+    // Lo aprendido quedo bajo la firma del texto del usuario (una tarea ensenada desde una
+    // grabacion); el objetivo que redacta el modelo es otro texto y por si solo no encontraria nada.
+    const recetas = makeRecetasPorFirma(makeRecetaDeCorreo(firmaDeObjetivo(APRENDIDA)));
+    const elector = makeElector(RESPUESTA_CORRECTA);
+
+    const resultado = await procesarTareaWeb(
+      makeDeps({ recetas, elector, navegador: makeNavegador(PAGINA_CON_LOS_NUEVOS) }),
+      makeJobConObjetivo('enviale ese correo al contacto', NUEVA),
+    );
+
+    expect(resultado).toBe('completada');
+    expect(elector.consultar).not.toHaveBeenCalled();
+    expect(recetas.buscarActiva).toHaveBeenCalledTimes(2);
+  });
+
+  it('un fraseo libre NO dispara la via rapida: cae en el selector con modelo', async () => {
+    const recetas = makeRecetasPorFirma(makeRecetaDeCorreo(firmaDeObjetivo(APRENDIDA)));
+    const elector = makeElector(JSON.stringify({ tarea: null, datos: {} }));
+    const motor = makeMotor();
+
+    await procesarTareaWeb(
+      makeDeps({ recetas, elector, motor, navegador: makeNavegador(PAGINA_CON_LOS_NUEVOS) }),
+      makeJobConObjetivo(`Manda un correo a ${NUEVO_DESTINATARIO} con el asunto "${NUEVO_ASUNTO}" y dile: "${NUEVO_CUERPO}"`),
+    ).catch(() => null);
+
+    expect(recetas.buscarActiva).toHaveBeenCalled();
     expect(motor.ejecutar).toHaveBeenCalled();
   });
 });

@@ -71,6 +71,53 @@ describe('firmaDeObjetivo (D3: criterio de equivalencia entre objetivos)', () =>
     expect(a).toBe(b);
     expect(a).toContain('<monto>');
   });
+
+  /**
+   * FIRMA CANONICA (caso real de produccion, receta ad0731c8): cada dato declarado deja UN marcador
+   * en la posicion de su valor y la palabra con la que el objetivo nombra al campo se conserva. La
+   * firma que quedo guardada duplicaba los marcadores y se comia esos rotulos ("con el <asunto>
+   * <asunto> y el siguiente <cuerpo> del mensaje <cuerpo>").
+   */
+  it('un dato declarado deja UN marcador y no consume la palabra que nombra al campo', () => {
+    const firma = firmaDeObjetivo(
+      'Enviar un correo electronico a omar.ledesm91@gmail.com con el asunto "Trayectoria fresca" y ' +
+        'el siguiente cuerpo del mensaje "Este correo lo envio el sistema". La tarea termina cuando ' +
+        'el correo haya sido enviado exitosamente.',
+    );
+    expect(firma).toBe(
+      'enviar un correo electronico a <destinatario> con el asunto <asunto> y el siguiente cuerpo ' +
+        'del mensaje <cuerpo> la tarea termina cuando el correo haya sido enviado exitosamente',
+    );
+  });
+
+  it('la misma estructura con OTROS valores firma igual que la canonica', () => {
+    const plantilla = (destinatario: string, asunto: string, cuerpo: string): string =>
+      `Enviar un correo electronico a ${destinatario} con el asunto "${asunto}" y el siguiente ` +
+      `cuerpo del mensaje "${cuerpo}". La tarea termina cuando el correo haya sido enviado exitosamente.`;
+    expect(plantilla('ana@y.com', 'Hola', 'Nos vemos manana')).not.toBe(
+      plantilla('omar.ledesm91@gmail.com', 'Trayectoria fresca', 'Este correo lo envio el sistema'),
+    );
+    expect(firmaDeObjetivo(plantilla('ana@y.com', 'Hola', 'Nos vemos manana'))).toBe(
+      firmaDeObjetivo(
+        plantilla('omar.ledesm91@gmail.com', 'Trayectoria fresca', 'Este correo lo envio el sistema'),
+      ),
+    );
+  });
+
+  /**
+   * ALCANCE de la via rapida, explicito para que nadie lo confunda con matcheo semantico: la firma
+   * es igualdad ESTRUCTURAL, no equivalencia de significado. Un fraseo libre de la MISMA tarea firma
+   * distinto y por tanto no dispara la via rapida: ese pedido va al selector con modelo, que es
+   * justo para lo que existe.
+   */
+  it('un fraseo libre de la misma tarea NO comparte firma (va al selector, no a la via rapida)', () => {
+    const canonica = firmaDeObjetivo(
+      'Enviar un correo electronico a ana@y.com con el asunto "Hola" y el siguiente cuerpo del ' +
+        'mensaje "Nos vemos". La tarea termina cuando el correo haya sido enviado exitosamente.',
+    );
+    const libre = firmaDeObjetivo('Manda un correo a ana@y.com con el asunto "Hola" y dile: "Nos vemos"');
+    expect(libre).not.toBe(canonica);
+  });
 });
 
 describe('descripcionGeneralizada (FIX seleccion: la descripcion sin los valores de la corrida origen)', () => {
