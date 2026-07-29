@@ -305,16 +305,71 @@ function accionDelPasoDeTraza(paso: PasoCensurado): AccionDeReceta | null {
  * La primera estrategia del paso hace de ganadora: la traza las trae ya ordenadas por estabilidad y
  * el motor resolvio el elemento, asi que es la mejor pista disponible.
  */
-export function entradasDeCorridaLibre(params: {
+export function entradasDeCorridaLibre(params: CorridaLibre): EntradaDeAtlas[] {
+  return recorrerCorridaLibre(params).entradas;
+}
+
+/** Lo que `entradasDeCorridaLibre` necesita saber de una corrida del motor libre. */
+export interface CorridaLibre {
   dominio: string;
   pasos: readonly PasoCensurado[];
   valores: readonly string[];
-}): EntradaDeAtlas[] {
+}
+
+/**
+ * POR QUE una corrida del motor libre no dejo NADA en el atlas, contado eslabon por eslabon.
+ *
+ * Existe por una corrida de produccion (29 jul 2026): una tarea exitosa de 16 pasos que clickeo y
+ * escribio en cinco controles no escribio una sola entrada y NO habia una linea que dijera en cual
+ * de los cuatro filtros se habia perdido el dato. El silencio absoluto costo una auditoria entera;
+ * estos contadores son para que la proxima vez la respuesta este en el log de la corrida.
+ */
+export interface ResumenDeCorridaLibre {
+  /** Pasos de la traza que se miraron (los sinteticos de verificacion incluidos). */
+  pasos: number;
+  /** Pasos EXITOSOS que llegaron con estrategias puestas (percepcion o complemento por selector). */
+  conEstrategias: number;
+  /** De esos, los que ademas son click o escribir, que es lo unico que el atlas clasifica. */
+  clasificables: number;
+  /** Los que produjeron una entrada (antes de quitar repetidas por dominio y clase). */
+  conClase: number;
+  /** Descartados porque ninguna estrategia era de un tipo que el atlas guarde (xpath, id, name). */
+  sinTipoAdmitido: number;
+  /** Descartados porque toda estrategia admitida coincidia con un valor tecleado (invariante 4). */
+  porParanoiaDeValores: number;
+  /** Descartados con estrategias admitidas pero sin nombre utilizable para formar la clase. */
+  sinNombreUtilizable: number;
+}
+
+/** El resumen de por que una corrida libre dejo lo que dejo. Mismo recorrido, misma decision. */
+export function resumenDeCorridaLibre(params: CorridaLibre): ResumenDeCorridaLibre {
+  return recorrerCorridaLibre(params).resumen;
+}
+
+/**
+ * EL recorrido de la corrida libre: entradas y resumen salen del MISMO paso por la misma rama, para
+ * que lo que el log dice y lo que el atlas guarda no puedan divergir.
+ */
+function recorrerCorridaLibre(params: CorridaLibre): {
+  entradas: EntradaDeAtlas[];
+  resumen: ResumenDeCorridaLibre;
+} {
   const entradas: EntradaDeAtlas[] = [];
+  const resumen: ResumenDeCorridaLibre = {
+    pasos: params.pasos.length,
+    conEstrategias: 0,
+    clasificables: 0,
+    conClase: 0,
+    sinTipoAdmitido: 0,
+    porParanoiaDeValores: 0,
+    sinNombreUtilizable: 0,
+  };
   for (const paso of params.pasos) {
     if (!paso.exito || paso.estrategias.length === 0) continue;
+    resumen.conEstrategias += 1;
     const accion = accionDelPasoDeTraza(paso);
     if (accion === null) continue;
+    resumen.clasificables += 1;
     const entrada = entradaDeAtlas(
       {
         dominio: paso.dominio ?? params.dominio,
@@ -324,9 +379,21 @@ export function entradasDeCorridaLibre(params: {
       },
       params.valores,
     );
-    if (entrada !== null) entradas.push(entrada);
+    if (entrada !== null) {
+      resumen.conClase += 1;
+      entradas.push(entrada);
+      continue;
+    }
+    // EN QUE FILTRO SE CAYO. La ganadora ya esta dentro de `estrategias`, asi que mirar la lista
+    // sola alcanza para decidirlo: si sin la paranoia de valores tampoco quedaba nada, lo que traia
+    // el paso era de tipos que el atlas no guarda; si con ella quedaba, la descarto la paranoia.
+    const admitidas = estrategiasParaElAtlas(paso.estrategias, []);
+    if (admitidas.length === 0) resumen.sinTipoAdmitido += 1;
+    else if (estrategiasParaElAtlas(paso.estrategias, params.valores).length === 0) {
+      resumen.porParanoiaDeValores += 1;
+    } else resumen.sinNombreUtilizable += 1;
   }
-  return sinRepetir(entradas);
+  return { entradas: sinRepetir(entradas), resumen };
 }
 
 /**
