@@ -1,3 +1,5 @@
+import type { EstrategiaLocalizacion } from '@ledesma-platform/shared';
+import { sanearEstrategias } from './localizacion.js';
 import type { CampoDeLaPagina } from './verificacion.js';
 import type { Logger } from './logger.js';
 
@@ -20,8 +22,15 @@ import type { Logger } from './logger.js';
  *    texto y que elemento tiene el foco. Si aterrizo en un elemento distinto al que el agente
  *    declaro como objetivo, la linea lo dice explicitamente para que corrija.
  *
+ * LECTURA FUSIONADA PARA EL ATLAS: la conexion CDP que la percepcion ya abre despues de cada paso
+ * lee, en la MISMA evaluacion, las estrategias de localizacion del elemento que el paso toco (rol,
+ * nombre accesible, aria-label, data-*), leidas del DOM real y nunca derivadas del texto del modelo.
+ * Es lo que le permite al motor libre alimentar el aprendizaje comun sin abrir ni una conexion mas,
+ * sin un token mas y sin cambiar una sola linea de lo que el agente ve.
+ *
  * PRESUPUESTO DE CONTEXTO: las lineas pendientes se entregan por turno con un tope duro
- * (MAX_LINEAS_POR_TURNO); el costo por corrida importa y este canal no puede crecer sin cota.
+ * (MAX_LINEAS_POR_TURNO); el costo por corrida importa y este canal no puede crecer sin cota. El
+ * dato del atlas NO viaja por esa cola: no es una linea, no ocupa una ranura y el modelo no lo ve.
  *
  * PRIVACIDAD: las lineas citan el CONTEXTO de un campo (name, id, aria-label...), nunca vuelcan la
  * pagina; el texto tecleado ya lo conoce el modelo (el lo escribio) y no se repite en los logs.
@@ -42,11 +51,39 @@ export interface PercepcionDePagina {
   /** Descriptor textual del elemento con foco (tag, type, name, id, placeholder, aria-label). */
   foco: string | null;
   campos: CampoPercibido[];
+  /**
+   * ATLAS DE SITIOS: las estrategias de localizacion del elemento que el paso TOCO, leidas del DOM
+   * real en ESTA MISMA evaluacion (ver `construirExpresionPercepcion`). Solo viene cuando el
+   * llamador pidio un objetivo de lectura; ausente = la percepcion corrio como siempre. NO participa
+   * de la huella ni de ninguna linea que vea el modelo: es un dato para el aprendizaje comun.
+   */
+  estrategias?: EstrategiaLocalizacion[];
 }
 
-/** PUERTO de lectura: lo implementa el handler sobre browserbase.percibirPagina. Nunca lanza. */
+/**
+ * QUE ELEMENTO tiene que leer la percepcion para alimentar el atlas de sitios. Es la unica entrada
+ * nueva a la expresion y solo decide DE DONDE se leen las estrategias; nada de lo que la percepcion
+ * ya reportaba depende de ella.
+ *
+ *  - `xpath`: el selector que el motor resolvio para el paso (el elemento exacto sobre el que actuo).
+ *  - `campo`: tras una ESCRITURA, el campo donde aterrizo el texto (mismo criterio que
+ *    `campoDondeAterrizo`, aplicado dentro de la pagina); sin coincidencia, el elemento enfocado.
+ *  - `foco`: el elemento enfocado, que es lo unico que queda de un click resuelto por VISION (no
+ *    deja selector) o de un click por coordenadas.
+ */
+export type ObjetivoDeLectura =
+  | { tipo: 'foco' }
+  | { tipo: 'xpath'; xpath: string }
+  | { tipo: 'campo'; texto: string };
+
+/**
+ * PUERTO de lectura: lo implementa el handler sobre browserbase.percibirPagina. Nunca lanza.
+ *
+ * `objetivo` (ATLAS DE SITIOS) pide que la MISMA evaluacion devuelva ademas las estrategias del
+ * elemento tocado. Es opcional de punta a punta: sin el, la lectura es exactamente la de siempre.
+ */
 export interface PerceptorDePagina {
-  percibir(): Promise<PercepcionDePagina | null>;
+  percibir(objetivo?: ObjetivoDeLectura | undefined): Promise<PercepcionDePagina | null>;
 }
 
 /** Tope DURO de lineas de percepcion que se adjuntan al contexto del agente por turno. */
@@ -58,12 +95,101 @@ const MAX_DESCRIPTOR_CHARS = 90;
 /** Prefijo de TODAS las lineas: el agente debe distinguirlas del contenido de la pagina. */
 export const PREFIJO_PERCEPCION = 'PERCEPCION DEL SISTEMA';
 
+/** Tope del texto tecleado que viaja dentro de la expresion para ubicar el campo donde aterrizo. */
+const MAX_TEXTO_A_UBICAR = 200;
+
+/**
+ * LECTURA FUSIONADA de las estrategias del elemento tocado (ATLAS DE SITIOS): que elemento leer y con
+ * que ayudantes de DOM. `ayudantes` es AYUDANTES_DOM de localizacion.ts y llega por parametro con el
+ * mismo criterio que el lector de campos (que quien compone sea el adaptador del navegador).
+ */
+export interface LecturaDeEstrategias {
+  ayudantes: string;
+  objetivo: ObjetivoDeLectura;
+}
+
+/**
+ * El BLOQUE que lee las estrategias del elemento tocado, para inyectarlo DENTRO de la evaluacion de
+ * percepcion. Cadena vacia si nadie pidio la lectura, y entonces la expresion resultante es byte a
+ * byte la de siempre.
+ *
+ * Va en su propio IIFE con su propio try/catch: si algo de aqui adentro falla (el elemento ya no
+ * esta, el sitio rompio una API que los ayudantes usan), devuelve null y la percepcion sigue
+ * entregando exactamente lo que entregaba antes. Degradar aqui cuesta un dato del atlas, nunca una
+ * linea de percepcion ni el desenlace del job.
+ *
+ * El texto tecleado viaja DENTRO de la expresion para poder ubicar el campo donde aterrizo con el
+ * mismo criterio que `campoDondeAterrizo` (exacta primero, contenida despues). Es un dato que ya
+ * vive en esa misma pagina porque el agente lo acaba de escribir ahi, se evalua en el mundo aislado
+ * y no se persiste en ningun lado.
+ */
+function bloqueDeEstrategias(lectura: LecturaDeEstrategias | undefined): string {
+  if (lectura === undefined) return '';
+  const objetivo = lectura.objetivo;
+  const elemento =
+    objetivo.tipo === 'xpath'
+      ? // Sin respaldo al foco a proposito: si el elemento del selector ya no esta (un click que
+        // cerro el compose), el foco quedo en OTRA cosa y guardarla seria atribuirle al paso un
+        // elemento que nunca toco.
+        `porXpath(${JSON.stringify(objetivo.xpath)})`
+      : objetivo.tipo === 'campo'
+        ? `campoConElTexto(${JSON.stringify(objetivo.texto.slice(0, MAX_TEXTO_A_UBICAR))}) || enfocado()`
+        : 'enfocado()';
+  return String.raw`  const estrategias = (() => {
+    try {
+${lectura.ayudantes}
+      const enfocado = () => {
+        let el = document.activeElement;
+        while (el && el.shadowRoot && el.shadowRoot.activeElement) el = el.shadowRoot.activeElement;
+        return !el || el === document.body || el === document.documentElement ? null : el;
+      };
+      const plano = (t) => String(t == null ? '' : t).replace(/\s+/g, ' ').trim().toLowerCase();
+      const campoConElTexto = (buscado) => {
+        const objetivo = plano(buscado);
+        if (objetivo === '') return null;
+        let contiene = null;
+        for (const nodo of document.querySelectorAll('input, textarea, select, [contenteditable="true"], [contenteditable=""]')) {
+          const tag = String(nodo.tagName || '').toLowerCase();
+          if (plano(nodo.getAttribute && nodo.getAttribute('type')) === 'password') continue;
+          let valor = '';
+          if (tag === 'select') {
+            const opcion = nodo.selectedOptions && nodo.selectedOptions[0];
+            valor = opcion ? (opcion.textContent || opcion.value || '') : (nodo.value || '');
+          } else if (tag === 'input' || tag === 'textarea') {
+            valor = nodo.value || '';
+          } else {
+            valor = nodo.innerText || nodo.textContent || '';
+          }
+          const actual = plano(valor);
+          if (actual === '') continue;
+          if (actual === objetivo) return nodo;
+          if (contiene === null && actual.indexOf(objetivo) !== -1) contiene = nodo;
+        }
+        return contiene;
+      };
+      const el = ${elemento};
+      if (!el || el.nodeType !== 1) return null;
+      return estrategiasDe(el);
+    } catch (e) { return null; }
+  })();
+`;
+}
+
 /**
  * Construye la expresion de percepcion COMPONIENDO el lector de campos existente (EXPRESION_LEER_CAMPOS
  * de browserbase.ts, que llega por parametro para no crear un ciclo de imports): mismos campos, mismos
  * chips, mas la huella (URL, titulo, nodos) y el descriptor del elemento con foco. Solo lectura.
+ *
+ * `lectura` (ATLAS DE SITIOS) FUSIONA en esta misma evaluacion la lectura de las estrategias del
+ * elemento que el paso toco. Es lo que permite que el motor libre alimente el atlas sin abrir ni una
+ * conexion CDP mas: el dato ya estaba en la pagina que la percepcion abre despues de cada paso, y
+ * hasta ahora se descartaba. SIN el parametro la expresion es la de siempre, caracter por caracter.
  */
-export function construirExpresionPercepcion(expresionCampos: string): string {
+export function construirExpresionPercepcion(
+  expresionCampos: string,
+  lectura?: LecturaDeEstrategias,
+): string {
+  const estrategias = bloqueDeEstrategias(lectura);
   return String.raw`(() => {
   const camposCrudo = ${expresionCampos};
   let campos = [];
@@ -85,12 +211,12 @@ export function construirExpresionPercepcion(expresionCampos: string): string {
     const texto = partes.join(' ').replace(/\s+/g, ' ').trim();
     return texto === '' ? null : texto.slice(0, 200);
   })();
-  return JSON.stringify({
+${estrategias}  return JSON.stringify({
     url: String(location.href || '').slice(0, 500),
     titulo: String(document.title || '').slice(0, 200),
     nodos: document.querySelectorAll('*').length,
     foco: foco,
-    campos: campos,
+    campos: campos,${estrategias === '' ? '' : '\n    estrategias: estrategias,'}
   });
 })()`;
 }
@@ -101,12 +227,13 @@ export function parsearPercepcion(crudo: string | null): PercepcionDePagina | nu
   try {
     const parsed: unknown = JSON.parse(crudo);
     if (typeof parsed !== 'object' || parsed === null) return null;
-    const { url, titulo, nodos, foco, campos } = parsed as {
+    const { url, titulo, nodos, foco, campos, estrategias } = parsed as {
       url?: unknown;
       titulo?: unknown;
       nodos?: unknown;
       foco?: unknown;
       campos?: unknown;
+      estrategias?: unknown;
     };
     if (typeof url !== 'string' || typeof titulo !== 'string' || typeof nodos !== 'number') {
       return null;
@@ -126,7 +253,18 @@ export function parsearPercepcion(crudo: string | null): PercepcionDePagina | nu
           ];
         })
       : [];
-    return { url, titulo, nodos, foco: typeof foco === 'string' && foco !== '' ? foco : null, campos: listaCampos };
+    // Las estrategias pasan por el MISMO saneo que las de la trayectoria (sanearEstrategias): valida
+    // contra el contrato, DESCARTA lo que la censura toca y acota. Lo que llegue mal (o no llegue)
+    // deja la percepcion intacta y sin dato para el atlas.
+    const leidas = Array.isArray(estrategias) ? sanearEstrategias(JSON.stringify(estrategias)) : [];
+    return {
+      url,
+      titulo,
+      nodos,
+      foco: typeof foco === 'string' && foco !== '' ? foco : null,
+      campos: listaCampos,
+      ...(leidas.length > 0 ? { estrategias: leidas } : {}),
+    };
   } catch {
     return null;
   }
@@ -358,6 +496,8 @@ function textoDeArgumento(args: Record<string, unknown>, clave: string): string 
 function actionDeSalidaDeAct(result: unknown): {
   method: string;
   argumentos: string[];
+  /** Selector que el motor resolvio, ya sin el prefijo de Stagehand. null = lo resolvio por vision. */
+  xpath: string | null;
 } | null {
   if (typeof result !== 'object' || result === null) return null;
   const envoltorio = result as { output?: unknown; playwrightArguments?: unknown };
@@ -367,14 +507,28 @@ function actionDeSalidaDeAct(result: unknown): {
       : envoltorio;
   const accion = salida.playwrightArguments;
   if (typeof accion !== 'object' || accion === null) return null;
-  const { method, arguments: argumentos } = accion as { method?: unknown; arguments?: unknown };
+  const { method, arguments: argumentos, selector } = accion as {
+    method?: unknown;
+    arguments?: unknown;
+    selector?: unknown;
+  };
   if (typeof method !== 'string') return null;
   return {
     method,
     argumentos: Array.isArray(argumentos)
       ? argumentos.filter((a): a is string => typeof a === 'string')
       : [],
+    xpath: typeof selector === 'string' ? xpathDeSelector(selector) : null,
   };
+}
+
+/** Prefijo con el que Stagehand entrega sus selectores ('xpath=/html[1]/...'). */
+const PREFIJO_XPATH = 'xpath=';
+
+/** El xpath de un selector del motor, o null si no lo es (nunca se adivina un elemento). */
+function xpathDeSelector(selector: string): string | null {
+  const crudo = selector.startsWith(PREFIJO_XPATH) ? selector.slice(PREFIJO_XPATH.length) : selector;
+  return crudo.startsWith('/') ? crudo : null;
 }
 
 /** Metodos de act que ESCRIBEN texto en el elemento resuelto. */
@@ -416,12 +570,52 @@ export function interpretarPaso(evento: EventoDePasoPercibido): PasoInterpretado
   return { tipo: 'refrescar' };
 }
 
+/**
+ * QUE ELEMENTO leer para el ATLAS en un paso dado, o null si ese paso no aporta ninguno. Se decide
+ * aparte de `interpretarPaso` a proposito: aquella funcion gobierna las LINEAS que ve el modelo y no
+ * se toca; esta solo elige de donde salen las estrategias que van al aprendizaje comun.
+ *
+ * El criterio es el mismo con el que el atlas clasifica los pasos de la traza (accionDelPasoDeTraza):
+ * solo los pasos que terminan siendo `click` o `escribir` tienen clase de elemento, asi que solo esos
+ * piden lectura y el resto no gasta ni una linea de JavaScript en la pagina.
+ *
+ *  - ESCRITURA (act con fill/type/setValue, o la tool nativa `type`): el campo donde aterrizo el
+ *    texto, que es el unico que demuestra donde quedo de verdad lo que se escribio.
+ *  - CLICK con selector resuelto: ese elemento exacto.
+ *  - CLICK resuelto por VISION (el act no trae playwrightArguments) o por coordenadas: el elemento
+ *    enfocado, que es la unica referencia que queda de esos dos caminos.
+ */
+export function objetivoDeLectura(evento: EventoDePasoPercibido): ObjetivoDeLectura | null {
+  if (TOOLS_SIN_EFECTO_EN_PAGINA.has(evento.actionName)) return null;
+  if (evento.actionName === 'click') return { tipo: 'foco' };
+  if (evento.actionName === 'type') {
+    const texto = textoDeArgumento(evento.actionArgs, 'text');
+    return texto === '' ? null : { tipo: 'campo', texto };
+  }
+  if (evento.actionName !== 'act') return null;
+  const accion = actionDeSalidaDeAct(evento.toolOutput.result);
+  // Un act sin accion resuelta es un click por vision: para el atlas cuenta como click (mismo
+  // criterio que accionDelPasoDeTraza) y lo unico que queda de el es el foco.
+  if (accion === null) return { tipo: 'foco' };
+  if (METODOS_DE_ESCRITURA.has(accion.method) && accion.argumentos[0] !== undefined) {
+    return { tipo: 'campo', texto: accion.argumentos[0] };
+  }
+  if (accion.method !== 'click') return null;
+  return accion.xpath !== null ? { tipo: 'xpath', xpath: accion.xpath } : { tipo: 'foco' };
+}
+
 /** Control de percepcion de UNA corrida del motor: acumula lineas y las entrega por turno. */
 export interface ControlDePercepcion {
   /** Toma la huella INICIAL (el "antes" del primer paso). Best-effort: nunca lanza. */
   inicializar(): Promise<void>;
-  /** Corre la percepcion que corresponda al paso recien terminado. Best-effort: nunca lanza. */
-  alTerminarPaso(evento: EventoDePasoPercibido): Promise<void>;
+  /**
+   * Corre la percepcion que corresponda al paso recien terminado. Best-effort: nunca lanza.
+   *
+   * Devuelve las estrategias del elemento que ese paso toco (ATLAS DE SITIOS), leidas en la MISMA
+   * evaluacion que la percepcion. Lista vacia cuando el paso no toca ningun elemento, cuando la
+   * lectura no encontro nada o cuando fallo: aprender es una mejora, nunca una condicion.
+   */
+  alTerminarPaso(evento: EventoDePasoPercibido): Promise<EstrategiaLocalizacion[]>;
   /** Drena las lineas pendientes (acotadas a MAX_LINEAS_POR_TURNO) para el siguiente turno. */
   tomarLineas(): string[];
 }
@@ -439,16 +633,18 @@ export interface ControlDePercepcion {
  * corrida queda exactamente como antes de V040.
  */
 export function crearControlDePercepcion(params: {
-  percibir: () => Promise<PercepcionDePagina | null>;
+  percibir: (objetivo?: ObjetivoDeLectura | undefined) => Promise<PercepcionDePagina | null>;
   mapaDelSitio?: readonly string[] | undefined;
   logger?: Logger | undefined;
 }): ControlDePercepcion {
   let previa: PercepcionDePagina | null = null;
   let cola: string[] = [...(params.mapaDelSitio ?? [])];
 
-  const percibirSeguro = async (): Promise<PercepcionDePagina | null> => {
+  const percibirSeguro = async (
+    objetivo?: ObjetivoDeLectura | undefined,
+  ): Promise<PercepcionDePagina | null> => {
     try {
-      return await params.percibir();
+      return await params.percibir(objetivo);
     } catch (error) {
       params.logger?.warn('tarea web: la lectura de percepcion fallo; el paso queda sin percepcion', {
         err: error instanceof Error ? `${error.name}: ${error.message}` : 'error desconocido',
@@ -461,11 +657,13 @@ export function crearControlDePercepcion(params: {
     inicializar: async (): Promise<void> => {
       previa = await percibirSeguro();
     },
-    alTerminarPaso: async (evento: EventoDePasoPercibido): Promise<void> => {
+    alTerminarPaso: async (evento: EventoDePasoPercibido): Promise<EstrategiaLocalizacion[]> => {
       const paso = interpretarPaso(evento);
-      if (paso.tipo === 'ignorar') return;
-      const actual = await percibirSeguro();
-      if (actual === null) return;
+      if (paso.tipo === 'ignorar') return [];
+      // El objetivo de lectura viaja DENTRO de la misma evaluacion: ni una conexion CDP mas, ni una
+      // linea mas para el modelo. Ausente = la lectura es exactamente la de siempre.
+      const actual = await percibirSeguro(objetivoDeLectura(evento) ?? undefined);
+      if (actual === null) return [];
       if (paso.tipo === 'click' && previa !== null && mismaHuella(previa, actual)) {
         cola.push(lineaDeClickSinEfecto(paso.descripcion));
       }
@@ -475,6 +673,7 @@ export function crearControlDePercepcion(params: {
         );
       }
       previa = actual;
+      return actual.estrategias ?? [];
     },
     tomarLineas: (): string[] => {
       const lineas = cola.slice(0, MAX_LINEAS_POR_TURNO);

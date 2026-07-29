@@ -59,6 +59,15 @@ export interface PasoCensurado {
    */
   estrategias: EstrategiaLocalizacion[];
   /**
+   * ATLAS DE SITIOS: las estrategias del elemento del paso leidas por la PERCEPCION, en la misma
+   * evaluacion que ya corre despues de cada paso (percepcion.ts). Va en un campo APARTE de
+   * `estrategias` a proposito: `estrategias` es lo que alimenta la promocion a receta, que es una
+   * decision de producto distinta y de mayor radio, y este cambio no la toca. Solo el agregador del
+   * atlas lee este campo (via `pasosConEstrategiasPercibidas`, atlas-sitios.ts). Igual que
+   * `estrategias`, NO se persiste: pasos_trayectoria no tiene columna para ella.
+   */
+  estrategiasPercibidas?: EstrategiaLocalizacion[];
+  /**
    * SITIO en el que ocurrio el paso (tareas multisitio). Lo estampa el handler al cerrar el tramo:
    * dentro de un tramo TODOS los pasos pertenecen al mismo sitio, porque un cambio de sitio termina
    * el tramo. Es lo que permite promover una receta que cruza sitios sabiendo a cual pertenece cada
@@ -188,7 +197,15 @@ function selectorDeAccion(accion: AccionCrudaDeMotor): string | null {
 export function extraerPasosCensurados(
   acciones: AccionCrudaDeMotor[],
   observaciones: ObservacionDePaso[] = [],
+  /**
+   * ATLAS DE SITIOS: las estrategias que la PERCEPCION leyo, UNA lista por accion y en el mismo
+   * orden en que el motor las empuja a su traza. El emparejamiento es estrictamente POSICIONAL y
+   * solo se aplica si las cantidades cuadran: sin esa garantia se descarta entera, porque
+   * atribuirle a un paso el elemento de otro es peor que no aprender nada.
+   */
+  percibidas: EstrategiaLocalizacion[][] = [],
 ): PasoCensurado[] {
+  const porPosicion = percibidas.length === acciones.length ? percibidas : [];
   const emparejadas = emparejarObservaciones(
     acciones,
     observaciones,
@@ -270,6 +287,11 @@ export function extraerPasosCensurados(
       // Estrategias observadas del DOM durante la corrida (CAMBIO 1). Vacia si no hubo observacion:
       // ese paso no se promueve, la traza no cambia.
       estrategias: observacion?.estrategias ?? [],
+      // Estrategias leidas por la PERCEPCION (atlas de sitios). Campo aparte: no alimenta ni la
+      // promocion a receta ni la traza persistida.
+      ...((porPosicion[idx]?.length ?? 0) > 0
+        ? { estrategiasPercibidas: porPosicion[idx] as EstrategiaLocalizacion[] }
+        : {}),
       // La URL se persiste SIN query string ni fragment (tokens de reset, codigos OAuth y session
       // ids viajan ahi); una URL no parseable se descarta (censurarUrl).
       url: (() => {

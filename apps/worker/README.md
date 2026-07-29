@@ -211,15 +211,24 @@ La trayectoria de la corrida se persiste con las acciones acumuladas EN VIVO aun
 ### Observador de pasos (`TAREA_WEB_OBSERVADOR_PASOS`)
 
 Encendido, el handler lee del DOM las estrategias de localizacion de cada elemento que el motor toca
-mientras la tarea corre, y esas estrategias son lo que hace promovible una corrida a receta. El
-costo es una conexion CDP NUEVA por paso durante la corrida.
+mientras la tarea corre, y esas estrategias son lo que hace promovible una corrida a receta. Este
+flag gobierna por tanto DOS cosas a la vez, y la segunda es una decision de producto propia: la
+lectura del DOM durante la corrida y la **promocion automatica a recetas**.
+
+**El costo, con precision** (la version anterior de esta seccion decia "una conexion CDP nueva por
+paso", y no describe lo que pasa): se abre una conexion CDP por cada ACCION CON ELEMENTO RESUELTO
+(`act` y `fillForm` con selector, `click` y `type` por coordenadas). Los pasos sin elemento (`goto`,
+`screenshot`, `extract`, `ariaTree`, `think`, `done`) no abren ninguna. Ademas, desde la percepcion
+de efecto y de campos (27 jul 2026) el worker YA abre una conexion despues de cada paso que toca la
+pagina, de forma incondicional y con este flag apagado: encender el observador no agrega un costo
+donde no habia ninguno, DUPLICA una lectura que ya se paga.
 
 **Apagado (default): las recetas NO capturan estrategias enriquecidas durante la corrida.** En la
 practica eso significa que una corrida del motor no se promueve a receta (sin estrategias no hay
 paso re-ejecutable que guardar). Lo demas no cambia: las recetas YA aprendidas se siguen ejecutando
-de forma determinista, se reparan y se jubilan igual, y la trayectoria se sigue registrando. Se
-enciende (`TAREA_WEB_OBSERVADOR_PASOS=true`) en los despliegues donde interese volver a aprender
-recetas nuevas.
+de forma determinista, se reparan y se jubilan igual, la trayectoria se sigue registrando y el atlas
+de sitios se sigue alimentando (ver abajo). Se enciende (`TAREA_WEB_OBSERVADOR_PASOS=true`) en los
+despliegues donde interese volver a aprender recetas nuevas.
 
 ### Atlas de sitios (`ATLAS_SITIOS_SECRET`, V040)
 
@@ -237,10 +246,27 @@ variable, la clave se deriva de `VAULT_SECRET` con una etiqueta de separacion de
 secreto de la boveda. Configurar la variable despues solo hace que los origenes se cuenten de nuevo
 desde cero.
 
-**Interaccion con `TAREA_WEB_OBSERVADOR_PASOS`**: el camino por RECETA alimenta el atlas siempre (las
-ganadoras las informa el ejecutor determinista). El camino del MOTOR LIBRE necesita las estrategias
-que lee el observador, asi que con el observador apagado (el default) una corrida con motor no aporta
-nada al atlas, por la misma razon por la que tampoco se promueve a receta.
+**El atlas NO depende de `TAREA_WEB_OBSERVADOR_PASOS`**: el camino por RECETA lo alimenta con las
+ganadoras que informa el ejecutor determinista, y el camino del MOTOR LIBRE con lo que lee la
+PERCEPCION. La percepcion abre una conexion CDP despues de cada paso que toca la pagina, y en esa
+MISMA evaluacion lee ahora tambien las estrategias del elemento que el paso toco: el rol, el nombre
+accesible y los `aria-label` / `data-*` salen del DOM real, nunca de la descripcion que escribio el
+modelo. Que elemento se lee:
+
+- tras una ESCRITURA, el campo donde aterrizo el texto (el mismo criterio con el que la percepcion
+  ya le reporta al agente donde quedo lo que tecleo);
+- tras un CLICK con selector resuelto, ese elemento;
+- tras un CLICK resuelto por vision o por coordenadas, el elemento enfocado, que es la unica
+  referencia que esos caminos dejan.
+
+Cuesta cero conexiones nuevas, cero tokens y cero lineas de contexto: el dato viaja por un canal que
+el modelo no ve. Si la lectura falla, se pierde el dato del atlas y la percepcion sigue igual. Lo que
+esta fuente aporta al atlas NO alimenta la promocion a recetas: viaja en un campo aparte
+(`estrategiasPercibidas`) y solo el agregador del atlas lo lee.
+
+Lo que el observador encendido sigue aportando de mas es cobertura sobre el elemento que un click
+hace DESAPARECER (el boton Enviar de un compose que se cierra): esa lectura solo se puede tomar
+antes de la accion, y la percepcion corre despues.
 
 ### Costo por corrida (`TAREA_WEB_SCREENSHOTS` y `TAREA_WEB_HISTORIAL_PASOS`)
 

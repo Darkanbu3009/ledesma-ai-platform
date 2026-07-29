@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import type { EstrategiaLocalizacion } from '@ledesma-platform/shared';
 import { VALOR_CENSURADO } from '../src/censura.js';
 import { extraerPasosCensurados, type AccionCrudaDeMotor } from '../src/trayectoria.js';
 
@@ -247,5 +248,34 @@ describe('enriquecimiento con observaciones del DOM (CAMBIO 1)', () => {
       { type: 'act', playwrightArguments: { selector: 'xpath=/a', method: 'click', arguments: [] } },
     ];
     expect(extraerPasosCensurados(acciones)[0]?.estrategias).toEqual([]);
+  });
+});
+
+describe('estrategias leidas por la percepcion (atlas de sitios)', () => {
+  const ATRIBUTO: EstrategiaLocalizacion = { tipo: 'atributo', atributo: 'id', valor: 'enviar' };
+  const ROL: EstrategiaLocalizacion = { tipo: 'rol', rol: 'textbox', nombre: 'Para' };
+  const acciones: AccionCrudaDeMotor[] = [
+    { type: 'act', playwrightArguments: { selector: 'xpath=/a', method: 'click', arguments: [] } },
+    { type: 'screenshot' },
+    { type: 'act', playwrightArguments: { selector: 'xpath=/b', method: 'fill', arguments: ['x'] } },
+  ];
+
+  it('empareja POR POSICION y va en un campo aparte de `estrategias`', () => {
+    const pasos = extraerPasosCensurados(acciones, [], [[ATRIBUTO], [], [ROL]]);
+    expect(pasos[0]?.estrategiasPercibidas).toEqual([ATRIBUTO]);
+    expect(pasos[1]?.estrategiasPercibidas).toBeUndefined();
+    expect(pasos[2]?.estrategiasPercibidas).toEqual([ROL]);
+    // `estrategias` es lo que alimenta la promocion a receta y no lo toca nadie desde aqui.
+    expect(pasos.every((paso) => paso.estrategias.length === 0)).toBe(true);
+  });
+
+  it('si las cantidades NO cuadran se descarta entera: nunca el elemento de otro paso', () => {
+    const pasos = extraerPasosCensurados(acciones, [], [[ATRIBUTO], [ROL]]);
+    expect(pasos.every((paso) => paso.estrategiasPercibidas === undefined)).toBe(true);
+  });
+
+  it('sin el parametro la traza es EXACTAMENTE la de antes', () => {
+    const pasos = extraerPasosCensurados(acciones);
+    expect(pasos.every((paso) => paso.estrategiasPercibidas === undefined)).toBe(true);
   });
 });

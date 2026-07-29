@@ -190,8 +190,10 @@ function main(): void {
           vaultSecret: config.VAULT_SECRET,
         }),
       },
-      // Observador de pasos APAGADO por defecto (TAREA_WEB_OBSERVADOR_PASOS): encendido abre una
-      // conexion CDP por paso durante la corrida.
+      // Observador de pasos APAGADO por defecto (TAREA_WEB_OBSERVADOR_PASOS): encendido DUPLICA,
+      // por cada accion con elemento resuelto, la lectura del DOM que la percepcion ya hace despues
+      // de cada paso, y habilita ademas la promocion automatica a recetas. El atlas de sitios no
+      // depende de el: lo alimenta la percepcion.
       observadorPasos: config.TAREA_WEB_OBSERVADOR_PASOS,
       notificadorAprobaciones,
       vaultSecret: config.VAULT_SECRET,
