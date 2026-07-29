@@ -60,7 +60,9 @@ export interface PasoCensurado {
   estrategias: EstrategiaLocalizacion[];
   /**
    * ATLAS DE SITIOS: las estrategias del elemento del paso leidas por la PERCEPCION, en la misma
-   * evaluacion que ya corre despues de cada paso (percepcion.ts). Va en un campo APARTE de
+   * evaluacion que ya corre despues de cada paso (percepcion.ts), o -- solo cuando esa lectura no
+   * devolvio nada para la accion -- las derivadas de los predicados de atributo del selector que el
+   * motor resolvio (estrategiasDelSelectorParaElAtlas). Va en un campo APARTE de
    * `estrategias` a proposito: `estrategias` es lo que alimenta la promocion a receta, que es una
    * decision de producto distinta y de mayor radio, y este cambio no la toca. Solo el agregador del
    * atlas lee este campo (via `pasosConEstrategiasPercibidas`, atlas-sitios.ts). Igual que

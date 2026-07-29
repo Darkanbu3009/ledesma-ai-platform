@@ -9,6 +9,7 @@ import {
   FalloDeEsquemaDelMotorError,
   GuardiaBloqueoReintentosError,
 } from './errores.js';
+import { estrategiasDelSelectorParaElAtlas } from './atlas-sitios.js';
 import { TOOL_CAMBIAR_DE_SITIO } from './prompt-tarea-web.js';
 import {
   crearAcumuladorDeConsumo,
@@ -744,8 +745,9 @@ export function construirOpcionesDeEjecucion(params: {
   /**
    * ATLAS DE SITIOS: recibe, por cada evento del bucle, UNA lista de estrategias POR ACCION que ese
    * evento empuja a la traza del motor (la primera lleva lo que la percepcion leyo del elemento
-   * tocado y el resto van vacias). Emitir una por accion es lo que mantiene el emparejamiento
-   * posicional con la traza; sin percepcion cableada no se pasa, y entonces no se emite nada.
+   * tocado; donde la percepcion no dio nada entra el complemento por selector). Emitir una por
+   * accion es lo que mantiene el emparejamiento posicional con la traza; sin percepcion cableada no
+   * se pasa, y entonces no se emite nada.
    */
   registrarEstrategias?: ((porAccion: EstrategiaLocalizacion[][]) => void) | undefined;
 }): AgentExecuteOptions {
@@ -823,12 +825,22 @@ export function construirOpcionesDeEjecucion(params: {
                 });
                 // ATLAS DE SITIOS: una entrada POR ACCION empujada por este evento (una tool puede
                 // empujar varias: fillForm empuja la suya mas una por campo). Lo leido pertenece a
-                // la primera, que es la accion de la tool; las demas van vacias para que la traza y
-                // esta lista sigan cuadrando en cantidad y en orden.
+                // la primera, que es la accion de la tool; las demas parten vacias para que la traza
+                // y esta lista sigan cuadrando en cantidad y en orden.
+                //
+                // LA PERCEPCION ES LA FUENTE PRIMARIA, y el SELECTOR solo la COMPLEMENTA: cuando la
+                // lectura no devolvio nada para una accion (elemento ya destruido, no resoluble o no
+                // enfocable) se derivan los predicados de atributo del selector que el motor resolvio
+                // para ESA accion. Nunca la reemplaza ni la mezcla: donde la percepcion dio algo, eso
+                // es lo que viaja, tal cual. Es lo que cubre las acciones finales, que destruyen su
+                // propio contexto y que ninguna lectura posterior puede alcanzar (el boton Enviar).
                 registrarEstrategias?.(
-                  pasosObservadosDeEvidencia(evento).map((_, indice) =>
-                    indice === 0 ? estrategias : [],
-                  ),
+                  pasosObservadosDeEvidencia(evento).map((paso, indice) => {
+                    const percibidas = indice === 0 ? estrategias : [];
+                    return percibidas.length > 0
+                      ? percibidas
+                      : estrategiasDelSelectorParaElAtlas(paso.selector);
+                  }),
                 );
               }
               if (observador === undefined) return;
