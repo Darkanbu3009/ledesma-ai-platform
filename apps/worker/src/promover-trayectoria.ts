@@ -364,6 +364,11 @@ function pasoCensuradoDesdeFila(fila: PasoTrayectoria, idx: number): PasoCensura
 export interface GuardadoRechazado {
   guardable: false;
   motivo: string;
+  /**
+   * Los metodos NO representables que la conversion alcanzo a descartar antes de abortar (FIX C).
+   * Ausente cuando no hubo ninguno o cuando el rechazo es previo a la conversion.
+   */
+  metodosDescartados?: string[];
 }
 
 export interface GuardadoAceptado {
@@ -417,7 +422,15 @@ export function convertirTrayectoriaPersistida(
     estado: 'exitosa',
     exigeVerificacion: detectarVerboBloqueado(ultima.objetivo) !== null,
   });
-  if (!promocion.promovida) return { guardable: false, motivo: promocion.motivo };
+  if (!promocion.promovida) {
+    return {
+      guardable: false,
+      motivo: promocion.motivo,
+      ...(promocion.metodosDescartados === undefined
+        ? {}
+        : { metodosDescartados: promocion.metodosDescartados }),
+    };
+  }
   return {
     guardable: true,
     pasos: promocion.pasos,
@@ -496,27 +509,33 @@ export async function procesarJobDePromoverTrayectoria(
   }
 
   const conversion = convertirTrayectoriaPersistida(trayectorias);
+  // FAIL-OPEN de los metodos no representables (FIX A): la promocion no aborta por ellos, pero se
+  // deja rastro de que gesto o tool desconocida se omitio al aprender la tarea. Sin esto, una receta
+  // con un paso de menos se veria como si la corrida no lo hubiera tenido.
+  //
+  // SE EMITE TAMBIEN EN EL CAMINO DE ABORTO (FIX C): antes iba despues del throw, asi que
+  // justo en las conversiones que hay que diagnosticar el log no aparecia y el descarte solo se podia
+  // reconstruir consultando la base. Va con el motivo, para leer las dos cosas en la misma linea.
+  const metodosDescartados = conversion.metodosDescartados ?? [];
+  if (metodosDescartados.length > 0) {
+    deps.logger.info('promocion de trayectoria: se descartaron metodos no representables', {
+      jobId: job.id,
+      jobOrigenId,
+      metodos: metodosDescartados,
+      ...(conversion.guardable ? {} : { motivo: conversion.motivo }),
+    });
+  }
   if (!conversion.guardable) {
     deps.logger.warn('promocion de trayectoria: no se pudo convertir en algo repetible', {
       jobId: job.id,
       jobOrigenId,
       motivo: conversion.motivo,
+      metodosDescartados,
     });
     // PromocionNoRepetibleError lleva el prefijo estable en su `name`: describeError (execution.ts)
     // construye el last_error como `${name}: ${message}`, asi que el job queda empezando con
     // PROMOCION_NO_REPETIBLE_PREFIX y la consola muestra el motivo real sin invitar a reintentar.
     throw new PromocionNoRepetibleError(conversion.motivo);
-  }
-
-  // FAIL-OPEN de los metodos no representables (FIX A): la promocion no aborto por ellos, pero se deja
-  // rastro de que gesto o tool desconocida se omitio al aprender la tarea. Sin esto, una receta con un
-  // paso de menos se veria como si la corrida no lo hubiera tenido.
-  if (conversion.metodosDescartados.length > 0) {
-    deps.logger.info('promocion de trayectoria: se descartaron metodos no representables', {
-      jobId: job.id,
-      jobOrigenId,
-      metodos: conversion.metodosDescartados,
-    });
   }
 
   const receta = await deps.recetas.promover({

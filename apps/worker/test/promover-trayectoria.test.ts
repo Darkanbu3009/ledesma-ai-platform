@@ -503,17 +503,48 @@ describe('convertirTrayectoriaPersistida (fixture real: fillFormVision en el pas
     expect(resultado.motivo).toContain('pulsacion sin teclas registradas');
   });
 
-  it('si un dato del objetivo queda sin cubrir por otro paso, falla con motivo especifico', () => {
-    // Sin el act del asunto (idx 7), el dato 'asunto' que el fillFormVision pudo haber llenado no
-    // queda cubierto: la conversion debe fallar diciendo el paso y el dato, no con el motivo generico.
+  it('la cabecera VACIA no reclama la cobertura de un dato que ella no escribio (FIX A)', () => {
+    // Sin el act del asunto (idx 7) la receta queda sin ese dato, pero la cabecera del llenado por
+    // vision NO es quien lo pierde: llego sin campos registrados, o sea sin haber escrito nada. Se
+    // descarta como cualquier metodo no representable y queda en metodosDescartados, que es donde
+    // hay que mirar. Antes de este fix la cabecera vacia reclamaba la cobertura de TODOS los datos
+    // declarados y tumbaba la conversion por un paso que no lleno ninguno.
     const pasos = pasosGmailConFillFormVision().map((p) =>
       p.idx === 7 ? { ...p, accion: { tipo: 'screenshot', instruccion: null, metodo: null, argumentos: [] }, selector: null, valorCensurado: null } : p,
     );
     const resultado = convertirTrayectoriaPersistida([trayectoria({ pasos })]);
+    expect(resultado.guardable).toBe(true);
+    if (!resultado.guardable) return;
+    expect(resultado.metodosDescartados).toContain('fillFormVision');
+    const escritos = resultado.pasos.filter((p) => p.accion === 'escribir');
+    expect(escritos.map((p) => p.valor)).toEqual([
+      { tipo: 'parametro', parametro: 'destinatario' },
+      { tipo: 'parametro', parametro: 'cuerpo' },
+    ]);
+  });
+
+  it('un llenado que SI registro el dato, y sin localizacion, sigue abortando (FIX A)', () => {
+    // La otra mitad de la regla: la comprobacion de cobertura aplica al registro que efectivamente
+    // trajo el dato. Este llenado del asunto llega con su valor pero sin selector ni descripcion de
+    // la que derivar estrategias, asi que no se puede repetir; y sin el act del asunto no hay ningun
+    // otro paso que teclee ese dato, de modo que descartarlo se lo llevaria de la receta.
+    const pasos = pasosGmailConFillFormVision().map((p) =>
+      p.idx === 7
+        ? {
+            ...p,
+            accion: { tipo: 'fillFormVision', instruccion: null, metodo: 'fill', argumentos: ['Reporte semanal'] },
+            selector: null,
+            valorCensurado: 'Reporte semanal',
+          }
+        : p,
+    );
+    const resultado = convertirTrayectoriaPersistida([trayectoria({ pasos })]);
     expect(resultado.guardable).toBe(false);
     if (resultado.guardable) return;
-    expect(resultado.motivo).toContain('fillFormVision');
     expect(resultado.motivo).toContain('asunto');
+    // El motivo viaja CON los metodos descartados hasta ese punto (FIX C): el job los loguea aunque
+    // la conversion aborte, para no tener que reconstruirlos desde la base.
+    expect(resultado.metodosDescartados).toContain('fillFormVision');
   });
 
   it('un fillFormVision con el campo registrado (metodo, valor y selector) se descompone en escritura', () => {
@@ -540,17 +571,18 @@ describe('convertirTrayectoriaPersistida (fixture real: fillFormVision en el pas
     ]);
   });
 
-  it('sin datos declarados en el objetivo, un fillFormVision sin registro falla con motivo especifico', () => {
+  it('sin datos declarados en el objetivo, la cabecera vacia se descarta y la conversion sigue', () => {
+    // Un objetivo sin datos que parametrizar tampoco es motivo de rechazo: no hay nada que la
+    // cabecera vacia pudiera haber perdido, asi que se descarta igual que un gesto de enfoque.
     const resultado = convertirTrayectoriaPersistida([
       trayectoria({
         objetivo: 'archiva el primer mensaje de la bandeja',
         pasos: pasosGmailConFillFormVision(),
       }),
     ]);
-    expect(resultado.guardable).toBe(false);
-    if (resultado.guardable) return;
-    expect(resultado.motivo).toContain('fillFormVision');
-    expect(resultado.motivo).toContain('cobertura');
+    expect(resultado.guardable).toBe(true);
+    if (!resultado.guardable) return;
+    expect(resultado.metodosDescartados).toContain('fillFormVision');
   });
 });
 
@@ -1254,6 +1286,34 @@ describe('procesarJobDePromoverTrayectoria', () => {
     await procesarJobDePromoverTrayectoria(deps, makeJob(PAYLOAD));
     expect(promovidas).toHaveLength(1);
     expect(promovidas[0]?.pasos.some((p) => p.accion === 'teclas' && p.teclas === 'Tab')).toBe(true);
+  });
+
+  it('loguea los metodos descartados TAMBIEN cuando la conversion aborta (FIX C)', async () => {
+    // El log del fail-open iba despues del throw, asi que justo en las conversiones que hay que
+    // diagnosticar no aparecia y el descarte solo se podia reconstruir consultando la base. Ahora se
+    // emite antes de abortar, con el motivo, y el warn del rechazo tambien los lleva.
+    const pasos = pasosGmailConFillFormVision().map((p) =>
+      p.idx === 7
+        ? {
+            ...p,
+            accion: { tipo: 'fillFormVision', instruccion: null, metodo: 'fill', argumentos: ['Reporte semanal'] },
+            selector: null,
+            valorCensurado: 'Reporte semanal',
+          }
+        : p,
+    );
+    const { deps } = makeDeps({ trayectorias: [trayectoria({ pasos })] });
+    await expect(procesarJobDePromoverTrayectoria(deps, makeJob(PAYLOAD))).rejects.toThrow(
+      /asunto/,
+    );
+    expect(deps.logger.info).toHaveBeenCalledWith(
+      'promocion de trayectoria: se descartaron metodos no representables',
+      expect.objectContaining({ metodos: ['fillFormVision', 'fill'], motivo: expect.stringContaining('asunto') }),
+    );
+    expect(deps.logger.warn).toHaveBeenCalledWith(
+      'promocion de trayectoria: no se pudo convertir en algo repetible',
+      expect.objectContaining({ metodosDescartados: ['fillFormVision', 'fill'] }),
+    );
   });
 
   it('rechaza un payload invalido sin tocar la base', async () => {

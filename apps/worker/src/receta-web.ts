@@ -349,13 +349,17 @@ const TIPOS_SIN_EFECTO = new Set([
  * llegan como acciones ADYACENTES (los act sinteticos de fillForm, o los act con los que el motor
  * completo los mismos campos despues), y ESAS son las que se promueven a pasos 'escribir'.
  *
- * La cabecera, por tanto, se DESCARTA, pero de forma CONDICIONADA (caso real de produccion, jul
- * 2026: un fillFormVision en el paso 4 abortaba la conversion entera con "sin ninguna estrategia de
- * localizacion" aunque los tres datos del objetivo quedaban cubiertos por acts posteriores con
- * selector): la promocion solo la omite si TODOS los datos declarados del objetivo terminan
- * cubiertos por algun paso de escritura de la receta. Si un dato quedaria sin cubrir, la conversion
- * falla con motivo especifico (ver promoverTrayectoria) en vez de producir una receta que hace
- * menos de lo aprendido.
+ * La cabecera, por tanto, se DESCARTA como cualquier otro METODO NO REPRESENTABLE (FIX A del 30 jul
+ * 2026, ver conversionNoRepresentable), y NO reclama cobertura de ningun dato POR SI SOLA. Una
+ * cabecera sin campos registrados no lleno nada: es un intento de llenado por vision del que no
+ * quedo constancia, asi que exigir que la receta cubra cada dato del objetivo por su culpa castiga
+ * a la trayectoria por un paso que no escribio nada (caso real de produccion del 30 jul 2026: un
+ * fillFormVision emitido ANTES de que el agente escribiera nada tumbaba un envio exitoso).
+ *
+ * La cobertura solo la exige el registro que SI trajo el dato: si la cabecera llega con argumentos
+ * pero sin localizacion, conversionNoRepresentable ata ese dato declarado a la comprobacion, igual
+ * que un select nativo. Y si llega con campo localizable (estrategias, metodo de tecleo y valor),
+ * se DESCOMPONE como un paso 'escribir' normal.
  */
 const TIPOS_LLENADO_DE_FORMULARIO = new Set(['fillForm', 'fillFormVision']);
 
@@ -419,7 +423,6 @@ type Conversion =
   | { promovido: PasoDeReceta }
   | {
       omitible: true;
-      exigeCobertura?: boolean;
       clickSinLocalizacion?: boolean;
       /**
        * Metodo NO REPRESENTABLE descartado (FIX A): su nombre, para el log de fail-open, y -- solo si
@@ -692,7 +695,33 @@ function esControlDeCabeceraDeCompose(paso: PasoCensurado): boolean {
   return CONTROLES_DE_CABECERA_DE_COMPOSE.some((control) => texto.includes(control));
 }
 
-/** ¿Alguna ESCRITURA posterior con estrategias utilizables cubre el MISMO campo que este paso? */
+/**
+ * El DATO DECLARADO del objetivo que este paso teclea, o null si no teclea ninguno (un click, o una
+ * escritura de un texto que el objetivo no declara). El texto sale de los argumentos, y cuando no
+ * hay (act resuelto por vision) de lo que la propia descripcion declara haber escrito.
+ */
+function datoDeclaradoDelPaso(
+  paso: PasoCensurado,
+  valores: ValoresDeParametros,
+): MarcadorParametro | null {
+  const argumentos = paso.accion.argumentos.join(' ').trim();
+  const texto = argumentos === '' ? (escrituraDeclaradaEnLaDescripcion(paso.accion) ?? '') : argumentos;
+  return texto === '' ? null : marcadorDelValor(texto, valores);
+}
+
+/**
+ * ¿Alguna ESCRITURA posterior con estrategias utilizables cubre el MISMO campo que este paso?
+ *
+ * UNA ESCRITURA CON DATO DECLARADO SOLO LA CUBRE OTRA QUE TECLEE ESE MISMO DATO (FIX B, caso real de
+ * produccion del 30 jul 2026): el paso que escribia el destinatario se destilaba fuera porque
+ * `describenElMismoCampo` daba por el MISMO campo a la escritura del cuerpo, y despues la cobertura
+ * reportaba, con razon, que ningun paso conservado cubria al destinatario. La causa es que el grupo
+ * de equivalencia del destinatario ('to', 'para', 'destinatarios', 'recipients') contiene dos
+ * palabras funcionales que aparecen en cualquier instruccion ("into the body TO finish the email",
+ * "en el cuadro PARA el cuerpo"), y la comparacion mira la instruccion entera, valor tecleado
+ * incluido. Un desvio real (el mismo campo re-escrito) sigue destilandose: ahi los dos pasos llevan
+ * el mismo dato. Los CLICKS de enfoque no llevan dato, asi que su destilacion no cambia.
+ */
 function escrituraPosteriorCubreElCampo(
   pasos: readonly PasoCensurado[],
   indice: number,
@@ -700,11 +729,13 @@ function escrituraPosteriorCubreElCampo(
 ): boolean {
   const paso = pasos[indice];
   if (paso === undefined) return false;
+  const dato = datoDeclaradoDelPaso(paso, valores);
   for (let i = indice + 1; i < pasos.length; i++) {
     const posterior = pasos[i];
     if (posterior === undefined) break;
     if (!esEscrituraConDato(posterior)) continue;
     if (estrategiasUtilizables(posterior, valores).length === 0) continue;
+    if (dato !== null && datoDeclaradoDelPaso(posterior, valores) !== dato) continue;
     if (apuntaAlMismoCampo(paso, posterior)) return true;
   }
   return false;
@@ -810,9 +841,9 @@ function convertirPaso(
 
   // LLENADO DE FORMULARIO (fillForm / fillFormVision): si este registro trae la escritura de UN
   // campo localizable (estrategias, metodo de tecleo y valor), se DESCOMPONE como un paso 'escribir'
-  // normal. Si no trae nada de eso (el caso persistido: cabecera sin selector, sin metodo y sin
-  // argumentos), se descarta de forma CONDICIONADA: la promocion verifica al final que los datos del
-  // objetivo quedaron cubiertos por otros pasos (ver TIPOS_LLENADO_DE_FORMULARIO).
+  // normal. Si no (el caso persistido: cabecera sin selector, sin metodo y sin argumentos), se
+  // descarta como METODO NO REPRESENTABLE: solo reclama cobertura del dato que ESE registro traiga
+  // en sus argumentos, y una cabecera vacia no trae ninguno (ver TIPOS_LLENADO_DE_FORMULARIO).
   if (TIPOS_LLENADO_DE_FORMULARIO.has(tipo)) {
     const accionDeCampo =
       paso.accion.metodo === null ? undefined : ACCION_POR_METODO[paso.accion.metodo];
@@ -824,7 +855,7 @@ function convertirPaso(
       }
       return { promovido: { ...base, accion: 'escribir', estrategias, valor } };
     }
-    return { omitible: true, exigeCobertura: true };
+    return conversionNoRepresentable(paso, valores);
   }
 
   // PULSACION DE TECLA registrada como act del motor (metodo 'press'; caso real de produccion, jul
@@ -915,6 +946,13 @@ function convertirPaso(
 export interface PromocionRechazada {
   promovida: false;
   motivo: string;
+  /**
+   * Los metodos NO representables descartados HASTA el punto del rechazo (FIX C). Viajan tambien en
+   * el camino de aborto para que el log del job diga que se omitio ADEMAS del motivo: sin esto, el
+   * unico rastro de la tool que se descarto se perdia justo en las conversiones que hay que
+   * diagnosticar, y habia que ir a la base a reconstruirlo. Ausente si no hubo ninguno.
+   */
+  metodosDescartados?: string[];
 }
 
 export interface PromocionAceptada {
@@ -960,13 +998,19 @@ export function promoverTrayectoria(entrada: {
   }
   const valores = valoresDeParametros(extraerParametrosDeclarados(entrada.objetivo));
   const pasos: PasoDeReceta[] = [];
-  const llenadosSinRegistro: string[] = [];
   const clicksSinLocalizacion: Array<{ idx: number; descriptor: string }> = [];
   const escriturasPromovidas: number[] = [];
   // Metodos NO representables descartados (FIX A): todos, para dejarlos en el log; y aparte los que
   // llevaban un dato DECLARADO del objetivo, que hay que verificar que otro paso cubra al final.
   const metodosDescartados: string[] = [];
   const datosNoRepresentablesSinCubrir: Array<{ metodo: string; parametro: MarcadorParametro }> = [];
+  // Todo rechazo posterior a esta linea viaja CON los metodos descartados hasta ese punto (FIX C):
+  // el log del job los emite tambien cuando la conversion aborta.
+  const rechazar = (motivo: string): PromocionRechazada => ({
+    promovida: false,
+    motivo,
+    ...(metodosDescartados.length > 0 ? { metodosDescartados } : {}),
+  });
   // Primero la adopcion (una escritura sin selector toma el localizador del adyacente), despues la
   // herencia de las pulsaciones (que copia las estrategias ya completas de la escritura previa) y al
   // final la destilacion: el orden importa, porque el donante puede ser justo un click que la
@@ -977,7 +1021,7 @@ export function promoverTrayectoria(entrada: {
   );
   for (const paso of descartarDesviosDeLaTrayectoria(preparados, valores)) {
     if (paso.exito === false) {
-      return { promovida: false, motivo: 'la trayectoria contiene un paso fallido' };
+      return rechazar('la trayectoria contiene un paso fallido');
     }
     const conversion = convertirPaso(paso, entrada.dominio, valores, pasos.length);
     if ('promovido' in conversion) {
@@ -985,8 +1029,7 @@ export function promoverTrayectoria(entrada: {
       pasos.push(conversion.promovido);
       continue;
     }
-    if (!conversion.omitible) return { promovida: false, motivo: conversion.motivo };
-    if (conversion.exigeCobertura === true) llenadosSinRegistro.push(paso.accion.tipo);
+    if (!conversion.omitible) return rechazar(conversion.motivo);
     if (conversion.clickSinLocalizacion === true) {
       clicksSinLocalizacion.push({ idx: paso.idx, descriptor: descriptorDePaso(paso) });
     }
@@ -1006,10 +1049,9 @@ export function promoverTrayectoria(entrada: {
   // propio (enviar, confirmar): la conversion falla nombrando el paso exacto.
   for (const click of clicksSinLocalizacion) {
     if (!escriturasPromovidas.some((idxEscritura) => idxEscritura > click.idx)) {
-      return {
-        promovida: false,
-        motivo: `el click del paso ${click.idx} (${click.descriptor}) quedo sin ninguna estrategia de localizacion y ninguna escritura posterior lo cubre`,
-      };
+      return rechazar(
+        `el click del paso ${click.idx} (${click.descriptor}) quedo sin ninguna estrategia de localizacion y ninguna escritura posterior lo cubre`,
+      );
     }
   }
   // COBERTURA del DATO de un metodo no representable (FIX A): un gesto o una tool desconocida se
@@ -1021,45 +1063,21 @@ export function promoverTrayectoria(entrada: {
     const cubiertos = new Set(marcadoresDeParametros(pasos));
     const perdido = datosNoRepresentablesSinCubrir.find((dato) => !cubiertos.has(dato.parametro));
     if (perdido !== undefined) {
-      return {
-        promovida: false,
-        motivo: `el paso con metodo ${perdido.metodo} llevaba el dato ${perdido.parametro} del objetivo y ningun otro paso lo cubre`,
-      };
-    }
-  }
-  // COBERTURA de un llenado de formulario sin registro de campos (TIPOS_LLENADO_DE_FORMULARIO): la
-  // cabecera descartada solo es inocua si cada dato que el objetivo declara termina tecleado por
-  // algun paso 'escribir' de la receta. Sin datos declarados no hay contra que verificar, asi que
-  // tampoco se puede afirmar que la receta repita lo aprendido: se rechaza con motivo especifico.
-  if (llenadosSinRegistro.length > 0) {
-    const tipoDeLlenado = llenadosSinRegistro[0] ?? 'fillForm';
-    const declarados = Object.keys(valores) as MarcadorParametro[];
-    if (declarados.length === 0) {
-      return {
-        promovida: false,
-        motivo: `paso ${tipoDeLlenado} de llenado sin campos registrados y el objetivo no declara datos con los que verificar la cobertura`,
-      };
-    }
-    const cubiertos = new Set(marcadoresDeParametros(pasos));
-    const faltantes = declarados.filter((parametro) => !cubiertos.has(parametro));
-    if (faltantes.length > 0) {
-      return {
-        promovida: false,
-        motivo: `paso ${tipoDeLlenado} de llenado sin campos registrados: ${faltantes.join(', ')} sin ningun otro paso que lo cubra`,
-      };
+      return rechazar(
+        `el paso con metodo ${perdido.metodo} llevaba el dato ${perdido.parametro} del objetivo y ningun otro paso lo cubre`,
+      );
     }
   }
   if (pasos.length === 0) {
-    return { promovida: false, motivo: 'la trayectoria no dejo ningun paso re-ejecutable' };
+    return rechazar('la trayectoria no dejo ningun paso re-ejecutable');
   }
   if (pasos.length > MAX_PASOS_RECETA) {
-    return { promovida: false, motivo: 'la trayectoria excede el tope de pasos de una receta' };
+    return rechazar('la trayectoria excede el tope de pasos de una receta');
   }
   if (entrada.exigeVerificacion && !tienePasoDeVerificacion(pasos)) {
-    return {
-      promovida: false,
-      motivo: 'el objetivo pide una accion irreversible y la trayectoria no dejo constancia de la verificacion',
-    };
+    return rechazar(
+      'el objetivo pide una accion irreversible y la trayectoria no dejo constancia de la verificacion',
+    );
   }
   return {
     promovida: true,
