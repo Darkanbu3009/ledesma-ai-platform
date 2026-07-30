@@ -223,6 +223,52 @@ describe('derivarEstrategiasDeDescripcion (FIX estrategias multiples, 28 jul 202
     ]);
   });
 
+  /**
+   * EL NOMBRE DERIVADO YA NO SE LLEVA LA COLA DE LA FRASE (FIX del 30 jul 2026). La forma 1 esta
+   * anclada a $, asi que con la descripcion real "click the Enviar button in the compose window"
+   * enganchaba `button` y tomaba como nombre todo lo que seguia: quedaba rol button "compose window"
+   * y texto "compose window", un localizador que no existe en la pagina. Ese es el par que quedo en
+   * el paso 6 de la receta eff5175f, que es el boton Enviar, y hacia que el paso escalara al modelo
+   * en cada ejecucion. Evaluar la forma 2 primero corta en la palabra de rol y devuelve "Enviar".
+   *
+   * Los siete casos van juntos a proposito: los cinco primeros son los que el cambio de orden no debe
+   * romper, y los dos ultimos son los que arregla.
+   */
+  it('el nombre se corta en la palabra de rol y no arrastra la cola de la frase', () => {
+    const derivar = (instruccion: string, metodo: string, argumentos: string[] = []) =>
+      derivarEstrategiasDeDescripcion({ tipo: 'act', instruccion, metodo, argumentos });
+
+    expect(derivar('click en Enviar', 'click')).toEqual([
+      { tipo: 'rol', rol: 'button', nombre: 'Enviar' },
+      { tipo: 'texto', texto: 'Enviar' },
+    ]);
+    // La forma 1 conserva su caso motivador: `textbox` abre la frase, asi que la forma 2 no tiene
+    // ningun nombre delante que capturar, y `box` dentro de `textbox` no tiene frontera de palabra.
+    expect(derivar('click the textbox Cuerpo del mensaje', 'click')).toEqual([
+      { tipo: 'rol', rol: 'textbox', nombre: 'Cuerpo del mensaje' },
+    ]);
+    expect(derivar('click the recipients field', 'click')).toEqual([
+      { tipo: 'rol', rol: 'textbox', nombre: 'recipients' },
+    ]);
+    expect(derivar('type X into the subject field', 'fill', ['X'])).toEqual([
+      { tipo: 'rol', rol: 'textbox', nombre: 'subject' },
+    ]);
+    expect(derivar('type the message into the body', 'type', ['hola'])).toEqual([
+      { tipo: 'rol', rol: 'textbox', nombre: 'message' },
+      { tipo: 'rol', rol: 'textbox', nombre: 'body' },
+    ]);
+    // Los dos casos reales que la forma 1 se llevaba enteros ("compose window" y "compose a new
+    // email"): el nombre del control esta ANTES de la palabra de rol.
+    expect(derivar('click the Enviar button in the compose window', 'click')).toEqual([
+      { tipo: 'rol', rol: 'button', nombre: 'Enviar' },
+      { tipo: 'texto', texto: 'Enviar' },
+    ]);
+    expect(derivar('click the Redactar button to compose a new email', 'click')).toEqual([
+      { tipo: 'rol', rol: 'button', nombre: 'Redactar' },
+      { tipo: 'texto', texto: 'Redactar' },
+    ]);
+  });
+
   it('sin instruccion, o con un metodo que no es click ni escritura, no deriva nada', () => {
     expect(
       derivarEstrategiasDeDescripcion({ tipo: 'act', instruccion: null, metodo: 'click', argumentos: [] }),
