@@ -203,6 +203,11 @@ function main(): void {
       // llamada y cuando se toma una captura de pantalla. Ninguna cambia lo que el agente decide.
       historialPasos: config.TAREA_WEB_HISTORIAL_PASOS,
       modoScreenshots: config.TAREA_WEB_SCREENSHOTS,
+      // BARRERA DE IDENTIDAD DEL ELEMENTO en MODO OBSERVACION por defecto
+      // (TAREA_WEB_BARRERA_IDENTIDAD): registra su veredicto en la trayectoria y no bloquea nada.
+      // Encenderla ('activa') es un cambio de una linea, y la medicion del modo observacion es lo que
+      // decide si conviene.
+      barreraIdentidad: config.TAREA_WEB_BARRERA_IDENTIDAD,
       runTimeoutMs: config.TAREA_WEB_TIMEOUT_SECONDS * 1000,
       resolveCredential: (ownerId, credentialId) =>
         resolveStoredCredential(credentialRepo, ownerId, credentialId, config.VAULT_SECRET),

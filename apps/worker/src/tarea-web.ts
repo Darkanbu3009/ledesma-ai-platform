@@ -78,6 +78,7 @@ import {
   type PistasDelAtlas,
   type VeredictoDeVerificacion,
 } from './ejecutor-receta.js';
+import type { ModoBarreraIdentidad } from './barrera-identidad.js';
 import {
   bloqueDelMapa,
   entradasDeCorridaLibre,
@@ -601,6 +602,11 @@ export interface TareaWebDeps {
   historialPasos: number;
   /** Cuando se toma una captura de pantalla durante la corrida (TAREA_WEB_SCREENSHOTS). */
   modoScreenshots: ModoScreenshots;
+  /**
+   * BARRERA DE IDENTIDAD DEL ELEMENTO (TAREA_WEB_BARRERA_IDENTIDAD, barrera-identidad.ts). Ausente =
+   * 'apagada': la barrera ni se evalua y la ejecucion por receta corre exactamente como antes.
+   */
+  barreraIdentidad?: ModoBarreraIdentidad | undefined;
   /** Deadline de pared de la tarea, en ms (TAREA_WEB_TIMEOUT_SECONDS * 1000). */
   runTimeoutMs: number;
   /** Resuelve y descifra la credencial del owner (la key del modelo sale de la boveda). */
@@ -1770,6 +1776,16 @@ async function ejecutarPorReceta(
     // ATLAS DE SITIOS (V040): pistas de localizacion para los pasos cuyas estrategias propias fallen.
     // Solo eso: encontrar un elemento. El paso `verificar` de arriba no lo recibe ni lo conoce.
     ...(opciones.atlas ? { atlas: opciones.atlas.pistas(sitio.dominio) } : {}),
+    // BARRERA DE IDENTIDAD DEL ELEMENTO (TAREA_WEB_BARRERA_IDENTIDAD): en 'observacion' (default del
+    // env) solo registra su veredicto en la trayectoria y el desenlace de la receta es identico al de
+    // hoy. Recibe el verbo del OBJETIVO DEL USUARIO -- el unico dato que no redacta ningun modelo --
+    // y las clases que el atlas tiene corroboradas para el dominio, que ya estan en memoria.
+    barreraIdentidad: {
+      modo: deps.barreraIdentidad ?? 'apagada',
+      verboDelObjetivo: opciones.verboBloqueado,
+      clasesCorroboradas: (dominio: string): ReadonlySet<string> =>
+        opciones.atlas?.clasesCorroboradas(dominio) ?? new Set<string>(),
+    },
     signal: opciones.control?.signal,
   });
 
@@ -2065,6 +2081,12 @@ interface LectorDelAtlas {
   entradasDe(dominio: string): EntradaConocida[];
   /** Puerto sincrono para el ejecutor de recetas. `dominioBase` es el de los pasos sin dominio propio. */
   pistas(dominioBase: string): PistasDelAtlas;
+  /**
+   * Las CLASES DE ELEMENTO que este dominio tiene corroboradas, para la barrera de identidad. Es una
+   * vista de lo que `entradasDe` ya trae en memoria (esServible ya aplicado): no lee la base ni abre
+   * nada, y por eso puede consultarse a mitad de un paso.
+   */
+  clasesCorroboradas(dominio: string): ReadonlySet<string>;
 }
 
 async function crearLectorDelAtlas(
@@ -2094,6 +2116,8 @@ async function crearLectorDelAtlas(
     pistas: (dominioBase: string): PistasDelAtlas => ({
       pistasParaPaso: (paso) => pistasParaPaso(paso, entradasDe(paso.dominio ?? dominioBase)),
     }),
+    clasesCorroboradas: (dominio: string): ReadonlySet<string> =>
+      new Set(entradasDe(dominio).map((entrada) => entrada.claseDeElemento)),
   };
 }
 
