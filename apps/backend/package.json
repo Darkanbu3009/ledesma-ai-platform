@@ -35,6 +35,10 @@
     "./aprendizaje-sitios": {
       "types": "./dist/aprendizaje-sitios/index.d.ts",
       "import": "./dist/aprendizaje-sitios/index.js"
+    },
+    "./plantillas-compartidas": {
+      "types": "./dist/plantillas-compartidas/index.d.ts",
+      "import": "./dist/plantillas-compartidas/index.js"
     }
   },
   "scripts": {

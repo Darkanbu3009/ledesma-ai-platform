@@ -85,6 +85,7 @@ import {
   entradasDeCorridaPorReceta,
   entradasServibles,
   hashDeOrigen,
+  ORIGENES_PARA_COMPARTIR,
   pasosConEstrategiasPercibidas,
   pistasParaPaso,
   resumenDeCorridaLibre,
@@ -92,6 +93,11 @@ import {
   type EntradaConocida,
   type EntradaDeAtlas,
 } from './atlas-sitios.js';
+import {
+  hashDeOrigenDePlantilla,
+  plantillaDeLaCorrida,
+  type PlantillaDeLaCorrida,
+} from './plantillas-compartidas.js';
 import {
   aplicarPromociones,
   evaluarPromociones,
@@ -523,6 +529,25 @@ export interface RepositorioAtlasParaWorker {
   }): Promise<void>;
 }
 
+/**
+ * Subconjunto del PlantillasCompartidasRepository (V041) que la tarea web usa: UN metodo, y solo
+ * escribe. Puerto propio con el mismo criterio que el del atlas: para que los tests pasen fakes sin
+ * base y para que quede a la vista lo unico que este handler puede hacerle a la tabla.
+ *
+ * LO QUE NO HAY AQUI, y es el punto: ningun metodo que LEA una plantilla. La publicacion llena la
+ * tabla y nadie la sirve todavia; el consumo es un cambio aparte y va a necesitar su propio puerto.
+ * Tampoco hay ningun parametro de owner, de firma, de descripcion ni de valores: una plantilla no
+ * tiene dueno y la tabla no tiene esas columnas (ver V041).
+ */
+export interface RepositorioPlantillasParaWorker {
+  publicar(plantilla: {
+    dominiosClave: string;
+    codigoDeIntencion: string;
+    pasos: unknown;
+    origenHash: string;
+  }): Promise<{ publicada: boolean; motivo?: string }>;
+}
+
 /** Dependencias del job de tarea web. index.ts cablea las reales; los tests pasan fakes. */
 export interface TareaWebDeps {
   repo: RepositorioSitiosParaTarea;
@@ -579,6 +604,19 @@ export interface TareaWebDeps {
    * exactamente como antes de V040.
    */
   atlas?: { repo: RepositorioAtlasParaWorker; clave: string } | undefined;
+  /**
+   * PLANTILLAS COMPARTIDAS (V041): la publicacion ANONIMA del procedimiento de una tarea de intencion
+   * irreversible que el propio origen acaba de aprender. Va con su CLAVE HMAC propia
+   * (`clavePlantillas`, plantillas-compartidas.ts), DISTINTA de la del atlas para que los dos hashes
+   * del mismo owner sean incomparables; las dos juntas o ninguna, porque sin clave no hay con que
+   * contar origenes.
+   *
+   * OPCIONAL con el mismo criterio que `atlas` y `recetas`: sin la migracion aplicada el worker corre
+   * igual, no publica nada y las tareas se comportan exactamente como antes de V041.
+   *
+   * SOLO ESCRIBE. Nada en este handler lee una plantilla ajena.
+   */
+  plantillas?: { repo: RepositorioPlantillasParaWorker; clave: string } | undefined;
   /**
    * OBSERVADOR DE PASOS (TAREA_WEB_OBSERVADOR_PASOS): apagado por defecto. Encendido, cada accion
    * CON ELEMENTO RESUELTO abre una conexion CDP para leer del DOM sus estrategias de localizacion
@@ -2023,6 +2061,7 @@ async function promoverRecetaBestEffort(
   pasos: PasoCensurado[],
   verboBloqueado: string | null,
   dominios: readonly string[],
+  atlas: LectorDelAtlas | null,
 ): Promise<void> {
   const recetas = deps.recetas;
   if (!recetas || !deps.determinista || !deps.escalador) return;
@@ -2061,7 +2100,109 @@ async function promoverRecetaBestEffort(
       jobId: job.id,
       err: describir(error),
     });
+    // La receta PROPIA no se guardo, asi que no hay nada corroborado que compartir: se sale sin
+    // publicar. Publicar aqui compartiria un procedimiento que ni su propio origen conservo.
+    return;
   }
+  // PLANTILLAS COMPARTIDAS (V041): la receta propia quedo guardada, asi que el procedimiento existe y
+  // le sirvio a alguien. Ahora, y solo si la tarea pedia una accion irreversible, se publica su
+  // version ANONIMA. Va DESPUES de la promocion y NUNCA antes: lo que se comparte es lo que el propio
+  // origen conservo para si.
+  await publicarPlantillaBestEffort(deps, job, {
+    pasos: promocion.pasos,
+    dominio: sitio.dominio,
+    dominios,
+    verboBloqueado,
+    clasesCorroboradas: atlas?.clasesParaPublicar(sitio.dominio) ?? new Set<string>(),
+  });
+}
+
+/**
+ * PUBLICA la version ANONIMA de una receta recien aprendida en `plantillas_compartidas` (V041).
+ *
+ * QUE VIAJA: el conjunto de dominios, el codigo de intencion, los pasos ya filtrados y un HASH de
+ * origen. QUE NO VIAJA: el owner, la firma, el objetivo, la descripcion, los valores, los xpath, las
+ * rutas y los ids. No es que no se manden: `esPublicable` (packages/shared) rechaza la plantilla
+ * ENTERA si alguno de ellos aparece, el puerto no tiene parametro para ellos y la tabla no tiene
+ * columna donde ponerlos.
+ *
+ * LA PRIMERA DE LAS DOS PUERTAS. `plantillaDeLaCorrida` corre `esPublicable` aqui, en el worker, antes
+ * de mandar nada; el repositorio del backend la vuelve a correr antes del insert. Cinturon y tirantes:
+ * la del worker es la que tiene el atlas en memoria y evita el viaje, la del backend es la que sigue
+ * en pie si un dia escribe otro productor.
+ *
+ * BEST-EFFORT TOTAL, y es una linea roja: el desenlace del job YA esta decidido cuando se llama a
+ * esto. Cualquier fallo se loguea aqui adentro y no se propaga -- ni el de la puerta, ni el de la
+ * base, ni el de un puerto mal cableado. Compartir es una mejora para la proxima persona, jamas parte
+ * del desenlace de la tarea de esta.
+ */
+async function publicarPlantillaBestEffort(
+  deps: TareaWebDeps,
+  job: Job,
+  entrada: {
+    pasos: readonly PasoDeReceta[];
+    dominio: string;
+    dominios: readonly string[];
+    verboBloqueado: string | null;
+    clasesCorroboradas: ReadonlySet<string>;
+  },
+): Promise<void> {
+  const plantillas = deps.plantillas;
+  if (plantillas === undefined) return;
+  try {
+    const veredicto = plantillaDeLaCorrida(entrada);
+    if (!veredicto.publicable) {
+      // Con `sin_intencion_irreversible` no hay nada que reportar como anomalia: es la mitad de las
+      // tareas y es la decision de diseno de V041, no un fallo.
+      const nivel = veredicto.motivo === 'sin_intencion_irreversible' ? 'debug' : 'info';
+      deps.logger[nivel]('tarea web: la corrida no se pudo compartir como plantilla', {
+        jobId: job.id,
+        dominio: entrada.dominio,
+        motivo: veredicto.motivo,
+        paso: veredicto.idx,
+        clasesCorroboradas: entrada.clasesCorroboradas.size,
+      });
+      return;
+    }
+    await publicar(deps, job, plantillas, veredicto.plantilla);
+  } catch (error) {
+    deps.logger.warn('tarea web: no se pudo compartir la plantilla (se ignora, best-effort)', {
+      jobId: job.id,
+      err: describir(error),
+    });
+  }
+}
+
+/** El upsert anonimo y su log. Separado para que la funcion de arriba se lea como sus dos puertas. */
+async function publicar(
+  deps: TareaWebDeps,
+  job: Job,
+  plantillas: { repo: RepositorioPlantillasParaWorker; clave: string },
+  plantilla: PlantillaDeLaCorrida,
+): Promise<void> {
+  const resultado = await plantillas.repo.publicar({
+    dominiosClave: plantilla.dominiosClave,
+    codigoDeIntencion: plantilla.codigoDeIntencion,
+    pasos: plantilla.pasos,
+    // El HASH del origen de ESTA corrida, con la clave de plantillas: incomparable con el del atlas
+    // para el mismo owner, que es lo que impide unir las dos tablas globales por el hash.
+    origenHash: hashDeOrigenDePlantilla(job.ownerId, plantillas.clave),
+  });
+  if (!resultado.publicada) {
+    // La SEGUNDA puerta rechazo. Si pasa, es un bug de la primera: se loguea con su motivo exacto.
+    deps.logger.warn('tarea web: el backend rechazo la plantilla (se ignora, best-effort)', {
+      jobId: job.id,
+      motivo: resultado.motivo ?? null,
+    });
+    return;
+  }
+  deps.logger.info('tarea web: el procedimiento de la corrida quedo compartido como plantilla', {
+    jobId: job.id,
+    dominios: plantilla.dominiosClave,
+    intencion: plantilla.codigoDeIntencion,
+    marcadores: plantilla.marcadoresClave,
+    pasos: plantilla.pasos.length,
+  });
 }
 
 /**
@@ -2087,6 +2228,17 @@ interface LectorDelAtlas {
    * nada, y por eso puede consultarse a mitad de un paso.
    */
   clasesCorroboradas(dominio: string): ReadonlySet<string>;
+  /**
+   * Las clases que este dominio tiene avaladas por VARIOS ORIGENES INDEPENDIENTES, sin el atajo del
+   * propio origen que `clasesCorroboradas` si concede. Es lo que autoriza a PUBLICAR una plantilla
+   * (V041), y el umbral es mas duro a proposito: en la barrera de identidad la clase solo se COMPARA
+   * contra el DOM del propio usuario, mientras que en una plantilla la clase acaba ESCRITA en una
+   * tabla global, dentro del nombre de sus ranuras. Publicarla con un solo origen revelaria un nombre
+   * accesible con menos aval del que el propio atlas exige para servirlo.
+   *
+   * Es otra vista de lo que `entradasDe` ya trae en memoria: no lee la base ni abre nada.
+   */
+  clasesParaPublicar(dominio: string): ReadonlySet<string>;
 }
 
 async function crearLectorDelAtlas(
@@ -2118,6 +2270,12 @@ async function crearLectorDelAtlas(
     }),
     clasesCorroboradas: (dominio: string): ReadonlySet<string> =>
       new Set(entradasDe(dominio).map((entrada) => entrada.claseDeElemento)),
+    clasesParaPublicar: (dominio: string): ReadonlySet<string> =>
+      new Set(
+        entradasDe(dominio)
+          .filter((entrada) => entrada.origenesHash.length >= ORIGENES_PARA_COMPARTIR)
+          .map((entrada) => entrada.claseDeElemento),
+      ),
   };
 }
 
@@ -2760,6 +2918,9 @@ export async function procesarTareaWeb(
       pasosDelJob,
       verboBloqueado,
       dominiosAutorizados,
+      // PLANTILLAS COMPARTIDAS (V041): el lector del atlas ya esta en memoria y es de donde salen las
+      // clases avaladas por varios origenes, que es lo unico que autoriza a publicar una plantilla.
+      atlas,
     );
     // ATLAS DE SITIOS (V040): esta corrida llego hasta aqui, o sea que salio bien Y -- si pedia una
     // accion irreversible -- su efecto quedo CONFIRMADO (los dos cortes de arriba). Sus pasos
