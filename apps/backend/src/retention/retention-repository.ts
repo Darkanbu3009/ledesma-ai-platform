@@ -11,7 +11,7 @@ import { cutoffIso, DEFAULT_RETENTION_POLICY, type RetentionPolicy } from './ret
  * via cron pg_cron opt-in (V016). Reusa el mismo cliente/pool que el resto del backend.
  *
  * El derecho de ERASURE (ARCO/GDPR) ya NO vive aqui: se movio al MOTOR DE BORRADO ATOMICO
- * (account/account-deletion-repository.ts), que cubre las 16 tablas en UNA transaccion (superconjunto
+ * (account/account-deletion-repository.ts), que cubre las 22 tablas en UNA transaccion (superconjunto
  * atomico del viejo eraseOwnerOperationalData, que borraba 6 tablas sueltas -> hallazgo H-01 auditoria 8).
  * Esta clase conserva SOLO la purga periodica conservadora por retencion.
  */

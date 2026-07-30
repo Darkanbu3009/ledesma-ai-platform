@@ -11,7 +11,10 @@ import { ConsentRepository } from '../privacy/consent-repository.js';
 import { ProcessingRecordRepository } from '../privacy/processing-record-repository.js';
 import { RegistrationRepository } from '../registration/registration-repository.js';
 import { AccountDeletionRepository } from '../account/account-deletion-repository.js';
-import { createSupabaseAuthUserDeleter } from '../account/supabase-admin.js';
+import {
+  createSupabaseAuthUserDeleter,
+  createSupabaseScreenshotDeleter,
+} from '../account/supabase-admin.js';
 import { deleteAccount, type DeleteAccountResult } from '../account/account-deletion-service.js';
 
 const MAX_DETAILS_CHARS = 5_000;
@@ -52,7 +55,7 @@ export interface AccountDeletionService {
  *    tratamiento) como JSON. La resolucion del resto de tipos es manual (admin).
  *  - POST /v1/admin/data-requests/:id/resolve: super-admin resuelve una solicitud. Con `erase` sobre una
  *    de tipo 'erasure', dispara el MOTOR DE BORRADO ATOMICO (account-deletion): borra/anonimiza TODOS los
- *    datos del titular (las 16 tablas) en UNA transaccion -- arreglando el hallazgo H-01 de la auditoria 8
+ *    datos del titular (las 22 tablas) en UNA transaccion -- arreglando el hallazgo H-01 de la auditoria 8
  *    (antes: 6 DELETE sueltos no atomicos + updateStatus como dos awaits separados). Con `delete_auth_user`
  *    ademas borra la identidad (auth.users). Sin `erase`, resolver solo cambia estado.
  *
@@ -87,6 +90,7 @@ export function dataSubjectRequestRoutes(
       (() => {
         const accountRepo = new AccountDeletionRepository(getSql(config));
         const authDeleter = createSupabaseAuthUserDeleter(config);
+        const screenshotDeleter = createSupabaseScreenshotDeleter(config);
         return {
           deleteAccount: (ownerId, opts) =>
             deleteAccount({
@@ -94,6 +98,7 @@ export function dataSubjectRequestRoutes(
               deleteAuthUser: opts.deleteAuthUser,
               repo: accountRepo,
               authDeleter,
+              screenshotDeleter,
               logger: app.log,
             }),
         };
