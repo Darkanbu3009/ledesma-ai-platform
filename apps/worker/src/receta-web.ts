@@ -417,7 +417,17 @@ function valorDePaso(texto: string, valores: ValoresDeParametros): ValorDePaso |
  */
 type Conversion =
   | { promovido: PasoDeReceta }
-  | { omitible: true; exigeCobertura?: boolean; clickSinLocalizacion?: boolean }
+  | {
+      omitible: true;
+      exigeCobertura?: boolean;
+      clickSinLocalizacion?: boolean;
+      /**
+       * Metodo NO REPRESENTABLE descartado (FIX A): su nombre, para el log de fail-open, y -- solo si
+       * el paso llevaba un DATO DECLARADO del objetivo -- el parametro que otro paso tiene que cubrir
+       * para que descartarlo no le quite nada a la receta.
+       */
+      noRepresentable?: { metodo: string; parametro: MarcadorParametro | null };
+    }
   | { omitible: false; motivo: string };
 
 /** Estrategias del paso que la receta puede usar: ordenadas y sin las que dependen del valor (D8). */
@@ -732,6 +742,24 @@ function rutaDelPaso(url: string | null, dominio: string): string | null {
   }
 }
 
+/**
+ * CATEGORIA de metodo NO REPRESENTABLE (FIX A, cuarta incidencia de la misma clase: antes rompieron
+ * fillFormVision, press y los clicks de foco sin selector; ahora clickAndHold). El ejecutor
+ * determinista no sabe repetir un gesto de enfoque o ajuste (un clickAndHold, un scroll suelto), un
+ * select de combo nativo, un arrastre, ni una tool DESCONOCIDA de una version futura de Stagehand.
+ * NINGUNO aborta por si mismo: la conversion solo se cae cuando el paso lleva un DATO DECLARADO del
+ * objetivo que ningun otro paso cubre (descartarlo perderia ese dato). Sin dato declarado el paso se
+ * DESCARTA en silencio, fail-open: publicar la receta sin ese gesto es mejor que rechazar una corrida
+ * exitosa por una tool que solo servia para pelear con el foco, o por una tool que todavia no existia
+ * cuando se escribio este conversor. La cobertura del dato la verifica promoverTrayectoria al final,
+ * con la misma mecanica condicionada que ya usan los clicks de foco y los llenados de formulario.
+ */
+function conversionNoRepresentable(paso: PasoCensurado, valores: ValoresDeParametros): Conversion {
+  const texto = paso.accion.argumentos.join(' ').trim();
+  const parametro = texto === '' ? null : marcadorDelValor(texto, valores);
+  return { omitible: true, noRepresentable: { metodo: paso.accion.metodo ?? paso.accion.tipo, parametro } };
+}
+
 function convertirPaso(
   paso: PasoCensurado,
   dominioDeLaReceta: string,
@@ -837,10 +865,10 @@ function convertirPaso(
         motivo: `paso ${paso.idx}: ${descriptorDePaso(paso)}, sin estrategia y sin paso adyacente que cubra el campo`,
       };
     }
-    return {
-      omitible: false,
-      motivo: `paso ${paso.idx}: ${descriptorDePaso(paso)}, sin ninguna estrategia de localizacion`,
-    };
+    // NO es un click de foco ni una escritura: sin estrategias, es un gesto no representable (un
+    // clickAndHold, una tool desconocida). No aborta, se descarta salvo que lleve un dato declarado
+    // sin cubrir (FIX A, ver conversionNoRepresentable).
+    return conversionNoRepresentable(paso, valores);
   }
 
   // ESCRITURA DECLARADA POR UN ACT DE VISION (FIX paso 16): sin metodo ni argumentos, el texto
@@ -864,8 +892,11 @@ function convertirPaso(
   }
 
   const accion = paso.accion.metodo === null ? undefined : ACCION_POR_METODO[paso.accion.metodo];
+  // METODO NO REPRESENTABLE con localizacion (un select nativo, un arrastre): el ejecutor no tiene
+  // primitiva para el, asi que no se promueve. Mismo criterio que el gesto sin estrategias: se
+  // descarta salvo que lleve un dato declarado del objetivo que ningun otro paso cubra (FIX A).
   if (accion === undefined) {
-    return { omitible: false, motivo: `metodo no re-ejecutable: ${paso.accion.metodo ?? 'ninguno'}` };
+    return conversionNoRepresentable(paso, valores);
   }
   if (accion === 'click') {
     return { promovido: { ...base, accion: 'click', estrategias } };
@@ -889,6 +920,13 @@ export interface PromocionRechazada {
 export interface PromocionAceptada {
   promovida: true;
   pasos: PasoDeReceta[];
+  /**
+   * Nombres de los metodos NO representables que se descartaron sin abortar (FIX A). Ausente si no
+   * hubo ninguno. Este modulo es PURO y no escribe log: lo loguea el llamador impuro
+   * (procesarJobDePromoverTrayectoria) para dejar rastro del gesto o de la tool desconocida que se
+   * omitio, que es lo que pide la politica de fail-open.
+   */
+  metodosDescartados?: string[];
 }
 
 export type ResultadoDePromocion = PromocionAceptada | PromocionRechazada;
@@ -925,6 +963,10 @@ export function promoverTrayectoria(entrada: {
   const llenadosSinRegistro: string[] = [];
   const clicksSinLocalizacion: Array<{ idx: number; descriptor: string }> = [];
   const escriturasPromovidas: number[] = [];
+  // Metodos NO representables descartados (FIX A): todos, para dejarlos en el log; y aparte los que
+  // llevaban un dato DECLARADO del objetivo, que hay que verificar que otro paso cubra al final.
+  const metodosDescartados: string[] = [];
+  const datosNoRepresentablesSinCubrir: Array<{ metodo: string; parametro: MarcadorParametro }> = [];
   // Primero la adopcion (una escritura sin selector toma el localizador del adyacente), despues la
   // herencia de las pulsaciones (que copia las estrategias ya completas de la escritura previa) y al
   // final la destilacion: el orden importa, porque el donante puede ser justo un click que la
@@ -948,6 +990,15 @@ export function promoverTrayectoria(entrada: {
     if (conversion.clickSinLocalizacion === true) {
       clicksSinLocalizacion.push({ idx: paso.idx, descriptor: descriptorDePaso(paso) });
     }
+    if (conversion.noRepresentable !== undefined) {
+      metodosDescartados.push(conversion.noRepresentable.metodo);
+      if (conversion.noRepresentable.parametro !== null) {
+        datosNoRepresentablesSinCubrir.push({
+          metodo: conversion.noRepresentable.metodo,
+          parametro: conversion.noRepresentable.parametro,
+        });
+      }
+    }
   }
   // COBERTURA de un click de foco descartado (convertirPaso): solo es inocuo si una ESCRITURA
   // POSTERIOR con estrategias lo cubre (el ejecutor enfoca el localizador de esa escritura antes de
@@ -958,6 +1009,21 @@ export function promoverTrayectoria(entrada: {
       return {
         promovida: false,
         motivo: `el click del paso ${click.idx} (${click.descriptor}) quedo sin ninguna estrategia de localizacion y ninguna escritura posterior lo cubre`,
+      };
+    }
+  }
+  // COBERTURA del DATO de un metodo no representable (FIX A): un gesto o una tool desconocida se
+  // descarta sin abortar, PERO si llevaba un dato declarado del objetivo (un select que fijaba el
+  // monto, por ejemplo) descartarlo lo perderia. Solo entonces la conversion se cae, y con la misma
+  // regla condicionada que los clicks de foco: es inocuo si algun paso 'escribir' de la receta teclea
+  // ese mismo dato. Un gesto sin dato (clickAndHold, scroll) jamas entra aca.
+  if (datosNoRepresentablesSinCubrir.length > 0) {
+    const cubiertos = new Set(marcadoresDeParametros(pasos));
+    const perdido = datosNoRepresentablesSinCubrir.find((dato) => !cubiertos.has(dato.parametro));
+    if (perdido !== undefined) {
+      return {
+        promovida: false,
+        motivo: `el paso con metodo ${perdido.metodo} llevaba el dato ${perdido.parametro} del objetivo y ningun otro paso lo cubre`,
       };
     }
   }
@@ -995,7 +1061,11 @@ export function promoverTrayectoria(entrada: {
       motivo: 'el objetivo pide una accion irreversible y la trayectoria no dejo constancia de la verificacion',
     };
   }
-  return { promovida: true, pasos };
+  return {
+    promovida: true,
+    pasos,
+    ...(metodosDescartados.length > 0 ? { metodosDescartados } : {}),
+  };
 }
 
 /**

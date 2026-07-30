@@ -221,7 +221,11 @@ describe('promoverTrayectoria (D4: cuando una corrida se vuelve repetible)', () 
     expect(resultado.motivo).toContain('sin ninguna estrategia de localizacion');
   });
 
-  it('un click sin estrategias pero CON dato no es un click de foco: bloquea nombrando el paso', () => {
+  it('un click sin estrategias con un dato que el objetivo NO declara se descarta, no aborta', () => {
+    // Politica de metodos no representables (FIX A): un click sin localizador no se puede repetir,
+    // pero si el dato que lleva no es un dato DECLARADO del objetivo, descartarlo no le quita nada a
+    // la receta. Antes abortaba la conversion entera; ahora se descarta y la escritura posterior
+    // queda. La conversion solo se cae cuando el dato perdido si era del objetivo (ver mas abajo).
     const resultado = promover(
       [
         paso({ accion: { tipo: 'act', instruccion: null, metodo: 'click', argumentos: ['opcion 3'] }, estrategias: [], selector: null }),
@@ -233,11 +237,10 @@ describe('promoverTrayectoria (D4: cuando una corrida se vuelve repetible)', () 
       ],
       'abre el ultimo correo',
     );
-    expect(resultado.promovida).toBe(false);
-    if (resultado.promovida) return;
-    // FIX B: el motivo nombra indice y descripcion del paso, conservando la frase estable.
-    expect(resultado.motivo).toContain('paso 0');
-    expect(resultado.motivo).toContain('sin ninguna estrategia de localizacion');
+    expect(resultado.promovida).toBe(true);
+    if (!resultado.promovida) return;
+    expect(resultado.pasos.map((p) => p.accion)).toEqual(['escribir']);
+    expect(resultado.metodosDescartados).toContain('click');
   });
 
   it('un act SIN metodo registrado (resuelto por vision) tambien cuenta como click de foco', () => {
@@ -343,12 +346,16 @@ describe('promoverTrayectoria (D4: cuando una corrida se vuelve repetible)', () 
     expect(resultado.pasos[0]?.idx).toBe(0);
   });
 
-  it('un metodo que el ejecutor no sabe repetir (selectOption) invalida la receta', () => {
+  it('un metodo que el ejecutor no sabe repetir (selectOption) sin dato del objetivo se descarta', () => {
+    // FIX A: el selectOption ya no aborta por si mismo. Sin ningun dato declarado del objetivo se
+    // descarta, y como era el unico paso la receta queda vacia y no se promueve por eso.
     const resultado = promover(
       [paso({ accion: { tipo: 'act', instruccion: null, metodo: 'selectOption', argumentos: ['a'] } })],
       'abre el correo',
     );
     expect(resultado.promovida).toBe(false);
+    if (resultado.promovida) return;
+    expect(resultado.motivo).toContain('ningun paso re-ejecutable');
   });
 
   it('una navegacion FUERA del dominio de la conexion invalida la receta', () => {
@@ -408,6 +415,155 @@ describe('promoverTrayectoria (D4: cuando una corrida se vuelve repetible)', () 
     expect(resultado.promovida).toBe(false);
     if (resultado.promovida) return;
     expect(resultado.motivo).toContain('verificacion');
+  });
+});
+
+/**
+ * METODOS NO REPRESENTABLES (FIX A): cerrar la CATEGORIA para que ninguna tool futura vuelva a abortar
+ * una conversion. Un gesto de enfoque o ajuste (clickAndHold, scroll), un select nativo o una tool
+ * DESCONOCIDA de una version futura de Stagehand se DESCARTA en silencio (fail-open); la conversion
+ * solo aborta cuando el paso llevaba un dato DECLARADO del objetivo que ningun otro paso cubre.
+ */
+describe('promoverTrayectoria con metodos no representables (FIX A)', () => {
+  const ROL_COMPOSE: EstrategiaLocalizacion = { tipo: 'rol', rol: 'button', nombre: 'Redactar' };
+  const ROL_SEND: EstrategiaLocalizacion = { tipo: 'rol', rol: 'button', nombre: 'Enviar' };
+  const ATRIBUTO_TO: EstrategiaLocalizacion = { tipo: 'atributo', atributo: 'aria-label', valor: 'Para' };
+  const ATRIBUTO_SUBJ: EstrategiaLocalizacion = { tipo: 'atributo', atributo: 'aria-label', valor: 'Asunto' };
+  const ATRIBUTO_BODY: EstrategiaLocalizacion = { tipo: 'atributo', atributo: 'aria-label', valor: 'Cuerpo del mensaje' };
+  const ATRIBUTO_FS: EstrategiaLocalizacion = { tipo: 'atributo', atributo: 'aria-label', valor: 'Pantalla completa' };
+
+  /** Un click de enfoque sobre el cuerpo, sin localizador (Stagehand lo resolvio por vision). */
+  const focoCuerpo = (idx: number, metodo: string | null = 'click'): PasoCensurado =>
+    paso({
+      idx,
+      accion: { tipo: 'act', instruccion: 'click the message body area', metodo, argumentos: [] },
+      estrategias: [],
+      selector: null,
+    });
+
+  it('convierte COMPLETA la corrida real (28 pasos, clickAndHold en la posicion 22, 13 focos)', () => {
+    // Corrida del 30 jul 06:14 UTC: envio de correo exitoso que el conversor rechazaba por el
+    // clickAndHold del paso 22. Debe convertir entera, sin rastro del gesto ni de los clicks de
+    // enfoque redundantes sobre el cuerpo, produciendo una receta de 6 a 10 pasos.
+    const OBJETIVO_CORREO =
+      'Enviar un correo electronico a omar.ledesm91@gmail.com con el asunto "Trayectoria fresca" y ' +
+      'el siguiente cuerpo del mensaje "Este correo lo envio el sistema". La tarea termina cuando el ' +
+      'correo haya sido enviado exitosamente.';
+
+    const pasosCorrida: PasoCensurado[] = [
+      // navegar al correo
+      paso({ idx: 0, accion: { tipo: 'goto', instruccion: null, metodo: null, argumentos: [] }, estrategias: [], selector: null, url: `https://${DOMINIO}/mail` }),
+      // exploracion: el motor mira, no actua
+      paso({ idx: 1, accion: { tipo: 'screenshot', instruccion: null, metodo: null, argumentos: [] }, estrategias: [], selector: null }),
+      paso({ idx: 2, accion: { tipo: 'ariaTree', instruccion: null, metodo: null, argumentos: [] }, estrategias: [], selector: null }),
+      // abrir el redactor
+      paso({ idx: 3, accion: { tipo: 'act', instruccion: 'click the Compose button', metodo: 'click', argumentos: [] }, estrategias: [ROL_COMPOSE, XPATH], selector: '/html/body/div/div[3]' }),
+      paso({ idx: 4, accion: { tipo: 'think', instruccion: null, metodo: null, argumentos: [] }, estrategias: [], selector: null }),
+      // foco del destinatario (redundante: lo cubre la escritura siguiente)
+      paso({ idx: 5, accion: { tipo: 'act', instruccion: 'click the recipients field', metodo: 'click', argumentos: [] }, estrategias: [], selector: null }),
+      // escribir destinatario
+      paso({ idx: 6, accion: { tipo: 'act', instruccion: 'type the recipient', metodo: 'fill', argumentos: ['omar.ledesm91@gmail.com'] }, estrategias: [ATRIBUTO_TO, XPATH], selector: '/html/body/div/form/input[1]' }),
+      paso({ idx: 7, accion: { tipo: 'extract', instruccion: null, metodo: null, argumentos: [] }, estrategias: [], selector: null }),
+      // foco del asunto (redundante)
+      paso({ idx: 8, accion: { tipo: 'act', instruccion: 'click the subject field', metodo: 'click', argumentos: [] }, estrategias: [], selector: null }),
+      // escribir asunto
+      paso({ idx: 9, accion: { tipo: 'act', instruccion: 'type the subject', metodo: 'fill', argumentos: ['Trayectoria fresca'] }, estrategias: [ATRIBUTO_SUBJ, XPATH], selector: '/html/body/div/form/input[2]' }),
+      // control de cabecera del compose (pantalla completa): conmuta la vista, no acerca al objetivo
+      paso({ idx: 10, accion: { tipo: 'act', instruccion: 'click the full screen button', metodo: 'click', argumentos: [] }, estrategias: [ATRIBUTO_FS, XPATH], selector: '/html/body/div/div[9]' }),
+      // pelea por enfocar el cuerpo: trece clicks de enfoque, con un clickAndHold en el medio
+      focoCuerpo(11), focoCuerpo(12), focoCuerpo(13), focoCuerpo(14, null), focoCuerpo(15),
+      focoCuerpo(16), focoCuerpo(17), focoCuerpo(18), focoCuerpo(19), focoCuerpo(20),
+      // POSICION 22 (idx 21): clickAndHold sin selector y sin dato, el gesto que abortaba la conversion
+      paso({ idx: 21, accion: { tipo: 'clickAndHold', instruccion: 'click and hold on the message body', metodo: null, argumentos: [] }, estrategias: [], selector: null }),
+      focoCuerpo(22), focoCuerpo(23), focoCuerpo(24),
+      // escribir el cuerpo (cubre todos los clicks de enfoque anteriores sobre el mismo campo)
+      paso({ idx: 25, accion: { tipo: 'act', instruccion: 'type the message into the body', metodo: 'fill', argumentos: ['Este correo lo envio el sistema'] }, estrategias: [ATRIBUTO_BODY, XPATH], selector: '/html/body/div/form/div[1]' }),
+      // verificacion determinista antes del envio irreversible
+      paso({ idx: 26, accion: { tipo: 'verificacion', instruccion: 'ok', metodo: null, argumentos: [] }, estrategias: [], selector: null }),
+      // enviar
+      paso({ idx: 27, accion: { tipo: 'act', instruccion: 'click the Send button', metodo: 'click', argumentos: [] }, estrategias: [ROL_SEND, XPATH], selector: '/html/body/div/form/div[2]' }),
+    ];
+
+    expect(pasosCorrida).toHaveLength(28);
+
+    const resultado = promover(pasosCorrida, OBJETIVO_CORREO, 'exitosa', true);
+    expect(resultado.promovida).toBe(true);
+    if (!resultado.promovida) return;
+
+    // La receta queda dentro del rango pedido (6 a 10 pasos), en este caso exactamente 7.
+    expect(resultado.pasos.length).toBeGreaterThanOrEqual(6);
+    expect(resultado.pasos.length).toBeLessThanOrEqual(10);
+    expect(resultado.pasos).toHaveLength(7);
+    expect(resultado.pasos.map((p) => p.accion)).toEqual([
+      'navegar', 'click', 'escribir', 'escribir', 'escribir', 'verificar', 'click',
+    ]);
+
+    // Ni rastro del clickAndHold ni de los clicks de enfoque redundantes sobre el cuerpo.
+    expect(JSON.stringify(resultado.pasos)).not.toContain('clickAndHold');
+    expect(JSON.stringify(resultado.pasos)).not.toContain('message body area');
+
+    // Los tres datos del objetivo viajan como marcadores, nunca como valor literal (D8).
+    expect(resultado.pasos.filter((p) => p.accion === 'escribir').map((p) => p.valor)).toEqual([
+      { tipo: 'parametro', parametro: 'destinatario' },
+      { tipo: 'parametro', parametro: 'asunto' },
+      { tipo: 'parametro', parametro: 'cuerpo' },
+    ]);
+    expect(JSON.stringify(resultado.pasos)).not.toContain('omar.ledesm91');
+    expect(JSON.stringify(resultado.pasos)).not.toContain('Este correo lo envio el sistema');
+
+    // El gesto no representable quedo registrado por su nombre, para el log de fail-open.
+    expect(resultado.metodosDescartados).toEqual(['clickAndHold']);
+
+    // Y el resultado valida contra el contrato compartido: es lo que se persiste como jsonb.
+    expect(parsearPasosDeReceta(JSON.parse(JSON.stringify(resultado.pasos)))).not.toBeNull();
+  });
+
+  it('una tool DESCONOCIDA de una version futura de Stagehand se descarta, no aborta (fail-open)', () => {
+    // Metodo que este conversor no conoce (toolFutura): se trata como no representable y se descarta,
+    // dejando su nombre en metodosDescartados, en vez de tumbar una corrida exitosa.
+    const resultado = promover(
+      [
+        paso({ accion: { tipo: 'toolFutura', instruccion: 'do something new', metodo: null, argumentos: [] }, estrategias: [], selector: null }),
+        paso({ idx: 1 }),
+      ],
+      'abre el ultimo correo',
+    );
+    expect(resultado.promovida).toBe(true);
+    if (!resultado.promovida) return;
+    expect(resultado.pasos.map((p) => p.accion)).toEqual(['click']);
+    expect(resultado.metodosDescartados).toEqual(['toolFutura']);
+  });
+
+  it('un metodo no representable que lleva un dato DECLARADO sin cobertura SI aborta', () => {
+    // Un select nativo que fija el destinatario, sin ninguna escritura que teclee ese destinatario:
+    // descartarlo perderia un dato del objetivo, asi que la conversion se cae (unica causa de aborto).
+    const resultado = promover(
+      [
+        paso({ accion: { tipo: 'act', instruccion: 'pick recipient', metodo: 'selectOption', argumentos: ['juan@ejemplo.com'] } }),
+        paso({ idx: 1, accion: { tipo: 'act', instruccion: 'click enviar', metodo: 'click', argumentos: [] } }),
+      ],
+      'envia el informe a juan@ejemplo.com',
+    );
+    expect(resultado.promovida).toBe(false);
+    if (resultado.promovida) return;
+    expect(resultado.motivo).toContain('destinatario');
+  });
+
+  it('el mismo metodo no representable NO aborta cuando otra escritura cubre ese dato', () => {
+    // El select fija el destinatario, pero un paso 'escribir' teclea ese mismo destinatario: el dato
+    // no se pierde, asi que el select se descarta y la receta se promueve.
+    const resultado = promover(
+      [
+        paso({ accion: { tipo: 'act', instruccion: 'pick recipient', metodo: 'selectOption', argumentos: ['juan@ejemplo.com'] } }),
+        paso({ idx: 1, accion: { tipo: 'act', instruccion: 'type the recipient', metodo: 'fill', argumentos: ['juan@ejemplo.com'] } }),
+      ],
+      'envia el informe a juan@ejemplo.com',
+    );
+    expect(resultado.promovida).toBe(true);
+    if (!resultado.promovida) return;
+    expect(resultado.pasos.map((p) => p.accion)).toEqual(['escribir']);
+    expect(resultado.pasos[0]?.valor).toEqual({ tipo: 'parametro', parametro: 'destinatario' });
+    expect(resultado.metodosDescartados).toEqual(['selectOption']);
   });
 });
 
