@@ -4,7 +4,14 @@ import {
   type EstrategiaLocalizacion,
   type PasoDeReceta,
 } from '@ledesma-platform/shared';
+import { claseDeElemento } from './atlas-sitios.js';
+import {
+  verificarIdentidadDeElemento,
+  type ModoBarreraIdentidad,
+  type VeredictoDeIdentidad,
+} from './barrera-identidad.js';
 import type { ReferenciaDeElemento } from './localizacion.js';
+import { normalizarTexto } from './parametros-objetivo.js';
 import {
   repararEstrategias,
   superaElLimiteDeEscaladas,
@@ -105,6 +112,18 @@ export interface NavegadorDeterminista {
     sesionExternaId: string,
     referencia: ReferenciaDeElemento,
   ): Promise<EstrategiaLocalizacion[]>;
+  /**
+   * LOCALIZA (sin clickear) el boton visible cuyo aria-label empieza con alguno de los prefijos, y
+   * devuelve su aria-label COMPLETO. Es la lectura de solo lectura que alimenta la barrera de
+   * identidad; la primitiva ya existia en browserbase.ts (modo simulacro de validar-percepcion.ts).
+   *
+   * OPCIONAL en el puerto a proposito: el adaptador real ya la implementa, y un fake que no la traiga
+   * deja la barrera sin nombre accesible (falla cerrada) en vez de romper el ejecutor.
+   */
+  localizarBotonPorAriaLabel?(
+    sesionExternaId: string,
+    prefijos: string[],
+  ): Promise<{ ariaLabel: string; rol: string; candidatos: number } | null>;
 }
 
 /** Lo que devuelve escalar UN paso al motor de navegacion. */
@@ -277,6 +296,136 @@ function pasoDeTraza(
   };
 }
 
+/** Lo que la barrera de identidad dejo dicho sobre un paso. 'no_evaluable' = la barrera misma fallo. */
+type ResultadoDeLaBarrera = VeredictoDeIdentidad | { tipo: 'no_evaluable' };
+
+/** Cuantos prefijos de aria-label viajan a la lectura del DOM. Los del propio paso, sin repetir. */
+const MAX_PREFIJOS_IDENTIDAD = 3;
+
+/** Solo estas dos acciones pueden CONSUMAR la accion irreversible del objetivo (pulsan o teclean). */
+const ACCIONES_QUE_CONSUMAN: ReadonlySet<AccionDeReceta> = new Set<AccionDeReceta>([
+  'click',
+  'teclas',
+]);
+
+/**
+ * PASO SINTETICO de la barrera de identidad para la traza de la corrida, visible en /actividad igual
+ * que receta:determinista y receta:atlas (mismo precedente que receta:promovida, tarea-web.ts).
+ *
+ * En MODO OBSERVACION la etiqueta dice HABRIA_BLOQUEADO: el paso siguio su camino exactamente como
+ * hoy. `exito` es true en todos los casos salvo un bloqueo efectivo: el veredicto es telemetria, no
+ * el desenlace del paso, y marcarlo como fallo leeria como si el paso no hubiera corrido.
+ */
+function pasoDeIdentidad(
+  paso: PasoSustituido,
+  idx: number,
+  resultado: ResultadoDeLaBarrera,
+  modo: ModoBarreraIdentidad,
+): PasoCensurado {
+  const etiqueta =
+    resultado.tipo === 'permitir'
+      ? 'identidad:permitida'
+      : resultado.tipo === 'no_evaluable'
+        ? 'identidad:no_evaluable'
+        : modo === 'activa'
+          ? 'identidad:bloqueada'
+          : 'identidad:habria_bloqueado';
+  const motivo = resultado.tipo === 'bloquear' ? resultado.motivo : null;
+  return {
+    idx,
+    accion: {
+      tipo: etiqueta,
+      instruccion: `barrera de identidad sobre el paso ${paso.paso.idx + 1}`,
+      metodo: paso.paso.accion,
+      argumentos: motivo === null ? [] : [motivo],
+    },
+    selector: paso.paso.estrategias[0] ? JSON.stringify(paso.paso.estrategias[0]) : null,
+    valorCensurado: null,
+    estrategias: [],
+    url: null,
+    exito: !(modo === 'activa' && resultado.tipo === 'bloquear'),
+  };
+}
+
+/**
+ * PREFIJOS de aria-label con los que buscar en el DOM el elemento de este paso: los nombres que las
+ * propias estrategias del paso declaran (nombre accesible, texto visible, aria-label). Normalizados
+ * con la MISMA funcion que construyo la clase del elemento, para que el prefijo que se busca y el
+ * nombre contra el que se compara hablen el mismo idioma.
+ */
+function prefijosDeIdentidad(estrategias: readonly EstrategiaLocalizacion[]): string[] {
+  const prefijos: string[] = [];
+  for (const estrategia of estrategias) {
+    const crudo =
+      estrategia.tipo === 'rol'
+        ? estrategia.nombre
+        : estrategia.tipo === 'texto'
+          ? estrategia.texto
+          : estrategia.tipo === 'atributo' && estrategia.atributo === 'aria-label'
+            ? estrategia.valor
+            : null;
+    if (crudo === null) continue;
+    const limpio = normalizarTexto(crudo);
+    if (limpio !== '' && !prefijos.includes(limpio)) prefijos.push(limpio);
+  }
+  return prefijos.slice(0, MAX_PREFIJOS_IDENTIDAD);
+}
+
+/**
+ * EVALUA la barrera de identidad para UN paso. Devuelve null cuando no hay nada que evaluar: la
+ * barrera esta apagada o sin cablear, o el paso no actua sobre ningun elemento ('navegar', 'esperar').
+ *
+ * COSTO. La comprobacion de la clase es PURA (la clase del paso y las clases corroboradas ya estan en
+ * memoria: crearLectorDelAtlas las leyo una vez al arrancar la tarea). La unica lectura del DOM es el
+ * nombre accesible, y se paga SOLO en el paso irreversible: una conexion CDP por corrida, no por paso.
+ *
+ * TODO EN TRY/CATCH PROPIO: un fallo de la barrera devuelve 'no_evaluable' y jamas cambia el desenlace
+ * del paso ni del job.
+ */
+async function evaluarIdentidadBestEffort(
+  paso: PasoSustituido,
+  deps: EjecucionPorRecetaDeps,
+  sitio: SitioDelPaso,
+  instruccion: InstruccionDePaso,
+  esPasoIrreversible: boolean,
+): Promise<ResultadoDeLaBarrera | null> {
+  const barrera = deps.barreraIdentidad;
+  if (barrera === undefined || barrera.modo === 'apagada') return null;
+  if (instruccion.accion === 'navegar' || instruccion.accion === 'esperar') return null;
+  try {
+    // El nombre accesible se lee SOLO cuando hace falta (el paso irreversible) y solo cuando el paso
+    // resuelve un elemento propio: una pulsacion sobre el foco no tiene elemento que identificar, y
+    // eso la barrera lo trata como falla cerrada, no como excepcion.
+    const nombreAccesible =
+      esPasoIrreversible && !instruccion.sobreElFoco
+        ? await leerNombreAccesible(deps, sitio.sesionExternaId, paso.paso.estrategias)
+        : null;
+    return verificarIdentidadDeElemento({
+      claseDeclarada: claseDeElemento(paso.paso.accion, paso.paso.estrategias),
+      clasesCorroboradas: barrera.clasesCorroboradas(sitio.dominio),
+      verboDelObjetivo: barrera.verboDelObjetivo,
+      esPasoIrreversible,
+      nombreAccesible,
+    });
+  } catch {
+    return { tipo: 'no_evaluable' };
+  }
+}
+
+/** Nombre accesible del elemento del paso, leido del DOM. null = no se pudo leer (falla cerrada). */
+async function leerNombreAccesible(
+  deps: EjecucionPorRecetaDeps,
+  sesionExternaId: string,
+  estrategias: readonly EstrategiaLocalizacion[],
+): Promise<string | null> {
+  const localizar = deps.navegador.localizarBotonPorAriaLabel;
+  if (localizar === undefined) return null;
+  const prefijos = prefijosDeIdentidad(estrategias);
+  if (prefijos.length === 0) return null;
+  const boton = await localizar.call(deps.navegador, sesionExternaId, prefijos);
+  return boton === null ? null : boton.ariaLabel;
+}
+
 /**
  * Construye la instruccion de bajo nivel de un paso, con la URL ya resuelta contra el dominio.
  *
@@ -343,7 +492,22 @@ export interface EjecucionPorRecetaDeps {
    * la ejecucion corre como antes de V040.
    */
   atlas?: PistasDelAtlas | undefined;
+  /**
+   * BARRERA DE IDENTIDAD DEL ELEMENTO (barrera-identidad.ts). Ausente = la barrera NO se evalua y la
+   * ejecucion corre exactamente como antes de este cambio (es lo que ve todo fake que no la cablee).
+   */
+  barreraIdentidad?: BarreraDeIdentidadParaEjecucion | undefined;
   signal?: AbortSignal | undefined;
+}
+
+/** Lo que el ejecutor necesita para evaluar la barrera de identidad, ya resuelto por el llamador. */
+export interface BarreraDeIdentidadParaEjecucion {
+  /** 'apagada' ni evalua; 'observacion' solo registra; 'activa' abandona la receta al bloquear. */
+  modo: ModoBarreraIdentidad;
+  /** Verbo irreversible del OBJETIVO DEL USUARIO, resuelto una vez por corrida. null = no hay. */
+  verboDelObjetivo: string | null;
+  /** Clases que el atlas tiene CORROBORADAS para ese dominio. Sincrono: ya se leyo al arrancar. */
+  clasesCorroboradas(dominio: string): ReadonlySet<string>;
 }
 
 /**
@@ -390,6 +554,12 @@ export async function ejecutarReceta(
   // ¿El paso anterior fue una ESCRITURA que salio bien? Es lo que decide que una pulsacion de tecla
   // caiga sobre el FOCO en vez de exigir localizador (ver instruccionDePaso).
   let trasEscrituraExitosa = false;
+  // ¿Ya paso el `verificar` de esta receta? Es el UNICO ancla determinista de cual es el paso
+  // irreversible: la receta no lo marca (PasoDeReceta no tiene campo para ello) y recetaAplicable
+  // exige que la receta traiga su `verificar` cuando el objetivo pide una accion bloqueada. El paso
+  // irreversible es el primer 'click' o 'teclas' posterior a ese `verificar` superado; un 'escribir'
+  // no consuma nada, y contarlo seria el falso positivo que la barrera no puede permitirse.
+  let verificacionSuperada = false;
 
   for (const sustituido of sustituidos) {
     // CANCELACION COOPERATIVA: el dueno termino la tarea desde la consola. Se corta ANTES del paso
@@ -436,6 +606,7 @@ export async function ejecutarReceta(
     if (sustituido.paso.accion === 'verificar') {
       trasEscrituraExitosa = false;
       const veredicto = await deps.verificar(sitio);
+      verificacionSuperada = veredicto.tipo === 'ejecutar';
       traza.push(pasoDeTraza(sustituido, traza.length, 'verificado', veredicto.tipo === 'ejecutar'));
       if (veredicto.tipo === 'detener') {
         return {
@@ -464,6 +635,48 @@ export async function ejecutarReceta(
         tokensOut,
         desenlace: { tipo: 'abandonada', motivo: 'paso no ejecutable', obsoleta: false },
       };
+    }
+
+    // BARRERA DE IDENTIDAD DEL ELEMENTO (barrera-identidad.ts). Se interpone AQUI, entre que la
+    // instruccion del paso queda armada y que el navegador la ejecuta, porque este punto esta aguas
+    // arriba de LOS TRES caminos por los que el paso llega a actuar sobre el DOM: las estrategias
+    // propias del paso, el reintento con pistas del atlas y la escalada al motor. Los tres consumen la
+    // MISMA `instruccion`, asi que un solo punto los cubre.
+    //
+    // EN MODO OBSERVACION NO BLOQUEA NADA: el paso sigue su camino exactamente como hoy, cualquiera
+    // sea el veredicto. Es telemetria, no control. En 'activa' un bloqueo ABANDONA la receta y la
+    // tarea la termina el motor, que vuelve a decidir con la verificacion determinista de por medio.
+    const esPasoIrreversible =
+      verificacionSuperada &&
+      deps.barreraIdentidad?.verboDelObjetivo != null &&
+      ACCIONES_QUE_CONSUMAN.has(sustituido.paso.accion);
+    if (esPasoIrreversible) verificacionSuperada = false;
+    const identidad = await evaluarIdentidadBestEffort(
+      sustituido,
+      deps,
+      sitio,
+      instruccion,
+      esPasoIrreversible,
+    );
+    if (identidad !== null) {
+      const modo = deps.barreraIdentidad?.modo ?? 'apagada';
+      traza.push(pasoDeIdentidad(sustituido, traza.length, identidad, modo));
+      if (modo === 'activa' && identidad.tipo === 'bloquear') {
+        return {
+          pasos: traza,
+          pasosReparados: reparados,
+          ganadoras,
+          escalados,
+          pasosEjecutados,
+          tokensIn,
+          tokensOut,
+          desenlace: {
+            tipo: 'abandonada',
+            motivo: `la identidad del elemento del paso ${sustituido.paso.idx} no se pudo confirmar (${identidad.motivo})`,
+            obsoleta: false,
+          },
+        };
+      }
     }
 
     // Un fallo INESPERADO del navegador (la sesion se cayo, la evaluacion excedio su timeout en una

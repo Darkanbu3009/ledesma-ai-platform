@@ -118,6 +118,19 @@ const EnvSchema = z.object({
   //     'minimo':  solo la primera de la corrida y las que preceden a una accion irreversible.
   //     'siempre': cada vez que el agente la pide (comportamiento historico, sin intervencion).
   TAREA_WEB_SCREENSHOTS: z.enum(['siempre', 'cambios', 'minimo']).default('cambios'),
+  //   TAREA_WEB_BARRERA_IDENTIDAD: la BARRERA DE IDENTIDAD DEL ELEMENTO (barrera-identidad.ts), que
+  //   responde lo que verificarAccion nunca se pregunta: ¿el elemento que se va a accionar es el que
+  //   corresponde? Se interpone antes de que un paso de receta actue sobre el DOM.
+  //     'observacion' (default): EVALUA y REGISTRA su veredicto en la trayectoria
+  //       (identidad:permitida / identidad:habria_bloqueado + motivo), y NO BLOQUEA NADA. El paso
+  //       sigue su camino exactamente como sin la barrera: es telemetria, no control. Es el modo con
+  //       el que se MIDE cuantos pasos reales bloquearia antes de encenderla.
+  //     'activa': un veredicto de bloqueo ABANDONA la receta y la tarea la termina el motor.
+  //     'apagada': la barrera ni se evalua (cero lecturas extra, cero pasos sinteticos).
+  //   COSTO en observacion y en activa: una conexion CDP por CORRIDA, no por paso. La comprobacion de
+  //   la clase del elemento es pura (las clases corroboradas del dominio ya se leyeron al arrancar la
+  //   tarea) y el nombre accesible se lee SOLO en el paso irreversible.
+  TAREA_WEB_BARRERA_IDENTIDAD: z.enum(['apagada', 'observacion', 'activa']).default('observacion'),
   //   TAREA_WEB_HISTORIAL_PASOS: cuantos pasos de ida y vuelta se reenvian al modelo en cada
   //   llamada. El objetivo original va SIEMPRE, este numero acota solo la conversacion posterior.
   //   Sin la ventana, el bucle reenvia la corrida entera en cada paso y el costo crece con el

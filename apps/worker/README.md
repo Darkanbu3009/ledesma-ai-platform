@@ -107,6 +107,7 @@ Este proceso **no se despliega** aun; solo debe compilar y poder correrse localm
 | `TAREA_WEB_OBSERVADOR_PASOS` | no | `false` | Observador de pasos: `true` o `false` (ver abajo). |
 | `TAREA_WEB_SCREENSHOTS` | no | `cambios` | Cuando se captura la pantalla: `siempre`, `cambios` o `minimo` (ver abajo). |
 | `TAREA_WEB_HISTORIAL_PASOS` | no | `8` | Pasos de conversacion que se reenvian al modelo en cada llamada (3..40). |
+| `TAREA_WEB_BARRERA_IDENTIDAD` | no | `observacion` | Barrera de identidad del elemento: `apagada`, `observacion` o `activa` (ver abajo). |
 | `ATLAS_SITIOS_SECRET` | no | derivado de `VAULT_SECRET` | Secreto del HMAC de origen del atlas de sitios (32+, ver abajo). |
 | `WORKER_POLL_INTERVAL_MS` | no | `5000` | Cada cuanto consulta la cola. |
 | `LOG_LEVEL` | no | `info` | Nivel de log. |
@@ -267,6 +268,56 @@ esta fuente aporta al atlas NO alimenta la promocion a recetas: viaja en un camp
 Lo que el observador encendido sigue aportando de mas es cobertura sobre el elemento que un click
 hace DESAPARECER (el boton Enviar de un compose que se cierra): esa lectura solo se puede tomar
 antes de la accion, y la percepcion corre despues.
+
+### Barrera de identidad del elemento (`TAREA_WEB_BARRERA_IDENTIDAD`)
+
+`verificarAccion` (`src/verificacion.ts`) tiene siete criterios y NINGUNO mira la identidad del
+elemento que se va a accionar: el parametro `verbo` solo decide que dato es obligatorio. Un paso de
+receta cuyo ultimo click apunte a `[{tipo:'rol', rol:'button', nombre:'Eliminar definitivamente'}]`
+supera la verificacion al 100 % (los parametros coinciden con el DOM, el monto no aplica, la politica
+permite) y el ejecutor borra. Los dos caminos por los que eso puede pasar hoy: una receta cuyas
+estrategias se auto repararon y quedaron apuntando a otro elemento tras un rediseno del sitio, y un
+modelo alucinado del motor libre que pulsa el boton contiguo.
+
+La barrera (`src/barrera-identidad.ts`) responde esa pregunta con dos comprobaciones, y es una
+**allowlist estricta**: aqui lo caro es el falso POSITIVO (ejecutar la accion equivocada), al reves
+de `detectarAccionQueExigeVerificacion`, donde lo caro es el falso negativo. No existe un tercer
+valor: nombre accesible null, clase null, clase ausente de las corroboradas o verbo que no
+corresponde, todos bloquean.
+
+1. **La clase.** El paso declara una clase de elemento (`claseDeElemento`, `src/atlas-sitios.ts`), esa
+   clase esta CORROBORADA en el dominio y -- cuando se pudo leer el DOM -- el elemento que hay ahi
+   lleva el nombre que la clase declara (`clase_distinta` es la deriva de una receta auto reparada).
+2. **El verbo, solo en el paso irreversible.** El nombre accesible del elemento pertenece a la FAMILIA
+   del verbo que pidio el usuario, con los regex de `VERBOS_ACCION_BLOQUEADA` filtrados por familia
+   aplicados AL NOMBRE LEIDO DEL DOM, nunca a la descripcion que redacta el modelo.
+
+**Donde se interpone.** En `ejecutarReceta` (`src/ejecutor-receta.ts`), entre que la instruccion del
+paso queda armada y que el navegador la ejecuta. Ese punto esta aguas arriba de los TRES caminos por
+los que un paso llega a actuar sobre el DOM (estrategias propias del paso, reintento con pistas del
+atlas, escalada al motor), porque los tres consumen la MISMA instruccion.
+
+**No consulta `esNavegacionDeSoloLectura`**, y es deliberado: esa funcion existe para que la
+navegacion y la lectura jamas se bloqueen, y devuelve `true` en cuanto la descripcion menciona link,
+folder, sidebar o inbox. Consultarla convertiria su bypass en un bypass de esta barrera.
+
+**Los tres modos:**
+
+- `observacion` (default): evalua y REGISTRA su veredicto como paso sintetico de la trayectoria
+  (`identidad:permitida`, `identidad:habria_bloqueado` + motivo, `identidad:no_evaluable`), visible en
+  /actividad igual que `receta:determinista` y `receta:atlas`. **NO BLOQUEA NADA**: el paso sigue su
+  camino exactamente como sin la barrera, cualquiera sea el veredicto. Es telemetria, no control, y es
+  el modo con el que se mide cuantos pasos reales bloquearia antes de encenderla.
+- `activa`: un veredicto de bloqueo ABANDONA la receta (sin marcarla obsoleta) y la tarea la termina
+  el motor, que vuelve a decidir con la verificacion determinista de por medio.
+- `apagada`: la barrera ni se evalua. Cero lecturas extra y cero pasos sinteticos.
+
+**El costo: una conexion CDP por CORRIDA, no por paso.** La comprobacion de la clase es pura (la clase
+del paso y las clases corroboradas del dominio ya estan en memoria: `crearLectorDelAtlas` las leyo una
+vez al arrancar la tarea). La unica lectura del DOM es el nombre accesible, y se paga SOLO en el paso
+irreversible, con `localizarBotonPorAriaLabel` (`src/browserbase.ts`), que es solo lectura en el mundo
+aislado. Un fallo de la barrera queda como `identidad:no_evaluable` y jamas cambia el desenlace del
+paso ni del job.
 
 ### Costo por corrida (`TAREA_WEB_SCREENSHOTS` y `TAREA_WEB_HISTORIAL_PASOS`)
 
