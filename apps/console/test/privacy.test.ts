@@ -145,6 +145,31 @@ describe('contenido legal', () => {
     }
   });
 
+  it('NINGUN documento vuelve a declarar que el aprendizaje colectivo aun no opera', () => {
+    // El atlas de sitios (V040) esta en produccion: el aviso 2026-07-29 declaraba esta finalidad "antes de
+    // activarse" y eso dejo de ser cierto. Este test falla si la frase desfasada reaparece en CUALQUIERA de
+    // los cuatro documentos de privacidad (integral y simplificado, en los dos idiomas).
+    const rastros = [
+      /a[uú]n no est[aá] en operaci[oó]n/i,
+      /se declara antes de activarse/i,
+      /not yet in operation/i,
+      /declared before it is activated/i,
+    ];
+    for (const nombre of ['aviso', 'avisoSimplificado', 'terminos'] as const) {
+      for (const idioma of ['es', 'en']) {
+        const texto = JSON.stringify(documentoLegal(nombre, idioma));
+        for (const rastro of rastros) {
+          expect(texto).not.toMatch(rastro);
+        }
+      }
+    }
+    // Y la afirmacion vigente esta puesta, en los dos idiomas del aviso integral.
+    expect(JSON.stringify(documentoLegal('aviso', 'es'))).toContain(
+      'Esta finalidad está en operación',
+    );
+    expect(JSON.stringify(documentoLegal('aviso', 'en'))).toContain('This purpose is in operation');
+  });
+
   it('el aviso integral cubre las secciones que exige la ley mexicana', () => {
     const ids = documentoLegal('aviso', 'es').secciones.map((s) => s.id);
     for (const requerida of [

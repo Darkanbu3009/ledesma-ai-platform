@@ -36,9 +36,13 @@ export const ENFORCED_DOCUMENT_TYPES: readonly DocumentType[] = ['privacy_notice
  * de la ultima revision del documento. Al cambiar una version, el gate re-solicita la aceptacion.
  */
 export const CURRENT_DOCUMENT_VERSIONS: Record<DocumentType, string> = {
-  // Texto definitivo del aviso y de los terminos, ya revisado y validado legalmente (retira la nota de
-  // borrador asistido por IA que llevaba la version 2026-07-28 al pie).
-  privacy_notice: '2026-07-29',
+  // El aviso sube a 2026-07-30 por una CORRECCION FACTUAL: la version 2026-07-29 declaraba que el
+  // aprendizaje colectivo aun no operaba, y dejo de ser cierto cuando el atlas de sitios (V040) entro a
+  // produccion. El ALCANCE declarado no cambia (dominio, clase de elemento y estrategia de localizacion);
+  // solo cambia el hecho de que la finalidad ya esta activa, asi que el titular vuelve a aceptarla.
+  privacy_notice: '2026-07-30',
+  // Los TERMINOS no cambiaron de texto (su clausula de aprendizaje colectivo nunca afirmo nada sobre la
+  // fecha de activacion), asi que su version se queda y el gate no los vuelve a pedir.
   terms: '2026-07-29',
 };
 

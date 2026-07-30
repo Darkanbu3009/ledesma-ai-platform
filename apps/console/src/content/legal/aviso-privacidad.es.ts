@@ -12,8 +12,8 @@ import type { DocumentoLegal } from './tipos';
  */
 export const AVISO_PRIVACIDAD_ES: DocumentoLegal = {
   tipo: 'privacy_notice',
-  version: '2026-07-29',
-  fecha: '29 de julio de 2026',
+  version: '2026-07-30',
+  fecha: '30 de julio de 2026',
   titulo: 'Aviso de Privacidad Integral',
   subtitulo:
     'Cómo tratamos tus datos personales en la plataforma Ledesma AI Labs, qué hacemos con ellos y cómo puedes controlarlos.',
@@ -169,7 +169,7 @@ export const AVISO_PRIVACIDAD_ES: DocumentoLegal = {
             {
               termino: 'Aprendizaje estructural agregado sobre sitios web',
               descripcion:
-                'Mejorar la fiabilidad del servicio para todos los usuarios aprendiendo cómo están construidos los sitios web. Lo que se agrega es exclusivamente estructura: el dominio del sitio, el tipo de elemento con el que se interactuó (por ejemplo, campo de búsqueda o botón de envío) y la estrategia que funcionó para localizar ese elemento en la página. Nunca se agregan los contenidos de las páginas, los valores que escribiste, los textos que leíste ni ningún dato personal, y los identificadores de origen se convierten en valores derivados mediante una función criptográfica de una sola vía, de modo que la estructura aprendida no se puede volver a asociar contigo. Al momento de publicar esta versión del aviso, esta finalidad se declara antes de activarse: la funcionalidad de aprendizaje colectivo aún no está en operación.',
+                'Mejorar la fiabilidad del servicio para todos los usuarios aprendiendo cómo están construidos los sitios web. Lo que se agrega es exclusivamente estructura: el dominio del sitio, el tipo de elemento con el que se interactuó (por ejemplo, campo de búsqueda o botón de envío) y la estrategia que funcionó para localizar ese elemento en la página. Nunca se agregan los contenidos de las páginas, los valores que escribiste, los textos que leíste ni ningún dato personal, y los identificadores de origen se convierten en valores derivados mediante una función criptográfica de una sola vía, de modo que la estructura aprendida no se puede volver a asociar contigo. Esta finalidad está en operación: la plataforma agrega estructura de los sitios web sobre los que se ejecutan tareas, con el alcance descrito arriba y ninguno mayor.',
             },
             {
               termino: 'Alertas operativas y comunicaciones del servicio por correo',
@@ -392,7 +392,7 @@ export const AVISO_PRIVACIDAD_ES: DocumentoLegal = {
         {
           tipo: 'parrafo',
           texto:
-            'Para cualquier duda sobre este aviso o sobre el tratamiento de tus datos personales, escríbenos a contacto@ledesma-ai-labs.com. Este aviso corresponde a la versión 2026-07-29, con fecha 29 de julio de 2026.',
+            'Para cualquier duda sobre este aviso o sobre el tratamiento de tus datos personales, escríbenos a contacto@ledesma-ai-labs.com. Este aviso corresponde a la versión 2026-07-30, con fecha 30 de julio de 2026.',
         },
       ],
     },
