@@ -2021,17 +2021,40 @@ async function ejecutarPorReceta(
   // al aprendizaje comun (dominio, clase de elemento, estrategias y un hash de origen no reversible)
   // con la MISMA fuente que la auto reparacion: `resultado.ganadoras`, que solo trae los pasos que
   // resolvieron su elemento sin motor. Best-effort total: el desenlace ya esta decidido.
+  //
+  // SOLO SI LAS ESTRATEGIAS DE LA RECETA SON LECTURA DEL DOM, y esta es la puerta que cierra el
+  // ENVENENAMIENTO DEL POZO. `entradasDeCorridaPorReceta` deriva la clase de las estrategias que la
+  // receta lleva guardadas, asi que una receta cuyas estrategias las escribio el MODELO (rol
+  // `textbox`, nombre `field`) escribiria en una tabla GLOBAL una clase que ningun DOM tiene; con dos
+  // cuentas llegaria al umbral de corroboracion y autorizaria a publicar una plantilla con ese nombre
+  // inventado dentro.
+  //
+  // EL CRITERIO ES `creadaDesdeTrayectoria`, que es el mas simple que lo GARANTIZA y no necesita ni
+  // campo nuevo ni migracion: el unico productor de estrategias derivadas de una descripcion es
+  // `derivarEstrategiasDePaso` (promover-trayectoria.ts), y su unico llamador es la conversion de una
+  // trayectoria PERSISTIDA, que promueve siempre con `creadaDesdeTrayectoria` no nulo. Los otros dos
+  // productores de recetas (la promocion de una corrida en vivo y el grabador) leen el DOM y promueven
+  // con null. Una receta de origen textual no aporta nada al atlas; ejecutarse le sigue saliendo
+  // igual de bien.
   if (completada) {
-    await registrarEnAtlasBestEffort(
-      deps,
-      job,
-      entradasDeCorridaPorReceta({
-        dominio: sitio.dominio,
-        pasos: receta.pasos,
-        ganadoras: resultado.ganadoras,
-        valores: valoresTecleadosDeLaCorrida(valores),
-      }),
-    );
+    if (receta.creadaDesdeTrayectoria !== null) {
+      deps.logger.info('tarea web: la receta se guardo desde el registro de una corrida y no aporta al aprendizaje comun', {
+        jobId: job.id,
+        connectionId: sitio.id,
+        recetaId: receta.id,
+      });
+    } else {
+      await registrarEnAtlasBestEffort(
+        deps,
+        job,
+        entradasDeCorridaPorReceta({
+          dominio: sitio.dominio,
+          pasos: receta.pasos,
+          ganadoras: resultado.ganadoras,
+          valores: valoresTecleadosDeLaCorrida(valores),
+        }),
+      );
+    }
   }
 
   await guardarTrayectoriaBestEffort(
@@ -2218,8 +2241,9 @@ async function mantenerRecetaBestEffort(
  * de por medio, la preparacion vive en la primera corrida y la ejecucion verificada en la segunda;
  * una receta con solo la segunda mitad haria algo distinto de lo aprendido.
  *
- * DEVUELVE el veredicto de la publicacion de plantilla (V041) por CUALQUIERA de sus caminos, incluido
- * el de la promocion que falla: es lo que el cierre del job registra en `jobs.resultado`.
+ * NO PUBLICA NADA. La publicacion de plantillas (V041) colgaba de esta funcion y por eso no habia
+ * producido ni una fila: se decide y se ejecuta por su cuenta en el cierre del job (ver
+ * `publicarPlantillaBestEffort`).
  */
 async function promoverRecetaBestEffort(
   deps: TareaWebDeps,
@@ -2229,18 +2253,9 @@ async function promoverRecetaBestEffort(
   pasos: PasoCensurado[],
   verboBloqueado: string | null,
   dominios: readonly string[],
-  atlas: LectorDelAtlas | null,
-): Promise<VeredictoDePlantilla> {
+): Promise<void> {
   const recetas = deps.recetas;
-  const clasesCorroboradas = atlas?.clasesParaPublicar(sitio.dominio) ?? new Set<string>();
-  if (!recetas || !deps.determinista || !deps.escalador) {
-    return {
-      publicada: false,
-      motivo: 'promocion_no_cableada',
-      idx: null,
-      clases: clasesCorroboradas.size,
-    };
-  }
+  if (!recetas || !deps.determinista || !deps.escalador) return;
   const promocion = promoverTrayectoria({
     pasos,
     dominio: sitio.dominio,
@@ -2248,51 +2263,35 @@ async function promoverRecetaBestEffort(
     estado: 'exitosa',
     exigeVerificacion: verboBloqueado !== null,
   });
-  // Los pasos que el PROPIO origen conservo para si, o null si no conservo ninguno. Es la condicion
-  // de la publicacion (ver abajo) y ya no un return: hasta este PR los dos caminos que la dejan en
-  // null salian de la funcion, y con ellos se iba tambien el veredicto de la publicacion.
-  let pasosAprendidos: readonly PasoDeReceta[] | null = null;
   if (!promocion.promovida) {
     deps.logger.info('tarea web: la corrida no se pudo convertir en algo repetible', {
       jobId: job.id,
       connectionId: sitio.id,
       motivo: promocion.motivo,
     });
-  } else {
-    try {
-      const receta = await recetas.promover({
-        ownerId: job.ownerId,
-        dominio: sitio.dominio,
-        firmaObjetivo: firmaDeObjetivo(objetivo, dominios),
-        pasos: promocion.pasos,
-        creadaDesdeTrayectoria: null,
-      });
-      deps.logger.info('tarea web: la corrida quedo aprendida para repetirla sin modelo', {
-        jobId: job.id,
-        connectionId: sitio.id,
-        dominio: sitio.dominio,
-        recetaId: receta?.id ?? null,
-        pasos: promocion.pasos.length,
-      });
-      pasosAprendidos = promocion.pasos;
-    } catch (error) {
-      deps.logger.warn('tarea web: no se pudo guardar lo aprendido (se ignora, best-effort)', {
-        jobId: job.id,
-        err: describir(error),
-      });
-    }
+    return;
   }
-  // PLANTILLAS COMPARTIDAS (V041): la publicacion solo ocurre si la receta propia quedo guardada, o
-  // sea que el procedimiento existe y le sirvio a alguien; y solo si la tarea pedia una accion
-  // irreversible. Eso NO cambia en este PR. Lo que cambia es que el VEREDICTO se calcula y se
-  // registra siempre, tambien cuando no hubo receta propia que compartir.
-  return await publicarPlantillaBestEffort(deps, job, {
-    pasos: pasosAprendidos,
-    dominio: sitio.dominio,
-    dominios,
-    verboBloqueado,
-    clasesCorroboradas,
-  });
+  try {
+    const receta = await recetas.promover({
+      ownerId: job.ownerId,
+      dominio: sitio.dominio,
+      firmaObjetivo: firmaDeObjetivo(objetivo, dominios),
+      pasos: promocion.pasos,
+      creadaDesdeTrayectoria: null,
+    });
+    deps.logger.info('tarea web: la corrida quedo aprendida para repetirla sin modelo', {
+      jobId: job.id,
+      connectionId: sitio.id,
+      dominio: sitio.dominio,
+      recetaId: receta?.id ?? null,
+      pasos: promocion.pasos.length,
+    });
+  } catch (error) {
+    deps.logger.warn('tarea web: no se pudo guardar lo aprendido (se ignora, best-effort)', {
+      jobId: job.id,
+      err: describir(error),
+    });
+  }
 }
 
 /**
@@ -2313,9 +2312,9 @@ interface VeredictoDePlantilla {
   /**
    * Por que no se publico. Son los motivos de `esPublicable` (packages/shared) y de
    * `plantillaDeLaCorrida`, mas los del CABLEADO, que son los que hasta hoy salian en silencio:
-   * `sin_receta_propia` (la corrida no dejo receta propia que compartir),
-   * `promocion_no_cableada` / `publicacion_no_cableada` (falta el puerto),
-   * `rechazada_por_el_backend` y `error_al_publicar`. null cuando si se publico.
+   * `sin_procedimiento_repetible` (la traza de la corrida no se pudo convertir en pasos),
+   * `publicacion_no_cableada` (falta el puerto), `rechazada_por_el_backend` y `error_al_publicar`.
+   * null cuando si se publico.
    */
   motivo: string | null;
   /** `idx` del paso que la rechazo, o null cuando el rechazo no es de un paso concreto. */
@@ -2325,13 +2324,26 @@ interface VeredictoDePlantilla {
 }
 
 /**
- * PUBLICA la version ANONIMA de una receta recien aprendida en `plantillas_compartidas` (V041).
+ * PUBLICA la version ANONIMA del procedimiento que ESTA corrida acaba de demostrar, en
+ * `plantillas_compartidas` (V041).
  *
  * QUE VIAJA: el conjunto de dominios, el codigo de intencion, los pasos ya filtrados y un HASH de
  * origen. QUE NO VIAJA: el owner, la firma, el objetivo, la descripcion, los valores, los xpath, las
  * rutas y los ids. No es que no se manden: `esPublicable` (packages/shared) rechaza la plantilla
  * ENTERA si alguno de ellos aparece, el puerto no tiene parametro para ellos y la tabla no tiene
  * columna donde ponerlos.
+ *
+ * DE DONDE SALEN LAS CLASES, y es la mitad del arreglo de este PR: de `pasos`, que el llamador arma
+ * con `pasosConEstrategiasPercibidas`, o sea la MISMA lista que alimenta el atlas. Antes salian de la
+ * receta promovida, cuyas estrategias, cuando existen, las derivo el modelo de su propia descripcion:
+ * en ingles y sobre otro eje ("field", "compose window") frente a lo que el atlas lee del DOM
+ * ("asunto", "cuerpo del mensaje"). No coincidia ninguna, asi que ninguna receta destilada del motor
+ * libre podia publicar. La conversion a pasos de receta la hace `promoverTrayectoria`, que es la
+ * MISMA de la promocion: aqui corre sobre la fuente buena.
+ *
+ * `objetivo` NO SALE DE ESTA FUNCION. Entra solo porque `promoverTrayectoria` lo necesita para
+ * reconocer los datos que el usuario declaro y convertirlos en marcadores; lo que se publica pasa
+ * despues por `esPublicable`, que rechaza la plantilla entera ante cualquier literal.
  *
  * LA PRIMERA DE LAS DOS PUERTAS. `plantillaDeLaCorrida` corre `esPublicable` aqui, en el worker, antes
  * de mandar nada; el repositorio del backend la vuelve a correr antes del insert. Cinturon y tirantes:
@@ -2343,15 +2355,17 @@ interface VeredictoDePlantilla {
  * base, ni el de un puerto mal cableado. Compartir es una mejora para la proxima persona, jamas parte
  * del desenlace de la tarea de esta.
  *
- * SIEMPRE DEVUELVE VEREDICTO, y por eso se la llama tambien cuando no hay receta propia (`pasos` en
- * null): un fallo de la publicacion es exactamente lo que hay que poder leer despues.
+ * SIEMPRE DEVUELVE VEREDICTO, tambien cuando no publica: un fallo de la publicacion es exactamente lo
+ * que hay que poder leer despues.
  */
 async function publicarPlantillaBestEffort(
   deps: TareaWebDeps,
   job: Job,
   entrada: {
-    /** Los pasos que la receta PROPIA conservo, o null si la corrida no dejo ninguna. */
-    pasos: readonly PasoDeReceta[] | null;
+    /** La traza del job con las estrategias que la PERCEPCION leyo del DOM ya puestas. */
+    pasos: readonly PasoCensurado[];
+    /** Objetivo del usuario. Solo para reconocer sus datos declarados; no viaja a ningun lado. */
+    objetivo: string;
     dominio: string;
     dominios: readonly string[];
     verboBloqueado: string | null;
@@ -2373,10 +2387,33 @@ async function publicarPlantillaBestEffort(
     return { publicada: false, motivo, idx: idx < 0 ? null : idx, clases };
   };
   try {
-    // Sin receta propia no hay nada corroborado que compartir, y publicar aqui compartiria un
-    // procedimiento que ni su propio origen conservo. Ese era el camino que salia en silencio.
-    if (entrada.pasos === null) return registrar('sin_receta_propia', -1);
-    const veredicto = plantillaDeLaCorrida({ ...entrada, pasos: entrada.pasos });
+    // LA INTENCION PRIMERO, antes de convertir nada. `plantillaDeLaCorrida` ya corta aqui, pero sin
+    // verbo no hay forma de que la conversion cambie el desenlace y si de que lo disfrace: una tarea
+    // REVERSIBLE cuya traza tampoco convierta quedaria registrada como un problema de conversion,
+    // cuando lo suyo es la decision de diseno de V041, y ademas subiria a `info` un motivo que es la
+    // mitad de las tareas. Es un subconjunto estricto de lo que decide `codigoDeIntencion`: sin verbo
+    // el codigo es null con total seguridad, asi que ningun caso cambia de veredicto.
+    if (entrada.verboBloqueado === null) return registrar('sin_intencion_irreversible', -1);
+    // EL PROCEDIMIENTO de esta corrida, con la MISMA conversion que usa la promocion a receta. Que el
+    // usuario conserve o no una receta propia ya NO es condicion: ver el comentario del llamador.
+    const material = promoverTrayectoria({
+      pasos: [...entrada.pasos],
+      dominio: entrada.dominio,
+      objetivo: entrada.objetivo,
+      estado: 'exitosa',
+      exigeVerificacion: entrada.verboBloqueado !== null,
+    });
+    if (!material.promovida) return registrar('sin_procedimiento_repetible', -1);
+    // Campo por campo y NUNCA con un spread de `entrada`: `plantillaDeLaCorrida` no recibe el
+    // objetivo, y que no lo reciba es su primer invariante (ver la cabecera de
+    // plantillas-compartidas.ts). El objetivo muere en la conversion de arriba.
+    const veredicto = plantillaDeLaCorrida({
+      pasos: material.pasos,
+      dominio: entrada.dominio,
+      dominios: entrada.dominios,
+      verboBloqueado: entrada.verboBloqueado,
+      clasesCorroboradas: entrada.clasesCorroboradas,
+    });
     if (!veredicto.publicable) return registrar(veredicto.motivo, veredicto.idx);
     // El puerto ausente (migracion sin aplicar) tambien queda registrado: es el otro caso en el que
     // la publicacion no escribia ni una fila ni una linea de log.
@@ -3142,7 +3179,7 @@ export async function procesarTareaWeb(
     // PROMOCION AUTOMATICA (CAMBIO 3): lo que acaba de funcionar queda aprendido para la proxima.
     // La corrida del motor siempre arranca desde la pagina de inicio (una receta que se rindio a
     // medias renavega antes), asi que su traza describe la tarea entera y es promovible.
-    const veredictoDePlantilla = await promoverRecetaBestEffort(
+    await promoverRecetaBestEffort(
       deps,
       job,
       sitio,
@@ -3150,9 +3187,6 @@ export async function procesarTareaWeb(
       pasosDelJob,
       verboBloqueado,
       dominiosAutorizados,
-      // PLANTILLAS COMPARTIDAS (V041): el lector del atlas ya esta en memoria y es de donde salen las
-      // clases avaladas por varios origenes, que es lo unico que autoriza a publicar una plantilla.
-      atlas,
     );
     // ATLAS DE SITIOS (V040): esta corrida llego hasta aqui, o sea que salio bien Y -- si pedia una
     // accion irreversible -- su efecto quedo CONFIRMADO (los dos cortes de arriba). Sus pasos
@@ -3185,6 +3219,35 @@ export async function procesarTareaWeb(
       });
     }
     await registrarEnAtlasBestEffort(deps, job, entradasLibres);
+    // PLANTILLAS COMPARTIDAS (V041): la version ANONIMA del procedimiento que esta corrida acaba de
+    // demostrar. Va AQUI, en la rama de cierre exitoso del motor libre, y no colgando de la promocion
+    // de receta: ese era el unico punto de llamada del repo y estaba en un camino muerto, porque la
+    // promocion no promueve nada con el observador de pasos apagado (el default de produccion) y sin
+    // receta propia la publicacion se cortaba. La publicacion se decide ahora por su cuenta, sobre
+    // `corridaLibre.pasos`, que es la MISMA fuente que el atlas: las clases se leen del DOM.
+    //
+    // POR QUE ESTA POSICION Y NO OTRA: DESPUES de los dos cortes de arriba, asi que la corrida llego
+    // hasta aqui solo si salio bien Y -- si pedia una accion irreversible -- su efecto quedo
+    // CONFIRMADO; y ANTES de `guardarResultado`, que es donde el veredicto queda registrado. Que vaya
+    // despues del agregador del atlas no cambia nada: `clasesParaPublicar` lee la instantanea que
+    // `crearLectorDelAtlas` dejo en memoria al arrancar la tarea, asi que una clase corroborada por
+    // ESTA corrida recien esta disponible para la SIGUIENTE.
+    //
+    // SE PUBLICA AUNQUE EL USUARIO NO CONSERVE UNA RECETA PROPIA, y es una decision de politica
+    // tomada a proposito. Conservar la receta depende hoy de una palanca de COSTO (el observador de
+    // pasos, que abre una conexion CDP mas por accion), no de ningun juicio sobre el procedimiento.
+    // Lo que respalda a lo que se publica es otra cosa y sigue intacta: la corrida llego a esta linea
+    // con el efecto irreversible confirmado, cada clase sigue exigiendo el aval de dos origenes
+    // INDEPENDIENTES (`clasesParaPublicar`), lo que sale pasa por `esPublicable` en el worker y otra
+    // vez en el backend, y el alcance esta declarado en los documentos legales vigentes.
+    const veredictoDePlantilla = await publicarPlantillaBestEffort(deps, job, {
+      pasos: corridaLibre.pasos,
+      objetivo,
+      dominio: sitio.dominio,
+      dominios: dominiosAutorizados,
+      verboBloqueado,
+      clasesCorroboradas: atlas?.clasesParaPublicar(sitio.dominio) ?? new Set<string>(),
+    });
     // `sesionExternaId` queda EN EL RESULTADO del job: es la unica forma de encontrar despues la
     // grabacion de la sesion en el proveedor a partir de una tarea concreta.
     await deps.guardarResultado(job.id, {

@@ -594,6 +594,75 @@ describe('agregador del atlas (camino por receta)', () => {
       },
     ]);
   });
+
+  /**
+   * ENVENENAMIENTO DEL POZO. Las clases que este camino escribe salen de las estrategias que la
+   * RECETA lleva guardadas, y hay un productor de recetas cuyas estrategias no las leyo nadie del
+   * DOM: la conversion de una trayectoria PERSISTIDA (el boton "Guardar como tarea aprendida"), que
+   * las deriva de la DESCRIPCION que escribio el modelo. Esas salen en ingles y sobre otro eje
+   * ("field", "compose window") frente a lo que el atlas lee ("asunto", "cuerpo del mensaje"). Sin
+   * esta puerta, ejecutar dos veces una receta asi con dos cuentas distintas dejaba una clase
+   * INVENTADA corroborada en una tabla global y habilitada para viajar dentro de una plantilla.
+   *
+   * La puerta es `creadaDesdeTrayectoria`, que ese productor es el unico que deja no nulo.
+   */
+  it('una receta con estrategias derivadas del modelo NO escribe sus clases en el atlas', async () => {
+    const atlas = makeAtlas();
+    // El par exacto que `derivarEstrategiasDeDescripcion` produce para "click the Enviar button in
+    // the compose window": un rol con un nombre que no existe en la pagina.
+    const ROL_INVENTADO = { tipo: 'rol', rol: 'button', nombre: 'compose window' } as const;
+    const receta = {
+      ...makeReceta([
+        {
+          idx: 0,
+          accion: 'click',
+          estrategias: [ROL_INVENTADO],
+          valor: null,
+          teclas: null,
+          ruta: null,
+          esperaMs: null,
+        },
+      ]),
+      creadaDesdeTrayectoria: 'tray-1',
+    };
+    const deps = makeDeps({
+      atlas: { repo: atlas.repo, clave: CLAVE },
+      recetas: makeRecetas(receta),
+      determinista: makeDeterminista([ROL_INVENTADO], 0),
+    });
+
+    // La receta se ejecuta con exito por el camino determinista: lo que cambia es lo que aporta.
+    await expect(procesarTareaWeb(deps, makeJob('abre el ultimo correo'))).resolves.toBe('completada');
+
+    expect(atlas.repo.registrarObservacion).not.toHaveBeenCalled();
+    expect(atlas.filas).toEqual([]);
+  });
+
+  it('la MISMA receta con las mismas estrategias SI aporta cuando no viene de una trayectoria', async () => {
+    // El contraste que fija que la puerta es el origen y no la forma de la estrategia.
+    const atlas = makeAtlas();
+    const receta = makeReceta([
+      {
+        idx: 0,
+        accion: 'click',
+        estrategias: [ROL_REDACTAR],
+        valor: null,
+        teclas: null,
+        ruta: null,
+        esperaMs: null,
+      },
+    ]);
+    expect(receta.creadaDesdeTrayectoria).toBeNull();
+    const deps = makeDeps({
+      atlas: { repo: atlas.repo, clave: CLAVE },
+      recetas: makeRecetas(receta),
+      determinista: makeDeterminista([ROL_REDACTAR], 0),
+    });
+
+    await procesarTareaWeb(deps, makeJob('abre el ultimo correo'));
+
+    expect(atlas.filas.map((fila) => fila.claseDeElemento)).toEqual([CLASE_REDACTAR]);
+  });
 });
 
 // -------------------------------------------------------------------------------------------------

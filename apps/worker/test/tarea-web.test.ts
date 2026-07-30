@@ -438,8 +438,9 @@ describe('procesarTareaWeb', () => {
       // despues la grabacion de esta corrida a partir del job.
       sesionExternaId: 'ses-1',
       // EL VEREDICTO DE LA PUBLICACION de plantilla (V041) queda registrado SIEMPRE, tambien cuando
-      // no habia nada que publicar. Aqui el worker corre sin recetas cableadas, y eso es lo que dice.
-      plantilla: { publicada: false, motivo: 'promocion_no_cableada', idx: null, clases: 0 },
+      // no habia nada que publicar. Esta tarea es REVERSIBLE (no pide ninguna accion bloqueada), asi
+      // que su motivo es la decision de diseno de V041 y no un fallo del cableado.
+      plantilla: { publicada: false, motivo: 'sin_intencion_irreversible', idx: null, clases: 0 },
     });
     expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
   });
