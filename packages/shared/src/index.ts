@@ -13,6 +13,7 @@ export * from './jobs/grabacion-payload.js';
 export * from './jobs/promover-trayectoria-payload.js';
 export * from './verificacion/contrato.js';
 export * from './recetas/contrato.js';
+export * from './plantillas/contrato.js';
 export * from './grabaciones/contrato.js';
 export * from './pricing/pricing.js';
 export * from './plans/plans.js';

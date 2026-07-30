@@ -14,8 +14,10 @@ import { PoliticasEjecucionRepository } from '@ledesma-platform/backend/politica
 import { TrayectoriasWebRepository } from '@ledesma-platform/backend/trayectorias';
 import { RecetasWebRepository } from '@ledesma-platform/backend/recetas-web';
 import { AprendizajeSitiosRepository } from '@ledesma-platform/backend/aprendizaje-sitios';
+import { PlantillasCompartidasRepository } from '@ledesma-platform/backend/plantillas-compartidas';
 import { GrabacionesRepository } from '@ledesma-platform/backend/grabaciones';
 import { claveDelAtlas } from './atlas-sitios.js';
+import { clavePlantillas } from './plantillas-compartidas.js';
 import { crearNotificadorAprobaciones, type BarridoAprobacionesDeps } from './aprobaciones.js';
 import { crearSubidorDeScreenshots } from './storage.js';
 import { parseEnv, type WorkerEnv } from './env.js';
@@ -189,6 +191,17 @@ function main(): void {
           secretoDedicado: config.ATLAS_SITIOS_SECRET,
           vaultSecret: config.VAULT_SECRET,
         }),
+      },
+      // PLANTILLAS COMPARTIDAS (V041): la segunda pieza del aprendizaje colectivo. Solo PUBLICA (nada
+      // lee esta tabla todavia) y solo las tareas de intencion irreversible. Activa desde el merge y
+      // sin flag, igual que el atlas: la clave se deriva de VAULT_SECRET con una ETIQUETA PROPIA, asi
+      // que no hace falta configurar nada nuevo en el despliegue.
+      //
+      // La clave NO es la del atlas a proposito (ver clavePlantillas): con la misma clave, el mismo
+      // owner produciria el mismo hash en las dos tablas globales y se podrian unir por ese hash.
+      plantillas: {
+        repo: new PlantillasCompartidasRepository(sql),
+        clave: clavePlantillas({ vaultSecret: config.VAULT_SECRET }),
       },
       // Observador de pasos APAGADO por defecto (TAREA_WEB_OBSERVADOR_PASOS): encendido DUPLICA,
       // por cada accion con elemento resuelto, la lectura del DOM que la percepcion ya hace despues
