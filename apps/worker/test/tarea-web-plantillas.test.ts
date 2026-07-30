@@ -517,3 +517,109 @@ describe('la publicacion es best-effort: su fallo no cambia el desenlace del job
     expect(plantillasDe(deps)).toHaveLength(0);
   });
 });
+
+/**
+ * EL VEREDICTO SIEMPRE QUEDA REGISTRADO (OBSERVABILIDAD, 30 jul 2026). Hasta este PR la publicacion
+ * no dejaba rastro de su decision en ningun lado: el log solo salia si se llegaba a evaluarla, y a la
+ * evaluacion no se llegaba nunca cuando la promocion de la receta propia fallaba, que es justo el
+ * caso a diagnosticar. Ahora el veredicto viaja en `jobs.resultado.plantilla` en TODOS los caminos.
+ *
+ * Lo que estos tests fijan: que el motivo del NO se registre, y que el comportamiento de la
+ * publicacion no haya cambiado (los casos que no publicaban siguen sin publicar).
+ */
+describe('el veredicto de la publicacion queda registrado en el resultado del job', () => {
+  function veredictoDe(deps: TareaWebDeps): Record<string, unknown> {
+    const llamadas = (deps.guardarResultado as ReturnType<typeof vi.fn>).mock.calls;
+    const resultado = llamadas[0]?.[1] as { plantilla?: Record<string, unknown> } | undefined;
+    return resultado?.plantilla ?? {};
+  }
+
+  it('cuando se publica, lo dice con las clases que lo autorizaron', async () => {
+    const deps = makeDeps();
+    await procesarTareaWeb(deps, makeJob(OBJETIVO));
+    expect(veredictoDe(deps)).toEqual({ publicada: true, motivo: null, idx: null, clases: 2 });
+  });
+
+  it('la promocion de la receta que FALLA deja el motivo registrado igual', async () => {
+    // EL CASO QUE COSTO LA AUDITORIA: el return temprano de la promocion se llevaba consigo la
+    // decision de publicar, asi que este job cerraba sin una sola linea sobre plantillas.
+    const recetas = makeRecetas();
+    recetas.promover.mockRejectedValue(new Error('base caida'));
+    const deps = makeDeps({ recetas });
+    await procesarTareaWeb(deps, makeJob(OBJETIVO));
+    expect(veredictoDe(deps)).toEqual({
+      publicada: false,
+      motivo: 'sin_receta_propia',
+      idx: null,
+      clases: 2,
+    });
+    expect(plantillasDe(deps)).toHaveLength(0);
+  });
+
+  it('sin observador de pasos la corrida no deja receta, y eso queda registrado', async () => {
+    // La forma REAL en la que produccion no publica nada: con el observador apagado (default) los
+    // pasos no llevan estrategias, la promocion rechaza y antes de este PR ahi terminaba el rastro.
+    const deps = makeDeps({ observadorPasos: false });
+    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
+    expect(veredictoDe(deps)).toMatchObject({ publicada: false, motivo: 'sin_receta_propia' });
+    expect(plantillasDe(deps)).toHaveLength(0);
+  });
+
+  it('una tarea reversible registra el motivo de diseno de V041', async () => {
+    const deps = makeDeps();
+    await procesarTareaWeb(deps, makeJob(OBJETIVO_REVERSIBLE));
+    expect(veredictoDe(deps)).toEqual({
+      publicada: false,
+      motivo: 'sin_intencion_irreversible',
+      idx: null,
+      clases: 2,
+    });
+  });
+
+  it('sin atlas se registra el paso que rechazo y que no habia ninguna clase avalada', async () => {
+    const deps = makeDeps({ atlas: undefined });
+    await procesarTareaWeb(deps, makeJob(OBJETIVO));
+    expect(veredictoDe(deps)).toEqual({
+      publicada: false,
+      motivo: 'clase_no_corroborada',
+      idx: 0,
+      clases: 0,
+    });
+  });
+
+  it('sin el puerto de plantillas cableado tambien queda registrado', async () => {
+    const deps = makeDeps({ plantillas: undefined });
+    await procesarTareaWeb(deps, makeJob(OBJETIVO));
+    expect(veredictoDe(deps)).toEqual({
+      publicada: false,
+      motivo: 'publicacion_no_cableada',
+      idx: null,
+      clases: 2,
+    });
+  });
+
+  it('el rechazo de la SEGUNDA puerta se registra sin el texto libre del backend', async () => {
+    const plantillas: RepositorioPlantillasParaWorker = {
+      publicar: vi.fn(async () => ({ publicada: false, motivo: 'la plantilla no es publicable' })),
+    };
+    const deps = makeDeps({ plantillas: { repo: plantillas, clave: CLAVE_PLANTILLAS } });
+    await procesarTareaWeb(deps, makeJob(OBJETIVO));
+    expect(veredictoDe(deps)).toEqual({
+      publicada: false,
+      motivo: 'rechazada_por_el_backend',
+      idx: null,
+      clases: 2,
+    });
+  });
+
+  it('un fallo de la publicacion se registra y no cambia el desenlace', async () => {
+    const deps = makeDeps({ plantillas: { repo: makePlantillas(true), clave: CLAVE_PLANTILLAS } });
+    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
+    expect(veredictoDe(deps)).toEqual({
+      publicada: false,
+      motivo: 'error_al_publicar',
+      idx: null,
+      clases: 2,
+    });
+  });
+});

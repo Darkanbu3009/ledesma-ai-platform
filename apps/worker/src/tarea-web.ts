@@ -2052,6 +2052,9 @@ async function mantenerRecetaBestEffort(
  * Se promueve la traza de TODO el job, no la de la ultima corrida: cuando hay una accion irreversible
  * de por medio, la preparacion vive en la primera corrida y la ejecucion verificada en la segunda;
  * una receta con solo la segunda mitad haria algo distinto de lo aprendido.
+ *
+ * DEVUELVE el veredicto de la publicacion de plantilla (V041) por CUALQUIERA de sus caminos, incluido
+ * el de la promocion que falla: es lo que el cierre del job registra en `jobs.resultado`.
  */
 async function promoverRecetaBestEffort(
   deps: TareaWebDeps,
@@ -2062,9 +2065,17 @@ async function promoverRecetaBestEffort(
   verboBloqueado: string | null,
   dominios: readonly string[],
   atlas: LectorDelAtlas | null,
-): Promise<void> {
+): Promise<VeredictoDePlantilla> {
   const recetas = deps.recetas;
-  if (!recetas || !deps.determinista || !deps.escalador) return;
+  const clasesCorroboradas = atlas?.clasesParaPublicar(sitio.dominio) ?? new Set<string>();
+  if (!recetas || !deps.determinista || !deps.escalador) {
+    return {
+      publicada: false,
+      motivo: 'promocion_no_cableada',
+      idx: null,
+      clases: clasesCorroboradas.size,
+    };
+  }
   const promocion = promoverTrayectoria({
     pasos,
     dominio: sitio.dominio,
@@ -2072,49 +2083,80 @@ async function promoverRecetaBestEffort(
     estado: 'exitosa',
     exigeVerificacion: verboBloqueado !== null,
   });
+  // Los pasos que el PROPIO origen conservo para si, o null si no conservo ninguno. Es la condicion
+  // de la publicacion (ver abajo) y ya no un return: hasta este PR los dos caminos que la dejan en
+  // null salian de la funcion, y con ellos se iba tambien el veredicto de la publicacion.
+  let pasosAprendidos: readonly PasoDeReceta[] | null = null;
   if (!promocion.promovida) {
     deps.logger.info('tarea web: la corrida no se pudo convertir en algo repetible', {
       jobId: job.id,
       connectionId: sitio.id,
       motivo: promocion.motivo,
     });
-    return;
+  } else {
+    try {
+      const receta = await recetas.promover({
+        ownerId: job.ownerId,
+        dominio: sitio.dominio,
+        firmaObjetivo: firmaDeObjetivo(objetivo, dominios),
+        pasos: promocion.pasos,
+        creadaDesdeTrayectoria: null,
+      });
+      deps.logger.info('tarea web: la corrida quedo aprendida para repetirla sin modelo', {
+        jobId: job.id,
+        connectionId: sitio.id,
+        dominio: sitio.dominio,
+        recetaId: receta?.id ?? null,
+        pasos: promocion.pasos.length,
+      });
+      pasosAprendidos = promocion.pasos;
+    } catch (error) {
+      deps.logger.warn('tarea web: no se pudo guardar lo aprendido (se ignora, best-effort)', {
+        jobId: job.id,
+        err: describir(error),
+      });
+    }
   }
-  try {
-    const receta = await recetas.promover({
-      ownerId: job.ownerId,
-      dominio: sitio.dominio,
-      firmaObjetivo: firmaDeObjetivo(objetivo, dominios),
-      pasos: promocion.pasos,
-      creadaDesdeTrayectoria: null,
-    });
-    deps.logger.info('tarea web: la corrida quedo aprendida para repetirla sin modelo', {
-      jobId: job.id,
-      connectionId: sitio.id,
-      dominio: sitio.dominio,
-      recetaId: receta?.id ?? null,
-      pasos: promocion.pasos.length,
-    });
-  } catch (error) {
-    deps.logger.warn('tarea web: no se pudo guardar lo aprendido (se ignora, best-effort)', {
-      jobId: job.id,
-      err: describir(error),
-    });
-    // La receta PROPIA no se guardo, asi que no hay nada corroborado que compartir: se sale sin
-    // publicar. Publicar aqui compartiria un procedimiento que ni su propio origen conservo.
-    return;
-  }
-  // PLANTILLAS COMPARTIDAS (V041): la receta propia quedo guardada, asi que el procedimiento existe y
-  // le sirvio a alguien. Ahora, y solo si la tarea pedia una accion irreversible, se publica su
-  // version ANONIMA. Va DESPUES de la promocion y NUNCA antes: lo que se comparte es lo que el propio
-  // origen conservo para si.
-  await publicarPlantillaBestEffort(deps, job, {
-    pasos: promocion.pasos,
+  // PLANTILLAS COMPARTIDAS (V041): la publicacion solo ocurre si la receta propia quedo guardada, o
+  // sea que el procedimiento existe y le sirvio a alguien; y solo si la tarea pedia una accion
+  // irreversible. Eso NO cambia en este PR. Lo que cambia es que el VEREDICTO se calcula y se
+  // registra siempre, tambien cuando no hubo receta propia que compartir.
+  return await publicarPlantillaBestEffort(deps, job, {
+    pasos: pasosAprendidos,
     dominio: sitio.dominio,
     dominios,
     verboBloqueado,
-    clasesCorroboradas: atlas?.clasesParaPublicar(sitio.dominio) ?? new Set<string>(),
+    clasesCorroboradas,
   });
+}
+
+/**
+ * EL VEREDICTO DE LA PUBLICACION de una corrida (OBSERVABILIDAD, 30 jul 2026). Queda en el log Y en
+ * `jobs.resultado`, campo `plantilla`, SIEMPRE: publicada o no, y por que no.
+ *
+ * POR QUE EXISTE: la publicacion de plantillas (V041) no habia producido ni una fila en produccion y
+ * averiguar por que costo una auditoria entera, porque el veredicto no se registraba en ningun lado.
+ * Es la SEGUNDA vez que la falta de observabilidad de un aprendizaje colectivo cuesta lo mismo (la
+ * primera fue `resumenDeCorridaLibre`, atlas-sitios.ts, 29 jul 2026), asi que aqui el veredicto viaja
+ * al resultado del job y no solo al log.
+ *
+ * NO ES un dato del usuario: un booleano, un motivo de vocabulario cerrado, un indice de paso y un
+ * conteo. Nada de esto identifica al owner, al sitio ni a lo que la tarea escribio.
+ */
+interface VeredictoDePlantilla {
+  publicada: boolean;
+  /**
+   * Por que no se publico. Son los motivos de `esPublicable` (packages/shared) y de
+   * `plantillaDeLaCorrida`, mas los del CABLEADO, que son los que hasta hoy salian en silencio:
+   * `sin_receta_propia` (la corrida no dejo receta propia que compartir),
+   * `promocion_no_cableada` / `publicacion_no_cableada` (falta el puerto),
+   * `rechazada_por_el_backend` y `error_al_publicar`. null cuando si se publico.
+   */
+  motivo: string | null;
+  /** `idx` del paso que la rechazo, o null cuando el rechazo no es de un paso concreto. */
+  idx: number | null;
+  /** Cuantas clases avaladas por origenes independientes habia para ese dominio. */
+  clases: number;
 }
 
 /**
@@ -2135,41 +2177,53 @@ async function promoverRecetaBestEffort(
  * esto. Cualquier fallo se loguea aqui adentro y no se propaga -- ni el de la puerta, ni el de la
  * base, ni el de un puerto mal cableado. Compartir es una mejora para la proxima persona, jamas parte
  * del desenlace de la tarea de esta.
+ *
+ * SIEMPRE DEVUELVE VEREDICTO, y por eso se la llama tambien cuando no hay receta propia (`pasos` en
+ * null): un fallo de la publicacion es exactamente lo que hay que poder leer despues.
  */
 async function publicarPlantillaBestEffort(
   deps: TareaWebDeps,
   job: Job,
   entrada: {
-    pasos: readonly PasoDeReceta[];
+    /** Los pasos que la receta PROPIA conservo, o null si la corrida no dejo ninguna. */
+    pasos: readonly PasoDeReceta[] | null;
     dominio: string;
     dominios: readonly string[];
     verboBloqueado: string | null;
     clasesCorroboradas: ReadonlySet<string>;
   },
-): Promise<void> {
-  const plantillas = deps.plantillas;
-  if (plantillas === undefined) return;
+): Promise<VeredictoDePlantilla> {
+  const clases = entrada.clasesCorroboradas.size;
+  const registrar = (motivo: string, idx: number): VeredictoDePlantilla => {
+    // Con `sin_intencion_irreversible` no hay nada que reportar como anomalia: es la mitad de las
+    // tareas y es la decision de diseno de V041, no un fallo.
+    const nivel = motivo === 'sin_intencion_irreversible' ? 'debug' : 'info';
+    deps.logger[nivel]('tarea web: la corrida no se pudo compartir como plantilla', {
+      jobId: job.id,
+      dominio: entrada.dominio,
+      motivo,
+      paso: idx,
+      clasesCorroboradas: clases,
+    });
+    return { publicada: false, motivo, idx: idx < 0 ? null : idx, clases };
+  };
   try {
-    const veredicto = plantillaDeLaCorrida(entrada);
-    if (!veredicto.publicable) {
-      // Con `sin_intencion_irreversible` no hay nada que reportar como anomalia: es la mitad de las
-      // tareas y es la decision de diseno de V041, no un fallo.
-      const nivel = veredicto.motivo === 'sin_intencion_irreversible' ? 'debug' : 'info';
-      deps.logger[nivel]('tarea web: la corrida no se pudo compartir como plantilla', {
-        jobId: job.id,
-        dominio: entrada.dominio,
-        motivo: veredicto.motivo,
-        paso: veredicto.idx,
-        clasesCorroboradas: entrada.clasesCorroboradas.size,
-      });
-      return;
-    }
-    await publicar(deps, job, plantillas, veredicto.plantilla);
+    // Sin receta propia no hay nada corroborado que compartir, y publicar aqui compartiria un
+    // procedimiento que ni su propio origen conservo. Ese era el camino que salia en silencio.
+    if (entrada.pasos === null) return registrar('sin_receta_propia', -1);
+    const veredicto = plantillaDeLaCorrida({ ...entrada, pasos: entrada.pasos });
+    if (!veredicto.publicable) return registrar(veredicto.motivo, veredicto.idx);
+    // El puerto ausente (migracion sin aplicar) tambien queda registrado: es el otro caso en el que
+    // la publicacion no escribia ni una fila ni una linea de log.
+    const plantillas = deps.plantillas;
+    if (plantillas === undefined) return registrar('publicacion_no_cableada', -1);
+    return await publicar(deps, job, plantillas, veredicto.plantilla, clases);
   } catch (error) {
     deps.logger.warn('tarea web: no se pudo compartir la plantilla (se ignora, best-effort)', {
       jobId: job.id,
       err: describir(error),
     });
+    return { publicada: false, motivo: 'error_al_publicar', idx: null, clases };
   }
 }
 
@@ -2179,7 +2233,8 @@ async function publicar(
   job: Job,
   plantillas: { repo: RepositorioPlantillasParaWorker; clave: string },
   plantilla: PlantillaDeLaCorrida,
-): Promise<void> {
+  clases: number,
+): Promise<VeredictoDePlantilla> {
   const resultado = await plantillas.repo.publicar({
     dominiosClave: plantilla.dominiosClave,
     codigoDeIntencion: plantilla.codigoDeIntencion,
@@ -2194,7 +2249,9 @@ async function publicar(
       jobId: job.id,
       motivo: resultado.motivo ?? null,
     });
-    return;
+    // El motivo del backend es texto libre y se queda en el log; lo que se registra en el resultado
+    // del job es el vocabulario acotado del veredicto.
+    return { publicada: false, motivo: 'rechazada_por_el_backend', idx: null, clases };
   }
   deps.logger.info('tarea web: el procedimiento de la corrida quedo compartido como plantilla', {
     jobId: job.id,
@@ -2203,6 +2260,7 @@ async function publicar(
     marcadores: plantilla.marcadoresClave,
     pasos: plantilla.pasos.length,
   });
+  return { publicada: true, motivo: null, idx: null, clases };
 }
 
 /**
@@ -2910,7 +2968,7 @@ export async function procesarTareaWeb(
     // PROMOCION AUTOMATICA (CAMBIO 3): lo que acaba de funcionar queda aprendido para la proxima.
     // La corrida del motor siempre arranca desde la pagina de inicio (una receta que se rindio a
     // medias renavega antes), asi que su traza describe la tarea entera y es promovible.
-    await promoverRecetaBestEffort(
+    const veredictoDePlantilla = await promoverRecetaBestEffort(
       deps,
       job,
       sitio,
@@ -2960,6 +3018,9 @@ export async function procesarTareaWeb(
       resumen: desenlace.resumen,
       via: 'modelo',
       sesionExternaId: activo.sesionExternaId,
+      // EL VEREDICTO DE LA PUBLICACION de plantilla, publicada o no (ver VeredictoDePlantilla). Es lo
+      // que permite responder "por que esta corrida no dejo plantilla" mirando el job, sin auditoria.
+      plantilla: veredictoDePlantilla,
     });
     deps.logger.info('tarea web completada dentro de la sesion del sitio', {
       jobId: job.id,

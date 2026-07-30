@@ -1316,6 +1316,30 @@ describe('procesarJobDePromoverTrayectoria', () => {
     );
   });
 
+  /**
+   * EL VEREDICTO DE LA PUBLICACION de plantilla (V041) tambien queda registrado en ESTA via. No
+   * publica -- y este PR no lo cambia -- pero antes eso no se podia responder mirando el job: el
+   * resultado no decia nada de plantillas y no habia con que medir cuantos procedimientos
+   * irreversibles se pierden por aqui.
+   */
+  it('registra en el resultado que esta via no publica, con la intencion de la tarea', async () => {
+    const { deps, resultados } = makeDeps();
+    await procesarJobDePromoverTrayectoria(deps, makeJob(PAYLOAD));
+    expect(resultados[0]).toMatchObject({
+      estado: 'ok',
+      plantilla: { publicada: false, motivo: 'via_sin_publicacion', idx: null, clases: 0 },
+    });
+  });
+
+  it('una tarea reversible registra el motivo de diseno de V041, no el de la via', async () => {
+    const objetivo = OBJETIVO.replace('envia', 'archiva');
+    const { deps, resultados } = makeDeps({ trayectorias: [trayectoria({ objetivo })] });
+    await procesarJobDePromoverTrayectoria(deps, makeJob(PAYLOAD));
+    expect(resultados[0]).toMatchObject({
+      plantilla: { publicada: false, motivo: 'sin_intencion_irreversible', idx: null, clases: 0 },
+    });
+  });
+
   it('rechaza un payload invalido sin tocar la base', async () => {
     const { deps } = makeDeps();
     await expect(

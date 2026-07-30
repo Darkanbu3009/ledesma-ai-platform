@@ -442,6 +442,31 @@ export function convertirTrayectoriaPersistida(
   };
 }
 
+/**
+ * EL VEREDICTO DE LA PUBLICACION de plantilla compartida (V041) de ESTA via, que es siempre "no se
+ * publico" (OBSERVABILIDAD, 30 jul 2026). Misma forma y mismo vocabulario que el del motor libre
+ * (tarea-web.ts, VeredictoDePlantilla), para que las dos vias se puedan leer con la misma consulta.
+ *
+ * ESTA VIA NO PUBLICA, y este PR no lo cambia: la promocion por consentimiento no tiene puerto de
+ * plantillas ni lector del atlas, asi que no hay clases corroboradas con las que autorizar nada. Lo
+ * que hasta hoy no se podia responder mirando un job es CUANTO se pierde por eso, y de eso se ocupa
+ * el motivo: `via_sin_publicacion` es un procedimiento irreversible que si habria sido candidato.
+ */
+function veredictoDePlantillaDeLaVia(objetivo: string): {
+  publicada: boolean;
+  motivo: string;
+  idx: number | null;
+  clases: number;
+} {
+  return {
+    publicada: false,
+    motivo:
+      detectarVerboBloqueado(objetivo) === null ? 'sin_intencion_irreversible' : 'via_sin_publicacion',
+    idx: null,
+    clases: 0,
+  };
+}
+
 /** Puerto de lectura de trayectorias (lo implementa TrayectoriasWebRepository). */
 export interface TrayectoriasParaPromocion {
   listarPorJobConPasos(jobId: string, ownerId: string): Promise<TrayectoriaConPasos[]>;
@@ -553,11 +578,13 @@ export async function procesarJobDePromoverTrayectoria(
     origen: 'automatica',
   });
 
+  const plantilla = veredictoDePlantillaDeLaVia(ultima.objetivo);
   await deps.guardarResultado(job.id, {
     estado: 'ok',
     via: 'trayectoria',
     recetaId: receta?.id ?? null,
     ...(conversion.pasosSoloXpath.length > 0 ? { pasosSoloXpath: conversion.pasosSoloXpath } : {}),
+    plantilla,
   });
   deps.logger.info('promocion de trayectoria: la tarea quedo guardada como aprendida', {
     jobId: job.id,
@@ -566,5 +593,6 @@ export async function procesarJobDePromoverTrayectoria(
     recetaId: receta?.id ?? null,
     pasos: conversion.pasos.length,
     pasosSoloXpath: conversion.pasosSoloXpath.length,
+    plantilla: plantilla.motivo,
   });
 }
