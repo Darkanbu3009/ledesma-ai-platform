@@ -437,6 +437,9 @@ describe('procesarTareaWeb', () => {
       // El id de la sesion del proveedor queda EN el resultado: es lo que permite localizar
       // despues la grabacion de esta corrida a partir del job.
       sesionExternaId: 'ses-1',
+      // EL VEREDICTO DE LA PUBLICACION de plantilla (V041) queda registrado SIEMPRE, tambien cuando
+      // no habia nada que publicar. Aqui el worker corre sin recetas cableadas, y eso es lo que dice.
+      plantilla: { publicada: false, motivo: 'promocion_no_cableada', idx: null, clases: 0 },
     });
     expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
   });

@@ -181,7 +181,8 @@ function nombreDerivadoValido(nombre: string): boolean {
 /**
  * DERIVA estrategias 'rol' y 'texto' desde la DESCRIPCION del ACT (FIX estrategias multiples, 28
  * jul 2026). La descripcion nombra el campo en lenguaje natural y es lo unico persistido que
- * sobrevive a un xpath re-renderizado. Cuatro formas, de la mas explicita a la mas laxa:
+ * sobrevive a un xpath re-renderizado. Cuatro formas, de la mas explicita a la mas laxa, evaluadas en
+ * el orden 0, 2, 1, 3 (la forma 2 va antes que la 1 desde el 30 jul 2026: ver su comentario):
  *  0. aria-label CITADO textualmente: 'type ... aria-label "Cuerpo del mensaje"' -> atributo
  *     aria-label "Cuerpo del mensaje" (y rol con ese mismo nombre). Es el nombre accesible literal
  *     que el modelo copio del DOM, asi que gana a cualquier nombre adivinado de las palabras;
@@ -245,13 +246,26 @@ export function derivarEstrategiasDeDescripcion(accion: {
     return estrategias;
   }
 
-  // Forma 1: la palabra de rol precede al nombre ("the textbox Cuerpo del mensaje").
-  const rolYNombre = descripcion.match(
-    /\b(textbox|input|button|boton|link|enlace|checkbox|combobox)\b[\s:]+(.{2,80}?)$/i,
+  // Forma 2, y va PRIMERO (FIX del nombre derivado, 30 jul 2026): la palabra de rol sigue al nombre
+  // ("the recipients field", "the Enviar button in the compose window"). Esta forma ancla el nombre al
+  // COMIENZO y corta en la palabra de rol, asi que no se lleva la cola de la frase.
+  //
+  // POR QUE ANTES DE LA FORMA 1, y es el orden que arregla un caso real de produccion: la forma 1
+  // esta anclada a $ y con "click the Enviar button in the compose window" engancha `button` y toma
+  // como nombre TODO lo que sigue, que tras limpiar el relleno queda en "compose window": un
+  // localizador que no existe en la pagina. Ese es el par exacto que quedo en el paso 6 de la receta
+  // eff5175f, que es el boton Enviar, y hace que el paso escale al modelo en cada ejecucion.
+  //
+  // La forma 1 no pierde su caso motivador ("click the textbox Cuerpo del mensaje") porque para que
+  // esta forma matchee hace falta un nombre de dos o mas caracteres ANTES de la palabra de rol, y ahi
+  // `textbox` abre la frase; `box` dentro de `textbox` no tiene frontera de palabra, asi que tampoco
+  // matchea por ese lado.
+  const nombreYRol = limpiarNombreDerivado(descripcion).match(
+    /^(.{2,80}?)\s+\b(field|button|box|area|campo|boton|casilla|textbox|input)\b/i,
   );
-  if (rolYNombre !== null) {
-    const rol = ROL_POR_PALABRA[(rolYNombre[1] ?? '').toLowerCase()];
-    const nombre = limpiarNombreDerivado(rolYNombre[2] ?? '');
+  if (nombreYRol !== null) {
+    const rol = ROL_POR_PALABRA[(nombreYRol[2] ?? '').toLowerCase()];
+    const nombre = limpiarNombreDerivado(nombreYRol[1] ?? '');
     if (rol !== undefined && nombreDerivadoValido(nombre)) {
       agregar({ tipo: 'rol', rol, nombre });
       if (rol === 'button' && esClick) agregar({ tipo: 'texto', texto: nombre });
@@ -259,13 +273,13 @@ export function derivarEstrategiasDeDescripcion(accion: {
     }
   }
 
-  // Forma 2: la palabra de rol sigue al nombre ("the recipients field").
-  const nombreYRol = limpiarNombreDerivado(descripcion).match(
-    /^(.{2,80}?)\s+\b(field|button|box|area|campo|boton|casilla|textbox|input)\b/i,
+  // Forma 1: la palabra de rol precede al nombre ("the textbox Cuerpo del mensaje").
+  const rolYNombre = descripcion.match(
+    /\b(textbox|input|button|boton|link|enlace|checkbox|combobox)\b[\s:]+(.{2,80}?)$/i,
   );
-  if (nombreYRol !== null) {
-    const rol = ROL_POR_PALABRA[(nombreYRol[2] ?? '').toLowerCase()];
-    const nombre = limpiarNombreDerivado(nombreYRol[1] ?? '');
+  if (rolYNombre !== null) {
+    const rol = ROL_POR_PALABRA[(rolYNombre[1] ?? '').toLowerCase()];
+    const nombre = limpiarNombreDerivado(rolYNombre[2] ?? '');
     if (rol !== undefined && nombreDerivadoValido(nombre)) {
       agregar({ tipo: 'rol', rol, nombre });
       if (rol === 'button' && esClick) agregar({ tipo: 'texto', texto: nombre });
@@ -442,6 +456,31 @@ export function convertirTrayectoriaPersistida(
   };
 }
 
+/**
+ * EL VEREDICTO DE LA PUBLICACION de plantilla compartida (V041) de ESTA via, que es siempre "no se
+ * publico" (OBSERVABILIDAD, 30 jul 2026). Misma forma y mismo vocabulario que el del motor libre
+ * (tarea-web.ts, VeredictoDePlantilla), para que las dos vias se puedan leer con la misma consulta.
+ *
+ * ESTA VIA NO PUBLICA, y este PR no lo cambia: la promocion por consentimiento no tiene puerto de
+ * plantillas ni lector del atlas, asi que no hay clases corroboradas con las que autorizar nada. Lo
+ * que hasta hoy no se podia responder mirando un job es CUANTO se pierde por eso, y de eso se ocupa
+ * el motivo: `via_sin_publicacion` es un procedimiento irreversible que si habria sido candidato.
+ */
+function veredictoDePlantillaDeLaVia(objetivo: string): {
+  publicada: boolean;
+  motivo: string;
+  idx: number | null;
+  clases: number;
+} {
+  return {
+    publicada: false,
+    motivo:
+      detectarVerboBloqueado(objetivo) === null ? 'sin_intencion_irreversible' : 'via_sin_publicacion',
+    idx: null,
+    clases: 0,
+  };
+}
+
 /** Puerto de lectura de trayectorias (lo implementa TrayectoriasWebRepository). */
 export interface TrayectoriasParaPromocion {
   listarPorJobConPasos(jobId: string, ownerId: string): Promise<TrayectoriaConPasos[]>;
@@ -553,11 +592,13 @@ export async function procesarJobDePromoverTrayectoria(
     origen: 'automatica',
   });
 
+  const plantilla = veredictoDePlantillaDeLaVia(ultima.objetivo);
   await deps.guardarResultado(job.id, {
     estado: 'ok',
     via: 'trayectoria',
     recetaId: receta?.id ?? null,
     ...(conversion.pasosSoloXpath.length > 0 ? { pasosSoloXpath: conversion.pasosSoloXpath } : {}),
+    plantilla,
   });
   deps.logger.info('promocion de trayectoria: la tarea quedo guardada como aprendida', {
     jobId: job.id,
@@ -566,5 +607,6 @@ export async function procesarJobDePromoverTrayectoria(
     recetaId: receta?.id ?? null,
     pasos: conversion.pasos.length,
     pasosSoloXpath: conversion.pasosSoloXpath.length,
+    plantilla: plantilla.motivo,
   });
 }

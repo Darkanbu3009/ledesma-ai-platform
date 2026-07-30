@@ -223,6 +223,52 @@ describe('derivarEstrategiasDeDescripcion (FIX estrategias multiples, 28 jul 202
     ]);
   });
 
+  /**
+   * EL NOMBRE DERIVADO YA NO SE LLEVA LA COLA DE LA FRASE (FIX del 30 jul 2026). La forma 1 esta
+   * anclada a $, asi que con la descripcion real "click the Enviar button in the compose window"
+   * enganchaba `button` y tomaba como nombre todo lo que seguia: quedaba rol button "compose window"
+   * y texto "compose window", un localizador que no existe en la pagina. Ese es el par que quedo en
+   * el paso 6 de la receta eff5175f, que es el boton Enviar, y hacia que el paso escalara al modelo
+   * en cada ejecucion. Evaluar la forma 2 primero corta en la palabra de rol y devuelve "Enviar".
+   *
+   * Los siete casos van juntos a proposito: los cinco primeros son los que el cambio de orden no debe
+   * romper, y los dos ultimos son los que arregla.
+   */
+  it('el nombre se corta en la palabra de rol y no arrastra la cola de la frase', () => {
+    const derivar = (instruccion: string, metodo: string, argumentos: string[] = []) =>
+      derivarEstrategiasDeDescripcion({ tipo: 'act', instruccion, metodo, argumentos });
+
+    expect(derivar('click en Enviar', 'click')).toEqual([
+      { tipo: 'rol', rol: 'button', nombre: 'Enviar' },
+      { tipo: 'texto', texto: 'Enviar' },
+    ]);
+    // La forma 1 conserva su caso motivador: `textbox` abre la frase, asi que la forma 2 no tiene
+    // ningun nombre delante que capturar, y `box` dentro de `textbox` no tiene frontera de palabra.
+    expect(derivar('click the textbox Cuerpo del mensaje', 'click')).toEqual([
+      { tipo: 'rol', rol: 'textbox', nombre: 'Cuerpo del mensaje' },
+    ]);
+    expect(derivar('click the recipients field', 'click')).toEqual([
+      { tipo: 'rol', rol: 'textbox', nombre: 'recipients' },
+    ]);
+    expect(derivar('type X into the subject field', 'fill', ['X'])).toEqual([
+      { tipo: 'rol', rol: 'textbox', nombre: 'subject' },
+    ]);
+    expect(derivar('type the message into the body', 'type', ['hola'])).toEqual([
+      { tipo: 'rol', rol: 'textbox', nombre: 'message' },
+      { tipo: 'rol', rol: 'textbox', nombre: 'body' },
+    ]);
+    // Los dos casos reales que la forma 1 se llevaba enteros ("compose window" y "compose a new
+    // email"): el nombre del control esta ANTES de la palabra de rol.
+    expect(derivar('click the Enviar button in the compose window', 'click')).toEqual([
+      { tipo: 'rol', rol: 'button', nombre: 'Enviar' },
+      { tipo: 'texto', texto: 'Enviar' },
+    ]);
+    expect(derivar('click the Redactar button to compose a new email', 'click')).toEqual([
+      { tipo: 'rol', rol: 'button', nombre: 'Redactar' },
+      { tipo: 'texto', texto: 'Redactar' },
+    ]);
+  });
+
   it('sin instruccion, o con un metodo que no es click ni escritura, no deriva nada', () => {
     expect(
       derivarEstrategiasDeDescripcion({ tipo: 'act', instruccion: null, metodo: 'click', argumentos: [] }),
@@ -1314,6 +1360,30 @@ describe('procesarJobDePromoverTrayectoria', () => {
       'promocion de trayectoria: no se pudo convertir en algo repetible',
       expect.objectContaining({ metodosDescartados: ['fillFormVision', 'fill'] }),
     );
+  });
+
+  /**
+   * EL VEREDICTO DE LA PUBLICACION de plantilla (V041) tambien queda registrado en ESTA via. No
+   * publica -- y este PR no lo cambia -- pero antes eso no se podia responder mirando el job: el
+   * resultado no decia nada de plantillas y no habia con que medir cuantos procedimientos
+   * irreversibles se pierden por aqui.
+   */
+  it('registra en el resultado que esta via no publica, con la intencion de la tarea', async () => {
+    const { deps, resultados } = makeDeps();
+    await procesarJobDePromoverTrayectoria(deps, makeJob(PAYLOAD));
+    expect(resultados[0]).toMatchObject({
+      estado: 'ok',
+      plantilla: { publicada: false, motivo: 'via_sin_publicacion', idx: null, clases: 0 },
+    });
+  });
+
+  it('una tarea reversible registra el motivo de diseno de V041, no el de la via', async () => {
+    const objetivo = OBJETIVO.replace('envia', 'archiva');
+    const { deps, resultados } = makeDeps({ trayectorias: [trayectoria({ objetivo })] });
+    await procesarJobDePromoverTrayectoria(deps, makeJob(PAYLOAD));
+    expect(resultados[0]).toMatchObject({
+      plantilla: { publicada: false, motivo: 'sin_intencion_irreversible', idx: null, clases: 0 },
+    });
   });
 
   it('rechaza un payload invalido sin tocar la base', async () => {
