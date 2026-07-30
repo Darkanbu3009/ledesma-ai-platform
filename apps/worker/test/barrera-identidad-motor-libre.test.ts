@@ -6,12 +6,15 @@ import type {
   GuardiaDeAccion,
   MotorDeTareaWeb,
   NavegadorParaTarea,
-  RegistradorDeTrayectorias,
   RepositorioAtlasParaWorker,
   RepositorioSitiosParaTarea,
   TareaWebDeps,
-  TrayectoriaNueva,
 } from '../src/tarea-web.js';
+import type {
+  PasoCensurado,
+  RegistradorDeTrayectorias,
+  TrayectoriaNueva,
+} from '../src/trayectoria.js';
 import { AccionBloqueadaError, AccionSinConfirmarError } from '../src/errores.js';
 import { claveDelAtlas } from '../src/atlas-sitios.js';
 import type { CampoDeLaPagina, RepositorioPoliticasParaWorker } from '../src/verificacion.js';
@@ -290,7 +293,7 @@ function escenario(
 
 /** Los pasos de identidad que la corrida dejo en la trayectoria. */
 function pasosDeIdentidad(trayectorias: ReturnType<typeof makeTrayectorias>) {
-  return (trayectorias.guardadas[0]?.pasos ?? []).filter((paso) =>
+  return (trayectorias.guardadas[0]?.pasos ?? []).filter((paso: PasoCensurado) =>
     paso.accion.tipo.startsWith('identidad:'),
   );
 }
