@@ -376,6 +376,13 @@ export interface GuardadoAceptado {
    * que nada), pero la fragilidad se reporta en el resultado del job para que sea visible.
    */
   pasosSoloXpath: string[];
+  /**
+   * Nombres de los metodos NO representables que la promocion descarto sin abortar (FIX A: un gesto
+   * de enfoque como clickAndHold, un scroll suelto, un select nativo o una tool desconocida de una
+   * version futura de Stagehand). Vacio cuando la trayectoria no traia ninguno. El job los loguea
+   * para dejar rastro de que gesto se omitio al aprender la tarea.
+   */
+  metodosDescartados: string[];
 }
 
 export type ResultadoDeGuardado = GuardadoAceptado | GuardadoRechazado;
@@ -418,6 +425,7 @@ export function convertirTrayectoriaPersistida(
     pasosSoloXpath: promocion.pasos
       .filter((paso) => paso.estrategias.length > 0 && paso.estrategias.every((e) => e.tipo === 'xpath'))
       .map((paso) => `paso ${paso.idx} (${paso.accion})`),
+    metodosDescartados: promocion.metodosDescartados ?? [],
   };
 }
 
@@ -498,6 +506,17 @@ export async function procesarJobDePromoverTrayectoria(
     // construye el last_error como `${name}: ${message}`, asi que el job queda empezando con
     // PROMOCION_NO_REPETIBLE_PREFIX y la consola muestra el motivo real sin invitar a reintentar.
     throw new PromocionNoRepetibleError(conversion.motivo);
+  }
+
+  // FAIL-OPEN de los metodos no representables (FIX A): la promocion no aborto por ellos, pero se deja
+  // rastro de que gesto o tool desconocida se omitio al aprender la tarea. Sin esto, una receta con un
+  // paso de menos se veria como si la corrida no lo hubiera tenido.
+  if (conversion.metodosDescartados.length > 0) {
+    deps.logger.info('promocion de trayectoria: se descartaron metodos no representables', {
+      jobId: job.id,
+      jobOrigenId,
+      metodos: conversion.metodosDescartados,
+    });
   }
 
   const receta = await deps.recetas.promover({
