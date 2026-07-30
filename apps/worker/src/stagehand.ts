@@ -455,9 +455,10 @@ export function crearActBlindado(params: {
         params.alTerminar?.();
         throw new AccionBloqueadaError(veredicto.mensaje);
       }
-      // INCOMPLETO (CAMBIO 1) y RECHAZAR (FIX C): la accion no pasa al navegador, pero la corrida NO
-      // se corta. El motivo vuelve al modelo como fallo de la tool; en 'rechazar' el texto ademas es
-      // terminal (la corrida terminara y el agente no debe insistir).
+      // INCOMPLETO (CAMBIO 1) y RECHAZAR: la accion no pasa al navegador, pero la corrida NO se
+      // corta. El motivo vuelve al modelo como fallo de la tool; en 'rechazar' el texto o bien es
+      // terminal (FIX C: la corrida terminara y el agente no debe insistir) o bien lo aparta de un
+      // control que no cambia el formulario y le dice que siga (FIX A).
       if (veredicto?.tipo === 'incompleto' || veredicto?.tipo === 'rechazar') {
         return { success: false, error: veredicto.mensaje };
       }

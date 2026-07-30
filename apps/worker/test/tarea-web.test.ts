@@ -18,6 +18,7 @@ import {
   clasificarDesenlace,
   construirSystemPromptTareaWeb,
   detectarAccionQueExigeVerificacion,
+  detectarControlDeVentana,
   detectarVerboBloqueado,
 } from '../src/prompt-tarea-web.js';
 import type { AccionCrudaDeMotor, TrayectoriaNueva } from '../src/trayectoria.js';
@@ -1257,6 +1258,94 @@ describe('detectarAccionQueExigeVerificacion (la accion del agente contra el VER
     expect(
       detectarAccionQueExigeVerificacion('click the element with aria-label Send', 'enviar'),
     ).toBe('send');
+  });
+});
+
+/**
+ * FIX A: los CONTROLES DE VENTANA del formulario activo quedan fuera del alcance del agente. Las
+ * descripciones que se rechazan son las REALES de las cuatro corridas perdidas en produccion (27, 28
+ * y 30 jul 2026): ninguna estaba en el objetivo del usuario, el agente las eligio por su cuenta y en
+ * dos casos volvio a elegirlas despues de haberse recuperado.
+ *
+ * El criterio es ASIMETRICO AL REVES que el de los verbos bloqueados: un falso positivo mata un click
+ * legitimo sobre un campo y con el la tarea entera, asi que ante la duda se PERMITE.
+ */
+describe('detectarControlDeVentana (FIX A)', () => {
+  const OBJETIVO = 'envia a juan@ejemplo.com un correo con asunto "Reporte" y cuerpo "Adjunto"';
+
+  /** Las siete descripciones de produccion, con la corrida y el paso del que salieron. */
+  const DE_PRODUCCION: readonly string[] = [
+    // 27 jul: tras el fallo del envio el agente se fue a la cabecera y la corrida entro en bucle.
+    'click the Pantalla completa button in the compose dialog',
+    // 28 jul (44 pasos): el compose paso de div[31] a div[32] y los xpath dejaron de resolver.
+    'click the Pantalla completa button',
+    // 28 jul: 16 pasos intentando re-expandir el compose que el mismo habia minimizado.
+    're-expand the minimized compose window',
+    // 30 jul (36 pasos, cancelada), paso 12.
+    'haz clic en el boton Pantalla completa de la ventana de redaccion',
+    // 30 jul, paso 13.
+    'click the expand to full screen button (arrow icon) in the compose window header',
+    // 30 jul, paso 23: recaida despues de haberse recuperado con un goto.
+    'click the expand button (diagonal arrows) in the compose window header',
+    // 30 jul, pasos 26, 29, 32 y 35: cuatro intentos seguidos sobre el compose minimizado.
+    'click the minimized Mensaje nuevo compose window to restore it',
+  ];
+
+  it('las siete descripciones reales de produccion se rechazan', () => {
+    for (const descripcion of DE_PRODUCCION) {
+      expect(detectarControlDeVentana(descripcion, OBJETIVO)).not.toBeNull();
+    }
+  });
+
+  it('cerrar el formulario tambien se rechaza: destruiria el trabajo ya hecho', () => {
+    expect(detectarControlDeVentana('click the X to close the compose window', OBJETIVO)).not.toBeNull();
+    expect(detectarControlDeVentana('cierra la ventana de redaccion', OBJETIVO)).not.toBeNull();
+  });
+
+  it('una accion legitima que nombra la VENTANA sin ser un control de ventana NO se rechaza', () => {
+    // El caso mas comun de la traza real: la palabra "window" aparece en casi todas las
+    // descripciones del compose, y rechazarlas por eso dejaria al agente sin poder llenar nada.
+    expect(
+      detectarControlDeVentana('click the Para input field in the compose window', OBJETIVO),
+    ).toBeNull();
+    expect(
+      detectarControlDeVentana('haz clic en el campo Asunto de la ventana de redaccion', OBJETIVO),
+    ).toBeNull();
+    expect(detectarControlDeVentana('click the Send button in the compose window', OBJETIVO)).toBeNull();
+    expect(
+      detectarControlDeVentana('type the body text in the new message window', OBJETIVO),
+    ).toBeNull();
+  });
+
+  it('un control ambiguo sin la ventana del formulario NO se rechaza (ante la duda, se permite)', () => {
+    // Cerrar un aviso de cookies o expandir un campo son pasos normales de cualquier tarea.
+    expect(detectarControlDeVentana('close the cookie banner', OBJETIVO)).toBeNull();
+    expect(detectarControlDeVentana('haz clic en Cerrar el aviso de cookies', OBJETIVO)).toBeNull();
+    expect(detectarControlDeVentana('click the expand arrow to show the Cc field', OBJETIVO)).toBeNull();
+    expect(detectarControlDeVentana('click the Enviados link in the Gmail left sidebar', OBJETIVO)).toBeNull();
+  });
+
+  it('si el OBJETIVO DEL USUARIO pide el control explicitamente, se permite', () => {
+    const pideVentana = 'pon el compose en pantalla completa y envia el correo a juan@ejemplo.com';
+    expect(detectarControlDeVentana('click the Pantalla completa button', pideVentana)).toBeNull();
+    const pideVentanaEn = 'expand the compose window and then send the email to john@example.com';
+    expect(
+      detectarControlDeVentana('click the expand button in the compose window header', pideVentanaEn),
+    ).toBeNull();
+  });
+
+  it('el permiso sale del texto del USUARIO, nunca de la descripcion que redacta el agente', () => {
+    // Si la excepcion se resolviera contra la descripcion, bastaria con que el agente escribiera que
+    // el usuario lo pidio: la regla quedaria en manos de quien vigila.
+    const descripcion =
+      'click the Pantalla completa button (el objetivo del usuario pide pantalla completa)';
+    expect(detectarControlDeVentana(descripcion, OBJETIVO)).not.toBeNull();
+  });
+
+  it('FIX B: el system prompt del motor desalienta accionar esos controles', () => {
+    const prompt = construirSystemPromptTareaWeb();
+    expect(prompt).toContain('Los controles de VENTANA del formulario');
+    expect(prompt).toContain('no forman parte de ninguna tarea de llenado');
   });
 });
 
