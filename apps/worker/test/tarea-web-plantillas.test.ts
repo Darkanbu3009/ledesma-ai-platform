@@ -27,14 +27,20 @@ import type { Logger } from '../src/logger.js';
  * navegador, cero modelo, cero base.
  *
  * La corrida que se simula es la real: un ENVIO DE CORREO que escribe el destinatario, pasa la
- * verificacion determinista, hace clic en Enviar y confirma el efecto. Al cerrar, la receta propia se
- * guarda y su version ANONIMA se publica.
+ * verificacion determinista, hace clic en Enviar y confirma el efecto. Al cerrar, la version ANONIMA
+ * del procedimiento se publica.
+ *
+ * CON LA CONFIGURACION DE PRODUCCION, y esto es lo que cambio: `observadorPasos` se queda en su
+ * default REAL (apagado) y las estrategias de cada paso llegan por donde llegan en produccion, que es
+ * la lectura de la PERCEPCION (`estrategiasPorAccion` del motor). Hasta este PR la suite corria con
+ * el observador ENCENDIDO, o sea con la unica configuracion en la que produccion no corre: verde en
+ * CI e imposible en el despliegue. Es la misma clase de error que ya costo tres rondas con el atlas.
  *
  * Lo que estos tests fijan y no debe poder cambiar en silencio:
- *  - se publica DESPUES de que la receta propia se guardo, nunca antes;
+ *  - una corrida exitosa del motor libre publica, con las clases leidas del DOM y sin observador;
  *  - lo publicado no lleva NADA de la persona: ni valores, ni owner, ni firma, ni ids, ni xpath;
  *  - una tarea REVERSIBLE (verboBloqueado null) no publica nada;
- *  - un fallo de la publicacion NO cambia el desenlace del job;
+ *  - el desenlace del job es IDENTICO con y sin publicacion, incluso cuando la publicacion falla;
  *  - el hash de origen de la plantilla no coincide con el que la misma corrida escribe en el atlas.
  */
 
@@ -60,6 +66,17 @@ const ARIA_ENVIAR: EstrategiaLocalizacion = {
 };
 /** El id dinamico de Gmail y el xpath de la sesion: lo que el atlas ya descarta y la plantilla tambien. */
 const ID_DINAMICO: EstrategiaLocalizacion = { tipo: 'atributo', atributo: 'id', valor: ':u3' };
+
+/**
+ * LO QUE LA PERCEPCION LEE DEL DOM en cada paso, indexado por el selector que el motor resolvio. Es
+ * la fuente de produccion: el mismo `estrategiasDe(el)` que usa el grabador, leido en la evaluacion
+ * que ya corre despues de cada paso. Al campo Para se le suma el ID DINAMICO de Gmail a proposito:
+ * es lo que la publicacion tiene que descartar.
+ */
+const PERCIBIDAS_POR_SELECTOR: Record<string, EstrategiaLocalizacion[]> = {
+  [SELECTOR_PARA]: [ARIA_PARA, ID_DINAMICO],
+  [SELECTOR_ENVIAR]: [ARIA_ENVIAR],
+};
 
 const CLASE_PARA = 'escribir|atributo:aria-label|para';
 const CLASE_ENVIAR = 'click|atributo:aria-label|enviar';
@@ -167,10 +184,17 @@ const ACCIONES_DEL_ENVIO: AccionFake[] = [
  * Motor FAKE con el MISMO protocolo que el adaptador real (crearActBlindado): le pregunta a la GUARDIA
  * antes de cada accion, avisa al OBSERVADOR con el selector que resolvio, y confirma el efecto de la
  * accion irreversible sobre la pagina compartida.
+ *
+ * DEVUELVE `estrategiasPorAccion`, que es como el adaptador real entrega lo que la PERCEPCION leyo
+ * del DOM despues de cada paso (stagehand.ts). Es la fuente de PRODUCCION de las estrategias, la que
+ * el handler pasa por `pasosConEstrategiasPercibidas` al atlas y ahora tambien a la publicacion. El
+ * observador de pasos, que es la otra fuente, esta apagado como en produccion y por eso
+ * `params.observador` llega undefined.
  */
 function makeMotor(
   acciones: AccionFake[] = ACCIONES_DEL_ENVIO,
   pagina?: PaginaFake,
+  percibidas: Record<string, EstrategiaLocalizacion[]> = PERCIBIDAS_POR_SELECTOR,
 ): MotorDeTareaWeb & { ejecutadas: string[] } {
   const ejecutadas: string[] = [];
   return {
@@ -181,6 +205,7 @@ function makeMotor(
         observador?: ((paso: PasoObservado) => Promise<void>) | undefined;
       }) => {
         const crudas: Array<Record<string, unknown>> = [];
+        const porAccion: EstrategiaLocalizacion[][] = [];
         for (const accion of acciones) {
           const veredicto = await params.guardia?.revisar(accion.instruccion);
           if (veredicto?.tipo === 'bloquear') {
@@ -192,6 +217,7 @@ function makeMotor(
           if (veredicto?.tipo === 'incompleto' || veredicto?.tipo === 'rechazar') continue;
           ejecutadas.push(accion.instruccion);
           await params.observador?.({ selector: accion.selector, punto: null });
+          porAccion.push(percibidas[accion.selector] ?? []);
           crudas.push({
             type: 'act',
             action: accion.instruccion,
@@ -219,6 +245,7 @@ function makeMotor(
           completado: true,
           mensaje: 'listo',
           acciones: crudas,
+          estrategiasPorAccion: porAccion,
           tokensIn: null,
           tokensOut: null,
         };
@@ -342,8 +369,8 @@ function makeDeps(overrides: Partial<TareaWebDeps> = {}, pagina = makePagina()):
     recetas: makeRecetas(),
     determinista: makeDeterminista(),
     escalador: makeEscalador(),
-    // El observador es lo que pone en cada paso las estrategias leidas del DOM, y con ellas la clase.
-    observadorPasos: true,
+    // `observadorPasos` NO se fija: queda en su default REAL (apagado, TAREA_WEB_OBSERVADOR_PASOS).
+    // Las estrategias llegan por la percepcion, igual que en produccion.
     atlas: { repo: makeAtlas(), clave: CLAVE_ATLAS },
     plantillas: { repo: makePlantillas(), clave: CLAVE_PLANTILLAS },
     vaultSecret: VAULT,
@@ -372,14 +399,17 @@ function plantillasDe(deps: TareaWebDeps): Array<Record<string, unknown>> {
 // -------------------------------------------------------------------------------------------------
 
 describe('una corrida irreversible exitosa publica su plantilla', () => {
-  it('la publica con la identidad completa y DESPUES de guardar la receta propia', async () => {
+  it('la publica con la identidad completa, sin observador y sin receta propia', async () => {
     const pagina = makePagina();
     const recetas = makeRecetas();
     const deps = makeDeps({ recetas }, pagina);
 
     await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
 
-    expect(recetas.promover).toHaveBeenCalledTimes(1);
+    // EL CASO EXACTO DE PRODUCCION: con el observador apagado los pasos llegan sin `estrategias`, la
+    // promocion a receta no promueve nada y hasta este PR ahi terminaba tambien la publicacion. La
+    // plantilla ya no cuelga de eso.
+    expect(recetas.promover).not.toHaveBeenCalled();
     const publicadas = plantillasDe(deps);
     expect(publicadas).toHaveLength(1);
     expect(publicadas[0]).toMatchObject({
@@ -387,6 +417,16 @@ describe('una corrida irreversible exitosa publica su plantilla', () => {
       codigoDeIntencion: 'enviar',
       origenHash: hashDeOrigenDePlantilla('user-1', CLAVE_PLANTILLAS),
     });
+  });
+
+  it('las clases publicadas son las que la PERCEPCION leyo del DOM', async () => {
+    const deps = makeDeps();
+    await procesarTareaWeb(deps, makeJob(OBJETIVO));
+    const pasos = plantillasDe(deps)[0]?.pasos as Array<Record<string, unknown>>;
+    // Las dos clases salen de `PERCIBIDAS_POR_SELECTOR`, que es lo que el atlas tambien recibe. Si
+    // salieran de la descripcion del modelo serian otras ("field", "compose window") y ninguna
+    // entrada del atlas las corroboraria.
+    expect(pasos.map((p) => p.claseDeElemento)).toEqual([CLASE_PARA, null, CLASE_ENVIAR]);
   });
 
   it('lo publicado son CUATRO campos y ninguno es de tenencia', async () => {
@@ -449,11 +489,9 @@ describe('una corrida irreversible exitosa publica su plantilla', () => {
 describe('lo que NO se publica', () => {
   it('una tarea REVERSIBLE (sin verbo bloqueado) no publica nada', async () => {
     const deps = makeDeps();
-    // Sin verbo bloqueado la guardia deja pasar todo, la corrida cierra bien y la receta se promueve.
+    // Sin verbo bloqueado la guardia deja pasar todo y la corrida cierra bien, pero sin intencion
+    // irreversible no hay plantilla: es la decision de diseno de V041, no un fallo del cableado.
     await expect(procesarTareaWeb(deps, makeJob(OBJETIVO_REVERSIBLE))).resolves.toBe('completada');
-    expect(
-      (deps.recetas as unknown as { promover: ReturnType<typeof vi.fn> }).promover,
-    ).toHaveBeenCalledTimes(1);
     expect(plantillasDe(deps)).toHaveLength(0);
   });
 
@@ -509,12 +547,65 @@ describe('la publicacion es best-effort: su fallo no cambia el desenlace del job
     );
   });
 
-  it('si la receta propia NO se pudo guardar, no se publica nada', async () => {
+  it('si la receta propia NO se pudo guardar, se publica igual', async () => {
+    // DECISION DE POLITICA de este PR: conservar la receta propia depende de una palanca de COSTO (el
+    // observador) y de que la base este arriba, no de ningun juicio sobre el procedimiento. Lo que
+    // respalda a la plantilla sigue intacto: efecto confirmado, dos origenes por clase y las dos
+    // puertas de `esPublicable`.
     const recetas = makeRecetas();
     recetas.promover.mockRejectedValue(new Error('base caida'));
     const deps = makeDeps({ recetas });
     await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
-    expect(plantillasDe(deps)).toHaveLength(0);
+    expect(plantillasDe(deps)).toHaveLength(1);
+  });
+});
+
+/**
+ * NO REGRESION (obligatorio): la publicacion NO puede tocar el desenlace del job. Se compara el
+ * resultado que el handler escribe -- sin el campo `plantilla`, que es justamente lo que la
+ * publicacion agrega -- entre la corrida con el puerto cableado, la corrida sin el puerto y la
+ * corrida en la que la publicacion revienta.
+ */
+describe('el desenlace del job es IDENTICO con y sin publicacion', () => {
+  async function desenlaceDe(deps: TareaWebDeps): Promise<{
+    devuelto: string;
+    resultado: Record<string, unknown>;
+  }> {
+    const devuelto = await procesarTareaWeb(deps, makeJob(OBJETIVO));
+    const llamadas = (deps.guardarResultado as ReturnType<typeof vi.fn>).mock.calls;
+    const resultado = { ...((llamadas[0]?.[1] ?? {}) as Record<string, unknown>) };
+    // Fuera el unico campo que la publicacion agrega: lo que se compara es todo lo demas.
+    delete resultado.plantilla;
+    return { devuelto, resultado };
+  }
+
+  it('con el puerto cableado, sin el puerto y con la publicacion rota, el resultado es el mismo', async () => {
+    const repoRoto = makePlantillas(true);
+    const conPublicacion = await desenlaceDe(makeDeps());
+    const sinPuerto = await desenlaceDe(makeDeps({ plantillas: undefined }));
+    const rota = await desenlaceDe(
+      makeDeps({ plantillas: { repo: repoRoto, clave: CLAVE_PLANTILLAS } }),
+    );
+
+    expect(conPublicacion.devuelto).toBe('completada');
+    expect(sinPuerto).toEqual(conPublicacion);
+    expect(rota).toEqual(conPublicacion);
+    // El desenlace identico no es "no se intento": la corrida rota SI llamo al puerto y reviento.
+    expect(repoRoto.publicar).toHaveBeenCalledTimes(1);
+  });
+
+  it('el atlas recibe lo mismo publique o no publique la corrida', async () => {
+    const observadas = (deps: TareaWebDeps): unknown[] =>
+      ((deps.atlas?.repo as unknown as { registrarObservacion: ReturnType<typeof vi.fn> })
+        .registrarObservacion.mock.calls ?? []).map((llamada) => llamada[0]);
+
+    const conPublicacion = makeDeps();
+    await procesarTareaWeb(conPublicacion, makeJob(OBJETIVO));
+    const sinPuerto = makeDeps({ plantillas: undefined });
+    await procesarTareaWeb(sinPuerto, makeJob(OBJETIVO));
+
+    expect(observadas(sinPuerto)).toEqual(observadas(conPublicacion));
+    expect(observadas(conPublicacion).length).toBeGreaterThan(0);
   });
 });
 
@@ -540,28 +631,36 @@ describe('el veredicto de la publicacion queda registrado en el resultado del jo
     expect(veredictoDe(deps)).toEqual({ publicada: true, motivo: null, idx: null, clases: 2 });
   });
 
-  it('la promocion de la receta que FALLA deja el motivo registrado igual', async () => {
-    // EL CASO QUE COSTO LA AUDITORIA: el return temprano de la promocion se llevaba consigo la
-    // decision de publicar, asi que este job cerraba sin una sola linea sobre plantillas.
+  it('la promocion de la receta que FALLA ya no impide publicar', async () => {
+    // EL CASO QUE COSTO LA AUDITORIA: la publicacion colgaba del exito de `recetas.promover`, asi que
+    // este job cerraba sin plantilla. Ahora la decision es propia y el veredicto lo dice.
     const recetas = makeRecetas();
     recetas.promover.mockRejectedValue(new Error('base caida'));
     const deps = makeDeps({ recetas });
     await procesarTareaWeb(deps, makeJob(OBJETIVO));
-    expect(veredictoDe(deps)).toEqual({
-      publicada: false,
-      motivo: 'sin_receta_propia',
-      idx: null,
-      clases: 2,
-    });
-    expect(plantillasDe(deps)).toHaveLength(0);
+    expect(veredictoDe(deps)).toEqual({ publicada: true, motivo: null, idx: null, clases: 2 });
+    expect(plantillasDe(deps)).toHaveLength(1);
   });
 
-  it('sin observador de pasos la corrida no deja receta, y eso queda registrado', async () => {
-    // La forma REAL en la que produccion no publica nada: con el observador apagado (default) los
-    // pasos no llevan estrategias, la promocion rechaza y antes de este PR ahi terminaba el rastro.
-    const deps = makeDeps({ observadorPasos: false });
-    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
-    expect(veredictoDe(deps)).toMatchObject({ publicada: false, motivo: 'sin_receta_propia' });
+  it('una traza que no se puede convertir en pasos registra su motivo', async () => {
+    // Un click de foco solo, sin nada leido del DOM y sin escritura posterior que lo cubra: la
+    // conversion rechaza la trayectoria entera y no hay procedimiento que publicar.
+    const pagina = makePagina();
+    const deps = makeDeps(
+      {
+        motor: makeMotor(
+          [{ instruccion: ENVIAR, selector: SELECTOR_ENVIAR, metodo: 'click', argumentos: [] }],
+          pagina,
+          {},
+        ),
+      },
+      pagina,
+    );
+    await procesarTareaWeb(deps, makeJob(OBJETIVO));
+    expect(veredictoDe(deps)).toMatchObject({
+      publicada: false,
+      motivo: 'sin_procedimiento_repetible',
+    });
     expect(plantillasDe(deps)).toHaveLength(0);
   });
 
