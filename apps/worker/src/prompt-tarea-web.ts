@@ -283,6 +283,68 @@ export function detectarAccionQueExigeVerificacion(
   return null;
 }
 
+/**
+ * CONTROLES DE VENTANA DEL FORMULARIO ACTIVO (FIX A): pantalla completa, expandir, minimizar,
+ * restaurar y cerrar. No cambian el CONTENIDO del formulario, asi que no forman parte de ninguna
+ * tarea de llenado, y su efecto es de lo mas caro de recuperar: el formulario se colapsa o se
+ * re-renderiza en otro nodo del DOM y el agente gasta decenas de pasos volviendo. Evidencia de
+ * produccion (27, 28 y 30 jul 2026): cuatro corridas perdidas contra la cabecera del redactor de
+ * Gmail, y en dos de ellas el agente volvio a elegir el mismo control despues de recuperarse.
+ *
+ * La deteccion se parte en DOS listas porque el riesgo de falso positivo no es el mismo:
+ *  - INEQUIVOCOS: "pantalla completa", "full screen" y "maximizar" no nombran otra cosa;
+ *  - AMBIGUOS: "expandir", "minimizar", "restaurar" y "cerrar" tambien describen acciones legitimas
+ *    (expandir un campo, cerrar un aviso de cookies), asi que ademas exigen que la descripcion nombre
+ *    la VENTANA del formulario.
+ */
+const CONTROLES_DE_VENTANA_INEQUIVOCOS =
+  /\bpantalla completa\b|\bfull ?screen\b|\bmaximiz\w*|\bmaximize[sd]?\b/;
+const CONTROLES_DE_VENTANA_AMBIGUOS =
+  /\b(?:re-?)?expand\w*|\bminimiz\w*|\brestaur\w*|\brestore[sd]?\b|\bcerra\w*|\bcierra\w*|\bclose[sd]?\b/;
+const VENTANA_DEL_FORMULARIO =
+  /\bventana\b|\bwindow\b|\bcompose\b|\bredaccion\b|\bredactar\b|\bmensaje nuevo\b|\bnew message\b|\bformulario\b/;
+
+/**
+ * CAMPOS Y CONTENIDO del formulario: si la descripcion nombra uno, la accion es sobre el CONTENIDO y
+ * JAMAS se rechaza, aunque la frase mencione tambien un control. Es el lado conservador del criterio
+ * (bloquear un click legitimo sobre un campo cuesta la tarea entera; dejar pasar un click a la
+ * cabecera cuesta unos pasos) y cubre el caso mas comun de la traza real, "click the Para input field
+ * in the compose window", que nombra la ventana sin ser un control de ventana.
+ */
+const CAMPOS_DEL_FORMULARIO =
+  /\b(?:campos?|fields?|inputs?|textarea|checkbox|asunto|subject|cuerpo|body|destinatarios?|recipients?|cc|cco|bcc|adjunt\w*|attach\w*|firma|signature)\b/;
+
+/**
+ * ¿La accion que el agente PROPONE es un CONTROL DE VENTANA del formulario activo, y por tanto queda
+ * fuera del alcance de la tarea (FIX A)? Devuelve el control que matcheo (para el log y el paso de la
+ * trayectoria) o null.
+ *
+ * `objetivoDelUsuario` es el texto del USUARIO, jamas la descripcion que redacta el agente: si el
+ * usuario pidio explicitamente accionar la ventana, se permite. Derivar ese permiso de la descripcion
+ * pondria la excepcion en manos de quien la regla vigila, que es el mismo error ya corregido en la
+ * deteccion del verbo (ver detectarAccionQueExigeVerificacion).
+ *
+ * ANTE LA DUDA, PERMITE, al reves que VERBOS_ACCION_BLOQUEADA: un falso positivo mata un click
+ * legitimo y con el la tarea entera; un falso negativo solo devuelve el problema que este FIX acota.
+ * Por eso la excepcion mira las DOS listas en el objetivo, aunque solo una haya matcheado en la
+ * descripcion: un objetivo que ya habla de la ventana desactiva la regla entera para esa corrida.
+ */
+export function detectarControlDeVentana(
+  descripcion: string,
+  objetivoDelUsuario: string,
+): string | null {
+  const texto = normalizarObjetivo(descripcion);
+  if (CAMPOS_DEL_FORMULARIO.test(texto)) return null;
+  const control =
+    texto.match(CONTROLES_DE_VENTANA_INEQUIVOCOS)?.[0] ??
+    (VENTANA_DEL_FORMULARIO.test(texto) ? (texto.match(CONTROLES_DE_VENTANA_AMBIGUOS)?.[0] ?? null) : null);
+  if (control === null) return null;
+  const objetivo = normalizarObjetivo(objetivoDelUsuario);
+  if (CONTROLES_DE_VENTANA_INEQUIVOCOS.test(objetivo)) return null;
+  if (CONTROLES_DE_VENTANA_AMBIGUOS.test(objetivo)) return null;
+  return control;
+}
+
 /** Nombre de la tool con la que el agente pide cambiar al otro sitio conectado de la tarea. */
 export const TOOL_CAMBIAR_DE_SITIO = 'cambiar_de_sitio';
 
@@ -370,6 +432,9 @@ export function construirSystemPromptTareaWeb(dominios: readonly string[] = []):
     'ESTILO DE TRABAJO:',
     '- Opera SOLO dentro del sitio de la tarea; no salgas a otros dominios salvo que el objetivo lo',
     '  pida explicitamente.',
+    '- Los controles de VENTANA del formulario en el que trabajas (pantalla completa, minimizar,',
+    '  expandir, cerrar) NO cambian su contenido y no forman parte de ninguna tarea de llenado: no los',
+    '  acciones. Si el formulario te queda chico o incomodo, sigue igual sobre sus campos.',
     '- Al terminar, resume en el mensaje final que hiciste y que encontraste, en el idioma del objetivo.',
   ].join('\n');
 }

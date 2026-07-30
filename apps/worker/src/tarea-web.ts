@@ -24,6 +24,7 @@ import {
   clasificarDesenlace,
   construirSystemPromptTareaWeb,
   detectarAccionQueExigeVerificacion,
+  detectarControlDeVentana,
   detectarVerboBloqueado,
   type DesenlaceTareaWeb,
 } from './prompt-tarea-web.js';
@@ -281,9 +282,11 @@ export interface NavegadorParaTarea {
  *    despues de ejecutarlas (CAMBIO 4): son las irreversibles que acaban de pasar la verificacion.
  *  - 'incompleto' (CAMBIO 1): NO pasa, pero la tarea SIGUE. Faltan datos del objetivo por escribir en
  *    la pagina; el mensaje vuelve al agente para que termine de llenarlos.
- *  - 'rechazar' (FIX C): NO pasa y la tarea sigue, pero el mensaje es TERMINAL: la corrida va a
- *    terminar y el agente no debe intentar la accion de nuevo por ninguna via. Es el aviso previo al
- *    corte duro del segundo bloqueo consecutivo.
+ *  - 'rechazar': NO pasa y la tarea SIGUE; el mensaje le dice al agente por que y como continuar.
+ *    Tiene dos usos: el aviso previo al corte duro del segundo bloqueo consecutivo (FIX C, mensaje
+ *    TERMINAL: la corrida va a terminar y el agente no debe intentar la accion por ninguna via) y el
+ *    control de ventana del formulario que queda fuera de alcance (FIX A, mensaje NO terminal: la
+ *    tarea sigue y el agente tiene que seguir con el objetivo).
  *  - 'bloquear': NO pasa y la tarea termina con el mensaje de la detencion. `causa` distingue los
  *    dos cierres nuevos: 'sin_efecto' (efecto probable, no se reintenta; el adaptador lo convierte
  *    en ACCION_SIN_EFECTO_CONFIRMADO) y 'guardia_reintentos' (el agente insistio tras agotar el
@@ -1219,6 +1222,14 @@ function crearGuardiaDeAccion(
     verboBloqueado: string | null;
     /** Texto del que salen los parametros: el LITERAL del usuario si llego (CAMBIO 3). */
     textoParametros: string;
+    /**
+     * TEXTO DEL USUARIO contra el que se resuelve la excepcion de los controles de ventana (FIX A):
+     * su literal MAS el objetivo que redacto el modelo conversacional. La union porque cualquiera de
+     * los dos puede ser el unico que nombre el control, y equivocarse hacia el lado permisivo es el
+     * lado barato. Lo que NUNCA entra aca es la descripcion que el agente de navegacion escribe en
+     * cada paso: es justo a quien la regla vigila.
+     */
+    objetivoDelUsuario: string;
     control?: ControlDeTareaWeb | undefined;
     /**
      * ESTADO DEL SITIO a lo largo de TODA la tarea (no de este tramo): el cupo de accion irreversible.
@@ -1353,6 +1364,24 @@ function crearGuardiaDeAccion(
         });
         return bloquear(detencionPorIdentidad(resultado.motivo));
       };
+      // CONTROLES DE VENTANA DEL FORMULARIO (FIX A): pantalla completa, expandir, minimizar,
+      // restaurar y cerrar quedan fuera del alcance del agente salvo que el objetivo del usuario los
+      // pida. Se evalua ANTES que todo lo demas -- el corte por objetivo sin verbo bloqueado incluido
+      // -- a proposito: la evidencia de produccion es de tareas de llenado, pero una tarea de solo
+      // lectura pierde la corrida igual de facil si el formulario se colapsa bajo sus pies.
+      //
+      // NO consume cupo ni cuenta como accion ejecutada (no pasa por `permitir` y no toca `estado`) y
+      // NO termina la corrida: mismo trato que una verificacion incompleta. Queda como PASO de la
+      // trayectoria con su motivo, para que en /actividad se vea por que no se ejecuto.
+      const controlDeVentana = detectarControlDeVentana(accion, opciones.objetivoDelUsuario);
+      if (controlDeVentana !== null) {
+        registrarRechazo(`control de ventana fuera del alcance de la tarea: ${controlDeVentana}`);
+        deps.logger.warn(
+          'tarea web: el agente propuso un control de ventana del formulario; NO se ejecuta y la tarea sigue',
+          { jobId: job.id, connectionId: sitio.id, control: controlDeVentana },
+        );
+        return { tipo: 'rechazar', mensaje: MENSAJE_CONTROL_DE_VENTANA };
+      }
       if (opciones.verboBloqueado === null) return permitir({ tipo: 'permitir' });
       if (opciones.control?.signal?.aborted === true) {
         // NO cuenta como bloqueo de la guardia (`bloqueo()` sigue en null): no es una detencion de
@@ -1604,6 +1633,16 @@ const MENSAJE_BLOQUEO_TERMINAL =
   'el sistema bloqueo esta accion: el unico reintento autorizado ya se uso y no se permite ninguno ' +
   'mas. La corrida va a terminar; NO intentes la accion de nuevo por ninguna via. Termina ahora y ' +
   'reporta lo que paso.';
+
+/**
+ * Mensaje que vuelve al agente cuando propone un CONTROL DE VENTANA del formulario (FIX A). Dice las
+ * dos cosas que evitan que insista: que esos controles no cambian el contenido del formulario (asi
+ * que accionarlos no acerca la tarea) y que la tarea sigue (no es un corte, no hay nada que reparar).
+ */
+const MENSAJE_CONTROL_DE_VENTANA =
+  'el sistema no ejecuto esa accion: los controles de ventana del formulario (pantalla completa, ' +
+  'expandir, minimizar, restaurar, cerrar) no cambian su contenido y no forman parte de esta tarea. ' +
+  'La tarea sigue: continua con el objetivo sobre los campos y botones del formulario tal como esta.';
 
 /** Mensaje del corte duro tras el segundo bloqueo consecutivo (FIX C): jamas un bucle. */
 const MENSAJE_GUARDIA_AGOTADA =
@@ -3001,6 +3040,10 @@ export async function procesarTareaWeb(
         politica,
         verboBloqueado,
         textoParametros,
+        // FIX A: el texto del usuario, con el objetivo del modelo conversacional sumado como
+        // respaldo (los jobs viejos no traen el literal). Es contra esto, y nunca contra lo que el
+        // agente escriba en cada paso, que se resuelve el permiso para accionar la ventana.
+        objetivoDelUsuario: `${textoUsuario ?? ''} ${objetivo}`,
         control,
         estado: registro.estadoDe(activo.sitio.id),
         // BARRERA DE IDENTIDAD DEL ELEMENTO (TAREA_WEB_BARRERA_IDENTIDAD): el MISMO cableado que

@@ -16,6 +16,7 @@ import {
   GuardiaBloqueoReintentosError,
 } from '../src/errores.js';
 import type { CampoDeLaPagina, RepositorioPoliticasParaWorker } from '../src/verificacion.js';
+import type { TrayectoriaNueva } from '../src/trayectoria.js';
 import { makeAprobacionesRepo } from './aprobaciones-fakes.js';
 import type { Logger } from '../src/logger.js';
 
@@ -563,6 +564,82 @@ describe('la guardia vigila el verbo del objetivo (CAMBIO 1)', () => {
     await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
     expect(motor.ejecutadas).toEqual([ENVIAR, ...NAVEGACIONES]);
     expect(motor.rechazadas).toEqual([]);
+  });
+});
+
+/**
+ * FIX A: los CONTROLES DE VENTANA del formulario activo (pantalla completa, expandir, minimizar,
+ * restaurar, cerrar) no llegan al navegador salvo que el objetivo del usuario los pida. En produccion
+ * (27, 28 y 30 jul 2026) fueron cuatro corridas perdidas: el compose se colapsaba o se re-renderizaba
+ * en otro nodo del DOM y el agente gastaba decenas de pasos intentando volver.
+ *
+ * Lo que estos tests fijan: el rechazo NO termina la corrida, NO consume el cupo de accion
+ * irreversible y queda en la trayectoria con su motivo.
+ */
+describe('controles de ventana del formulario (FIX A)', () => {
+  const OBJETIVO = 'envia el resumen mensual a juan@ejemplo.com';
+  const PANTALLA_COMPLETA = 'click the Pantalla completa button in the compose dialog';
+  const ENVIAR = 'haz clic en el boton Enviar';
+
+  function conCompose(acciones: string[]): {
+    pagina: PaginaFake;
+    motor: ReturnType<typeof makeMotor>;
+  } {
+    const pagina = makePagina([{ contexto: 'input email para', valor: 'juan@ejemplo.com' }]);
+    return { pagina, motor: makeMotor(acciones, 'enviado', pagina) };
+  }
+
+  it('el control NO llega al navegador, la corrida SIGUE y el envio posterior pasa (no consume cupo)', async () => {
+    const { pagina, motor } = conCompose([PANTALLA_COMPLETA, ENVIAR]);
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina) });
+
+    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
+    expect(motor.rechazadas).toEqual([PANTALLA_COMPLETA]);
+    expect(motor.ejecutadas).toEqual([ENVIAR]);
+    // UNA sola corrida del motor: el rechazo no corta el bucle del agente.
+    expect(motor.ejecutar).toHaveBeenCalledTimes(1);
+    // Y el cupo quedo intacto: el envio real se verifico y se ejecuto despues del rechazo.
+    expect(deps.guardarResultado).toHaveBeenCalledWith(
+      'job-1',
+      expect.objectContaining({ estado: 'ok' }),
+    );
+  });
+
+  it('el rechazo NO lee el DOM ni compara nada: se resuelve antes de la verificacion', async () => {
+    const { pagina, motor } = conCompose([PANTALLA_COMPLETA, ENVIAR]);
+    const navegador = makeNavegadorDePagina(pagina);
+    await procesarTareaWeb(makeDeps({ motor, navegador }), makeJob(OBJETIVO));
+    // Las DOS lecturas son las del envio (comparacion + confirmacion). El control no cuesta ninguna.
+    expect(navegador.leerCamposDeLaPagina).toHaveBeenCalledTimes(2);
+  });
+
+  it('el rechazo queda en la trayectoria con su motivo (visible en /actividad)', async () => {
+    const { pagina, motor } = conCompose([PANTALLA_COMPLETA, ENVIAR]);
+    const trayectorias = {
+      guardar: vi.fn<(trayectoria: TrayectoriaNueva) => Promise<void>>(async () => {}),
+    };
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina), trayectorias });
+
+    await procesarTareaWeb(deps, makeJob(OBJETIVO));
+
+    const guardada = trayectorias.guardar.mock.calls[0]?.[0];
+    const paso = guardada?.pasos.find((p) =>
+      (p.accion.instruccion ?? '').includes('control de ventana fuera del alcance'),
+    );
+    expect(paso).toBeDefined();
+    expect(paso?.exito).toBe(false);
+    // La descripcion del act queda en el paso, para que se vea QUE fue lo que no se ejecuto.
+    expect(paso?.accion.instruccion).toContain('Pantalla completa');
+  });
+
+  it('si el OBJETIVO pide pantalla completa, el control SI se ejecuta', async () => {
+    const objetivo = 'pon el compose en pantalla completa y envia el resumen a juan@ejemplo.com';
+    const { pagina, motor } = conCompose([PANTALLA_COMPLETA, ENVIAR]);
+    const deps = makeDeps({ motor, navegador: makeNavegadorDePagina(pagina) });
+
+    await expect(procesarTareaWeb(deps, makeJob(objetivo))).resolves.toBe('completada');
+    expect(motor.rechazadas).toEqual([]);
+    expect(motor.ejecutadas).toEqual([PANTALLA_COMPLETA, ENVIAR]);
   });
 });
 
