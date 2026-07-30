@@ -113,6 +113,17 @@ describe('contenido legal', () => {
     }
   });
 
+  it('la frase de cierre de cada documento cita SU propia version', () => {
+    // Subir la version y olvidar el texto publica un documento que se presenta con un numero que no es el
+    // suyo. El simplificado no cita version en su cuerpo: remite al integral, que si la cita.
+    for (const nombre of ['aviso', 'terminos'] as const) {
+      for (const idioma of ['es', 'en']) {
+        const doc = documentoLegal(nombre, idioma);
+        expect(JSON.stringify(doc)).toMatch(new RegExp(`versi[oó]n ${doc.version}`, 'i'));
+      }
+    }
+  });
+
   it('cada documento existe en los dos idiomas, con secciones', () => {
     for (const nombre of ['aviso', 'avisoSimplificado', 'terminos'] as const) {
       for (const idioma of ['es', 'en']) {
@@ -242,9 +253,46 @@ describe('contenido legal', () => {
     for (const texto of [aviso, terminos]) {
       expect(texto).toContain('dominio');
       expect(texto).toMatch(/una sola vía/);
+      // ALCANCE AMPLIADO para las plantillas compartidas: a la lista cerrada de tres elementos se sumaron
+      // el CODIGO DE INTENCION y el ORDEN en que los elementos se accionaron. Los dos documentos tienen que
+      // declarar los dos: si uno se queda corto, el consentimiento no cubre lo que la plataforma agrega.
+      expect(texto).toContain('CÓDIGO DE INTENCIÓN');
+      expect(texto).toContain('El ORDEN en que esos elementos se accionaron');
+      // De los datos variables se guarda la POSICION, nunca el valor.
+      expect(texto).toContain('Se guarda la posición del dato, nunca el dato.');
+      // El procedimiento agregado se OFRECE de forma explicita y no se ejecuta sin aprobacion.
+      expect(texto).toContain('se ejecuta solo si lo aprueba');
+      // Y la lista sigue siendo CERRADA: el alcance declarado es un techo, no un ejemplo.
+      expect(texto).toContain('y nada más que esto');
     }
     // Los terminos enumeran explicitamente lo que NUNCA se agrega.
     expect(terminos).toContain('Los valores que se escribieron en los formularios.');
+    // Y precisan que del objetivo escrito no queda la redaccion, solo la etiqueta de la plataforma.
+    expect(terminos).toContain('en lugar de tu redacción, solo el código de intención');
+  });
+
+  it('la version en INGLES declara el mismo alcance ampliado que la espanola', () => {
+    // Una traduccion no puede declarar menos que el original: el titular que lee en ingles acepta lo mismo.
+    for (const nombre of ['aviso', 'terminos'] as const) {
+      const texto = JSON.stringify(documentoLegal(nombre, 'en'));
+      expect(texto).toContain('INTENT CODE');
+      expect(texto).toContain('The ORDER in which those elements were acted on');
+      expect(texto).toContain('The position of the value is kept, never the value.');
+      expect(texto).toContain('runs only with their approval');
+      expect(texto).toContain('nothing beyond this');
+    }
+  });
+
+  it('el aviso SIMPLIFICADO resume el alcance ampliado y no se queda corto', () => {
+    // El simplificado es un RESUMEN del integral: puede decir menos palabras, no menos alcance.
+    const es = JSON.stringify(documentoLegal('avisoSimplificado', 'es'));
+    expect(es).toContain('código de intención');
+    expect(es).toContain('el orden en que esos elementos se accionaron');
+    expect(es).toContain('se ejecuta solo si lo aprueba');
+    const en = JSON.stringify(documentoLegal('avisoSimplificado', 'en'));
+    expect(en).toContain('intent code');
+    expect(en).toContain('the order in which those elements were acted on');
+    expect(en).toContain('runs only with their approval');
   });
 });
 
