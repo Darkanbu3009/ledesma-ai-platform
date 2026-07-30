@@ -154,7 +154,15 @@ export function motivoDeGuardadoNoRepetible(error: unknown): MotivoNoRepetible |
     }
     return { tipo: 'sinEstrategia' };
   }
-  if (motivo.includes('de llenado sin campos registrados')) return { tipo: 'datoSinCubrir' };
+  // El worker ya no aborta por una cabecera de llenado VACIA (esa no escribio nada), solo por el
+  // paso que SI registro un dato del objetivo y que ningun otro paso vuelve a escribir. El motivo
+  // viejo se sigue reconociendo: un job fallido de antes del cambio conserva su last_error.
+  if (
+    motivo.includes('de llenado sin campos registrados') ||
+    motivo.includes('del objetivo y ningun otro paso lo cubre')
+  ) {
+    return { tipo: 'datoSinCubrir' };
+  }
   return { tipo: 'generico' };
 }
 

@@ -166,6 +166,16 @@ describe('motivoDeGuardadoNoRepetible (fallo permanente del guardado, por famili
         ),
       ),
     ).toEqual({ tipo: 'sinEstrategia', paso: '19', descripcion: 'click the message body area' });
+    // Motivo VIGENTE: el paso que SI registro el dato y que ningun otro vuelve a escribir. El worker
+    // ya no aborta por una cabecera de llenado vacia, que no escribio nada.
+    expect(
+      motivoDeGuardadoNoRepetible(
+        new Error(
+          'PROMOCION_NO_REPETIBLE: el paso con metodo fill llevaba el dato asunto del objetivo y ningun otro paso lo cubre',
+        ),
+      ),
+    ).toEqual({ tipo: 'datoSinCubrir' });
+    // Motivo VIEJO: un job fallido antes del cambio conserva su last_error y se sigue reconociendo.
     expect(
       motivoDeGuardadoNoRepetible(
         new Error(

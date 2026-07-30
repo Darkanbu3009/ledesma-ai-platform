@@ -567,6 +567,136 @@ describe('promoverTrayectoria con metodos no representables (FIX A)', () => {
   });
 });
 
+/**
+ * COBERTURA DE LOS DATOS DECLARADOS (FIX A/B, corrida real del 30 jul 06:14 UTC). El mismo envio
+ * exitoso de arriba, ahora con los DOS detalles que la reconstruccion anterior no tenia: el
+ * fillFormVision VACIO que el agente emitio en la POSICION 3, antes de escribir nada, y la
+ * instruccion REAL del paso que teclea el destinatario. La conversion abortaba con
+ *
+ *   paso fillFormVision de llenado sin campos registrados: destinatario sin ningun otro paso que lo cubra
+ *
+ * pese a que la corrida SI escribia el destinatario en la posicion 6. Las dos causas, encadenadas:
+ *  A. la cabecera de llenado VACIA reclamaba la cobertura de todos los datos del objetivo, cuando
+ *     no habia escrito ninguno (es un intento de llenado por vision sin constancia de que llenara);
+ *  B. la escritura del destinatario se destilaba fuera ANTES de convertirse, porque el grupo de
+ *     equivalencia de ese campo ('to', 'para', 'destinatarios', 'recipients') tiene dos palabras
+ *     funcionales: cualquier instruccion posterior que diga "to" o "para" -- y la comparacion mira
+ *     la instruccion entera, con el valor tecleado dentro -- pasaba por una re-escritura del mismo
+ *     campo. La cobertura miraba bien los pasos CONSERVADOS; el paso ya no estaba entre ellos.
+ */
+describe('promoverTrayectoria con la corrida real del 30 jul 06:14 UTC (fillFormVision vacio)', () => {
+  const DESTINATARIO = 'martin.ledesm91@gmail.com';
+  const ASUNTO = 'Trayectoria fresca';
+  const CUERPO = 'Este correo lo envio el sistema';
+  const OBJETIVO_REAL =
+    `Enviar un correo electronico a ${DESTINATARIO} con el asunto "${ASUNTO}" y el siguiente cuerpo ` +
+    `del mensaje "${CUERPO}". La tarea termina cuando el correo haya sido enviado exitosamente.`;
+
+  const ROL_COMPOSE: EstrategiaLocalizacion = { tipo: 'rol', rol: 'button', nombre: 'Redactar' };
+  const ROL_SEND: EstrategiaLocalizacion = { tipo: 'rol', rol: 'button', nombre: 'Enviar' };
+  const ATRIBUTO_TO: EstrategiaLocalizacion = { tipo: 'atributo', atributo: 'aria-label', valor: 'Para' };
+  const ATRIBUTO_SUBJ: EstrategiaLocalizacion = { tipo: 'atributo', atributo: 'aria-label', valor: 'Asunto' };
+  const ATRIBUTO_BODY: EstrategiaLocalizacion = { tipo: 'atributo', atributo: 'aria-label', valor: 'Cuerpo del mensaje' };
+
+  const foco = (idx: number, metodo: string | null = 'click'): PasoCensurado =>
+    paso({
+      idx,
+      accion: { tipo: 'act', instruccion: 'click the message body area', metodo, argumentos: [] },
+      estrategias: [],
+      selector: null,
+    });
+
+  function corridaReal(): PasoCensurado[] {
+    return [
+      paso({ idx: 0, accion: { tipo: 'goto', instruccion: null, metodo: null, argumentos: [] }, estrategias: [], selector: null, url: `https://${DOMINIO}/mail` }),
+      paso({ idx: 1, accion: { tipo: 'screenshot', instruccion: null, metodo: null, argumentos: [] }, estrategias: [], selector: null }),
+      // POSICION 3: el llenado por vision que no dejo constancia de haber llenado nada.
+      paso({ idx: 2, accion: { tipo: 'fillFormVision', instruccion: 'llenar los campos del correo', metodo: null, argumentos: [] }, estrategias: [], selector: null }),
+      paso({ idx: 3, accion: { tipo: 'act', instruccion: 'click the Compose button', metodo: 'click', argumentos: [] }, estrategias: [ROL_COMPOSE, XPATH], selector: '/html/body/div/div[3]' }),
+      paso({ idx: 4, accion: { tipo: 'think', instruccion: null, metodo: null, argumentos: [] }, estrategias: [], selector: null }),
+      paso({ idx: 5, accion: { tipo: 'act', instruccion: 'click the Para input field', metodo: 'click', argumentos: [] }, estrategias: [], selector: null }),
+      // POSICION 6: la escritura del destinatario, con selector y con valor.
+      paso({ idx: 6, accion: { tipo: 'act', instruccion: `type "${DESTINATARIO}" into the Para input field`, metodo: 'fill', argumentos: [DESTINATARIO] }, estrategias: [ATRIBUTO_TO, XPATH], selector: '/html/body/div[7]/div[3]/div/form/input[1]', valorCensurado: DESTINATARIO }),
+      paso({ idx: 7, accion: { tipo: 'act', instruccion: 'press Tab key to confirm the recipient', metodo: 'press', argumentos: ['Tab'] }, estrategias: [ATRIBUTO_TO], selector: '/html/body/div[7]/div[3]/div/form/input[1]' }),
+      paso({ idx: 8, accion: { tipo: 'act', instruccion: 'click the Asunto input field', metodo: 'click', argumentos: [] }, estrategias: [], selector: null }),
+      paso({ idx: 9, accion: { tipo: 'act', instruccion: `type "${ASUNTO}" into the Asunto input field`, metodo: 'fill', argumentos: [ASUNTO] }, estrategias: [ATRIBUTO_SUBJ, XPATH], selector: '/html/body/div[7]/div[3]/div/form/input[2]', valorCensurado: ASUNTO }),
+      paso({ idx: 10, accion: { tipo: 'act', instruccion: 'click the full screen button', metodo: 'click', argumentos: [] }, estrategias: [XPATH], selector: '/html/body/div/div[9]' }),
+      foco(11), foco(12), foco(13), foco(14, null), foco(15),
+      foco(16), foco(17), foco(18), foco(19), foco(20),
+      paso({ idx: 21, accion: { tipo: 'clickAndHold', instruccion: 'click and hold on the message body', metodo: null, argumentos: [] }, estrategias: [], selector: null }),
+      foco(22), foco(23), foco(24),
+      // La instruccion del cuerpo termina en "to finish the email": ese "to" es el que hacia pasar
+      // esta escritura por una re-escritura del campo Para y borraba el destinatario de la receta.
+      paso({ idx: 25, accion: { tipo: 'act', instruccion: `type "${CUERPO}" into the message body to finish the email`, metodo: 'fill', argumentos: [CUERPO] }, estrategias: [ATRIBUTO_BODY, XPATH], selector: '/html/body/div[7]/div[3]/div/form/div[1]', valorCensurado: CUERPO }),
+      paso({ idx: 26, accion: { tipo: 'verificacion', instruccion: 'ok', metodo: null, argumentos: [] }, estrategias: [], selector: null }),
+      paso({ idx: 27, accion: { tipo: 'act', instruccion: 'click the Send button', metodo: 'click', argumentos: [] }, estrategias: [ROL_SEND, XPATH], selector: '/html/body/div/form/div[2]' }),
+    ];
+  }
+
+  it('convierte COMPLETA, con el destinatario, el asunto y el cuerpo como marcadores', () => {
+    const pasos = corridaReal();
+    expect(pasos).toHaveLength(28);
+
+    const resultado = promover(pasos, OBJETIVO_REAL, 'exitosa', true);
+    expect(resultado.promovida).toBe(true);
+    if (!resultado.promovida) return;
+
+    // La receta queda dentro del rango pedido (6 a 10 pasos), en este caso exactamente 8.
+    expect(resultado.pasos.length).toBeGreaterThanOrEqual(6);
+    expect(resultado.pasos.length).toBeLessThanOrEqual(10);
+    expect(resultado.pasos).toHaveLength(8);
+    expect(resultado.pasos.map((p) => p.accion)).toEqual([
+      'navegar', 'click', 'escribir', 'teclas', 'escribir', 'escribir', 'verificar', 'click',
+    ]);
+
+    // Los tres datos viajan como marcadores. El destinatario es el que se perdia.
+    expect(resultado.pasos.filter((p) => p.accion === 'escribir').map((p) => p.valor)).toEqual([
+      { tipo: 'parametro', parametro: 'destinatario' },
+      { tipo: 'parametro', parametro: 'asunto' },
+      { tipo: 'parametro', parametro: 'cuerpo' },
+    ]);
+    expect(JSON.stringify(resultado.pasos)).not.toContain('martin.ledesm91');
+
+    // La cabecera vacia y el gesto quedan como metodos descartados, que es el rastro del fail-open.
+    expect(resultado.metodosDescartados).toEqual(['fillFormVision', 'clickAndHold']);
+    expect(parsearPasosDeReceta(JSON.parse(JSON.stringify(resultado.pasos)))).not.toBeNull();
+  });
+
+  it('una escritura con dato declarado NO la destila una escritura de OTRO dato (FIX B)', () => {
+    // El caso desnudo: dos campos distintos cuyas instrucciones comparten la palabra "to". Las dos
+    // escrituras se conservan, cada una con su marcador.
+    const resultado = promover(
+      [
+        paso({ idx: 0, accion: { tipo: 'act', instruccion: `type "${DESTINATARIO}" into the Para input field`, metodo: 'fill', argumentos: [DESTINATARIO] }, estrategias: [ATRIBUTO_TO] }),
+        paso({ idx: 1, accion: { tipo: 'act', instruccion: `type "${ASUNTO}" into the subject box to continue`, metodo: 'fill', argumentos: [ASUNTO] }, estrategias: [ATRIBUTO_SUBJ] }),
+      ],
+      `Enviar un correo a ${DESTINATARIO} con el asunto "${ASUNTO}"`,
+    );
+    expect(resultado.promovida).toBe(true);
+    if (!resultado.promovida) return;
+    expect(resultado.pasos.map((p) => p.valor)).toEqual([
+      { tipo: 'parametro', parametro: 'destinatario' },
+      { tipo: 'parametro', parametro: 'asunto' },
+    ]);
+  });
+
+  it('un desvio real (el MISMO dato re-escrito despues) se sigue destilando', () => {
+    // La destilacion estricta no se relaja: cuando la escritura posterior teclea el MISMO dato en el
+    // mismo campo, la primera quedo anulada por el desvio y solo la ultima es el camino que llego.
+    const resultado = promover(
+      [
+        paso({ idx: 0, accion: { tipo: 'act', instruccion: `type "${DESTINATARIO}" into the Para input field`, metodo: 'fill', argumentos: [DESTINATARIO] }, estrategias: [ATRIBUTO_TO] }),
+        paso({ idx: 1, accion: { tipo: 'act', instruccion: `type "${DESTINATARIO}" into the Para input field`, metodo: 'fill', argumentos: [DESTINATARIO] }, estrategias: [ATRIBUTO_TO] }),
+      ],
+      `Enviar un correo a ${DESTINATARIO}`,
+    );
+    expect(resultado.promovida).toBe(true);
+    if (!resultado.promovida) return;
+    expect(resultado.pasos).toHaveLength(1);
+    expect(resultado.pasos[0]?.valor).toEqual({ tipo: 'parametro', parametro: 'destinatario' });
+  });
+});
+
 describe('promocion y valores sensibles (D8)', () => {
   const OBJETIVO = 'envia el informe a juan@ejemplo.com';
 
