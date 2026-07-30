@@ -83,10 +83,14 @@ describe('DocumentosLegalesSection (perfil)', () => {
   it('una aceptacion de version VIEJA se muestra como pendiente, no como aceptada', () => {
     // El aviso se acepto en una version anterior y los terminos no se aceptaron nunca: los dos
     // aparecen como pendientes de la version vigente, y ninguno como aceptado.
+    // Cada documento anuncia SU version vigente: el aviso y los terminos se versionan por separado y no
+    // tienen por que coincidir (una correccion del aviso no obliga a re-aceptar los terminos).
     renderSection(estado([consent({ documentVersion: '2020-01-01' })]));
-    expect(
-      screen.getAllByText(`Pendiente de aceptar la versión ${PRIVACY_NOTICE_VERSION}`),
-    ).toHaveLength(2);
+    const pendientes = screen.getAllByText(/Pendiente de aceptar la versión/);
+    expect(pendientes.map((p) => p.textContent)).toEqual([
+      `Pendiente de aceptar la versión ${PRIVACY_NOTICE_VERSION}`,
+      `Pendiente de aceptar la versión ${TERMS_VERSION}`,
+    ]);
     expect(screen.queryByText(/Aceptado el/)).not.toBeInTheDocument();
   });
 

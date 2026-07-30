@@ -37,6 +37,22 @@ export interface AccountDataDeletionResult {
   /** Recetas de tareas web (V035): lo aprendido de las navegaciones del owner. */
   recetasWeb: number;
   /**
+   * Checkpoints de aprobacion humana (V027). Su `on delete cascade` arrastra las constancias de
+   * intervencion del Art.22 (intervenciones_art22), que no se borran por separado.
+   */
+  aprobacionesWeb: number;
+  /** Politica de ejecucion del owner (V034). Como maximo 1: owner_id es la PK de la tabla. */
+  politicasEjecucion: number;
+  /** Grabaciones de tareas (V036): lo que el owner enseno, incluidos los valores que tecleo. */
+  grabaciones: number;
+  /**
+   * screenshot_path de los checkpoints borrados (los no nulos): objetos del bucket PRIVADO
+   * 'aprobaciones-web' de Storage, que NO viven en Postgres y que ningun DELETE alcanza. Se devuelven
+   * para que el orquestador los purgue (account-deletion-service.ts); sin ese paso quedarian
+   * huerfanos con la imagen de lo que el agente veia en pantalla.
+   */
+  aprobacionesWebScreenshots: string[];
+  /**
    * contexto_externo_id de los sitios conectados borrados (los no nulos): referencias de contextos
    * de navegador que viven en un PROVEEDOR EXTERNO y que el borrado local no alcanza. El purgado en
    * el proveedor es de 7.1b; se devuelven desde ya para que ese paso tenga su insumo (borrado ARCO
@@ -57,8 +73,9 @@ interface IdRow {
 /**
  * MOTOR DE BORRADO DE DATOS DE CUENTA (atomico). Borra/anonimiza TODOS los datos de negocio de un owner en
  * UNA transaccion (this.sql.begin): todo o nada. Es el SUPERCONJUNTO ATOMICO del viejo
- * eraseOwnerOperationalData (6 DELETE sueltos, no atomico -> hallazgo H-01 de la auditoria 8): cubre las 18
- * tablas, respeta las FKs y protege a los demas owners.
+ * eraseOwnerOperationalData (6 DELETE sueltos, no atomico -> hallazgo H-01 de la auditoria 8): borra 22
+ * tablas (mas pasos_trayectoria e intervenciones_art22 por cascade) y anonimiza admin_actions, respeta las
+ * FKs y protege a los demas owners.
  *
  * NO borra auth.users: eso vive en el sistema de autenticacion de Supabase (sin FK ni transaccion comun con
  * Postgres) y es un paso SEPARADO Y OPCIONAL del orquestador (account-deletion-service.ts).
@@ -73,7 +90,9 @@ interface IdRow {
  *      (V014, historica), data_subject_requests,
  *      upgrade_requests, sitios_conectados (V024; ademas recoge sus contexto_externo_id para el
  *      purgado en el proveedor externo, que ejecuta 7.1b), trayectorias_web (V030; su cascade
- *      arrastra pasos_trayectoria) y recetas_web (V035).
+ *      arrastra pasos_trayectoria), recetas_web (V035), aprobaciones_web (V027; su cascade arrastra
+ *      intervenciones_art22, y sus screenshot_path vuelven para que el orquestador purgue los objetos
+ *      del bucket privado de Storage), politicas_ejecucion (V034) y grabaciones (V036).
  *   5. admin_actions: se ANONIMIZA (UPDATE actor_id = null), NO se borra, para conservar el audit trail
  *      (guia de la tarea). target_id (NOT NULL) se retiene como id opaco: tras borrar el perfil ya no
  *      resuelve a una persona identificable, y ofuscarlo romperia la correlacion del log.
@@ -141,6 +160,25 @@ export class AccountDeletionRepository {
       const recetasWeb = await tx<IdRow[]>`
         delete from recetas_web where owner_id = ${ownerId} returning id
       `;
+      // aprobaciones_web (V027): los checkpoints de aprobacion humana del owner. Sin FK a jobs a
+      // proposito (V027:37), asi que borrar el job NO se los lleva y hay que borrarlos EXPLICITO por
+      // owner_id. Su `on delete cascade` arrastra intervenciones_art22 (las constancias del Art.22
+      // viven y mueren con su checkpoint). Se recogen los screenshot_path: son objetos de Storage que
+      // ningun DELETE alcanza y que el orquestador purga aparte.
+      const aprobacionesWeb = await tx<Array<{ id: string; screenshot_path: string | null }>>`
+        delete from aprobaciones_web where owner_id = ${ownerId} returning id, screenshot_path
+      `;
+      // politicas_ejecucion (V034): las preferencias que gobiernan si una accion irreversible se
+      // ejecuta. Sin FK alguna. owner_id es la PK, no hay columna id: el returning va sobre owner_id.
+      const politicasEjecucion = await tx<Array<{ owner_id: string }>>`
+        delete from politicas_ejecucion where owner_id = ${ownerId} returning owner_id
+      `;
+      // grabaciones (V036): lo que el owner ENSENO haciendo la tarea el mismo. Sin FK alguna. Sus
+      // `pasos` guardan los valores que tecleo (censurados, pero suyos), asi que el derecho de
+      // supresion los alcanza igual que a una trayectoria.
+      const grabaciones = await tx<IdRow[]>`
+        delete from grabaciones where owner_id = ${ownerId} returning id
+      `;
 
       // --- (5) admin_actions: ANONIMIZAR (no borrar). Conserva la fila, quita el vinculo personal actor. ---
       const adminActions = await tx<IdRow[]>`
@@ -189,8 +227,14 @@ export class AccountDeletionRepository {
         sitiosConectados: sitiosConectados.length,
         trayectoriasWeb: trayectoriasWeb.length,
         recetasWeb: recetasWeb.length,
+        aprobacionesWeb: aprobacionesWeb.length,
+        politicasEjecucion: politicasEjecucion.length,
+        grabaciones: grabaciones.length,
         sitiosConectadosContextosExternos: sitiosConectados
           .map((r) => r.contexto_externo_id)
+          .filter((x): x is string => typeof x === 'string' && x.length > 0),
+        aprobacionesWebScreenshots: aprobacionesWeb
+          .map((r) => r.screenshot_path)
           .filter((x): x is string => typeof x === 'string' && x.length > 0),
         adminActionsAnonymized: adminActions.length,
         subscriptions: subscriptions.length,

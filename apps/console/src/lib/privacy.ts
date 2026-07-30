@@ -11,7 +11,7 @@
 // los archivos de content/legal (misma convencion que el repo ya usa para los tipos espejados
 // backend/consola). El test privacy.test.ts verifica la sincronia con el contenido.
 // -----------------------------------------------------------------------------------------------------
-export const PRIVACY_NOTICE_VERSION = '2026-07-29';
+export const PRIVACY_NOTICE_VERSION = '2026-07-30';
 export const TERMS_VERSION = '2026-07-29';
 
 export type DocumentType = 'privacy_notice' | 'terms';

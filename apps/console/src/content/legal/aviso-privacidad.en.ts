@@ -10,8 +10,8 @@ import type { DocumentoLegal } from './tipos';
  */
 export const AVISO_PRIVACIDAD_EN: DocumentoLegal = {
   tipo: 'privacy_notice',
-  version: '2026-07-29',
-  fecha: 'July 29, 2026',
+  version: '2026-07-30',
+  fecha: 'July 30, 2026',
   titulo: 'Privacy Notice',
   subtitulo:
     'How we process your personal data on the Ledesma AI Labs platform, what we do with it, and how you stay in control of it.',
@@ -167,7 +167,7 @@ export const AVISO_PRIVACIDAD_EN: DocumentoLegal = {
             {
               termino: 'Aggregated structural learning about websites',
               descripcion:
-                'Improving the reliability of the service for every user by learning how websites are built. What gets aggregated is structure only: the site domain, the type of element that was interacted with (for example, a search field or a submit button) and the strategy that worked to locate that element on the page. Page contents, the values you typed, the text you read and any personal data are never aggregated, and origin identifiers are converted into derived values through a one way cryptographic function, so the learned structure cannot be tied back to you. As of this version of the notice, this purpose is declared before it is activated: the collective learning feature is not yet in operation.',
+                'Improving the reliability of the service for every user by learning how websites are built. What gets aggregated is structure only: the site domain, the type of element that was interacted with (for example, a search field or a submit button) and the strategy that worked to locate that element on the page. Page contents, the values you typed, the text you read and any personal data are never aggregated, and origin identifiers are converted into derived values through a one way cryptographic function, so the learned structure cannot be tied back to you. This purpose is in operation: the platform aggregates structure from the websites where tasks are executed, with the scope described above and no wider.',
             },
             {
               termino: 'Operational alerts and service emails',
@@ -390,7 +390,7 @@ export const AVISO_PRIVACIDAD_EN: DocumentoLegal = {
         {
           tipo: 'parrafo',
           texto:
-            'For any question about this notice or about the processing of your personal data, write to us at contacto@ledesma-ai-labs.com. This notice corresponds to version 2026-07-29, dated July 29, 2026.',
+            'For any question about this notice or about the processing of your personal data, write to us at contacto@ledesma-ai-labs.com. This notice corresponds to version 2026-07-30, dated July 30, 2026.',
         },
       ],
     },

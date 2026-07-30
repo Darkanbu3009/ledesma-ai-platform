@@ -142,6 +142,19 @@ function evaluate(db: Db, text: string, values: unknown[]): unknown[] {
     if (table === 'sitios_conectados') {
       return removed.map((r) => ({ id: r.id, contexto_externo_id: r.contexto_externo_id ?? null }));
     }
+    // aprobaciones_web devuelve ademas screenshot_path (returning id, screenshot_path) y su FK ON DELETE
+    // CASCADE (V027) arrastra las constancias del Art.22, como en Postgres.
+    if (table === 'aprobaciones_web') {
+      const removedIds = new Set(removed.map((r) => r.id));
+      db.intervenciones_art22 = tbl(db, 'intervenciones_art22').filter(
+        (r) => !removedIds.has(r.aprobacion_id ?? ''),
+      );
+      return removed.map((r) => ({ id: r.id, screenshot_path: r.screenshot_path ?? null }));
+    }
+    // politicas_ejecucion no tiene columna id: owner_id es su PK (returning owner_id).
+    if (table === 'politicas_ejecucion') {
+      return removed.map((r) => ({ owner_id: r.owner_id }));
+    }
     // FK ON DELETE CASCADE (V030): borrar una trayectoria arrastra sus pasos, como en Postgres.
     if (table === 'trayectorias_web') {
       const removedIds = new Set(removed.map((r) => r.id));
@@ -178,9 +191,12 @@ const A_COUNTS: Record<string, number> = {
   agent_runs: 2, jobs: 3, scheduled_tasks: 4, triggers: 5, recipes: 6, processing_records: 7,
   agents: 8, provider_credentials: 9, consents: 10, data_subject_requests: 11, upgrade_requests: 12,
   subscriptions: 13, usage_counters: 14, sitios_conectados: 15, trayectorias_web: 16,
+  aprobaciones_web: 17, grabaciones: 18,
+  // politicas_ejecucion: owner_id es la PK -> como maximo UNA fila por owner (V034).
+  politicas_ejecucion: 1,
 };
 
-const OWNER_TABLES = ['agent_runs', 'jobs', 'scheduled_tasks', 'triggers', 'recipes', 'processing_records', 'agents', 'provider_credentials', 'consents', 'data_subject_requests', 'upgrade_requests', 'sitios_conectados', 'trayectorias_web'];
+const OWNER_TABLES = ['agent_runs', 'jobs', 'scheduled_tasks', 'triggers', 'recipes', 'processing_records', 'agents', 'provider_credentials', 'consents', 'data_subject_requests', 'upgrade_requests', 'sitios_conectados', 'trayectorias_web', 'aprobaciones_web', 'politicas_ejecucion', 'grabaciones'];
 
 /** DB con dos owners (A y B) en la MISMA org 'org-1', + admin_actions con A como actor y como target. */
 function sharedOrgDb(): Db {
@@ -193,6 +209,18 @@ function sharedOrgDb(): Db {
   db.sitios_conectados = (db.sitios_conectados ?? []).map((r, i) => ({
     ...r,
     contexto_externo_id: r.owner_id === 'owner-A' && i < 2 ? `ctx-${i}` : null,
+  }));
+  // aprobaciones_web: las de A con screenshot en el bucket privado (deben volver en
+  // aprobacionesWebScreenshots) salvo una sin captura (screenshot_path null: no debe volver).
+  db.aprobaciones_web = (db.aprobaciones_web ?? []).map((r, i) => ({
+    ...r,
+    screenshot_path: r.owner_id === 'owner-A' && i > 0 ? `${r.owner_id}/${r.id}.png` : null,
+  }));
+  // intervenciones_art22 (V027): una constancia por checkpoint, ligada por aprobacion_id (su dueno es
+  // el de la aprobacion). Deben caer por el cascade al borrar aprobaciones_web.
+  db.intervenciones_art22 = tbl(db, 'aprobaciones_web').map((r, i) => ({
+    id: `intervencion-${i}`,
+    aprobacion_id: r.id ?? null,
   }));
   // pasos_trayectoria (V030): un paso por trayectoria, ligado por trayectoria_id (sin owner_id
   // propio: su dueno es el de la cabecera). Deben caer por el cascade al borrar trayectorias_web.
@@ -241,7 +269,8 @@ describe('AccountDeletionRepository.deleteAccountData', () => {
     expect(result).toMatchObject({
       agentRuns: 2, jobs: 3, scheduledTasks: 4, triggers: 5, recipes: 6, processingRecords: 7,
       agents: 8, providerCredentials: 9, consents: 10, dataSubjectRequests: 11, upgradeRequests: 12,
-      subscriptions: 13, usageCounters: 14, sitiosConectados: 15, trayectoriasWeb: 16, profiles: 1,
+      subscriptions: 13, usageCounters: 14, sitiosConectados: 15, trayectoriasWeb: 16,
+      aprobacionesWeb: 17, politicasEjecucion: 1, grabaciones: 18, profiles: 1,
     });
     // Los contexto_externo_id NO NULOS de los sitios borrados vuelven para el purgado en el
     // proveedor externo (7.1b); los null se filtran.
@@ -260,6 +289,42 @@ describe('AccountDeletionRepository.deleteAccountData', () => {
     // Los pasos que quedan son EXACTAMENTE los de las trayectorias de B.
     expect(pasos.length).toBeGreaterThan(0);
     expect(pasos.every((p) => idsB.has(p.trayectoria_id ?? ''))).toBe(true);
+  });
+
+  it('las tres tablas que sobrevivian al borrado (V027/V034/V036) ahora se borran, y solo las del owner', async () => {
+    // aprobaciones_web, politicas_ejecucion y grabaciones llevan owner_id y NO tienen FK hacia nada que
+    // se borre, asi que ningun cascade las alcanzaba: quedaban en pie tras el erasure.
+    const sql = makeStatefulSql(sharedOrgDb());
+    const result = await new AccountDeletionRepository(sql as unknown as Sql).deleteAccountData('owner-A');
+
+    for (const t of ['aprobaciones_web', 'politicas_ejecucion', 'grabaciones']) {
+      expect(tbl(sql.db, t).filter((r) => r.owner_id === 'owner-A')).toHaveLength(0);
+      expect(tbl(sql.db, t).filter((r) => r.owner_id === 'owner-B')).toHaveLength(1);
+    }
+    expect(result.aprobacionesWeb).toBe(17);
+    expect(result.politicasEjecucion).toBe(1);
+    expect(result.grabaciones).toBe(18);
+    // Las tres se borran DENTRO de la misma transaccion que las demas (ninguna consulta suelta).
+    for (const tabla of ['aprobaciones_web', 'politicas_ejecucion', 'grabaciones']) {
+      const llamada = sql.calls.find((c) => c.text.includes(`delete from ${tabla} where`));
+      expect(llamada?.tx).toBe(true);
+    }
+  });
+
+  it('ARCO en cascada (V027): borrar aprobaciones_web arrastra las constancias del Art.22 y devuelve sus screenshots', async () => {
+    const sql = makeStatefulSql(sharedOrgDb());
+    const result = await new AccountDeletionRepository(sql as unknown as Sql).deleteAccountData('owner-A');
+
+    // Ninguna constancia de A sobrevive; las de B siguen ligadas a sus aprobaciones.
+    const idsB = new Set(tbl(sql.db, 'aprobaciones_web').map((r) => r.id));
+    const intervenciones = tbl(sql.db, 'intervenciones_art22');
+    expect(intervenciones.length).toBeGreaterThan(0);
+    expect(intervenciones.every((i) => idsB.has(i.aprobacion_id ?? ''))).toBe(true);
+
+    // Los screenshot_path NO NULOS vuelven para que el orquestador purgue el bucket privado; el
+    // checkpoint sin captura (null) se filtra, y ningun path es de otro owner.
+    expect(result.aprobacionesWebScreenshots).toHaveLength(16);
+    expect(result.aprobacionesWebScreenshots.every((p) => p.startsWith('owner-A/'))).toBe(true);
   });
 
   it('ANONIMIZA admin_actions: nulifica actor_id del owner, CONSERVA las filas y no toca target ajeno', async () => {

@@ -6,7 +6,10 @@ import { getSql } from '../db/client.js';
 import { createSupabaseJwtVerifier, type JwtVerifier } from '../auth/jwt-verifier.js';
 import { requireUser } from '../auth/require-user.js';
 import { AccountDeletionRepository } from '../account/account-deletion-repository.js';
-import { createSupabaseAuthUserDeleter } from '../account/supabase-admin.js';
+import {
+  createSupabaseAuthUserDeleter,
+  createSupabaseScreenshotDeleter,
+} from '../account/supabase-admin.js';
 import { deleteAccount, type DeleteAccountResult } from '../account/account-deletion-service.js';
 
 /**
@@ -82,6 +85,7 @@ export function accountRoutes(
       (() => {
         const accountRepo = new AccountDeletionRepository(getSql(config));
         const authDeleter = createSupabaseAuthUserDeleter(config);
+        const screenshotDeleter = createSupabaseScreenshotDeleter(config);
         return {
           deleteAccount: (ownerId, opts) =>
             deleteAccount({
@@ -89,6 +93,7 @@ export function accountRoutes(
               deleteAuthUser: opts.deleteAuthUser,
               repo: accountRepo,
               authDeleter,
+              screenshotDeleter,
               logger: app.log,
             }),
         };

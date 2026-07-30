@@ -30,16 +30,17 @@ const verifier: JwtVerifier = {
 
 const deleteAccount = vi.fn();
 
-/** Resultado del motor con `data` completo (17 tablas) y el `authUser` que se quiera probar. */
+/** Resultado del motor con `data` completo (22 tablas) y el `authUser` que se quiera probar. */
 function makeResult(authUser: DeleteAccountResult['authUser']): DeleteAccountResult {
   const data: AccountDataDeletionResult = {
     agents: 2, agentRuns: 5, jobs: 3, scheduledTasks: 1, triggers: 0, recipes: 0, processingRecords: 1,
     providerCredentials: 1, consents: 1, dataSubjectRequests: 0, upgradeRequests: 0, sitiosConectados: 0,
     trayectoriasWeb: 0,
-      recetasWeb: 0, sitiosConectadosContextosExternos: [], adminActionsAnonymized: 0,
+      recetasWeb: 0, aprobacionesWeb: 0, politicasEjecucion: 0, grabaciones: 0,
+      sitiosConectadosContextosExternos: [], aprobacionesWebScreenshots: [], adminActionsAnonymized: 0,
     subscriptions: 1, usageCounters: 1, profiles: 1, organization: 'deleted',
   };
-  return { data, authUser };
+  return { data, authUser, screenshots: 'nothing_to_delete' };
 }
 
 async function makeApp(): Promise<FastifyInstance> {
