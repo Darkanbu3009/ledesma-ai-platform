@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import {
+  nombresDeLaFamilia,
+  resumenDeIdentidad,
   verificarIdentidadDeElemento,
   type EntradaDeIdentidad,
 } from '../src/barrera-identidad.js';
@@ -178,5 +180,60 @@ describe('la barrera no consulta esNavegacionDeSoloLectura', () => {
     const fuente = readFileSync(new URL('../src/barrera-identidad.ts', import.meta.url), 'utf8');
     // Aparece SOLO en el comentario que explica por que no se usa, jamas como llamada.
     expect(/esNavegacionDeSoloLectura\s*\(/.test(fuente)).toBe(false);
+  });
+});
+
+/**
+ * LA ETIQUETA DEL VEREDICTO es UNA sola para los DOS caminos que evaluan la barrera (el ejecutor de
+ * recetas y la guardia del motor libre). Estos tests fijan exactamente los valores que el camino de
+ * recetas ya escribia antes de que la guardia reusara esta funcion: si cambiaran, la medicion de una
+ * corrida por receta dejaria de ser comparable con la de una corrida libre en /actividad.
+ */
+describe('resumenDeIdentidad: una sola etiqueta para los dos caminos', () => {
+  it('permitir es siempre identidad:permitida y exito, en los tres modos', () => {
+    for (const modo of ['apagada', 'observacion', 'activa'] as const) {
+      expect(resumenDeIdentidad({ tipo: 'permitir' }, modo)).toEqual({
+        etiqueta: 'identidad:permitida',
+        exito: true,
+      });
+    }
+  });
+
+  it('en OBSERVACION un bloqueo dice HABRIA bloqueado y el paso NO queda como fallido', () => {
+    expect(resumenDeIdentidad({ tipo: 'bloquear', motivo: 'clase_distinta' }, 'observacion')).toEqual(
+      { etiqueta: 'identidad:habria_bloqueado', exito: true },
+    );
+  });
+
+  it('en ACTIVA el mismo veredicto es un bloqueo efectivo y el paso queda como fallido', () => {
+    expect(resumenDeIdentidad({ tipo: 'bloquear', motivo: 'clase_distinta' }, 'activa')).toEqual({
+      etiqueta: 'identidad:bloqueada',
+      exito: false,
+    });
+  });
+
+  it('un fallo de la propia barrera nunca marca el paso como fallido', () => {
+    expect(resumenDeIdentidad({ tipo: 'no_evaluable' }, 'activa')).toEqual({
+      etiqueta: 'identidad:no_evaluable',
+      exito: true,
+    });
+  });
+});
+
+/**
+ * NOMBRES DE LA FAMILIA: el unico insumo deterministico que el camino del MOTOR LIBRE tiene para
+ * buscar en el DOM el control de la accion que pidio el usuario. Sale de la tabla de verbos, jamas
+ * de la descripcion que redacta el modelo.
+ */
+describe('nombresDeLaFamilia', () => {
+  it('trae la familia entera, en los dos idiomas', () => {
+    expect(nombresDeLaFamilia('enviar')).toEqual(['enviar', 'send']);
+    expect(nombresDeLaFamilia('send')).toEqual(['enviar', 'send']);
+    expect(nombresDeLaFamilia('delete')).toEqual(['borrar', 'eliminar', 'delete', 'remove']);
+  });
+
+  it('sin verbo, o con un verbo que no esta en la tabla, no hay nada que buscar', () => {
+    expect(nombresDeLaFamilia(null)).toEqual([]);
+    expect(nombresDeLaFamilia('archivar')).toEqual([]);
   });
 });

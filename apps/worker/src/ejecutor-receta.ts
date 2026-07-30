@@ -6,9 +6,10 @@ import {
 } from '@ledesma-platform/shared';
 import { claseDeElemento } from './atlas-sitios.js';
 import {
+  resumenDeIdentidad,
   verificarIdentidadDeElemento,
   type ModoBarreraIdentidad,
-  type VeredictoDeIdentidad,
+  type ResultadoDeLaBarrera,
 } from './barrera-identidad.js';
 import type { ReferenciaDeElemento } from './localizacion.js';
 import { normalizarTexto } from './parametros-objetivo.js';
@@ -296,9 +297,6 @@ function pasoDeTraza(
   };
 }
 
-/** Lo que la barrera de identidad dejo dicho sobre un paso. 'no_evaluable' = la barrera misma fallo. */
-type ResultadoDeLaBarrera = VeredictoDeIdentidad | { tipo: 'no_evaluable' };
-
 /** Cuantos prefijos de aria-label viajan a la lectura del DOM. Los del propio paso, sin repetir. */
 const MAX_PREFIJOS_IDENTIDAD = 3;
 
@@ -313,8 +311,8 @@ const ACCIONES_QUE_CONSUMAN: ReadonlySet<AccionDeReceta> = new Set<AccionDeRecet
  * que receta:determinista y receta:atlas (mismo precedente que receta:promovida, tarea-web.ts).
  *
  * En MODO OBSERVACION la etiqueta dice HABRIA_BLOQUEADO: el paso siguio su camino exactamente como
- * hoy. `exito` es true en todos los casos salvo un bloqueo efectivo: el veredicto es telemetria, no
- * el desenlace del paso, y marcarlo como fallo leeria como si el paso no hubiera corrido.
+ * hoy. La etiqueta y el `exito` los resuelve resumenDeIdentidad (barrera-identidad.ts), compartido
+ * con el cableado del motor libre para que los dos caminos no puedan divergir.
  */
 function pasoDeIdentidad(
   paso: PasoSustituido,
@@ -322,14 +320,7 @@ function pasoDeIdentidad(
   resultado: ResultadoDeLaBarrera,
   modo: ModoBarreraIdentidad,
 ): PasoCensurado {
-  const etiqueta =
-    resultado.tipo === 'permitir'
-      ? 'identidad:permitida'
-      : resultado.tipo === 'no_evaluable'
-        ? 'identidad:no_evaluable'
-        : modo === 'activa'
-          ? 'identidad:bloqueada'
-          : 'identidad:habria_bloqueado';
+  const { etiqueta, exito } = resumenDeIdentidad(resultado, modo);
   const motivo = resultado.tipo === 'bloquear' ? resultado.motivo : null;
   return {
     idx,
@@ -343,7 +334,7 @@ function pasoDeIdentidad(
     valorCensurado: null,
     estrategias: [],
     url: null,
-    exito: !(modo === 'activa' && resultado.tipo === 'bloquear'),
+    exito,
   };
 }
 

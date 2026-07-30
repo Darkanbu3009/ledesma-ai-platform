@@ -32,8 +32,9 @@ import { VERBOS_ACCION_BLOQUEADA } from './prompt-tarea-web.js';
  * barrera: un boton llamado "Mover a la carpeta" quedaria exento de comprobar su identidad. La
  * barrera juzga el NOMBRE ACCESIBLE LEIDO DEL DOM, no la descripcion que redacta un modelo.
  *
- * Modulo PURO: sin navegador, sin base y sin reloj. La lectura del DOM la hace el cableado
- * (ejecutor-receta.ts) y entra aqui como un dato mas.
+ * Modulo PURO: sin navegador, sin base y sin reloj. La lectura del DOM la hacen los cableados
+ * (ejecutor-receta.ts para el camino de recetas, tarea-web.ts para el del motor libre) y entra aqui
+ * como un dato mas.
  */
 
 /** Por que la barrera no deja actuar sobre el elemento. */
@@ -66,6 +67,61 @@ export interface EntradaDeIdentidad {
   esPasoIrreversible: boolean;
   /** Nombre accesible LEIDO DEL DOM del elemento que se va a accionar. null = no se pudo leer. */
   nombreAccesible: string | null;
+}
+
+/** Lo que la barrera dejo dicho sobre una accion. 'no_evaluable' = la barrera misma fallo. */
+export type ResultadoDeLaBarrera = VeredictoDeIdentidad | { tipo: 'no_evaluable' };
+
+/**
+ * COMO SE LEE un veredicto en la trayectoria, para los DOS caminos que evaluan la barrera (el de
+ * recetas y el del motor libre). Vive aqui, y no en cada cableado, porque la etiqueta es lo que la
+ * consola agrupa en /actividad: dos caminos con etiquetas distintas para el mismo veredicto harian
+ * imposible medir la barrera de una corrida contra la de la otra, que es justo para lo que existe el
+ * modo observacion.
+ *
+ * `exito` es true en todos los casos salvo un bloqueo EFECTIVO: en observacion el veredicto es
+ * telemetria y la accion siguio su camino, asi que marcar el paso como fallido leeria como si algo
+ * no hubiera corrido.
+ */
+export function resumenDeIdentidad(
+  resultado: ResultadoDeLaBarrera,
+  modo: ModoBarreraIdentidad,
+): { etiqueta: string; exito: boolean } {
+  const etiqueta =
+    resultado.tipo === 'permitir'
+      ? 'identidad:permitida'
+      : resultado.tipo === 'no_evaluable'
+        ? 'identidad:no_evaluable'
+        : modo === 'activa'
+          ? 'identidad:bloqueada'
+          : 'identidad:habria_bloqueado';
+  return { etiqueta, exito: !(modo === 'activa' && resultado.tipo === 'bloquear') };
+}
+
+/**
+ * Los NOMBRES CANONICOS de la familia del verbo que pidio el usuario, normalizados, para buscar en
+ * el DOM el control de esa accion (localizarBotonPorAriaLabel, browserbase.ts).
+ *
+ * Existe para el camino del MOTOR LIBRE, que a diferencia del de recetas no tiene un paso con
+ * estrategias propias de donde sacar el prefijo: cuando la guardia se interpone, el elemento que el
+ * motor va a resolver todavia no existe como dato. Lo unico deterministico disponible ahi es el verbo
+ * del OBJETIVO DEL USUARIO, que no lo redacta ningun modelo.
+ *
+ * Se devuelve la familia entera y no solo el verbo canonico porque un sitio en ingles rotula "Send"
+ * un objetivo escrito en espanol ("envia el correo"), y al reves. No se acota la lista: son como
+ * mucho seis nombres fijos de una tabla del codigo, no texto de una pagina.
+ */
+export function nombresDeLaFamilia(verboDelObjetivo: string | null): string[] {
+  if (verboDelObjetivo === null) return [];
+  const familia = VERBOS_ACCION_BLOQUEADA.find((v) => v.verbo === verboDelObjetivo)?.accion;
+  if (familia === undefined) return [];
+  const nombres: string[] = [];
+  for (const verbo of VERBOS_ACCION_BLOQUEADA) {
+    if (verbo.accion !== familia) continue;
+    const nombre = normalizarTexto(verbo.verbo);
+    if (nombre !== '' && !nombres.includes(nombre)) nombres.push(nombre);
+  }
+  return nombres;
 }
 
 /**
