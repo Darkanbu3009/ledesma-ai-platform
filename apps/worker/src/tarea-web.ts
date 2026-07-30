@@ -78,9 +78,16 @@ import {
   type PistasDelAtlas,
   type VeredictoDeVerificacion,
 } from './ejecutor-receta.js';
-import type { ModoBarreraIdentidad } from './barrera-identidad.js';
+import {
+  nombresDeLaFamilia,
+  resumenDeIdentidad,
+  verificarIdentidadDeElemento,
+  type ModoBarreraIdentidad,
+  type ResultadoDeLaBarrera,
+} from './barrera-identidad.js';
 import {
   bloqueDelMapa,
+  claseDeElemento,
   entradasDeCorridaLibre,
   entradasDeCorridaPorReceta,
   entradasServibles,
@@ -247,6 +254,18 @@ export interface NavegadorParaTarea {
   ): Promise<PercepcionDePagina | null>;
   /** LEE el texto visible de la pagina (o del elemento del selector), acotado y sin tocarla. */
   leerTextoVisible(sesionExternaId: string, selector?: string): Promise<string>;
+  /**
+   * LOCALIZA (sin clickear) el boton visible cuyo aria-label empieza con alguno de los prefijos, y
+   * devuelve su aria-label COMPLETO. Es la MISMA primitiva de solo lectura que alimenta la barrera
+   * de identidad en el camino de recetas (ejecutor-receta.ts); el adaptador real ya la implementa.
+   *
+   * OPCIONAL en el puerto a proposito, con el mismo criterio que `percibirPagina`: un fake que no la
+   * traiga deja la barrera sin nombre accesible (falla cerrada) en vez de romper la tarea.
+   */
+  localizarBotonPorAriaLabel?(
+    sesionExternaId: string,
+    prefijos: string[],
+  ): Promise<{ ariaLabel: string; rol: string; candidatos: number } | null>;
   /**
    * OBSERVA la salida de red actual (pais + IP) de la sesion viva en una PESTANA NUEVA (sin tocar
    * la pagina de la tarea). Pais null = no observable -> el handler aborta (no se puede verificar).
@@ -1075,6 +1094,74 @@ function esperarMs(ms: number): Promise<void> {
   return new Promise((resolver) => setTimeout(resolver, ms));
 }
 
+/** Lo que la guardia necesita para evaluar la barrera de identidad, ya resuelto por el handler. */
+interface BarreraDeIdentidadParaGuardia {
+  /** 'apagada' ni evalua; 'observacion' solo registra; 'activa' ademas no deja pasar la accion. */
+  modo: ModoBarreraIdentidad;
+  /** Clases que el atlas tiene CORROBORADAS para ese dominio. Sincrono: ya se leyo al arrancar. */
+  clasesCorroboradas(dominio: string): ReadonlySet<string>;
+}
+
+/**
+ * El veredicto de la barrera como PASO SINTETICO de la trayectoria, con la MISMA etiqueta que el
+ * camino de recetas (resumenDeIdentidad, barrera-identidad.ts) y por tanto visible en /actividad
+ * igual que la de una corrida por receta. Es lo que permite comparar la medicion de los dos caminos.
+ *
+ * `sinElemento` distingue los dos casos que el motivo 'clase_no_corroborada' junta en este camino: no
+ * haber encontrado en el DOM ningun control de la familia del verbo, o haberlo encontrado con una
+ * clase que el atlas no corroboro. Para decidir si el consumo de plantillas ajenas puede ser seguro
+ * esa diferencia es justamente el dato, y se registra sin tocar la funcion pura.
+ *
+ * La descripcion del act pasa por la MISMA censura que el resto de la traza.
+ */
+function construirPasoDeIdentidad(
+  accion: string,
+  resultado: ResultadoDeLaBarrera,
+  modo: ModoBarreraIdentidad,
+  sinElemento: boolean,
+): PasoCensurado {
+  const { etiqueta, exito } = resumenDeIdentidad(resultado, modo);
+  const argumentos: string[] = [];
+  if (resultado.tipo === 'bloquear') argumentos.push(resultado.motivo);
+  if (sinElemento) argumentos.push('sin elemento de la familia del verbo en la pagina');
+  return {
+    idx: 0,
+    accion: {
+      tipo: etiqueta,
+      instruccion: `barrera de identidad sobre la accion del motor: ${censurarTexto(accion)}`,
+      metodo: null,
+      argumentos,
+    },
+    selector: null,
+    valorCensurado: null,
+    estrategias: [],
+    url: null,
+    exito,
+  };
+}
+
+/**
+ * La DETENCION con la que se cierra la corrida cuando la barrera bloquea en modo 'activa'. Mismo
+ * patron que detencionPorDatosIncompletos: un 'noCoincide' del contrato que ya existe, con lo pedido
+ * y lo encontrado en los campos que la consola ya sabe traducir. NO se inventa un cierre nuevo ni un
+ * motivo nuevo: el veredicto viaja por `bloquear`, igual que cualquier otra detencion de la guardia.
+ *
+ * `encontrado` va VACIO a proposito: el nombre accesible que se leyo del DOM no vuelve al usuario ni
+ * al modelo por este canal (el motivo tecnico ya queda en el paso de la trayectoria).
+ */
+function detencionPorIdentidad(motivo: string): Extract<Veredicto, { tipo: 'detener' }> {
+  return {
+    tipo: 'detener',
+    detencion: {
+      motivo: 'noCoincide',
+      pedido: 'el elemento que corresponde a la accion pedida',
+      encontrado: '',
+      detalle: `no se pudo confirmar la identidad del elemento a accionar (${motivo})`,
+    },
+    comparaciones: [],
+  };
+}
+
 /**
  * GUARDIA DE ACCION (CAMBIO 2): la VERIFICACION DETERMINISTA corriendo INMEDIATAMENTE ANTES de la
  * accion, dentro del mismo bucle del agente y sin que el agente participe.
@@ -1138,6 +1225,11 @@ function crearGuardiaDeAccion(
      * Lo mantiene el handler por conexion, para que volver a un sitio ya visitado no reabra su cupo.
      */
     estado: EstadoDeSitioParaGuardia;
+    /**
+     * BARRERA DE IDENTIDAD DEL ELEMENTO (barrera-identidad.ts) para el camino del MOTOR LIBRE.
+     * Ausente = la barrera NO se evalua y la guardia se comporta exactamente como antes.
+     */
+    barreraIdentidad?: BarreraDeIdentidadParaGuardia | undefined;
   },
 ): GuardiaDeTareaWeb {
   const verificaciones: VerificacionEnLaTraza[] = [];
@@ -1191,6 +1283,75 @@ function crearGuardiaDeAccion(
       ): VeredictoDeGuardia => {
         registrarRechazo(veredicto.detencion.motivo);
         return bloquear(veredicto);
+      };
+      /**
+       * BARRERA DE IDENTIDAD DEL ELEMENTO (barrera-identidad.ts) en el camino del MOTOR LIBRE.
+       *
+       * SE INTERPONE JUSTO ANTES DE `permitir` con `confirmar: true`, que son los DOS unicos puntos
+       * por los que la accion IRREVERSIBLE del objetivo sale al navegador (el primer intento y su
+       * unico reintento autorizado). Se llama ANTES de tocar `estado` a proposito: en modo 'activa'
+       * la accion no sale, y contar una ejecucion que no ocurrio corromperia el cupo de la corrida.
+       *
+       * QUE MIRA, y en que se diferencia del camino de recetas: aqui la guardia corre ANTES de que el
+       * motor resuelva el elemento, asi que el elemento exacto que se va a accionar todavia no es un
+       * dato de este proceso. Lo que se lee del DOM es el control de la FAMILIA DEL VERBO DEL USUARIO
+       * (nombresDeLaFamilia, jamas la descripcion que redacta el modelo) y lo que se comprueba es que
+       * ese control EXISTA y que su clase este corroborada por el atlas en este dominio.
+       *
+       * NO SE EVALUA en las acciones intermedias (abrir, escribir, navegar): sin el paso de la receta
+       * no hay clase que comparar sin leer el DOM, y leerlo por accion costaria una conexion CDP en
+       * cada uno de los ~28 pasos de una corrida para producir un veredicto sin contenido.
+       *
+       * TODO EN TRY/CATCH PROPIO: un fallo de la barrera queda como 'no_evaluable' y jamas cambia el
+       * desenlace de la accion ni del job. Devuelve un veredicto SOLO en modo 'activa'.
+       */
+      const revisarIdentidad = async (): Promise<VeredictoDeGuardia | null> => {
+        const barrera = opciones.barreraIdentidad;
+        if (barrera === undefined || barrera.modo === 'apagada') return null;
+        let resultado: ResultadoDeLaBarrera;
+        let sinElemento = true;
+        try {
+          const localizar = deps.navegador.localizarBotonPorAriaLabel;
+          const prefijos = nombresDeLaFamilia(opciones.verboBloqueado);
+          const boton =
+            localizar === undefined || prefijos.length === 0
+              ? null
+              : await localizar.call(deps.navegador, sesionExternaId, prefijos);
+          sinElemento = boton === null;
+          resultado = verificarIdentidadDeElemento({
+            // La clase se construye con la MISMA funcion con la que el atlas escribio las suyas, a
+            // partir del elemento LEIDO DEL DOM: es la unica identidad disponible en este camino.
+            claseDeclarada:
+              boton === null
+                ? null
+                : claseDeElemento('click', [
+                    { tipo: 'rol', rol: boton.rol, nombre: boton.ariaLabel },
+                  ]),
+            clasesCorroboradas: barrera.clasesCorroboradas(sitio.dominio),
+            verboDelObjetivo: opciones.verboBloqueado,
+            esPasoIrreversible: true,
+            nombreAccesible: boton === null ? null : boton.ariaLabel,
+          });
+        } catch (error) {
+          deps.logger.warn('tarea web: la barrera de identidad fallo; el veredicto queda no evaluable', {
+            jobId: job.id,
+            connectionId: sitio.id,
+            err: describir(error),
+          });
+          resultado = { tipo: 'no_evaluable' };
+        }
+        verificaciones.push({
+          accionesPrevias,
+          paso: construirPasoDeIdentidad(accion, resultado, barrera.modo, sinElemento),
+        });
+        if (barrera.modo !== 'activa' || resultado.tipo !== 'bloquear') return null;
+        deps.logger.warn('tarea web: la barrera de identidad bloqueo la accion del motor', {
+          jobId: job.id,
+          connectionId: sitio.id,
+          dominio: sitio.dominio,
+          motivo: resultado.motivo,
+        });
+        return bloquear(detencionPorIdentidad(resultado.motivo));
       };
       if (opciones.verboBloqueado === null) return permitir({ tipo: 'permitir' });
       if (opciones.control?.signal?.aborted === true) {
@@ -1277,6 +1438,8 @@ function crearGuardiaDeAccion(
             ultimosFaltantes = veredicto.faltantes;
             return { tipo: 'incompleto', mensaje: mensajeDeIncompleto(veredicto) };
           }
+          const corte = await revisarIdentidad();
+          if (corte !== null) return corte;
           // El reintento NO suma una segunda ejecucion: es LA MISMA accion (confirmarla deja
           // ejecutadas == confirmadas y la tarea puede cerrarse como exitosa).
           estado.reintentosSinEfecto += 1;
@@ -1339,6 +1502,8 @@ function crearGuardiaDeAccion(
           return { tipo: 'incompleto', mensaje: mensajeDeIncompleto(veredicto) };
         }
         ultimosFaltantes = null;
+        const corte = await revisarIdentidad();
+        if (corte !== null) return corte;
         // La EJECUCION se cuenta aqui (desde este punto la accion va al navegador); el CUPO se
         // consume recien al CONFIRMAR el efecto (FIX A): irreversiblesConfirmadas es la barrera.
         estado.irreversiblesEjecutadas += 1;
@@ -2801,6 +2966,15 @@ export async function procesarTareaWeb(
         textoParametros,
         control,
         estado: registro.estadoDe(activo.sitio.id),
+        // BARRERA DE IDENTIDAD DEL ELEMENTO (TAREA_WEB_BARRERA_IDENTIDAD): el MISMO cableado que
+        // recibe la ejecucion por receta, con las clases que el atlas ya tiene en memoria. En
+        // 'observacion' (default del env) solo registra su veredicto y el desenlace de la corrida es
+        // identico al de hoy.
+        barreraIdentidad: {
+          modo: deps.barreraIdentidad ?? 'apagada',
+          clasesCorroboradas: (dominio: string): ReadonlySet<string> =>
+            atlas?.clasesCorroboradas(dominio) ?? new Set<string>(),
+        },
       });
       const enCurso = activo;
       try {

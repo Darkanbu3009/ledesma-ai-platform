@@ -292,10 +292,27 @@ corresponde, todos bloquean.
    del verbo que pidio el usuario, con los regex de `VERBOS_ACCION_BLOQUEADA` filtrados por familia
    aplicados AL NOMBRE LEIDO DEL DOM, nunca a la descripcion que redacta el modelo.
 
-**Donde se interpone.** En `ejecutarReceta` (`src/ejecutor-receta.ts`), entre que la instruccion del
-paso queda armada y que el navegador la ejecuta. Ese punto esta aguas arriba de los TRES caminos por
-los que un paso llega a actuar sobre el DOM (estrategias propias del paso, reintento con pistas del
-atlas, escalada al motor), porque los tres consumen la MISMA instruccion.
+**Donde se interpone, camino por receta.** En `ejecutarReceta` (`src/ejecutor-receta.ts`), entre que
+la instruccion del paso queda armada y que el navegador la ejecuta. Ese punto esta aguas arriba de los
+TRES caminos por los que un paso llega a actuar sobre el DOM (estrategias propias del paso, reintento
+con pistas del atlas, escalada al motor), porque los tres consumen la MISMA instruccion.
+
+**Donde se interpone, camino del MOTOR LIBRE.** En la GUARDIA DE ACCION (`crearGuardiaDeAccion`,
+`src/tarea-web.ts`), justo antes de los dos `permitir(..., confirmar: true)`, que son los unicos
+puntos por los que la accion IRREVERSIBLE del objetivo sale al navegador (el primer intento y su
+unico reintento autorizado). El motor libre NO pasa por el ejecutor de recetas: hasta este cambio,
+una corrida libre no producia ni una etiqueta de identidad en su trayectoria porque ese codigo nunca
+se ejecutaba.
+
+La diferencia con el camino por receta es real y hay que tenerla presente al leer la medicion: cuando
+la guardia se interpone, el motor todavia no resolvio el elemento, asi que el elemento exacto que se
+va a accionar no es un dato de este proceso. Lo que se lee del DOM es el control de la FAMILIA DEL
+VERBO DEL USUARIO (`nombresDeLaFamilia`, jamas la descripcion que redacta el modelo) y lo que se
+comprueba es que ese control EXISTA y que su clase este corroborada por el atlas en ese dominio, que
+es exactamente la propiedad de la que dependeria una plantilla ajena. Las acciones intermedias
+(abrir, escribir, navegar) no se evaluan: sin el paso de la receta no hay clase que comparar sin leer
+el DOM, y leerlo por accion costaria una conexion CDP en cada uno de los ~28 pasos de una corrida
+para producir un veredicto sin contenido.
 
 **No consulta `esNavegacionDeSoloLectura`**, y es deliberado: esa funcion existe para que la
 navegacion y la lectura jamas se bloqueen, y devuelve `true` en cuanto la descripcion menciona link,
@@ -308,16 +325,23 @@ folder, sidebar o inbox. Consultarla convertiria su bypass en un bypass de esta 
   /actividad igual que `receta:determinista` y `receta:atlas`. **NO BLOQUEA NADA**: el paso sigue su
   camino exactamente como sin la barrera, cualquiera sea el veredicto. Es telemetria, no control, y es
   el modo con el que se mide cuantos pasos reales bloquearia antes de encenderla.
-- `activa`: un veredicto de bloqueo ABANDONA la receta (sin marcarla obsoleta) y la tarea la termina
-  el motor, que vuelve a decidir con la verificacion determinista de por medio.
+- `activa`: en el camino por receta, un veredicto de bloqueo ABANDONA la receta (sin marcarla
+  obsoleta) y la tarea la termina el motor, que vuelve a decidir con la verificacion determinista de
+  por medio. En el camino del motor libre se traduce al veredicto `bloquear` que la guardia YA tiene:
+  la accion no llega al navegador y la corrida cierra por el mismo camino que cualquier otra
+  detencion de la verificacion (`DETENIDA_VERIFICACION` con motivo `noCoincide`). No hay un cierre
+  nuevo, y el bloqueo se evalua ANTES de contar la ejecucion, para no consumir el cupo de la corrida
+  con una accion que no salio.
 - `apagada`: la barrera ni se evalua. Cero lecturas extra y cero pasos sinteticos.
 
-**El costo: una conexion CDP por CORRIDA, no por paso.** La comprobacion de la clase es pura (la clase
-del paso y las clases corroboradas del dominio ya estan en memoria: `crearLectorDelAtlas` las leyo una
-vez al arrancar la tarea). La unica lectura del DOM es el nombre accesible, y se paga SOLO en el paso
+**El costo: una conexion CDP por CORRIDA, no por paso.** La comprobacion de la clase es pura (las
+clases corroboradas del dominio ya estan en memoria: `crearLectorDelAtlas` las leyo una vez al
+arrancar la tarea). La unica lectura del DOM es el nombre accesible, y se paga SOLO en la accion
 irreversible, con `localizarBotonPorAriaLabel` (`src/browserbase.ts`), que es solo lectura en el mundo
-aislado. Un fallo de la barrera queda como `identidad:no_evaluable` y jamas cambia el desenlace del
-paso ni del job.
+aislado. En el motor libre eso son 1 conexion en una corrida de 28 pasos (2 si el sistema autoriza su
+unico reintento), sobre las 2 que la guardia ya abre en ese mismo punto para la verificacion
+determinista: +50 % en la accion irreversible, 0 en las otras 27. Un fallo de la barrera queda como
+`identidad:no_evaluable` y jamas cambia el desenlace del paso ni del job.
 
 ### Costo por corrida (`TAREA_WEB_SCREENSHOTS` y `TAREA_WEB_HISTORIAL_PASOS`)
 
