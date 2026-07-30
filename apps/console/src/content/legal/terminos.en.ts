@@ -9,8 +9,8 @@ import type { DocumentoLegal } from './tipos';
  */
 export const TERMINOS_EN: DocumentoLegal = {
   tipo: 'terms',
-  version: '2026-07-29',
-  fecha: 'July 29, 2026',
+  version: '2026-07-31',
+  fecha: 'July 31, 2026',
   titulo: 'Terms of Service',
   subtitulo:
     'The rules of the agreement between you and Ledesma AI Labs for using the platform: what we give you, what is on you, and what happens when something goes wrong.',
@@ -150,7 +150,7 @@ export const TERMINOS_EN: DocumentoLegal = {
         {
           tipo: 'parrafo',
           texto:
-            'So the platform works more reliably for everyone, we may learn from the STRUCTURE of the websites where tasks are executed and aggregate that learning into a shared repository. This clause corresponds to the secondary purpose declared in the Privacy Notice and has exactly the same scope described there.',
+            'So the platform works more reliably for everyone, we may learn from the STRUCTURE of the websites where tasks are executed, and from the ORDER in which a procedure worked inside them, and aggregate that learning into a shared repository. This clause corresponds to the secondary purpose declared in the Privacy Notice and has exactly the same scope described there.',
         },
         {
           tipo: 'parrafo',
@@ -159,10 +159,18 @@ export const TERMINOS_EN: DocumentoLegal = {
         {
           tipo: 'lista',
           items: [
-            'The website domain.',
+            'The website domain, or the set of domains when a task spans more than one.',
             'The type or class of the element that was interacted with, for example a search field or a submit button.',
             'The strategy that worked to locate that element within the page.',
+            'An INTENT CODE drawn from a closed list defined by the platform (for example, "send" or "buy"). It is not text of yours: it is a label of ours, and it is the only thing that records what the procedure was for.',
+            'The ORDER in which those elements were acted on and, for each step, whether what was typed was a value that changes on every run. The position of the value is kept, never the value.',
+            'How many times the procedure worked and how many times it failed.',
           ],
+        },
+        {
+          tipo: 'parrafo',
+          texto:
+            'That aggregated procedure may be offered to another person who asks for the same thing on the same site and has never done it before, so they do not have to discover it from scratch. It is offered EXPLICITLY, runs only with their approval, and goes through the same pre-checks as any task of their own: it is compared against the page just the same, their irreversible-action settings are respected, and if any step cannot be resolved the procedure is abandoned and the task runs the normal way.',
         },
         {
           tipo: 'parrafo',
@@ -173,7 +181,7 @@ export const TERMINOS_EN: DocumentoLegal = {
           items: [
             'The content of the pages the agent read.',
             'The values typed into forms.',
-            'Your goals, your instructions, or any personal data of yours or of third parties.',
+            'Your goals and your instructions as you wrote them, and any personal data of yours or of third parties. The aggregated procedure does not keep your words: it keeps the sequence of actions and, in place of your wording, only the intent code.',
             'Any credential, token or session context.',
           ],
         },
@@ -282,7 +290,7 @@ export const TERMINOS_EN: DocumentoLegal = {
         {
           tipo: 'parrafo',
           texto:
-            'For any question about these terms, write to us at contacto@ledesma-ai-labs.com or visit https://www.ledesma-ai-labs.com. These terms correspond to version 2026-07-29, dated July 29, 2026.',
+            'For any question about these terms, write to us at contacto@ledesma-ai-labs.com or visit https://www.ledesma-ai-labs.com. These terms correspond to version 2026-07-31, dated July 31, 2026.',
         },
       ],
     },

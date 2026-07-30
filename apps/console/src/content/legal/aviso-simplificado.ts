@@ -10,12 +10,12 @@ import type { DocumentoLegal } from './tipos';
 // Comparte VERSION con el aviso integral: es el mismo documento en dos niveles de detalle, y aceptar el
 // aviso de privacidad cubre a los dos.
 
-const VERSION = '2026-07-30';
+const VERSION = '2026-07-31';
 
 export const AVISO_SIMPLIFICADO_ES: DocumentoLegal = {
   tipo: 'privacy_notice',
   version: VERSION,
-  fecha: '30 de julio de 2026',
+  fecha: '31 de julio de 2026',
   titulo: 'Aviso de Privacidad Simplificado',
   subtitulo:
     'Resumen de cómo tratamos tus datos personales. El aviso integral tiene el detalle completo y es el que rige.',
@@ -64,7 +64,17 @@ export const AVISO_SIMPLIFICADO_ES: DocumentoLegal = {
         {
           tipo: 'parrafo',
           texto:
-            'Finalidades no necesarias, a las que puedes oponerte: aprendizaje estructural agregado sobre sitios web (solo dominio, tipo de elemento y estrategia de localización, nunca contenidos ni valores ni datos personales, con los identificadores de origen convertidos en valores no reversibles) y alertas operativas por correo.',
+            'Finalidades no necesarias, a las que puedes oponerte: aprendizaje estructural agregado sobre sitios web y alertas operativas por correo.',
+        },
+        {
+          tipo: 'parrafo',
+          texto:
+            'Del aprendizaje estructural agregado solo se agrega esto: el dominio, o el conjunto de dominios cuando la tarea cruza más de uno; el tipo de elemento; la estrategia que funcionó para localizarlo; un código de intención tomado de una lista cerrada que define la plataforma; el orden en que esos elementos se accionaron, con la posición de los datos que cambian en cada ejecución y nunca el dato; y cuántas veces el procedimiento funcionó y cuántas falló. Nunca los contenidos de las páginas, ni los valores que escribiste, ni tus objetivos o instrucciones tal como los escribiste, ni ningún dato personal, y los identificadores de origen se convierten en valores no reversibles.',
+        },
+        {
+          tipo: 'parrafo',
+          texto:
+            'Ese procedimiento agregado puede ofrecérsele de forma explícita a otra persona que pida lo mismo en el mismo sitio, se ejecuta solo si lo aprueba y pasa por las mismas comprobaciones previas que cualquier tarea suya.',
         },
       ],
     },
@@ -96,7 +106,7 @@ export const AVISO_SIMPLIFICADO_ES: DocumentoLegal = {
 export const AVISO_SIMPLIFICADO_EN: DocumentoLegal = {
   tipo: 'privacy_notice',
   version: VERSION,
-  fecha: 'July 30, 2026',
+  fecha: 'July 31, 2026',
   titulo: 'Short Form Privacy Notice',
   subtitulo:
     'A summary of how we process your personal data. The full notice has the complete detail and is the one that governs.',
@@ -145,7 +155,17 @@ export const AVISO_SIMPLIFICADO_EN: DocumentoLegal = {
         {
           tipo: 'parrafo',
           texto:
-            'Non necessary purposes, which you may object to: aggregated structural learning about websites (domain, element type and location strategy only, never contents, values or personal data, with origin identifiers converted into non reversible values) and operational alerts by email.',
+            'Non necessary purposes, which you may object to: aggregated structural learning about websites and operational alerts by email.',
+        },
+        {
+          tipo: 'parrafo',
+          texto:
+            'Aggregated structural learning covers only this: the domain, or the set of domains when a task spans more than one; the element type; the strategy that worked to locate it; an intent code drawn from a closed list defined by the platform; the order in which those elements were acted on, with the position of the values that change on every run and never the value itself; and how many times the procedure worked and how many times it failed. Never page contents, the values you typed, your goals or instructions as you wrote them, or any personal data, and origin identifiers are converted into non reversible values.',
+        },
+        {
+          tipo: 'parrafo',
+          texto:
+            'That aggregated procedure may be offered explicitly to another person who asks for the same thing on the same site, runs only with their approval and goes through the same pre-checks as any task of their own.',
         },
       ],
     },

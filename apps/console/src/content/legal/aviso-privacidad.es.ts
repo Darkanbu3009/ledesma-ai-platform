@@ -8,12 +8,19 @@ import type { DocumentoLegal } from './tipos';
  * retention-policy.ts y las funciones de purga, y las medidas de seguridad son las que estan implementadas.
  * Si cambias el comportamiento de la plataforma, este texto deja de ser cierto y hay que actualizarlo.
  *
+ * UNICA EXCEPCION, Y ES DELIBERADA: el ALCANCE de la finalidad secundaria de aprendizaje colectivo se
+ * declara POR ADELANTADO. La version 2026-07-31 suma el codigo de intencion, el ORDEN de los pasos y el
+ * ofrecimiento explicito del procedimiento agregado a otro titular ANTES de que la plataforma escriba la
+ * primera fila con esos datos. El alcance declarado es un TECHO consentido, no un inventario de lo ya
+ * acumulado: el codigo no puede pasarse de ese techo, pero el techo si puede ir por delante del codigo.
+ * Declararlo despues de empezar a agregar dejaria ese tratamiento sin consentimiento previo.
+ *
  * Para SUBIR DE VERSION ver el procedimiento en apps/backend/src/privacy/documents.ts.
  */
 export const AVISO_PRIVACIDAD_ES: DocumentoLegal = {
   tipo: 'privacy_notice',
-  version: '2026-07-30',
-  fecha: '30 de julio de 2026',
+  version: '2026-07-31',
+  fecha: '31 de julio de 2026',
   titulo: 'Aviso de Privacidad Integral',
   subtitulo:
     'Cómo tratamos tus datos personales en la plataforma Ledesma AI Labs, qué hacemos con ellos y cómo puedes controlarlos.',
@@ -169,7 +176,7 @@ export const AVISO_PRIVACIDAD_ES: DocumentoLegal = {
             {
               termino: 'Aprendizaje estructural agregado sobre sitios web',
               descripcion:
-                'Mejorar la fiabilidad del servicio para todos los usuarios aprendiendo cómo están construidos los sitios web. Lo que se agrega es exclusivamente estructura: el dominio del sitio, el tipo de elemento con el que se interactuó (por ejemplo, campo de búsqueda o botón de envío) y la estrategia que funcionó para localizar ese elemento en la página. Nunca se agregan los contenidos de las páginas, los valores que escribiste, los textos que leíste ni ningún dato personal, y los identificadores de origen se convierten en valores derivados mediante una función criptográfica de una sola vía, de modo que la estructura aprendida no se puede volver a asociar contigo. Esta finalidad está en operación: la plataforma agrega estructura de los sitios web sobre los que se ejecutan tareas, con el alcance descrito arriba y ninguno mayor.',
+                'Mejorar la fiabilidad del servicio para todos los usuarios aprendiendo cómo están construidos los sitios web y en qué orden funcionó dentro de ellos un procedimiento que ya se completó. Lo que se agrega es exclusivamente estructura, con el alcance que se detalla abajo y ninguno mayor. Nunca se agregan los contenidos de las páginas, los valores que escribiste, los textos que leíste, tus objetivos o tus instrucciones tal como los escribiste, ni ningún dato personal tuyo o de terceros, y los identificadores de origen se convierten en valores derivados mediante una función criptográfica de una sola vía, de modo que la estructura aprendida no se puede volver a asociar contigo. Esta finalidad está en operación: la plataforma agrega estructura de los sitios web sobre los que se ejecutan tareas. El alcance de abajo se declara completo desde ahora, antes de que la plataforma agregue el primer dato de cada elemento que enumera: es el límite máximo de esta finalidad, no una descripción de lo que ya se acumuló.',
             },
             {
               termino: 'Alertas operativas y comunicaciones del servicio por correo',
@@ -177,6 +184,32 @@ export const AVISO_PRIVACIDAD_ES: DocumentoLegal = {
                 'Enviarte a tu correo mensajes de bienvenida, avisos de estado del servicio y alertas operativas sobre tu cuenta.',
             },
           ],
+        },
+        {
+          tipo: 'parrafo',
+          texto:
+            'Sobre el aprendizaje estructural agregado, este es su alcance completo, el mismo que declara la cláusula de aprendizaje colectivo de los Términos de Servicio. Lo que sí se agrega, y nada más que esto:',
+        },
+        {
+          tipo: 'lista',
+          items: [
+            'El dominio del sitio web, o el conjunto de dominios cuando la tarea cruza más de uno.',
+            'El tipo o clase del elemento con el que se interactuó, por ejemplo un campo de búsqueda o un botón de envío.',
+            'La estrategia que funcionó para localizar ese elemento dentro de la página.',
+            'Un CÓDIGO DE INTENCIÓN tomado de una lista cerrada que define la plataforma (por ejemplo, "enviar" o "comprar"). No es un texto tuyo: es una etiqueta nuestra, y es lo único que describe para qué servía el procedimiento.',
+            'El ORDEN en que esos elementos se accionaron, y para cada paso, si lo que se escribió era un dato que cambia en cada ejecución. Se guarda la posición del dato, nunca el dato.',
+            'Cuántas veces el procedimiento funcionó y cuántas falló.',
+          ],
+        },
+        {
+          tipo: 'parrafo',
+          texto:
+            'Ese procedimiento agregado puede ofrecérsele a otra persona que pida lo mismo en el mismo sitio y no lo haya hecho nunca, para que no tenga que descubrirlo de cero. Se le ofrece de forma EXPLÍCITA, se ejecuta solo si lo aprueba, y pasa por las mismas comprobaciones previas que cualquier tarea suya: se compara contra la página, que se compararía igual, se respeta su configuración de acciones irreversibles, y si un paso no se puede resolver, el procedimiento se abandona y la tarea se hace por el camino normal.',
+        },
+        {
+          tipo: 'parrafo',
+          texto:
+            'El procedimiento agregado no conserva tus palabras: conserva la secuencia de acciones y, en lugar de tu redacción, solo el código de intención. Puedes oponerte a esta finalidad en cualquier momento escribiendo a contacto@ledesma-ai-labs.com, sin que ello afecte tu uso de la plataforma.',
         },
       ],
     },
@@ -392,7 +425,7 @@ export const AVISO_PRIVACIDAD_ES: DocumentoLegal = {
         {
           tipo: 'parrafo',
           texto:
-            'Para cualquier duda sobre este aviso o sobre el tratamiento de tus datos personales, escríbenos a contacto@ledesma-ai-labs.com. Este aviso corresponde a la versión 2026-07-30, con fecha 30 de julio de 2026.',
+            'Para cualquier duda sobre este aviso o sobre el tratamiento de tus datos personales, escríbenos a contacto@ledesma-ai-labs.com. Este aviso corresponde a la versión 2026-07-31, con fecha 31 de julio de 2026.',
         },
       ],
     },

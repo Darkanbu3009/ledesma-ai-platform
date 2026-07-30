@@ -7,12 +7,16 @@ import type { DocumentoLegal } from './tipos';
  * secundaria del aviso de privacidad (aviso-privacidad.es.ts, seccion 4). Si una cambia, la otra cambia en
  * el mismo commit: si se contradicen, el consentimiento deja de ser informado.
  *
+ * La lista de lo que SI se agrega es CERRADA y se declara POR ADELANTADO: desde la version 2026-07-31
+ * incluye el codigo de intencion y el ORDEN de los pasos, que la plataforma aun no agrega. Es el TECHO de
+ * la finalidad, no el inventario de lo acumulado (ver la nota en aviso-privacidad.es.ts).
+ *
  * Para SUBIR DE VERSION ver el procedimiento en apps/backend/src/privacy/documents.ts.
  */
 export const TERMINOS_ES: DocumentoLegal = {
   tipo: 'terms',
-  version: '2026-07-29',
-  fecha: '29 de julio de 2026',
+  version: '2026-07-31',
+  fecha: '31 de julio de 2026',
   titulo: 'Términos de Servicio',
   subtitulo:
     'Las reglas del acuerdo entre tú y Ledesma AI Labs para usar la plataforma: qué te damos, qué te toca a ti y qué pasa cuando algo sale mal.',
@@ -152,7 +156,7 @@ export const TERMINOS_ES: DocumentoLegal = {
         {
           tipo: 'parrafo',
           texto:
-            'Para que la plataforma funcione de forma más confiable para todos, podemos aprender de la ESTRUCTURA de los sitios web sobre los que se ejecutan tareas y agregar ese aprendizaje en un repositorio común. Esta cláusula corresponde a la finalidad secundaria declarada en el Aviso de Privacidad y tiene exactamente el mismo alcance que allí se describe.',
+            'Para que la plataforma funcione de forma más confiable para todos, podemos aprender de la ESTRUCTURA de los sitios web sobre los que se ejecutan tareas, y del ORDEN en que un procedimiento funcionó dentro de ellos, y agregar ese aprendizaje en un repositorio común. Esta cláusula corresponde a la finalidad secundaria declarada en el Aviso de Privacidad y tiene exactamente el mismo alcance que allí se describe.',
         },
         {
           tipo: 'parrafo',
@@ -161,10 +165,18 @@ export const TERMINOS_ES: DocumentoLegal = {
         {
           tipo: 'lista',
           items: [
-            'El dominio del sitio web.',
+            'El dominio del sitio web, o el conjunto de dominios cuando la tarea cruza más de uno.',
             'El tipo o clase del elemento con el que se interactuó, por ejemplo un campo de búsqueda o un botón de envío.',
             'La estrategia que funcionó para localizar ese elemento dentro de la página.',
+            'Un CÓDIGO DE INTENCIÓN tomado de una lista cerrada que define la plataforma (por ejemplo, "enviar" o "comprar"). No es un texto tuyo: es una etiqueta nuestra, y es lo único que describe para qué servía el procedimiento.',
+            'El ORDEN en que esos elementos se accionaron, y para cada paso, si lo que se escribió era un dato que cambia en cada ejecución. Se guarda la posición del dato, nunca el dato.',
+            'Cuántas veces el procedimiento funcionó y cuántas falló.',
           ],
+        },
+        {
+          tipo: 'parrafo',
+          texto:
+            'Ese procedimiento agregado puede ofrecérsele a otra persona que pida lo mismo en el mismo sitio y no lo haya hecho nunca, para que no tenga que descubrirlo de cero. Se le ofrece de forma EXPLÍCITA, se ejecuta solo si lo aprueba, y pasa por las mismas comprobaciones previas que cualquier tarea suya: se compara contra la página, que se compararía igual, se respeta su configuración de acciones irreversibles, y si un paso no se puede resolver, el procedimiento se abandona y la tarea se hace por el camino normal.',
         },
         {
           tipo: 'parrafo',
@@ -175,7 +187,7 @@ export const TERMINOS_ES: DocumentoLegal = {
           items: [
             'El contenido de las páginas que el agente leyó.',
             'Los valores que se escribieron en los formularios.',
-            'Tus objetivos, tus instrucciones o cualquier dato personal tuyo o de terceros.',
+            'Tus objetivos y tus instrucciones tal como los escribiste, y cualquier dato personal tuyo o de terceros. El procedimiento agregado no conserva tus palabras: conserva la secuencia de acciones y, en lugar de tu redacción, solo el código de intención.',
             'Cualquier credencial, token o contexto de sesión.',
           ],
         },
@@ -284,7 +296,7 @@ export const TERMINOS_ES: DocumentoLegal = {
         {
           tipo: 'parrafo',
           texto:
-            'Para cualquier duda sobre estos términos, escríbenos a contacto@ledesma-ai-labs.com o visita https://www.ledesma-ai-labs.com. Estos términos corresponden a la versión 2026-07-29, con fecha 29 de julio de 2026.',
+            'Para cualquier duda sobre estos términos, escríbenos a contacto@ledesma-ai-labs.com o visita https://www.ledesma-ai-labs.com. Estos términos corresponden a la versión 2026-07-31, con fecha 31 de julio de 2026.',
         },
       ],
     },

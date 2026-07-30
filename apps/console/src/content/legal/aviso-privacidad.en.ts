@@ -10,8 +10,8 @@ import type { DocumentoLegal } from './tipos';
  */
 export const AVISO_PRIVACIDAD_EN: DocumentoLegal = {
   tipo: 'privacy_notice',
-  version: '2026-07-30',
-  fecha: 'July 30, 2026',
+  version: '2026-07-31',
+  fecha: 'July 31, 2026',
   titulo: 'Privacy Notice',
   subtitulo:
     'How we process your personal data on the Ledesma AI Labs platform, what we do with it, and how you stay in control of it.',
@@ -167,7 +167,7 @@ export const AVISO_PRIVACIDAD_EN: DocumentoLegal = {
             {
               termino: 'Aggregated structural learning about websites',
               descripcion:
-                'Improving the reliability of the service for every user by learning how websites are built. What gets aggregated is structure only: the site domain, the type of element that was interacted with (for example, a search field or a submit button) and the strategy that worked to locate that element on the page. Page contents, the values you typed, the text you read and any personal data are never aggregated, and origin identifiers are converted into derived values through a one way cryptographic function, so the learned structure cannot be tied back to you. This purpose is in operation: the platform aggregates structure from the websites where tasks are executed, with the scope described above and no wider.',
+                'Improving the reliability of the service for every user by learning how websites are built and in what order a procedure that already completed worked inside them. What gets aggregated is structure only, with the scope detailed below and no wider. Page contents, the values you typed, the text you read, your goals or your instructions as you wrote them, and any personal data of yours or of third parties are never aggregated, and origin identifiers are converted into derived values through a one way cryptographic function, so the learned structure cannot be tied back to you. This purpose is in operation: the platform aggregates structure from the websites where tasks are executed. The scope below is declared in full from now on, before the platform aggregates the first piece of data for each item it lists: it is the ceiling of this purpose, not a description of what has already been collected.',
             },
             {
               termino: 'Operational alerts and service emails',
@@ -175,6 +175,32 @@ export const AVISO_PRIVACIDAD_EN: DocumentoLegal = {
                 'Sending you welcome messages, service status notices and operational alerts about your account by email.',
             },
           ],
+        },
+        {
+          tipo: 'parrafo',
+          texto:
+            'On aggregated structural learning, this is its full scope, the same one declared by the collective learning clause of the Terms of Service. What is aggregated, and nothing beyond this:',
+        },
+        {
+          tipo: 'lista',
+          items: [
+            'The website domain, or the set of domains when a task spans more than one.',
+            'The type or class of the element that was interacted with, for example a search field or a submit button.',
+            'The strategy that worked to locate that element within the page.',
+            'An INTENT CODE drawn from a closed list defined by the platform (for example, "send" or "buy"). It is not text of yours: it is a label of ours, and it is the only thing that records what the procedure was for.',
+            'The ORDER in which those elements were acted on and, for each step, whether what was typed was a value that changes on every run. The position of the value is kept, never the value.',
+            'How many times the procedure worked and how many times it failed.',
+          ],
+        },
+        {
+          tipo: 'parrafo',
+          texto:
+            'That aggregated procedure may be offered to another person who asks for the same thing on the same site and has never done it before, so they do not have to discover it from scratch. It is offered EXPLICITLY, runs only with their approval, and goes through the same pre-checks as any task of their own: it is compared against the page just the same, their irreversible-action settings are respected, and if any step cannot be resolved the procedure is abandoned and the task runs the normal way.',
+        },
+        {
+          tipo: 'parrafo',
+          texto:
+            'The aggregated procedure does not keep your words: it keeps the sequence of actions and, in place of your wording, only the intent code. You may object to this purpose at any time by writing to contacto@ledesma-ai-labs.com, and doing so will not affect your use of the platform.',
         },
       ],
     },
@@ -390,7 +416,7 @@ export const AVISO_PRIVACIDAD_EN: DocumentoLegal = {
         {
           tipo: 'parrafo',
           texto:
-            'For any question about this notice or about the processing of your personal data, write to us at contacto@ledesma-ai-labs.com. This notice corresponds to version 2026-07-30, dated July 30, 2026.',
+            'For any question about this notice or about the processing of your personal data, write to us at contacto@ledesma-ai-labs.com. This notice corresponds to version 2026-07-31, dated July 31, 2026.',
         },
       ],
     },
