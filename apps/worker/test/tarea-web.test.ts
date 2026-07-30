@@ -441,7 +441,13 @@ describe('procesarTareaWeb', () => {
       // EL VEREDICTO DE LA PUBLICACION de plantilla (V041) queda registrado SIEMPRE, tambien cuando
       // no habia nada que publicar. Esta tarea es REVERSIBLE (no pide ninguna accion bloqueada), asi
       // que su motivo es la decision de diseno de V041 y no un fallo del cableado.
-      plantilla: { publicada: false, motivo: 'sin_intencion_irreversible', idx: null, clases: 0 },
+      plantilla: {
+        publicada: false,
+        motivo: 'sin_intencion_irreversible',
+        submotivo: null,
+        idx: null,
+        clases: 0,
+      },
     });
     expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
   });

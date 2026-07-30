@@ -959,3 +959,146 @@ describe('promoverTrayectoria con pasos de varios sitios', () => {
     expect(resultado.pasos.map((p) => p.accion)).toEqual(['click', 'click']);
   });
 });
+
+/**
+ * LA POLITICA CONDICIONADA DEL PR 274, APLICADA AL ULTIMO ABORTO QUE LE FALTABA (30 jul 2026).
+ *
+ * Una ESCRITURA sin localizacion abortaba la conversion entera sin preguntar nada. Es el mismo caso
+ * que ya cerraron los metodos no representables y los clicks de foco: si lo que ese paso tecleaba es
+ * un dato DECLARADO del objetivo y OTRO paso conservado teclea ese mismo dato, el intento fallido no
+ * le quita nada al procedimiento. Sin cobertura sigue abortando, con el motivo de siempre.
+ *
+ * Y LA IDENTIDAD DEL ELEMENTO POR SU LOCALIZADOR: dos pasos que comparten un nombre accesible tocaron
+ * el mismo elemento, aunque no compartan selector ni descripcion. Es lo que colapsa los clicks por
+ * coordenadas, y NO cambia el camino de la receta, donde los pasos llegan sin estrategias.
+ */
+describe('promoverTrayectoria con escrituras sin localizacion (politica condicionada)', () => {
+  const ATRIBUTO_BODY: EstrategiaLocalizacion = {
+    tipo: 'atributo',
+    atributo: 'aria-label',
+    valor: 'Cuerpo del mensaje',
+  };
+  const OBJETIVO_CUERPO =
+    'Enviar un correo con el siguiente cuerpo del mensaje "hola que tal". La tarea termina cuando el ' +
+    'correo haya sido enviado exitosamente.';
+
+  it('el intento SIN localizacion se descarta cuando otro paso conservado teclea ese mismo dato', () => {
+    const resultado = promover(
+      [
+        // El primer intento de escribir el cuerpo: la percepcion no alcanzo el elemento, asi que el
+        // paso llega sin nada con lo que localizarlo, y ademas por coordenadas (sin instruccion).
+        paso({
+          idx: 0,
+          accion: { tipo: 'type', instruccion: null, metodo: 'type', argumentos: ['hola que tal'] },
+          estrategias: [],
+          selector: null,
+        }),
+        // El segundo, el que si quedo: mismo dato, con localizador propio.
+        paso({
+          idx: 1,
+          accion: {
+            tipo: 'act',
+            instruccion: 'type the body of the message',
+            metodo: 'fill',
+            argumentos: ['hola que tal'],
+          },
+          estrategias: [ATRIBUTO_BODY, XPATH],
+          selector: '/html/body/div/form/div[1]',
+        }),
+      ],
+      OBJETIVO_CUERPO,
+    );
+    expect(resultado.promovida).toBe(true);
+    if (!resultado.promovida) return;
+    expect(resultado.pasos.map((p) => p.accion)).toEqual(['escribir']);
+    expect(resultado.pasos[0]?.valor).toEqual({ tipo: 'parametro', parametro: 'cuerpo' });
+  });
+
+  it('sin ningun paso que cubra ese dato SIGUE abortando, con el mismo motivo y su paso', () => {
+    const resultado = promover(
+      [
+        paso({
+          idx: 0,
+          accion: {
+            tipo: 'act',
+            instruccion: 'type the body of the message',
+            metodo: 'fill',
+            argumentos: ['hola que tal'],
+          },
+          estrategias: [],
+          selector: null,
+        }),
+      ],
+      OBJETIVO_CUERPO,
+    );
+    expect(resultado.promovida).toBe(false);
+    if (resultado.promovida) return;
+    expect(resultado.motivo).toContain('sin estrategia y sin paso adyacente que cubra el campo');
+    expect(resultado.regla).toBe('escritura_sin_localizacion');
+    expect(resultado.paso).toBe(0);
+  });
+
+  it('un click sin instruccion ni selector se colapsa contra el campo que su localizador nombra', () => {
+    const resultado = promover(
+      [
+        // Click POR COORDENADAS: ni instruccion ni selector; solo el nombre que la percepcion leyo.
+        paso({
+          idx: 0,
+          accion: { tipo: 'click', instruccion: null, metodo: 'click', argumentos: [] },
+          estrategias: [ATRIBUTO_BODY],
+          selector: null,
+        }),
+        paso({
+          idx: 1,
+          accion: {
+            tipo: 'act',
+            instruccion: 'type the body of the message',
+            metodo: 'fill',
+            argumentos: ['hola que tal'],
+          },
+          estrategias: [ATRIBUTO_BODY, XPATH],
+          selector: '/html/body/div/form/div[1]',
+        }),
+      ],
+      OBJETIVO_CUERPO,
+    );
+    expect(resultado.promovida).toBe(true);
+    if (!resultado.promovida) return;
+    expect(resultado.pasos.map((p) => p.accion)).toEqual(['escribir']);
+  });
+
+  it('dos elementos DISTINTOS con el mismo TIPO de estrategia no se colapsan entre si', () => {
+    // La identidad la da el NOMBRE, no la clase de estrategia: dos campos con aria-label son dos
+    // campos, y el click del asunto no puede desaparecer por la escritura del cuerpo.
+    const ATRIBUTO_SUBJ: EstrategiaLocalizacion = {
+      tipo: 'atributo',
+      atributo: 'aria-label',
+      valor: 'Asunto',
+    };
+    const resultado = promover(
+      [
+        paso({
+          idx: 0,
+          accion: { tipo: 'click', instruccion: null, metodo: 'click', argumentos: [] },
+          estrategias: [ATRIBUTO_SUBJ],
+          selector: null,
+        }),
+        paso({
+          idx: 1,
+          accion: {
+            tipo: 'act',
+            instruccion: 'type the body of the message',
+            metodo: 'fill',
+            argumentos: ['hola que tal'],
+          },
+          estrategias: [ATRIBUTO_BODY, XPATH],
+          selector: '/html/body/div/form/div[1]',
+        }),
+      ],
+      OBJETIVO_CUERPO,
+    );
+    expect(resultado.promovida).toBe(true);
+    if (!resultado.promovida) return;
+    expect(resultado.pasos.map((p) => p.accion)).toEqual(['click', 'escribir']);
+  });
+});

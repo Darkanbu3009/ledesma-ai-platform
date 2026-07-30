@@ -315,3 +315,219 @@ describe('la trayectoria real de referencia, con el observador apagado', () => {
     expect(veredicto.idx).toBe(pasosPublicables()[7]?.idx);
   });
 });
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * LA CORRIDA REAL DE LAS 20:51 DEL 30 JUL 2026: correo enviado, verificacion previa superada, efecto
+ * confirmado -- y `{"idx":null,"clases":5,"motivo":"sin_procedimiento_repetible","publicada":false}`
+ * en el resultado del job. Sus 24 pasos, en la forma con la que la traza los deja en produccion.
+ *
+ * LO QUE LA DISTINGUE de la corrida de referencia de arriba: el agente peleo con el foco del cuerpo
+ * del mensaje con OCHO clicks seguidos, y uno de ellos lo emitio POR COORDENADAS. Un click por
+ * coordenadas no trae selector (Stagehand no resuelve ninguno para el) ni instruccion (sus argumentos
+ * son `describe` y `coordinates`, no `action`), asi que las dos vias con las que la destilacion
+ * reconoce "el mismo campo" -- selector identico y descripcion equivalente -- no lo alcanzaban, y se
+ * colaba en el procedimiento como un paso propio. Lo que SI trae es el nombre accesible que la
+ * percepcion leyo del elemento sobre el que cayo, y por ahi es por donde se colapsa ahora.
+ *
+ * El `fillFormVision` de la posicion 3 es el intento de llenado por vision que NO lleno ningun campo:
+ * se descarta como metodo no representable y no reclama la cobertura de ningun dato.
+ */
+describe('la corrida real de las 20:51, con el observador apagado', () => {
+  /** Un click de enfoque sobre el cuerpo resuelto por vision: sin selector, con lo leido del DOM. */
+  const focoDelCuerpo = (idx: number): PasoCensurado =>
+    paso({
+      idx,
+      accion: { tipo: 'act', instruccion: 'click the message body area', metodo: 'click', argumentos: [] },
+      estrategiasPercibidas: [LEIDO_CUERPO],
+    });
+
+  /** EL CLICK POR COORDENADAS: sin selector, sin instruccion y con metodo derivado de la tool. */
+  const focoPorCoordenadas = (idx: number): PasoCensurado =>
+    paso({
+      idx,
+      accion: { tipo: 'click', instruccion: null, metodo: 'click', argumentos: [] },
+      estrategiasPercibidas: [LEIDO_CUERPO],
+    });
+
+  function corridaDeLas2051(): PasoCensurado[] {
+    return [
+      paso({ idx: 0, accion: { tipo: 'goto', instruccion: null, metodo: null, argumentos: [] } }),
+      paso({ idx: 1, accion: { tipo: 'screenshot', instruccion: null, metodo: null, argumentos: [] } }),
+      // POSICION 3: el llenado por vision, ANTES de que el agente escribiera nada.
+      paso({
+        idx: 2,
+        accion: { tipo: 'fillFormVision', instruccion: 'llenar los campos del correo', metodo: null, argumentos: [] },
+      }),
+      paso({
+        idx: 3,
+        accion: { tipo: 'act', instruccion: 'click the Compose button', metodo: 'click', argumentos: [] },
+        selector: '/html/body/div/div[3]',
+        estrategiasPercibidas: [LEIDO_REDACTAR, xpath('/html/body/div/div[3]')],
+      }),
+      paso({ idx: 4, accion: { tipo: 'think', instruccion: null, metodo: null, argumentos: [] } }),
+      paso({
+        idx: 5,
+        accion: { tipo: 'act', instruccion: 'click the Para input field', metodo: 'click', argumentos: [] },
+        estrategiasPercibidas: [LEIDO_PARA],
+      }),
+      paso({
+        idx: 6,
+        accion: {
+          tipo: 'act',
+          instruccion: `type "${DESTINATARIO}" into the Para input field`,
+          metodo: 'fill',
+          argumentos: [DESTINATARIO],
+        },
+        selector: '/html/body/div[7]/div[3]/div/form/input[1]',
+        valorCensurado: DESTINATARIO,
+        estrategiasPercibidas: [LEIDO_PARA, xpath('/html/body/div[7]/div[3]/div/form/input[1]')],
+      }),
+      paso({
+        idx: 7,
+        accion: {
+          tipo: 'act',
+          instruccion: 'press Tab key to confirm the recipient',
+          metodo: 'press',
+          argumentos: ['Tab'],
+        },
+        selector: '/html/body/div[7]/div[3]/div/form/input[1]',
+        estrategiasPercibidas: [LEIDO_PARA],
+      }),
+      paso({
+        idx: 8,
+        accion: {
+          tipo: 'act',
+          instruccion: `type "${ASUNTO}" into the Asunto input field`,
+          metodo: 'fill',
+          argumentos: [ASUNTO],
+        },
+        selector: '/html/body/div[7]/div[3]/div/form/input[2]',
+        valorCensurado: ASUNTO,
+        estrategiasPercibidas: [LEIDO_ASUNTO, xpath('/html/body/div[7]/div[3]/div/form/input[2]')],
+      }),
+      // PASOS 9 A 17: los ocho clicks de enfoque sobre el cuerpo, con el de coordenadas en medio.
+      focoDelCuerpo(9),
+      focoDelCuerpo(10),
+      focoDelCuerpo(11),
+      focoPorCoordenadas(12),
+      focoDelCuerpo(13),
+      focoDelCuerpo(14),
+      focoDelCuerpo(15),
+      focoDelCuerpo(16),
+      paso({ idx: 17, accion: { tipo: 'screenshot', instruccion: null, metodo: null, argumentos: [] } }),
+      paso({
+        idx: 18,
+        accion: {
+          tipo: 'act',
+          instruccion: `type "${CUERPO}" into the message body to finish the email`,
+          metodo: 'fill',
+          argumentos: [CUERPO],
+        },
+        selector: '/html/body/div[7]/div[3]/div/form/div[1]',
+        valorCensurado: CUERPO,
+        estrategiasPercibidas: [LEIDO_CUERPO, xpath('/html/body/div[7]/div[3]/div/form/div[1]')],
+      }),
+      paso({ idx: 19, accion: { tipo: 'think', instruccion: null, metodo: null, argumentos: [] } }),
+      paso({ idx: 20, accion: { tipo: 'extract', instruccion: null, metodo: null, argumentos: [] } }),
+      paso({ idx: 21, accion: { tipo: 'verificacion', instruccion: 'ok', metodo: null, argumentos: [] } }),
+      paso({
+        idx: 22,
+        accion: { tipo: 'act', instruccion: 'click the Send button', metodo: 'click', argumentos: [] },
+        selector: '/html/body/div/form/div[2]',
+        estrategiasPercibidas: [LEIDO_ENVIAR, xpath('/html/body/div/form/div[2]')],
+      }),
+      paso({ idx: 23, accion: { tipo: 'done', instruccion: null, metodo: null, argumentos: [] } }),
+    ];
+  }
+
+  function procedimiento() {
+    return promoverTrayectoria({
+      pasos: pasosConEstrategiasPercibidas(corridaDeLas2051()),
+      dominio: DOMINIO,
+      objetivo: OBJETIVO,
+      estado: 'exitosa',
+      exigeVerificacion: true,
+    });
+  }
+
+  /**
+   * LAS CINCO CLASES QUE EL ATLAS TENIA CORROBORADAS ese dia, tal como salieron del veredicto:
+   * Redactar, Asunto, Cuerpo del mensaje y Destinatarios en Para en sus DOS acciones. El boton
+   * Enviar NO esta, y eso es un problema DISTINTO (ver el ultimo test de este bloque).
+   */
+  const CINCO_CLASES = new Set([
+    'click|rol:button|redactar',
+    'click|atributo:aria-label|destinatarios en para',
+    'escribir|atributo:aria-label|destinatarios en para',
+    'escribir|atributo:aria-label|asunto',
+    'escribir|atributo:aria-label|cuerpo del mensaje',
+  ]);
+
+  function publicarCon(clases: ReadonlySet<string>) {
+    const material = procedimiento();
+    if (!material.promovida) throw new Error(`la conversion rechazo: ${material.motivo}`);
+    return plantillaDeLaCorrida({
+      pasos: material.pasos,
+      dominio: DOMINIO,
+      dominios: [DOMINIO],
+      verboBloqueado: 'enviar',
+      clasesCorroboradas: clases,
+    });
+  }
+
+  it('la traza son 24 pasos y ninguno llega con estrategias propias', () => {
+    expect(corridaDeLas2051()).toHaveLength(24);
+    expect(corridaDeLas2051().every((p) => p.estrategias.length === 0)).toBe(true);
+  });
+
+  it('ARMA EL PROCEDIMIENTO: los ocho clicks de enfoque se colapsan, el de coordenadas incluido', () => {
+    const material = procedimiento();
+    expect(material.promovida).toBe(true);
+    if (!material.promovida) return;
+    // Ni un click sobrante: el unico que queda entre la escritura del asunto y la del cuerpo seria
+    // el de coordenadas, que es el que la destilacion no alcanzaba a reconocer.
+    expect(material.pasos.map((p) => p.accion)).toEqual([
+      'navegar',
+      'click',
+      'escribir',
+      'teclas',
+      'escribir',
+      'escribir',
+      'verificar',
+      'click',
+    ]);
+    // El llenado por vision se descarto sin abortar y sin reclamar cobertura de ningun dato.
+    expect(material.metodosDescartados).toEqual(['fillFormVision']);
+  });
+
+  it('con las seis clases corroboradas, la corrida PUBLICA', () => {
+    const veredicto = publicarCon(new Set([...CINCO_CLASES, 'click|atributo:aria-label|enviar']));
+    expect(veredicto.publicable).toBe(true);
+    if (!veredicto.publicable) return;
+    expect(veredicto.plantilla.pasos).toHaveLength(7);
+    expect(veredicto.plantilla.codigoDeIntencion).toBe('enviar');
+    expect(veredicto.plantilla.marcadoresClave).toBe('asunto+cuerpo+destinatario');
+    // Ni un valor de la persona, ni un xpath, ni una ruta.
+    const serializado = JSON.stringify(veredicto.plantilla);
+    for (const prohibido of [DESTINATARIO, ASUNTO, CUERPO, 'xpath', 'ruta', '/html']) {
+      expect(serializado, prohibido).not.toContain(prohibido);
+    }
+  });
+
+  it('con las CINCO clases reales el rechazo es el del boton Enviar, y es OTRO problema', () => {
+    // PROBLEMA DISTINTO Y CONOCIDO: `clasesParaPublicar` exige DOS origenes independientes, y la
+    // clase del boton Enviar no los tiene todavia. No es un fallo de la conversion -- el
+    // procedimiento se arma entero -- y se fija aqui como el comportamiento esperado: el motivo es
+    // de la puerta de publicacion y NOMBRA el paso, que es justo lo que el rechazo anterior
+    // (`sin_procedimiento_repetible` con idx null) no podia decir.
+    const veredicto = publicarCon(CINCO_CLASES);
+    expect(veredicto.publicable).toBe(false);
+    if (veredicto.publicable) return;
+    expect(veredicto.motivo).toBe('clase_no_corroborada');
+    const material = procedimiento();
+    if (!material.promovida) throw new Error(material.motivo);
+    expect(veredicto.idx).toBe(material.pasos[7]?.idx);
+  });
+});

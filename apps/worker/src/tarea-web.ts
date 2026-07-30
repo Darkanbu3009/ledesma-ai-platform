@@ -2356,6 +2356,17 @@ interface VeredictoDePlantilla {
    * null cuando si se publico.
    */
   motivo: string | null;
+  /**
+   * EL SUB-MOTIVO: la REGLA concreta que corto, cuando `motivo` es un motivo que agrupa varias.
+   * Hoy solo lo lleva `sin_procedimiento_repetible`, que son las TRECE reglas de `promoverTrayectoria`
+   * metidas en una palabra (ver ReglaDeRechazo, receta-web.ts). null cuando el motivo ya es la regla.
+   *
+   * POR QUE EXISTE: es la SEGUNDA vez que la falta de detalle de este campo obliga a deducir el
+   * diagnostico leyendo el conversor, porque ni la base ni el log lo tenian (la primera fue el
+   * veredicto entero, 30 jul 2026). Vocabulario CERRADO igual que `motivo`: ni un dato del usuario,
+   * del sitio ni de lo que la tarea escribio.
+   */
+  submotivo: string | null;
   /** `idx` del paso que la rechazo, o null cuando el rechazo no es de un paso concreto. */
   idx: number | null;
   /** Cuantas clases avaladas por origenes independientes habia para ese dominio. */
@@ -2412,7 +2423,11 @@ async function publicarPlantillaBestEffort(
   },
 ): Promise<VeredictoDePlantilla> {
   const clases = entrada.clasesCorroboradas.size;
-  const registrar = (motivo: string, idx: number): VeredictoDePlantilla => {
+  const registrar = (
+    motivo: string,
+    idx: number,
+    submotivo: string | null = null,
+  ): VeredictoDePlantilla => {
     // Con `sin_intencion_irreversible` no hay nada que reportar como anomalia: es la mitad de las
     // tareas y es la decision de diseno de V041, no un fallo.
     const nivel = motivo === 'sin_intencion_irreversible' ? 'debug' : 'info';
@@ -2420,10 +2435,11 @@ async function publicarPlantillaBestEffort(
       jobId: job.id,
       dominio: entrada.dominio,
       motivo,
+      submotivo,
       paso: idx,
       clasesCorroboradas: clases,
     });
-    return { publicada: false, motivo, idx: idx < 0 ? null : idx, clases };
+    return { publicada: false, motivo, submotivo, idx: idx < 0 ? null : idx, clases };
   };
   try {
     // LA INTENCION PRIMERO, antes de convertir nada. `plantillaDeLaCorrida` ya corta aqui, pero sin
@@ -2442,7 +2458,12 @@ async function publicarPlantillaBestEffort(
       estado: 'exitosa',
       exigeVerificacion: entrada.verboBloqueado !== null,
     });
-    if (!material.promovida) return registrar('sin_procedimiento_repetible', -1);
+    // EL SUB-MOTIVO de la conversion: la regla que corto y el paso que la disparo, que es lo que
+    // hasta hoy no quedaba en ningun lado. El `motivo` de la conversion NO viaja: lleva dentro la
+    // descripcion que el modelo escribio del paso, y el resultado de un job no es lugar para eso.
+    if (!material.promovida) {
+      return registrar('sin_procedimiento_repetible', material.paso ?? -1, material.regla);
+    }
     // Campo por campo y NUNCA con un spread de `entrada`: `plantillaDeLaCorrida` no recibe el
     // objetivo, y que no lo reciba es su primer invariante (ver la cabecera de
     // plantillas-compartidas.ts). El objetivo muere en la conversion de arriba.
@@ -2464,7 +2485,7 @@ async function publicarPlantillaBestEffort(
       jobId: job.id,
       err: describir(error),
     });
-    return { publicada: false, motivo: 'error_al_publicar', idx: null, clases };
+    return { publicada: false, motivo: 'error_al_publicar', submotivo: null, idx: null, clases };
   }
 }
 
@@ -2492,7 +2513,7 @@ async function publicar(
     });
     // El motivo del backend es texto libre y se queda en el log; lo que se registra en el resultado
     // del job es el vocabulario acotado del veredicto.
-    return { publicada: false, motivo: 'rechazada_por_el_backend', idx: null, clases };
+    return { publicada: false, motivo: 'rechazada_por_el_backend', submotivo: null, idx: null, clases };
   }
   deps.logger.info('tarea web: el procedimiento de la corrida quedo compartido como plantilla', {
     jobId: job.id,
@@ -2501,7 +2522,7 @@ async function publicar(
     marcadores: plantilla.marcadoresClave,
     pasos: plantilla.pasos.length,
   });
-  return { publicada: true, motivo: null, idx: null, clases };
+  return { publicada: true, motivo: null, submotivo: null, idx: null, clases };
 }
 
 /**
