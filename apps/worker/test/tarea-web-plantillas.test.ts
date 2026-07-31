@@ -746,3 +746,165 @@ describe('el veredicto de la publicacion queda registrado en el resultado del jo
     });
   });
 });
+
+/**
+ * EL CLICK FINAL SIN LOCALIZADOR, DE PUNTA A PUNTA EN EL HANDLER. Es la forma REAL con la que la
+ * corrida del 31 jul 2026 03:27 UTC cerro en produccion: correo enviado, efecto confirmado, y en el
+ * resultado del job `sin_procedimiento_repetible` / `click_sin_localizacion_sin_cobertura`.
+ *
+ * POR QUE EL PASO LLEGA VACIO: la percepcion lee el elemento DESPUES de la accion y al enviar el
+ * sitio desmonta el compose, asi que ese paso no recibe nada (aqui, la tabla de percibidas no tiene
+ * entrada para el selector del envio). La UNICA lectura que alcanza al control vivo es la de la
+ * BARRERA DE IDENTIDAD, que corre ANTES, y es la que este cableado lleva al paso.
+ *
+ * La barrera va en 'observacion', que es el default de produccion de TAREA_WEB_BARRERA_IDENTIDAD, y
+ * el observador de pasos sigue apagado como en el resto de este archivo.
+ */
+describe('el click final publica con lo que la barrera de identidad leyo del DOM', () => {
+  /** El control que la barrera encuentra vivo justo antes de accionarlo (nombre accesible completo). */
+  const CONTROL_ENVIAR = { ariaLabel: 'Enviar (Ctrl-Enter)', rol: 'button', candidatos: 1 };
+
+  /** La clase de ese control: la MISMA que la corrida escribe en el atlas por la otra puerta. */
+  const CLASE_DE_LA_BARRERA = 'click|rol:button|enviar (ctrl-enter)';
+
+  /** Lo que la percepcion alcanza a leer: el campo Para si, el boton de envio NO. */
+  const PERCIBIDAS_SIN_EL_ENVIO: Record<string, EstrategiaLocalizacion[]> = {
+    [SELECTOR_PARA]: [ARIA_PARA, ID_DINAMICO],
+  };
+
+  /** La estrategia con la que el atlas tiene guardada la clase del boton de envio. */
+  const ROL_ENVIAR: EstrategiaLocalizacion = {
+    tipo: 'rol',
+    rol: 'button',
+    nombre: 'Enviar (Ctrl-Enter)',
+  };
+
+  /** Atlas con las dos clases que esta corrida necesita avaladas por dos origenes independientes. */
+  function makeAtlasConLaClaseDeLaBarrera(): RepositorioAtlasParaWorker {
+    const filas: Array<{ claseDeElemento: string; estrategias: EstrategiaLocalizacion[] }> = [
+      { claseDeElemento: CLASE_PARA, estrategias: [ARIA_PARA] },
+      { claseDeElemento: CLASE_DE_LA_BARRERA, estrategias: [ROL_ENVIAR] },
+    ];
+    return {
+      listarPorDominio: vi.fn(async (dominio: string) =>
+        dominio !== DOMINIO
+          ? []
+          : filas.map((fila) => ({
+              ...fila,
+              corroboraciones: 5,
+              origenesHash: ['otro-origen-0', 'otro-origen-1'],
+            })),
+      ),
+      registrarObservacion: vi.fn(async () => {}),
+    };
+  }
+
+  function depsDelEnvioSinLocalizador(
+    overrides: Partial<TareaWebDeps> = {},
+    control: typeof CONTROL_ENVIAR | null = CONTROL_ENVIAR,
+  ): TareaWebDeps {
+    const pagina = makePagina();
+    return makeDeps(
+      {
+        navegador: {
+          ...makeNavegador(pagina),
+          localizarBotonPorAriaLabel: vi.fn(async () => control),
+        },
+        motor: makeMotor(ACCIONES_DEL_ENVIO, pagina, PERCIBIDAS_SIN_EL_ENVIO),
+        atlas: { repo: makeAtlasConLaClaseDeLaBarrera(), clave: CLAVE_ATLAS },
+        barreraIdentidad: 'observacion',
+        ...overrides,
+      },
+      pagina,
+    );
+  }
+
+  function veredictoDe(deps: TareaWebDeps): Record<string, unknown> {
+    const llamadas = (deps.guardarResultado as ReturnType<typeof vi.fn>).mock.calls;
+    const resultado = llamadas[0]?.[1] as { plantilla?: Record<string, unknown> } | undefined;
+    return resultado?.plantilla ?? {};
+  }
+
+  it('la corrida PUBLICA, y el paso del envio viaja con la clase que la barrera leyo', async () => {
+    const deps = depsDelEnvioSinLocalizador();
+
+    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
+
+    const publicadas = plantillasDe(deps);
+    expect(publicadas).toHaveLength(1);
+    const pasos = publicadas[0]?.pasos as Array<Record<string, unknown>>;
+    expect(pasos.map((p) => p.accion)).toEqual(['escribir', 'verificar', 'click']);
+    expect(pasos.map((p) => p.claseDeElemento)).toEqual([CLASE_PARA, null, CLASE_DE_LA_BARRERA]);
+    expect(pasos[2]?.estrategias).toEqual([
+      { tipo: 'rol', rol: 'button', nombre: 'Enviar (Ctrl-Enter)' },
+    ]);
+    expect(veredictoDe(deps)).toEqual({
+      publicada: true,
+      motivo: null,
+      submotivo: null,
+      idx: null,
+      clases: 2,
+    });
+    // Ni el nombre del control ni nada de la persona convierten esto en un dato de usuario: lo que
+    // viaja es el nombre accesible que el sitio le promete a cualquier lector de pantalla.
+    const serializado = JSON.stringify(publicadas);
+    for (const prohibido of [DESTINATARIO, 'user-1', 'job-1', 'xpath', 'ruta', ':u3']) {
+      expect(serializado, prohibido).not.toContain(prohibido);
+    }
+  });
+
+  it('la clase que se publica es la MISMA que la corrida escribe en el atlas', async () => {
+    const deps = depsDelEnvioSinLocalizador();
+    await procesarTareaWeb(deps, makeJob(OBJETIVO));
+    const registrar = (deps.atlas?.repo as unknown as {
+      registrarObservacion: ReturnType<typeof vi.fn>;
+    }).registrarObservacion;
+    const escritas = registrar.mock.calls.map((llamada) => (llamada[0] as { claseDeElemento: string }).claseDeElemento);
+    // La del control accionado la escribe la otra puerta del mismo cierre; si divergieran, la
+    // plantilla se caeria por 'clase_no_corroborada' y este arreglo no serviria de nada.
+    expect(escritas).toContain(CLASE_DE_LA_BARRERA);
+    const pasos = plantillasDe(deps)[0]?.pasos as Array<Record<string, unknown>>;
+    expect(pasos[2]?.claseDeElemento).toBe(CLASE_DE_LA_BARRERA);
+  });
+
+  it('SIN la lectura de la barrera, la misma corrida vuelve a quedar sin publicar', async () => {
+    // La barrera apagada es la LINEA BASE: nadie ve vivo el control, el paso del envio sigue sin una
+    // sola estrategia y la destilacion lo rechaza con el motivo de produccion.
+    const deps = depsDelEnvioSinLocalizador({ barreraIdentidad: 'apagada' });
+    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
+    expect(plantillasDe(deps)).toHaveLength(0);
+    expect(veredictoDe(deps)).toMatchObject({
+      publicada: false,
+      motivo: 'sin_procedimiento_repetible',
+      submotivo: 'click_sin_localizacion_sin_cobertura',
+    });
+  });
+
+  it('con MAS DE UN candidato en la pagina tampoco se completa y no se publica', async () => {
+    const deps = depsDelEnvioSinLocalizador({}, { ...CONTROL_ENVIAR, candidatos: 3 });
+    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
+    expect(plantillasDe(deps)).toHaveLength(0);
+    expect(veredictoDe(deps)).toMatchObject({
+      publicada: false,
+      motivo: 'sin_procedimiento_repetible',
+      submotivo: 'click_sin_localizacion_sin_cobertura',
+    });
+  });
+
+  it('sin el metodo de lectura en el puerto, la corrida cierra igual de bien y no publica', async () => {
+    // El fake que no trae la primitiva deja la barrera sin control que leer: falla cerrada y el
+    // desenlace del job es exactamente el mismo.
+    const pagina = makePagina();
+    const deps = makeDeps(
+      {
+        navegador: makeNavegador(pagina),
+        motor: makeMotor(ACCIONES_DEL_ENVIO, pagina, PERCIBIDAS_SIN_EL_ENVIO),
+        atlas: { repo: makeAtlasConLaClaseDeLaBarrera(), clave: CLAVE_ATLAS },
+        barreraIdentidad: 'observacion',
+      },
+      pagina,
+    );
+    await expect(procesarTareaWeb(deps, makeJob(OBJETIVO))).resolves.toBe('completada');
+    expect(plantillasDe(deps)).toHaveLength(0);
+  });
+});
