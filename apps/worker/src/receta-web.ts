@@ -374,36 +374,45 @@ const TIPO_VERIFICACION = 'verificacion';
  * Prefijo de los tipos de paso SINTETICO que deja la BARRERA DE IDENTIDAD del elemento en la traza:
  * 'identidad:permitida', 'identidad:bloqueada', 'identidad:habria_bloqueado' e
  * 'identidad:no_evaluable' (resumenDeIdentidad, barrera-identidad.ts, compartido por el camino de
- * recetas y el del motor libre). El unico de los cuatro que se registra con exito false es el bloqueo
- * EFECTIVO, y un bloqueo efectivo es justamente la accion que no salio al navegador.
+ * recetas y el del motor libre). NINGUNO de los cuatro acciona nada: la barrera LEE el DOM y emite un
+ * veredicto, y hasta el bloqueo EFECTIVO (el unico que se registra con exito false) es justamente la
+ * accion que no salio al navegador.
  */
 const PREFIJO_TIPO_IDENTIDAD = 'identidad:';
 
 /**
- * ¿Este paso FALLIDO representa una accion que NUNCA LLEGO AL NAVEGADOR?
+ * ¿Este paso lo escribio el SISTEMA para dejar constancia de un VEREDICTO, en vez del MOTOR para
+ * dejar constancia de algo que hizo? Un paso sintetico describe una accion que JAMAS llego al
+ * navegador: no aporta nada que repetir, no se puede reproducir y no puede impedir armar el
+ * procedimiento, exactamente igual que los screenshots y los pasos de exploracion que ya se descartan
+ * (TIPOS_SIN_EFECTO).
  *
- * POR QUE EXISTE (caso real de produccion, 31 jul 2026 01:02 UTC): la guardia rechazo un click sobre
- * el control "Pantalla completa" del compose (controles de ventana fuera del alcance de la tarea) y
- * la corrida siguio y envio el correo. Ese rechazo queda como PASO de la trayectoria con exito false
- * -- que es lo que hace visible en /actividad por que el agente no consiguio lo que pidio -- y la
- * conversion lo leia como "la trayectoria contiene un paso fallido" y tumbaba la plantilla entera.
+ * DOS CASOS REALES DE PRODUCCION, LA MISMA CATEGORIA:
+ *  - 31 jul 2026 01:02 UTC: la guardia rechazo un click sobre "Pantalla completa" y su paso, con
+ *    exito false, se leia como un paso FALLIDO del procedimiento ('paso_fallido').
+ *  - 31 jul 2026 03:27 UTC: los veredictos de la barrera de identidad llegan con exito TRUE y sin
+ *    estrategias, y la conversion los trataba como un gesto sin localizacion. Segun la forma con la
+ *    que cada camino los registra, eso los convertia en un click sin localizacion
+ *    ('click_sin_localizacion_sin_cobertura', que es la forma del ejecutor de recetas: metodo
+ *    'click') o en un metodo no representable que ademas podia reclamar cobertura de un dato.
+ * La primera vez se cerro por LISTA DE TIPOS y la lista se quedo corta a la segunda.
  *
- * EL CRITERIO: un paso SINTETICO fallido no es un paso fallido del PROCEDIMIENTO. Lo escribe el
- * sistema, no el motor, y describe una accion que el navegador jamas recibio: no aporta nada que
- * repetir, no se puede reproducir y no puede impedir armar el procedimiento, exactamente igual que
- * los screenshots y los pasos de exploracion que ya se descartan (TIPOS_SIN_EFECTO).
+ * EL CRITERIO ES ESTRUCTURAL: la marca `sintetico` que el sello de la traza pone sobre TODO lo que
+ * entra por el canal de veredictos del sistema (intercalarVerificaciones, tarea-web.ts), sea de la
+ * verificacion determinista, de cualquier rechazo de la guardia, de la barrera de identidad o de un
+ * veredicto que todavia no existe. No hay tipo que reconocer y no hay lista que actualizar.
  *
- * SON DOS FAMILIAS, y son TODAS las que el sistema escribe en la traza del motor libre:
- *  - 'verificacion': la verificacion determinista que DETUVO la accion o la encontro INCOMPLETA
- *    (construirPasoDeVerificacion) y CUALQUIER rechazo de la guardia (construirPasoDeBloqueo): el
- *    control de ventana fuera de alcance, la cancelacion desde la consola, el cupo de accion
- *    irreversible ya consumido, el reintento agotado, el efecto probable y la politica no disponible.
- *  - 'identidad:*': el bloqueo EFECTIVO de la barrera de identidad.
- * Un paso de la traza del MOTOR (act, click, goto, fillForm) con exito false queda fuera a proposito:
- * esa accion SI salio al navegador y fallo, y una plantilla que la omitiera haria otra cosa.
+ * LA COLA POR TIPO es solo para los pasos que PERDIERON la marca: los que se reconstruyen desde
+ * pasos_trayectoria (V030 no tiene columna para ella, ver `sintetico` en trayectoria.ts) y que
+ * promueve el job de guardar-como-tarea-aprendida. Cubre las dos familias que la base puede devolver
+ * hoy: 'verificacion' (verificacion determinista y rechazos de la guardia) e 'identidad:*' (los
+ * cuatro veredictos de la barrera, en las formas del motor libre y del ejecutor de recetas).
+ *
+ * Un paso de la traza del MOTOR (act, click, goto, fillForm) NO entra aqui a proposito, ni cuando
+ * falla: esa accion SI salio al navegador, y un procedimiento que la omitiera haria otra cosa.
  */
-function esAccionQueNuncaLlegoAlNavegador(paso: PasoCensurado): boolean {
-  if (paso.exito !== false) return false;
+function esPasoSintetico(paso: PasoCensurado): boolean {
+  if (paso.sintetico === true) return true;
   const tipo = paso.accion.tipo;
   return tipo === TIPO_VERIFICACION || tipo.startsWith(PREFIJO_TIPO_IDENTIDAD);
 }
@@ -900,10 +909,19 @@ function convertirPaso(
   } as const;
 
   // El paso sintetico de la verificacion determinista se promueve como tal: la receta aprende DONDE
-  // hay que volver a comparar antes de ejecutar la accion irreversible (D7).
+  // hay que volver a comparar antes de ejecutar la accion irreversible (D7). Es el UNICO paso del
+  // sistema que el procedimiento aprende, porque es el unico que el procedimiento tiene que volver a
+  // hacer; el que DETUVO o encontro incompleta la accion ya quedo descartado antes de llegar aqui.
   if (tipo === TIPO_VERIFICACION) {
     return { promovido: { ...base, accion: 'verificar', estrategias: [] } };
   }
+
+  // CUALQUIER OTRO PASO SINTETICO se descarta sin abortar y sin reclamar nada. Lo escribio el sistema
+  // para dejar constancia de un veredicto y la accion que describe no ocurrio sobre la pagina, asi
+  // que no es un click sin localizacion ni un metodo no representable: no es un paso del
+  // procedimiento (ver esPasoSintetico). Sin esto, un veredicto sin estrategias caia en la
+  // clasificacion por FORMA de mas abajo y podia tumbar la conversion entera de una corrida exitosa.
+  if (esPasoSintetico(paso)) return { omitible: true };
 
   if (tipo === 'goto' || tipo === 'navigate') {
     const ruta = rutaDelPaso(paso.url, dominioDelPaso);
@@ -1151,8 +1169,10 @@ export type ResultadoDePromocion = PromocionAceptada | PromocionRechazada;
  *
  * Los pasos que el motor ejecuto para MIRAR (extract, ariaTree, screenshot, think, done) se omiten:
  * existian para informar al modelo, que en la ejecucion determinista no participa. Con el MISMO
- * criterio se omite el paso SINTETICO fallido, que describe una accion que nunca llego al navegador
- * (ver esAccionQueNuncaLlegoAlNavegador); el paso del MOTOR fallido sigue descartando la trayectoria.
+ * criterio se omite TODO paso SINTETICO, haya salido bien o mal, porque describe una accion que nunca
+ * llego al navegador (ver esPasoSintetico); la unica excepcion es la verificacion que SI comparo y
+ * dejo pasar, que se promueve como paso 'verificar'. El paso del MOTOR fallido sigue descartando la
+ * trayectoria.
  */
 export function promoverTrayectoria(entrada: {
   pasos: PasoCensurado[];
@@ -1211,8 +1231,8 @@ export function promoverTrayectoria(entrada: {
   for (const paso of descartarDesviosDeLaTrayectoria(preparados, valores)) {
     if (paso.exito === false) {
       // La accion que este paso describe nunca llego al navegador: se descarta sin abortar, como
-      // cualquier otro paso que no dejo huella en la pagina (ver esAccionQueNuncaLlegoAlNavegador).
-      if (esAccionQueNuncaLlegoAlNavegador(paso)) continue;
+      // cualquier otro paso que no dejo huella en la pagina (ver esPasoSintetico).
+      if (esPasoSintetico(paso)) continue;
       return rechazar('paso_fallido', 'la trayectoria contiene un paso fallido', paso.idx);
     }
     const conversion = convertirPaso(paso, entrada.dominio, valores, pasos.length);
