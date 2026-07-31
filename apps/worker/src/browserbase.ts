@@ -304,21 +304,53 @@ export function expresionPercepcionConEstrategias(objetivo: ObjetivoDeLectura): 
   });
 }
 
-/** Lo que devuelve localizar el boton de una accion por rol y aria-label (modo simulacro, FASE 3). */
+/** Lo que devuelve localizar el control de una accion por su rol y su nombre accesible. */
 export interface BotonLocalizado {
-  /** aria-label completo del boton VISIBLE que matcheo (en Gmail: "Enviar (Ctrl-Enter)"). */
+  /**
+   * NOMBRE ACCESIBLE completo del control VISIBLE que matcheo, resuelto por la cadena entera de
+   * `nombreDe` (en Gmail el aria-label "Enviar (Ctrl-Enter)"; en un sitio sin aria-label, el texto
+   * del propio boton). El campo conserva su nombre historico porque el puerto que lo declara lo
+   * comparte con el ejecutor de recetas.
+   */
   ariaLabel: string;
-  /** Rol efectivo del elemento (atributo role, o el tag cuando es un <button>). */
+  /** Rol accesible del elemento, el MISMO que leen la percepcion y el grabador (`rolDe`). */
   rol: string;
   /** Cuantos candidatos (visibles u ocultos) matchearon el prefijo en la pagina. */
   candidatos: number;
 }
 
 /**
- * Expresion de SOLO LECTURA que localiza el BOTON de una accion por su ROL y su ARIA-LABEL por
- * PREFIJO (el aria-label real del boton Enviar de Gmail es "Enviar (Ctrl-Enter)", asi que la
+ * ELEMENTOS QUE RECORRE el localizador. La lista es CERRADA y corta a proposito: cada tag de mas es
+ * un candidato de mas, y con mas de un candidato no hay certeza de cual control se acciona.
+ *
+ *  - `button` y `[role="button"]`: el boton nativo y el que un sitio arma con un div (Gmail).
+ *  - `input[type="submit"]` e `input[type="button"]`: el boton de formulario sin JavaScript, que es
+ *    la forma clasica de una accion final en un sitio de compra. `nombreDe` ya sabe leer su `value` y
+ *    `rolDe` ya los mapea a 'button', asi que producen la MISMA clase que los otros dos.
+ *
+ * QUE QUEDA FUERA, y por que: `a[href]` sin `role="button"` (un enlace es navegacion, no una accion,
+ * y meter todos los enlaces multiplicaria los candidatos: la carpeta "Enviados" de un correo entraria
+ * por prefijo), `[role="menuitem"]` y `[role="link"]` (idem), `input[type="image"]` (su nombre sale
+ * del `alt` y es raro como accion final) y `summary` (abre un detalle, no acciona nada). Un
+ * `a[role="button"]` SI entra: ya lo cubre `[role="button"]`.
+ */
+const CONTROLES_ACCIONABLES = 'button, [role="button"], input[type="submit"], input[type="button"]';
+
+/**
+ * Expresion de SOLO LECTURA que localiza el CONTROL de una accion por su ROL y su NOMBRE ACCESIBLE
+ * por PREFIJO (el nombre real del boton Enviar de Gmail es "Enviar (Ctrl-Enter)", asi que la
  * coincidencia exacta de las estrategias de receta no sirve aqui). Es la localizacion que el modo
- * simulacro de scripts/validar-percepcion.ts valida contra Gmail real SIN clickear nada.
+ * simulacro de scripts/validar-percepcion.ts valida contra Gmail real SIN clickear nada, y la que
+ * alimenta la barrera de identidad en los dos caminos.
+ *
+ * EL NOMBRE SALE DE `nombreDe` (AYUDANTES_DOM, localizacion.ts), o sea de la MISMA cadena que usan la
+ * percepcion y el grabador: aria-label, aria-labelledby, label asociado, placeholder / title / alt y
+ * texto del control. Hasta este cambio miraba SOLO el aria-label, asi que un boton cuyo nombre viene
+ * de su texto interno (`<button>Comprar ahora</button>`) no se encontraba nunca. Cero logica
+ * duplicada: si divergiera de la percepcion, el mismo control tendria dos clases de elemento.
+ *
+ * La comparacion pasa por `claveDeNombre`, el mismo normalizador que ya usa el resolutor dentro de la
+ * pagina: sin marcas invisibles de direccion, con los espacios colapsados y en minusculas.
  *
  * VISIBILIDAD compatible con el navegador real y con el test de DOM (jsdom no calcula layout): un
  * elemento con un ancestro display:none / hidden / aria-hidden esta oculto SIEMPRE; el criterio de
@@ -326,7 +358,8 @@ export interface BotonLocalizado {
  */
 export function expresionLocalizarBotonPorAriaLabel(prefijos: string[]): string {
   return String.raw`(() => {
-  const prefijos = ${JSON.stringify(prefijos)}.map((p) => String(p).toLowerCase());
+${AYUDANTES_DOM}
+  const prefijos = ${JSON.stringify(prefijos)}.map((p) => claveDeNombre(p));
   const ocultoPorAtributos = (el) => {
     for (let n = el; n && n.getAttribute; n = n.parentElement) {
       const estilo = (n.getAttribute('style') || '').replace(/\s+/g, '').toLowerCase();
@@ -345,17 +378,14 @@ export function expresionLocalizarBotonPorAriaLabel(prefijos: string[]): string 
   };
   let candidatos = 0;
   let elegido = null;
-  for (const el of document.querySelectorAll('button, [role="button"]')) {
-    const aria = (el.getAttribute('aria-label') || '').trim();
-    if (aria === '') continue;
-    const plano = aria.toLowerCase();
+  for (const el of document.querySelectorAll(${JSON.stringify(CONTROLES_ACCIONABLES)})) {
+    const nombre = nombreDe(el);
+    if (nombre === '') continue;
+    const plano = claveDeNombre(nombre);
     if (!prefijos.some((p) => p !== '' && plano.indexOf(p) === 0)) continue;
     candidatos += 1;
     if (elegido === null && visible(el)) {
-      elegido = {
-        ariaLabel: aria.slice(0, 120),
-        rol: (el.getAttribute('role') || String(el.tagName || '').toLowerCase()),
-      };
+      elegido = { ariaLabel: nombre.slice(0, 120), rol: rolDe(el) };
     }
   }
   if (elegido === null) return JSON.stringify({ localizado: null, candidatos: candidatos });

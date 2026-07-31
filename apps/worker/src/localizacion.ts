@@ -33,8 +33,15 @@ import { normalizarTexto } from './parametros-objetivo.js';
  */
 
 /**
- * Utilidades compartidas por las dos expresiones. Se inyectan como texto en cada evaluacion (el
- * mundo aislado se recrea en cada conexion CDP, asi que no hay estado que reusar entre llamadas).
+ * Utilidades compartidas por TODAS las expresiones que leen el DOM: las dos de este modulo, la de
+ * percepcion (browserbase.ts), el localizador de controles por nombre (browserbase.ts) y el guion del
+ * grabador (guion-grabador.ts). Se inyectan como texto en cada evaluacion (el mundo aislado se recrea
+ * en cada conexion CDP, asi que no hay estado que reusar entre llamadas).
+ *
+ * QUE UNA SOLA COPIA IMPORTA: la clase de elemento del atlas (claseDeElemento, atlas-sitios.ts) sale
+ * del rol y del nombre que devuelven estas funciones. Dos implementaciones del nombre accesible
+ * producirian dos clases distintas para el MISMO control, y lo que escribiera un camino no lo
+ * encontraria el otro.
  *
  * `rolDe` y `nombreDe` son una aproximacion DELIBERADA del calculo de nombre accesible del estandar:
  * cubren los casos que un formulario real usa (aria-label, aria-labelledby, label asociado,
@@ -61,6 +68,16 @@ function rolDe(el) {
 function textoDe(el) {
   const crudo = el.innerText !== undefined && el.innerText !== null ? el.innerText : el.textContent;
   return String(crudo == null ? '' : crudo).replace(/\\s+/g, ' ').trim();
+}
+// Marcas invisibles de direccion de texto (LRM, RLM, aislantes bidi, BOM) que sitios como Gmail
+// incrustan en el nombre accesible (el boton Enviar las lleva): se retiran antes de comparar. Es el
+// MISMO conjunto que retira normalizarTexto (parametros-objetivo.ts) fuera de la pagina.
+function claveDeNombre(texto) {
+  return String(texto == null ? '' : texto)
+    .replace(/[\\u200e\\u200f\\u061c\\u202a-\\u202e\\u2066-\\u2069\\ufeff]/g, '')
+    .replace(/\\s+/g, ' ')
+    .trim()
+    .toLowerCase();
 }
 function nombreDe(el) {
   if (!el.getAttribute) return '';
@@ -192,15 +209,6 @@ ${AYUDANTES_DOM}
     try { encontrados = document.querySelectorAll(seleccion); } catch (e) { return null; }
     const vivos = Array.prototype.filter.call(encontrados, visible);
     return vivos.length === 1 ? vivos[0] : null;
-  }
-  // Marcas invisibles de direccion de texto (LRM, RLM, aislantes bidi, BOM) que sitios como Gmail
-  // incrustan en el nombre accesible (el boton Enviar las lleva): se retiran antes de comparar.
-  function claveDeNombre(texto) {
-    return String(texto == null ? '' : texto)
-      .replace(/[\\u200e\\u200f\\u061c\\u202a-\\u202e\\u2066-\\u2069\\ufeff]/g, '')
-      .replace(/\\s+/g, ' ')
-      .trim()
-      .toLowerCase();
   }
   // Nombre accesible matcheado POR PREFIJO: el nombre buscado puede ser un recorte del real
   // ("Enviar" encuentra "Enviar (Ctrl+Intro)", "destinatario" encuentra "Destinatarios en Para").
