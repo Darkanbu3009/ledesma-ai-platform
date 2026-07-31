@@ -223,7 +223,48 @@ export function plantillaDeLaCorrida(entrada: {
 export interface IdentidadDePlantilla {
   dominiosClave: string;
   codigoDeIntencion: CodigoDeIntencion;
+  /** El conjunto EXACTO que el objetivo del consumidor declara. Es lo que se busco, para el log. */
   marcadoresClave: string;
+  /** Ese conjunto Y TODOS SUS SUBCONJUNTOS: las claves que una plantilla puede tener para aplicar. */
+  marcadoresPosibles: string[];
+}
+
+/**
+ * TOPE REAL de claves que un consumidor puede generar: los subconjuntos de un conjunto de SEIS, que
+ * son los seis marcadores del contrato de recetas (`MARCADORES`, packages/shared). 2^6 = 64, y es una
+ * cota del VOCABULARIO CERRADO, no un limite configurable: no hay objetivo, por raro que sea, que
+ * produzca una lista mas larga.
+ */
+export const MAX_CLAVES_DE_MARCADORES = 64;
+
+/**
+ * LAS CLAVES DE MARCADORES que este consumidor puede consumir: la de su propio conjunto y la de
+ * todos sus subconjuntos, cada una en el formato de la columna `marcadores_clave`.
+ *
+ * POR QUE EXISTE, y es la mitad del FIX de la CONTENCION: la relacion verdadera entre la plantilla y
+ * el consumidor no es la igualdad sino la CONTENCION. La plantilla aplica si los marcadores QUE ELLA
+ * EXIGE son un subconjunto de los que el consumidor declara; un dato de mas del consumidor (un
+ * objetivo que ademas menciona un monto) no puede impedir que se encuentre. Comparando por igualdad,
+ * `asunto+cuerpo+destinatario+monto` no casaba con `asunto+cuerpo+destinatario` aunque la plantilla
+ * solo necesitara un subconjunto de lo que el consumidor traia.
+ *
+ * POR QUE ASI Y NO CON UN OPERADOR DE CONJUNTOS EN LA BASE: generando aqui los subconjuntos, la
+ * consulta sigue siendo IGUALDAD sobre las mismas tres columnas del indice unico de V041 (un `in` es
+ * igualdad contra una lista), asi que no hace falta migracion, ni columna nueva, ni un segundo indice.
+ *
+ * LO QUE NO CAMBIA: una plantilla que exige un marcador que el consumidor NO tiene sigue sin aplicar.
+ * No esta entre estas claves, y si por algun camino llegara, `plantillaAplicable` la rechaza igual con
+ * `dato_sin_declarar`.
+ */
+export function clavesDeMarcadoresContenidos(marcadores: readonly MarcadorParametro[]): string[] {
+  // El filtro acota el largo de la lista a 2^6 pase lo que pase: el conjunto de entrada llega de un
+  // `Object.keys` con un cast, y de esta funcion depende que la consulta no crezca sin techo.
+  const unicos = [...new Set(marcadores)].filter(esMarcadorParametro).sort();
+  let subconjuntos: MarcadorParametro[][] = [[]];
+  for (const marcador of unicos) {
+    subconjuntos = [...subconjuntos, ...subconjuntos.map((previo) => [...previo, marcador])];
+  }
+  return subconjuntos.map((subconjunto) => marcadoresClave(subconjunto)).sort();
 }
 
 /**
@@ -232,10 +273,11 @@ export interface IdentidadDePlantilla {
  * su propio texto y los datos que su propio objetivo declara.
  *
  * ES UN WHERE DE TRES COLUMNAS Y NADA MAS, y esa es la decision de diseno completa: no hay modelo,
- * no hay ranking y no hay texto libre en ninguno de los tres componentes (ocho codigos cerrados, seis
- * marcadores cerrados y los hostnames que el propio usuario conecto). Por eso el consumo no toca el
- * prompt del elector ni su catalogo: una plantilla no compite con las tareas propias, se busca por
- * igualdad exacta despues de que las dos vias propias no encontraron nada.
+ * no hay texto libre en ninguno de los tres componentes (ocho codigos cerrados, seis marcadores
+ * cerrados y los hostnames que el propio usuario conecto) y el unico orden que existe es el desempate
+ * determinista de la consulta. Por eso el consumo no toca el prompt del elector ni su catalogo: una
+ * plantilla no compite con las tareas propias, se busca por igualdad -- contra el conjunto declarado y
+ * contra sus subconjuntos -- despues de que las dos vias propias no encontraron nada.
  *
  * Devuelve null -- y no hay busqueda -- cuando la tarea no pide ninguna accion irreversible (sin
  * codigo de intencion no hay plantilla que buscar: ver la cabecera) o cuando no hay dominios.
@@ -254,6 +296,7 @@ export function identidadDeConsumo(entrada: {
     dominiosClave: clave,
     codigoDeIntencion: codigo,
     marcadoresClave: marcadoresClave(entrada.marcadores),
+    marcadoresPosibles: clavesDeMarcadoresContenidos(entrada.marcadores),
   };
 }
 

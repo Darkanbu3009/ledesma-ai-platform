@@ -2,9 +2,12 @@ import { describe, it, expect } from 'vitest';
 import type { CodigoDeIntencion, EstrategiaLocalizacion, PasoDeReceta } from '@ledesma-platform/shared';
 import { claveDelAtlas, claseDeElemento, hashDeOrigen } from '../src/atlas-sitios.js';
 import {
+  MAX_CLAVES_DE_MARCADORES,
   clavePlantillas,
+  clavesDeMarcadoresContenidos,
   codigoDeIntencion,
   hashDeOrigenDePlantilla,
+  identidadDeConsumo,
   plantillaDeLaCorrida,
 } from '../src/plantillas-compartidas.js';
 import { VERBOS_ACCION_BLOQUEADA } from '../src/prompt-tarea-web.js';
@@ -284,5 +287,67 @@ describe('plantillaDeLaCorrida', () => {
       clasesCorroboradas: clases,
     });
     expect(veredicto).toEqual({ publicable: false, motivo: 'sin_identidad_estructural', idx: -1 });
+  });
+});
+
+describe('clavesDeMarcadoresContenidos (la CONTENCION del consumo)', () => {
+  it('devuelve el conjunto declarado Y todos sus subconjuntos, sin repetir y ordenados', () => {
+    expect(clavesDeMarcadoresContenidos(['cuerpo', 'destinatario'])).toEqual([
+      '',
+      'cuerpo',
+      'cuerpo+destinatario',
+      'destinatario',
+    ]);
+  });
+
+  it('un objetivo sin datos declara solo la clave vacia (nunca una lista vacia)', () => {
+    expect(clavesDeMarcadoresContenidos([])).toEqual(['']);
+  });
+
+  it('el conjunto declarado esta SIEMPRE dentro: declarar lo exacto sigue encontrando la plantilla', () => {
+    const claves = clavesDeMarcadoresContenidos(['asunto', 'cuerpo', 'destinatario']);
+    expect(claves).toContain('asunto+cuerpo+destinatario');
+  });
+
+  it('un dato de mas NO esconde a la plantilla que pide menos', () => {
+    // El caso que rompia la igualdad exacta: el objetivo menciona ademas un monto.
+    const claves = clavesDeMarcadoresContenidos(['asunto', 'cuerpo', 'destinatario', 'monto']);
+    expect(claves).toContain('asunto+cuerpo+destinatario');
+    expect(claves).toHaveLength(16);
+  });
+
+  it('el TOPE real es 2^6, y no depende de lo que el llamador mande', () => {
+    const todos = clavesDeMarcadoresContenidos([
+      'asunto',
+      'cantidad',
+      'cuerpo',
+      'destinatario',
+      'monto',
+      'producto',
+    ]);
+    expect(todos).toHaveLength(MAX_CLAVES_DE_MARCADORES);
+    expect(MAX_CLAVES_DE_MARCADORES).toBe(64);
+    // Un nombre que no es uno de los seis no puede hacer crecer la lista: se descarta.
+    const conBasura = clavesDeMarcadoresContenidos([
+      'destinatario',
+      'contrasena',
+      'tarjeta',
+    ] as never);
+    expect(conBasura).toEqual(['', 'destinatario']);
+  });
+
+  it('la identidad del consumo lleva la clave exacta Y las claves contenidas', () => {
+    const identidad = identidadDeConsumo({
+      dominios: [DOMINIO],
+      verboBloqueado: 'enviar',
+      marcadores: ['destinatario', 'cuerpo'],
+    });
+    expect(identidad).toEqual({
+      dominiosClave: DOMINIO,
+      codigoDeIntencion: 'enviar',
+      // La clave exacta se conserva para el diagnostico: es lo que el objetivo declaro.
+      marcadoresClave: 'cuerpo+destinatario',
+      marcadoresPosibles: ['', 'cuerpo', 'cuerpo+destinatario', 'destinatario'],
+    });
   });
 });

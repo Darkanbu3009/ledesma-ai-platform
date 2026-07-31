@@ -177,9 +177,25 @@ export class PlantillasCompartidasRepository {
   /**
    * LA LECTURA DEL CONSUMO: la plantilla de esta IDENTIDAD que se le puede servir a un consumidor.
    *
-   * ES UN WHERE DE TRES COLUMNAS mas dos filtros, y no hay un ranking, un LIKE ni un orden por
-   * popularidad: la identidad es UNICA (el indice unico de V041 es exactamente esta clave), asi que la
-   * consulta devuelve una fila o ninguna. Cero texto libre entra a esta query.
+   * ES UN WHERE DE TRES COLUMNAS mas dos filtros, y no hay un LIKE ni un orden por popularidad. Cero
+   * texto libre entra a esta query.
+   *
+   * LA CONTENCION, y es la unica diferencia con una igualdad de tres columnas: `marcadores_clave` se
+   * compara contra el conjunto que el consumidor declara Y CONTRA TODOS SUS SUBCONJUNTOS, que el
+   * worker genera antes de llamar (`clavesDeMarcadoresContenidos`, apps/worker). La plantilla aplica
+   * si lo que ELLA exige esta contenido en lo que el consumidor trae; con la igualdad exacta, un dato
+   * de mas del consumidor la volvia inencontrable. Sigue siendo IGUALDAD contra una lista, o sea las
+   * mismas tres columnas del indice unico de V041 y en el mismo orden: sin migracion, sin columna
+   * nueva y sin un segundo indice. La lista tiene 64 cadenas como maximo (2^6, los subconjuntos de los
+   * seis marcadores del contrato).
+   *
+   * EL DESEMPATE, porque con contencion pueden calificar varias filas y elegir al azar significaria
+   * que la misma tarea corre un procedimiento distinto en cada corrida:
+   *  1. LA MAS ESPECIFICA: la que exige mas marcadores. Es la que mas cerca esta de lo que el usuario
+   *     pidio, y la que deja menos campos sin llenar.
+   *  2. LA MAS CORROBORADA: mas origenes distintos y despues mas ejecuciones exitosas.
+   *  3. EL `id`, que es UNICO. No es un criterio de calidad: es lo que convierte un orden parcial en
+   *     TOTAL, para que dos corridas con los mismos datos elijan siempre la misma fila.
    *
    * LOS DOS FILTROS:
    *  - `estado`: 'retirada' no se sirve nunca.
@@ -200,22 +216,34 @@ export class PlantillasCompartidasRepository {
   async buscarServible(clave: {
     dominiosClave: string;
     codigoDeIntencion: string;
-    marcadoresClave: string;
+    /** El conjunto de marcadores del consumidor y todos sus subconjuntos, ya en formato de clave. */
+    marcadoresPosibles: readonly string[];
     /** HMAC del origen del CONSUMIDOR, con la clave de plantillas del worker. */
     origenHash: string;
   }): Promise<PlantillaServible | null> {
+    // Un consumidor siempre trae al menos la clave vacia (el subconjunto vacio). Sin ninguna no hay
+    // nada que preguntar, y un `in ()` no seria una consulta valida.
+    if (clave.marcadoresPosibles.length === 0) return null;
     const filas = await this.sql<FilaServible[]>`
       select id, estado, pasos, jsonb_array_length(origenes_hash) as origenes
       from plantillas_compartidas
       where dominios_clave = ${clave.dominiosClave}
         and codigo_de_intencion = ${clave.codigoDeIntencion}
-        and marcadores_clave = ${clave.marcadoresClave}
+        and marcadores_clave in ${this.sql([...clave.marcadoresPosibles])}
         and estado in ${this.sql([...ESTADOS_SERVIBLES])}
         and exists (
           select 1
           from jsonb_array_elements_text(origenes_hash) as origen(hash)
           where origen.hash <> ${clave.origenHash}
         )
+      order by
+        case
+          when marcadores_clave = '' then 0
+          else length(marcadores_clave) - length(replace(marcadores_clave, '+', '')) + 1
+        end desc,
+        origenes desc,
+        ejecuciones_exitosas desc,
+        id asc
       limit 1
     `;
     const fila = filas[0];

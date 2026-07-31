@@ -582,11 +582,17 @@ export interface RepositorioPlantillasParaWorker {
     pasos: unknown;
     origenHash: string;
   }): Promise<{ publicada: boolean; motivo?: string }>;
-  /** La plantilla de esta IDENTIDAD que se le puede servir a este origen. null = no hay ninguna. */
+  /**
+   * La plantilla de esta IDENTIDAD que se le puede servir a este origen. null = no hay ninguna.
+   *
+   * `marcadoresPosibles` son el conjunto de marcadores que el objetivo del consumidor declara Y TODOS
+   * SUS SUBCONJUNTOS: la plantilla aplica si lo que ELLA exige esta CONTENIDO en lo que el consumidor
+   * trae, no solo si los dos conjuntos son iguales (ver `clavesDeMarcadoresContenidos`).
+   */
   buscarServible?(clave: {
     dominiosClave: string;
     codigoDeIntencion: string;
-    marcadoresClave: string;
+    marcadoresPosibles: readonly string[];
     origenHash: string;
   }): Promise<{ id: string; estado: string; pasos: unknown; origenes: number } | null>;
   /** Contadores agregados de como le fue. Best-effort: su fallo no cambia el desenlace del job. */
@@ -2704,7 +2710,11 @@ async function buscarPlantillaAjena(
   let fila: { id: string; estado: string; pasos: unknown; origenes: number } | null;
   try {
     fila = await plantillas.repo.buscarServible({
-      ...identidad,
+      dominiosClave: identidad.dominiosClave,
+      codigoDeIntencion: identidad.codigoDeIntencion,
+      // CONTENCION, no igualdad: la plantilla aplica si sus marcadores estan CONTENIDOS en los que
+      // este objetivo declara. `marcadoresClave` (el conjunto exacto) no viaja a la consulta.
+      marcadoresPosibles: identidad.marcadoresPosibles,
       origenHash: hashDeOrigenDePlantilla(job.ownerId, plantillas.clave),
     });
   } catch (error) {

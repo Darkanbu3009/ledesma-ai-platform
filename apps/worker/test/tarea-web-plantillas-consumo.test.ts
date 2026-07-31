@@ -16,6 +16,11 @@ import type {
 import type { EscaladorDePaso, InstruccionDePaso, NavegadorDeterminista } from '../src/ejecutor-receta.js';
 import type { PeticionDeEleccion } from '../src/eleccion-tarea.js';
 import {
+  marcadoresClave,
+  marcadoresDePasosPublicables,
+  parsearPasosPublicables,
+} from '@ledesma-platform/shared';
+import {
   descripcionDeOfrecimiento,
   hashDeOrigenDePlantilla,
   parsearOfrecimiento,
@@ -324,29 +329,65 @@ function pasosDeLaPlantilla(): unknown[] {
 /** El origen de LA OTRA CUENTA: el que hace que la plantilla sea ajena y por tanto servible. */
 const ORIGEN_AJENO = 'origen-de-otra-cuenta';
 
+/** Una fila de `plantillas_compartidas` tal como la devolveria la base. */
+interface FilaDePlantilla {
+  id: string;
+  estado: string;
+  pasos: unknown;
+  origenes: number;
+  origenesHash?: string[];
+}
+
 /**
- * Fake del repositorio de plantillas. Emula la query real: devuelve la fila solo si la identidad
- * coincide, el estado es servible y QUEDA AL MENOS UN ORIGEN DISTINTO del consumidor.
- *
- * Ese ultimo punto es el predicado exacto de `buscarServible` (FIX A): que el consumidor tambien
- * figure entre los origenes NO la excluye mientras haya otro. El fake anterior copiaba el predicado
- * viejo ("yo no estoy dentro"), y por eso la exclusion permanente de una fila con dos origenes
- * reales no se veia en CI.
+ * `marcadores_clave` DE LA FILA, derivado de sus propios pasos igual que en la publicacion: es lo que
+ * la plantilla EXIGE, y lo que la contencion compara contra lo que el consumidor declara.
  */
-function makePlantillas(
-  fila: { id: string; estado: string; pasos: unknown; origenes: number; origenesHash?: string[] } | null,
-): RepositorioPlantillasParaWorker & {
+function marcadoresDeLaFila(fila: FilaDePlantilla): string {
+  return marcadoresClave(marcadoresDePasosPublicables(parsearPasosPublicables(fila.pasos) ?? []));
+}
+
+/**
+ * Fake del repositorio de plantillas. Emula la query real de `buscarServible`, con sus tres reglas:
+ *
+ *  1. LA CONTENCION: la fila califica si SU `marcadores_clave` esta entre las claves que el consumidor
+ *     manda (su conjunto declarado y todos sus subconjuntos), no solo si son iguales.
+ *  2. EL ORIGEN: califica mientras QUEDE AL MENOS UN ORIGEN DISTINTO del consumidor. Que el consumidor
+ *     tambien figure entre los origenes NO la excluye. El fake anterior copiaba el predicado viejo
+ *     ("yo no estoy dentro"), y por eso la exclusion permanente de una fila con dos origenes reales no
+ *     se veia en CI.
+ *  3. EL DESEMPATE: gana la mas especifica (mas marcadores), despues la mas corroborada (mas origenes,
+ *     mas exitos) y al final el `id`, que es unico. Nunca al azar.
+ */
+function makePlantillas(filas: FilaDePlantilla[]): RepositorioPlantillasParaWorker & {
   buscarServible: ReturnType<typeof vi.fn>;
   registrarEjecucion: ReturnType<typeof vi.fn>;
 } {
   return {
     publicar: vi.fn(async () => ({ publicada: true })),
-    buscarServible: vi.fn(async (clave: { origenHash: string }) => {
-      if (fila === null) return null;
-      const origenes = fila.origenesHash ?? [];
-      if (!origenes.some((hash) => hash !== clave.origenHash)) return null;
-      return { id: fila.id, estado: fila.estado, pasos: fila.pasos, origenes: fila.origenes };
-    }),
+    buscarServible: vi.fn(
+      async (clave: { marcadoresPosibles: readonly string[]; origenHash: string }) => {
+        const candidatas = filas.filter((fila) => {
+          const origenes = fila.origenesHash ?? [ORIGEN_AJENO];
+          if (!origenes.some((hash) => hash !== clave.origenHash)) return false;
+          return clave.marcadoresPosibles.includes(marcadoresDeLaFila(fila));
+        });
+        const cuantos = (fila: FilaDePlantilla): number => {
+          const clave = marcadoresDeLaFila(fila);
+          return clave === '' ? 0 : clave.split('+').length;
+        };
+        const elegida = [...candidatas].sort(
+          (a, b) =>
+            cuantos(b) - cuantos(a) || b.origenes - a.origenes || a.id.localeCompare(b.id),
+        )[0];
+        if (elegida === undefined) return null;
+        return {
+          id: elegida.id,
+          estado: elegida.estado,
+          pasos: elegida.pasos,
+          origenes: elegida.origenes,
+        };
+      },
+    ),
     registrarEjecucion: vi.fn(async () => {}),
   };
 }
@@ -391,7 +432,7 @@ function makeDeps(overrides: Partial<TareaWebDeps> = {}): TareaWebDeps {
     determinista: makeDeterminista(),
     escalador: makeEscalador(),
     atlas: { repo: makeAtlas(CLASES_DEL_PROCEDIMIENTO), clave: 'clave-del-atlas' },
-    plantillas: { repo: makePlantillas(null), clave: CLAVE_PLANTILLAS },
+    plantillas: { repo: makePlantillas([]), clave: CLAVE_PLANTILLAS },
     // Sin `observadorPasos`: el DEFAULT DE PRODUCCION (apagado). Ninguno de estos tests lo enciende.
     vaultSecret: 'a'.repeat(64),
     model: 'anthropic/claude-opus-4-5',
@@ -419,12 +460,22 @@ function conPlantilla(
   extra: Partial<TareaWebDeps> = {},
   origenesHash: string[] = [ORIGEN_AJENO],
 ): TareaWebDeps {
+  return conPlantillas(
+    [{ id: 'plantilla-1', estado: 'candidata', pasos, origenes: 2, origenesHash }],
+    clases,
+    extra,
+  );
+}
+
+/** Igual, con VARIAS filas en la tabla: es lo que hace falta para medir el desempate. */
+function conPlantillas(
+  filas: FilaDePlantilla[],
+  clases: string[] = CLASES_DEL_PROCEDIMIENTO,
+  extra: Partial<TareaWebDeps> = {},
+): TareaWebDeps {
   return makeDeps({
     atlas: { repo: makeAtlas(clases), clave: 'clave-del-atlas' },
-    plantillas: {
-      repo: makePlantillas({ id: 'plantilla-1', estado: 'candidata', pasos, origenes: 2, origenesHash }),
-      clave: CLAVE_PLANTILLAS,
-    },
+    plantillas: { repo: makePlantillas(filas), clave: CLAVE_PLANTILLAS },
     ...extra,
   });
 }
@@ -668,6 +719,99 @@ describe('aplicabilidad: falla cerrada y la tarea sigue por el motor libre', () 
     expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
   });
 
+});
+
+describe('contencion: la plantilla aplica si sus marcadores caben en los que el objetivo declara', () => {
+  /** Un procedimiento que solo exige destinatario y cuerpo (sin asunto). */
+  function pasosSinAsunto(): unknown[] {
+    return [
+      pasoEscribir(0, CLASE_DESTINATARIO, 'Destinatarios en Para', {
+        tipo: 'parametro',
+        parametro: 'destinatario',
+      }),
+      pasoEscribir(1, CLASE_CUERPO, 'Cuerpo del mensaje', { tipo: 'parametro', parametro: 'cuerpo' }),
+      pasoVerificar(2),
+      pasoClick(3, CLASE_ENVIAR, 'Enviar'),
+    ];
+  }
+
+  it('el objetivo declara EXACTAMENTE lo que la plantilla pide: se sirve', async () => {
+    const deps = conPlantilla(pasosDeLaPlantilla());
+
+    // El objetivo de siempre declara destinatario, asunto y cuerpo, que es lo que la plantilla exige.
+    const resultado = await procesarTareaWeb(deps, makeJob());
+
+    expect(resultado).toBe('pausada');
+    expect(deps.aprobaciones.crear).toHaveBeenCalled();
+  });
+
+  it('el objetivo declara DE MAS: se sirve igual (un dato de mas no puede esconderla)', async () => {
+    const deps = conPlantilla(pasosDeLaPlantilla());
+    // El mismo pedido, mas un monto. Con la igualdad exacta la clave pasaba a ser
+    // asunto+cuerpo+destinatario+monto y la plantilla no se encontraba nunca.
+    const conMonto = makeJob(`${OBJETIVO} por 2,400 MXN`);
+
+    const resultado = await procesarTareaWeb(deps, conMonto);
+
+    expect(resultado).toBe('pausada');
+    const plantillas = deps.plantillas as unknown as {
+      repo: { buscarServible: ReturnType<typeof vi.fn> };
+    };
+    const clave = plantillas.repo.buscarServible.mock.calls[0]?.[0] as {
+      marcadoresPosibles: string[];
+    };
+    // Los 16 subconjuntos de los cuatro datos declarados, con el de la plantilla entre ellos.
+    expect(clave.marcadoresPosibles).toHaveLength(16);
+    expect(clave.marcadoresPosibles).toContain('asunto+cuerpo+destinatario');
+  });
+
+  it('el objetivo declara DE MENOS: NO se sirve (la plantilla pide un dato que no hay)', async () => {
+    const deps = conPlantilla(pasosDeLaPlantilla());
+    // Sin asunto ni cuerpo: la plantilla exige los tres y este objetivo trae uno.
+    const soloDestinatario = makeJob('envia un correo a martin@ejemplo.com');
+
+    await correr(deps, soloDestinatario);
+
+    expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
+    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+  });
+
+  it('con dos candidatas gana LA MAS ESPECIFICA, y siempre la misma', async () => {
+    // Las dos caben en lo que el objetivo declara (destinatario, asunto y cuerpo). La de tres
+    // marcadores es la que mas cerca esta de lo pedido y la que deja menos campos sin llenar.
+    const filas: FilaDePlantilla[] = [
+      { id: 'plantilla-generica', estado: 'candidata', pasos: pasosSinAsunto(), origenes: 9 },
+      { id: 'plantilla-especifica', estado: 'candidata', pasos: pasosDeLaPlantilla(), origenes: 2 },
+    ];
+    const deps = conPlantillas(filas);
+    const plantillas = deps.plantillas as unknown as {
+      repo: { registrarEjecucion: ReturnType<typeof vi.fn> };
+    };
+
+    const resultado = await procesarTareaWeb(
+      yaDecidido(deps, aprobacionDelOfrecimiento()),
+      makeJob(),
+    );
+
+    expect(resultado).toBe('completada');
+    // Gana la de TRES marcadores aunque la otra tenga MAS origenes: la especificidad va primero.
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-especifica', true);
+  });
+
+  it('el orden de las filas en la tabla no cambia cual gana', async () => {
+    const conservadas: FilaDePlantilla[] = [
+      { id: 'plantilla-especifica', estado: 'candidata', pasos: pasosDeLaPlantilla(), origenes: 2 },
+      { id: 'plantilla-generica', estado: 'candidata', pasos: pasosSinAsunto(), origenes: 9 },
+    ];
+    const deps = conPlantillas(conservadas);
+    const plantillas = deps.plantillas as unknown as {
+      repo: { registrarEjecucion: ReturnType<typeof vi.fn> };
+    };
+
+    await procesarTareaWeb(yaDecidido(deps, aprobacionDelOfrecimiento()), makeJob());
+
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-especifica', true);
+  });
 });
 
 describe('el origen propio: solo excluye la plantilla que NADIE MAS descubrio', () => {

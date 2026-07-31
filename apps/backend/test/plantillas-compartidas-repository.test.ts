@@ -305,7 +305,7 @@ describe('buscarServible: la lectura del consumo', () => {
     const servible = await repo.buscarServible({
       dominiosClave: DOMINIO,
       codigoDeIntencion: 'enviar',
-      marcadoresClave: 'destinatario',
+      marcadoresPosibles: ['', 'destinatario'],
       origenHash: 'hash-del-consumidor',
     });
 
@@ -313,7 +313,10 @@ describe('buscarServible: la lectura del consumo', () => {
     const [texto, valores] = sql.queries[0] as [string, unknown[]];
     expect(texto).toContain('dominios_clave = ');
     expect(texto).toContain('codigo_de_intencion = ');
-    expect(texto).toContain('marcadores_clave = ');
+    // CONTENCION: igualdad contra la LISTA de subconjuntos, o sea las mismas tres columnas del
+    // indice unico de V041 y en el mismo orden. No hay operador de conjuntos ni columna nueva.
+    expect(texto).toContain('marcadores_clave in ');
+    expect(valores).toContainEqual({ lista: ['', 'destinatario'] });
     expect(texto).toContain('estado in ');
     // LA EXCLUSION DEL PROPIO ORIGEN vive DENTRO de la query: el hash no sale de la base.
     expect(texto).toContain('from jsonb_array_elements_text(origenes_hash) as origen(hash)');
@@ -330,7 +333,7 @@ describe('buscarServible: la lectura del consumo', () => {
     await new PlantillasCompartidasRepository(sql).buscarServible({
       dominiosClave: DOMINIO,
       codigoDeIntencion: 'enviar',
-      marcadoresClave: 'destinatario',
+      marcadoresPosibles: ['', 'destinatario'],
       origenHash: 'hash-del-consumidor',
     });
     const [texto] = sql.queries[0] as [string, unknown[]];
@@ -346,10 +349,42 @@ describe('buscarServible: la lectura del consumo', () => {
     const servible = await repo.buscarServible({
       dominiosClave: DOMINIO,
       codigoDeIntencion: 'enviar',
-      marcadoresClave: '',
+      marcadoresPosibles: [''],
       origenHash: 'hash',
     });
     expect(servible).toBeNull();
+  });
+
+  it('sin ninguna clave de marcadores no se consulta nada (un `in ()` no es una query)', async () => {
+    const sql = makeSql([[]]);
+    const servible = await new PlantillasCompartidasRepository(sql).buscarServible({
+      dominiosClave: DOMINIO,
+      codigoDeIntencion: 'enviar',
+      marcadoresPosibles: [],
+      origenHash: 'hash',
+    });
+    expect(servible).toBeNull();
+    expect(sql.queries).toHaveLength(0);
+  });
+
+  it('EL DESEMPATE es determinista: la mas especifica, la mas corroborada y al final el id', async () => {
+    const sql = makeSql([[{ id: 'p-1', estado: 'candidata', pasos: pasos(), origenes: 2 }]]);
+    await new PlantillasCompartidasRepository(sql).buscarServible({
+      dominiosClave: DOMINIO,
+      codigoDeIntencion: 'enviar',
+      marcadoresPosibles: ['', 'asunto', 'asunto+destinatario', 'destinatario'],
+      origenHash: 'hash-del-consumidor',
+    });
+    const [texto] = sql.queries[0] as [string, unknown[]];
+    const orden = texto.slice(texto.indexOf('order by'));
+    // 1. LA MAS ESPECIFICA: cuantos marcadores exige la fila (la clave vacia son cero).
+    expect(orden).toContain("when marcadores_clave = '' then 0");
+    expect(orden).toContain("length(marcadores_clave) - length(replace(marcadores_clave, '+', '')) + 1");
+    // 2. LA MAS CORROBORADA. 3. El id, que es UNICO: es lo que hace TOTAL el orden, para que dos
+    //    corridas con los mismos datos elijan siempre la misma fila.
+    expect(orden.indexOf('origenes desc')).toBeLessThan(orden.indexOf('ejecuciones_exitosas desc'));
+    expect(orden.indexOf('ejecuciones_exitosas desc')).toBeLessThan(orden.indexOf('id asc'));
+    expect(orden).toContain('limit 1');
   });
 });
 
