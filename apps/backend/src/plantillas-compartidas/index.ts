@@ -11,5 +11,6 @@ export {
   MAX_CLASES_POR_DOMINIO,
   ORIGENES_PARA_PUBLICAR,
   type PlantillaParaPublicar,
+  type PlantillaServible,
   type ResultadoDePublicacion,
 } from './plantillas-compartidas-repository.js';

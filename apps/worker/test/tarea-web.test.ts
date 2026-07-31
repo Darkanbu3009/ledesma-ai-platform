@@ -448,6 +448,9 @@ describe('procesarTareaWeb', () => {
         idx: null,
         clases: 0,
       },
+      // Y EL VEREDICTO DEL CONSUMO, tambien siempre. Estos deps no cablean el puerto de lectura de
+      // plantillas, asi que el cuarto peldano no llega ni a calcular su identidad.
+      plantillaAjena: { consumida: false, motivo: 'no_cableado', idx: null },
     });
     expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
   });

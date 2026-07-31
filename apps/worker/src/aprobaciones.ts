@@ -3,6 +3,7 @@
 import type { AccionTipo, AprobacionWeb } from '@ledesma-platform/backend/aprobaciones';
 import { MARCADOR_REQUIERE_APROBACION, construirSystemPromptTareaWeb } from './prompt-tarea-web.js';
 import { enviarViaResend } from './alertas.js';
+import { parsearOfrecimiento, textoDelOfrecimientoEs } from './plantillas-compartidas.js';
 import type { Logger } from './logger.js';
 
 /**
@@ -153,6 +154,20 @@ function urlActividad(consoleBaseUrl: string): string {
   return `${consoleBaseUrl.replace(/\/+$/, '')}/actividad`;
 }
 
+/**
+ * LO QUE EL CORREO MUESTRA de una aprobacion. Casi siempre es la propia `descripcion` (la linea que el
+ * agente redacto sobre la accion pendiente, 7.1e); cuando el checkpoint es el MOTIVO NUEVO del consumo
+ * de plantillas compartidas (V041), la descripcion persistida es un CODIGO CERRADO y la frase la
+ * redacta la plataforma desde el, en espanol, que es el unico idioma que el worker conoce.
+ *
+ * Sirve para los DOS correos (pendiente y expirada) porque el barrido de vencidas solo tiene la fila.
+ * Una descripcion que no sea un ofrecimiento pasa intacta: ni un motivo existente cambia.
+ */
+export function textoDeAprobacion(descripcion: string): string {
+  const ofrecimiento = parsearOfrecimiento(descripcion);
+  return ofrecimiento === null ? descripcion : textoDelOfrecimientoEs(ofrecimiento);
+}
+
 /** Formatea una fecha ISO a `YYYY-MM-DD HH:MM UTC` (estable, sin locale; mismo criterio que alertas.ts). */
 function formatearFecha(iso: string): string {
   const d = new Date(iso);
@@ -176,11 +191,12 @@ export function construirCorreoAprobacionPendiente(params: {
   consoleBaseUrl?: string;
 }): CorreoAprobacion {
   const enlace = params.consoleBaseUrl ? urlActividad(params.consoleBaseUrl) : null;
+  const descripcion = textoDeAprobacion(params.descripcion);
   const subject = 'Tu agente necesita tu aprobacion para continuar';
   const text = [
     `Tu tarea web en ${params.dominio} llego a una accion que requiere tu aprobacion:`,
     '',
-    params.descripcion,
+    descripcion,
     '',
     'La tarea esta en pausa con la pagina tal como quedo. Si no decides antes de que expire la',
     `aprobacion (${formatearFecha(params.expiraEnIso)}), la tarea se cancela sin ejecutar la accion.`,
@@ -188,7 +204,7 @@ export function construirCorreoAprobacionPendiente(params: {
     ...(enlace ? [`Aprobar o rechazar: ${enlace}`, ''] : []),
     'Este correo es automatico. No incluye el contenido de tus paginas.',
   ].join('\n');
-  const descripcionHtml = escapeHtml(params.descripcion);
+  const descripcionHtml = escapeHtml(descripcion);
   const dominioHtml = escapeHtml(params.dominio);
   const enlaceHtml = enlace ? escapeHtml(enlace) : null;
   const html = [
@@ -212,18 +228,19 @@ export function construirCorreoAprobacionExpirada(params: {
   consoleBaseUrl?: string;
 }): CorreoAprobacion {
   const enlace = params.consoleBaseUrl ? urlActividad(params.consoleBaseUrl) : null;
+  const descripcion = textoDeAprobacion(params.descripcion);
   const subject = 'Una aprobacion expiro y la tarea se cancelo';
   const text = [
     'Una accion que requeria tu aprobacion expiro sin decision y la tarea se cancelo SIN ejecutarla:',
     '',
-    params.descripcion,
+    descripcion,
     '',
     'Puedes volver a pedirle la tarea a tu agente cuando quieras.',
     '',
     ...(enlace ? [`Ver la actividad: ${enlace}`, ''] : []),
     'Este correo es automatico.',
   ].join('\n');
-  const descripcionHtml = escapeHtml(params.descripcion);
+  const descripcionHtml = escapeHtml(descripcion);
   const enlaceHtml = enlace ? escapeHtml(enlace) : null;
   const html = [
     '<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1f2937;line-height:1.5;max-width:560px;">',

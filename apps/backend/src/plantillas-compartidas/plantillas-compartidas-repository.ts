@@ -14,9 +14,8 @@ import {
  * un origen descubrio y que la plataforma podra reusar. Recibe el cliente sql por inyeccion
  * (testeable), mismo patron que AprendizajeSitiosRepository y RecetasWebRepository.
  *
- * EN ESTE COMMIT ESTE REPOSITORIO SOLO ESCRIBE. No tiene ni un metodo que devuelva una plantilla: el
- * consumo es un cambio aparte. Lo unico que lee de la base es `aprendizaje_sitios`, y para nada mas
- * que aplicar la segunda puerta (ver abajo).
+ * TRES OPERACIONES: `publicar` (upsert anonimo), `buscarServible` (la lectura del CONSUMO, por la
+ * clave de tres columnas de la identidad) y `registrarEjecucion` (los contadores de como le fue).
  *
  * INVARIANTES A NIVEL DE QUERY, y son el mecanismo del anonimato, no una promesa:
  *  - Ninguna query de este repositorio nombra `owner_id`, ni un id de trayectoria, de receta o de job,
@@ -78,6 +77,34 @@ export type ResultadoDePublicacion =
   | { publicada: false; motivo: string };
 
 interface FilaDeConteo {
+  origenes: number | string | null;
+}
+
+/**
+ * ESTADOS que se pueden servir: 'retirada' no sale nunca de la base. NO decide si hace falta el
+ * checkpoint de aprobacion humana -- eso lo resuelve el worker, y hoy es incondicional para toda
+ * plantilla ajena, sea 'candidata' o 'corroborada'.
+ */
+const ESTADOS_SERVIBLES: readonly string[] = ['candidata', 'corroborada'];
+
+/**
+ * UNA plantilla tal como se le sirve a un consumidor. Deliberadamente MINIMA: el procedimiento, su
+ * estado y cuantos origenes distintos la avalan. No devuelve `origenes_hash` -- ni siquiera al worker,
+ * que es quien tiene la clave -- porque para decidir solo hace falta el CONTEO, y devolver la lista
+ * permitiria comparar hashes fuera de la unica query que tiene que hacerlo (la de exclusion de abajo).
+ */
+export interface PlantillaServible {
+  id: string;
+  estado: string;
+  /** Pasos CRUDOS del jsonb. El worker los parsea contra el contrato antes de mirarlos. */
+  pasos: unknown;
+  origenes: number;
+}
+
+interface FilaServible {
+  id: string;
+  estado: string;
+  pasos: unknown;
   origenes: number | string | null;
 }
 
@@ -145,6 +172,76 @@ export class PlantillasCompartidasRepository {
       pasos: veredicto.pasos,
       origenHash: plantilla.origenHash,
     });
+  }
+
+  /**
+   * LA LECTURA DEL CONSUMO: la plantilla de esta IDENTIDAD que se le puede servir a un consumidor.
+   *
+   * ES UN WHERE DE TRES COLUMNAS mas dos filtros, y no hay un ranking, un LIKE ni un orden por
+   * popularidad: la identidad es UNICA (el indice unico de V041 es exactamente esta clave), asi que la
+   * consulta devuelve una fila o ninguna. Cero texto libre entra a esta query.
+   *
+   * LOS DOS FILTROS:
+   *  - `estado`: 'retirada' no se sirve nunca.
+   *  - EL ORIGEN PROPIO: una plantilla entre cuyos `origenes_hash` esta el del consumidor NO se le
+   *    sirve como ajena. La produjo el mismo, asi que ya la tiene por sus propias recetas y ofrecersela
+   *    como descubrimiento de otra cuenta seria falso. El `@>` de jsonb decide la pertenencia dentro
+   *    del propio statement: el hash no sale de la base ni se compara en el worker.
+   *
+   * El hash es OPACO para este repositorio, igual que en `publicar`: no lo deriva, no lo guarda y no
+   * puede volver de el al usuario.
+   */
+  async buscarServible(clave: {
+    dominiosClave: string;
+    codigoDeIntencion: string;
+    marcadoresClave: string;
+    /** HMAC del origen del CONSUMIDOR, con la clave de plantillas del worker. */
+    origenHash: string;
+  }): Promise<PlantillaServible | null> {
+    const propio = this.sql.json([clave.origenHash] as unknown as Parameters<Sql['json']>[0]);
+    const filas = await this.sql<FilaServible[]>`
+      select id, estado, pasos, jsonb_array_length(origenes_hash) as origenes
+      from plantillas_compartidas
+      where dominios_clave = ${clave.dominiosClave}
+        and codigo_de_intencion = ${clave.codigoDeIntencion}
+        and marcadores_clave = ${clave.marcadoresClave}
+        and estado in ${this.sql([...ESTADOS_SERVIBLES])}
+        and not (origenes_hash @> ${propio})
+      limit 1
+    `;
+    const fila = filas[0];
+    if (fila === undefined) return null;
+    return {
+      id: fila.id,
+      estado: fila.estado,
+      pasos: fila.pasos,
+      origenes: Number(fila.origenes ?? 0),
+    };
+  }
+
+  /**
+   * COMO LE FUE a una plantilla en una ejecucion, en AGREGADO y sin decir a quien: los tres contadores
+   * que V041 dejo inicializados. `fallos_consecutivos` se pone en 0 con cada exito y sube con cada
+   * fallo, que es lo que distingue una plantilla que envejecio mal de una con mala suerte suelta.
+   *
+   * NO TOCA `estado`: la promocion a 'corroborada' y el retiro son decisiones aparte. Aqui solo se
+   * acumula la materia prima.
+   *
+   * El llamador lo trata como BEST-EFFORT: el desenlace del job ya esta decidido cuando esto corre.
+   */
+  async registrarEjecucion(id: string, exitosa: boolean): Promise<void> {
+    await this.sql`
+      update plantillas_compartidas set
+        ejecuciones_exitosas = ejecuciones_exitosas + ${exitosa ? 1 : 0},
+        ejecuciones_fallidas = ejecuciones_fallidas + ${exitosa ? 0 : 1},
+        -- Los fallos SEGUIDOS se reinician con cada exito. La comparacion es contra un entero (y no
+        -- un booleano ligado) con el mismo criterio que los dos contadores de arriba, que es el patron
+        -- que ya usa RecetasWebRepository.registrarEjecucion.
+        fallos_consecutivos = case when ${exitosa ? 1 : 0} = 1 then 0 else fallos_consecutivos + 1 end,
+        ultima_ejecucion_en = now(),
+        actualizada_en = now()
+      where id = ${id}
+    `;
   }
 
   /**
