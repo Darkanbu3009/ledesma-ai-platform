@@ -370,6 +370,44 @@ const TIPOS_LLENADO_DE_FORMULARIO = new Set(['fillForm', 'fillFormVision']);
  */
 const TIPO_VERIFICACION = 'verificacion';
 
+/**
+ * Prefijo de los tipos de paso SINTETICO que deja la BARRERA DE IDENTIDAD del elemento en la traza:
+ * 'identidad:permitida', 'identidad:bloqueada', 'identidad:habria_bloqueado' e
+ * 'identidad:no_evaluable' (resumenDeIdentidad, barrera-identidad.ts, compartido por el camino de
+ * recetas y el del motor libre). El unico de los cuatro que se registra con exito false es el bloqueo
+ * EFECTIVO, y un bloqueo efectivo es justamente la accion que no salio al navegador.
+ */
+const PREFIJO_TIPO_IDENTIDAD = 'identidad:';
+
+/**
+ * ¿Este paso FALLIDO representa una accion que NUNCA LLEGO AL NAVEGADOR?
+ *
+ * POR QUE EXISTE (caso real de produccion, 31 jul 2026 01:02 UTC): la guardia rechazo un click sobre
+ * el control "Pantalla completa" del compose (controles de ventana fuera del alcance de la tarea) y
+ * la corrida siguio y envio el correo. Ese rechazo queda como PASO de la trayectoria con exito false
+ * -- que es lo que hace visible en /actividad por que el agente no consiguio lo que pidio -- y la
+ * conversion lo leia como "la trayectoria contiene un paso fallido" y tumbaba la plantilla entera.
+ *
+ * EL CRITERIO: un paso SINTETICO fallido no es un paso fallido del PROCEDIMIENTO. Lo escribe el
+ * sistema, no el motor, y describe una accion que el navegador jamas recibio: no aporta nada que
+ * repetir, no se puede reproducir y no puede impedir armar el procedimiento, exactamente igual que
+ * los screenshots y los pasos de exploracion que ya se descartan (TIPOS_SIN_EFECTO).
+ *
+ * SON DOS FAMILIAS, y son TODAS las que el sistema escribe en la traza del motor libre:
+ *  - 'verificacion': la verificacion determinista que DETUVO la accion o la encontro INCOMPLETA
+ *    (construirPasoDeVerificacion) y CUALQUIER rechazo de la guardia (construirPasoDeBloqueo): el
+ *    control de ventana fuera de alcance, la cancelacion desde la consola, el cupo de accion
+ *    irreversible ya consumido, el reintento agotado, el efecto probable y la politica no disponible.
+ *  - 'identidad:*': el bloqueo EFECTIVO de la barrera de identidad.
+ * Un paso de la traza del MOTOR (act, click, goto, fillForm) con exito false queda fuera a proposito:
+ * esa accion SI salio al navegador y fallo, y una plantilla que la omitiera haria otra cosa.
+ */
+function esAccionQueNuncaLlegoAlNavegador(paso: PasoCensurado): boolean {
+  if (paso.exito !== false) return false;
+  const tipo = paso.accion.tipo;
+  return tipo === TIPO_VERIFICACION || tipo.startsWith(PREFIJO_TIPO_IDENTIDAD);
+}
+
 /** ¿El texto de este argumento es un valor que la censura ya marco como sensible? */
 function esCensurado(texto: string): boolean {
   return texto.includes(VALOR_CENSURADO);
@@ -1112,7 +1150,9 @@ export type ResultadoDePromocion = PromocionAceptada | PromocionRechazada;
  *    campo que despues se escribio bien no puede tumbar la corrida entera.
  *
  * Los pasos que el motor ejecuto para MIRAR (extract, ariaTree, screenshot, think, done) se omiten:
- * existian para informar al modelo, que en la ejecucion determinista no participa.
+ * existian para informar al modelo, que en la ejecucion determinista no participa. Con el MISMO
+ * criterio se omite el paso SINTETICO fallido, que describe una accion que nunca llego al navegador
+ * (ver esAccionQueNuncaLlegoAlNavegador); el paso del MOTOR fallido sigue descartando la trayectoria.
  */
 export function promoverTrayectoria(entrada: {
   pasos: PasoCensurado[];
@@ -1170,6 +1210,9 @@ export function promoverTrayectoria(entrada: {
   );
   for (const paso of descartarDesviosDeLaTrayectoria(preparados, valores)) {
     if (paso.exito === false) {
+      // La accion que este paso describe nunca llego al navegador: se descarta sin abortar, como
+      // cualquier otro paso que no dejo huella en la pagina (ver esAccionQueNuncaLlegoAlNavegador).
+      if (esAccionQueNuncaLlegoAlNavegador(paso)) continue;
       return rechazar('paso_fallido', 'la trayectoria contiene un paso fallido', paso.idx);
     }
     const conversion = convertirPaso(paso, entrada.dominio, valores, pasos.length);

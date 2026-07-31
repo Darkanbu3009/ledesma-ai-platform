@@ -327,6 +327,36 @@ describe('pasosCensuradosDesdeTrayectorias', () => {
     expect(pasos.every((p) => p.exito)).toBe(true);
     expect(pasos.some((p) => p.selector?.includes('div[999]'))).toBe(false);
   });
+
+  it('descarta TAMBIEN los pasos sinteticos fallidos, y ese criterio mas amplio no cambia', () => {
+    // LA DIFERENCIA CON LA DESTILACION AUTOMATICA (31 jul 2026): promoverTrayectoria descarta sin
+    // abortar solo los pasos sinteticos fallidos (la accion que nunca llego al navegador) y sigue
+    // abortando con un paso del MOTOR fallido. Aqui el pre-filtro descarta LOS DOS, a proposito: el
+    // usuario pidio guardar esta trayectoria y su desenlace global ya fue exitoso, asi que todo paso
+    // fallido fue compensado por un reintento que si esta en la traza. Este test fija que sigue asi.
+    const conRechazoDeGuardia = trayectoria({
+      pasos: [
+        paso(0, { tipo: 'act', instruccion: 'click en Redactar', metodo: 'click' }, {
+          selector: `xpath=/html[1]/body[1]//div[@aria-label='Redactar']`,
+        }),
+        paso(1, {
+          tipo: 'verificacion',
+          instruccion:
+            'guardia: la accion NO se ejecuto (control de ventana fuera del alcance de la tarea: pantalla completa): click button Pantalla completa',
+        }, { exito: false }),
+        paso(2, { tipo: 'act', instruccion: 'click en Enviar', metodo: 'click' }, {
+          selector: 'xpath=/html[1]/body[1]/div[999]/div[1]',
+          exito: false,
+        }),
+        paso(3, { tipo: 'act', instruccion: 'click en Enviar', metodo: 'click' }, {
+          selector: `xpath=/html[1]/body[1]//div[@aria-label='Enviar']`,
+        }),
+      ],
+    });
+    const pasos = pasosCensuradosDesdeTrayectorias([conRechazoDeGuardia]);
+    expect(pasos.map((p) => p.accion.tipo)).toEqual(['act', 'act']);
+    expect(pasos.map((p) => p.idx)).toEqual([0, 1]);
+  });
 });
 
 describe('convertirTrayectoriaPersistida (fixture Gmail de 19 pasos)', () => {

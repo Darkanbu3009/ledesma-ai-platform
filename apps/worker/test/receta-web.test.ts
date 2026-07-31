@@ -10,6 +10,12 @@ import {
   sustituirParametros,
   valoresDeParametros,
 } from '../src/receta-web.js';
+import {
+  construirPasoDeBloqueo,
+  construirPasoDeVerificacion,
+  type Veredicto,
+} from '../src/verificacion.js';
+import { resumenDeIdentidad } from '../src/barrera-identidad.js';
 import { extraerParametrosDeclarados } from '../src/parametros-objetivo.js';
 import type { PasoCensurado } from '../src/trayectoria.js';
 
@@ -1100,5 +1106,145 @@ describe('promoverTrayectoria con escrituras sin localizacion (politica condicio
     expect(resultado.promovida).toBe(true);
     if (!resultado.promovida) return;
     expect(resultado.pasos.map((p) => p.accion)).toEqual(['click', 'escribir']);
+  });
+});
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * PASOS SINTETICOS FALLIDOS: los que el SISTEMA escribe en la traza para dejar constancia de una
+ * accion que NUNCA LLEGO AL NAVEGADOR (caso real de produccion del 31 jul 2026 01:02 UTC, ver el
+ * bloque de la corrida real en plantillas-motor-libre.test.ts).
+ *
+ * Los pasos se construyen con las MISMAS funciones que corren en produccion -- no con literales
+ * copiados aqui -- para que un cambio de tipo o de `exito` en cualquiera de las dos familias rompa
+ * este test en vez de reabrir el rechazo en silencio.
+ */
+describe('promoverTrayectoria con pasos sinteticos fallidos (la accion no llego al navegador)', () => {
+  const OBJETIVO = 'envia el correo a martin@x.com';
+
+  /** El paso que la conversion tiene que conservar para que quede procedimiento que armar. */
+  const clickUtil = (idx: number): PasoCensurado =>
+    paso({ idx, accion: { tipo: 'act', instruccion: 'click the Send button', metodo: 'click', argumentos: [] } });
+
+  const enTrayectoria = (sintetico: PasoCensurado, idx: number): PasoCensurado => ({
+    ...sintetico,
+    idx,
+    url: `https://${DOMINIO}/inbox`,
+  });
+
+  it('el RECHAZO DE LA GUARDIA por control de ventana se descarta y la conversion sigue', () => {
+    // El paso EXACTO del idx 12 de la corrida del 31 jul: la guardia no dejo salir el click sobre
+    // "Pantalla completa" y la corrida siguio hasta enviar el correo.
+    const rechazo = construirPasoDeBloqueo(
+      'guardia: la accion NO se ejecuto (control de ventana fuera del alcance de la tarea: pantalla completa): click button Pantalla completa',
+    );
+    expect(rechazo.exito).toBe(false);
+    const resultado = promover([clickUtil(0), enTrayectoria(rechazo, 1), clickUtil(2)], OBJETIVO);
+    expect(resultado.promovida).toBe(true);
+    if (!resultado.promovida) return;
+    // Ni un paso 'verificar' de mas: el rechazo no aporta nada al procedimiento.
+    expect(resultado.pasos.map((p) => p.accion)).toEqual(['click', 'click']);
+  });
+
+  it('los OTROS rechazos de la guardia se descartan por la MISMA regla, no caso por caso', () => {
+    // Los cinco motivos restantes con los que la guardia registra un rechazo (tarea-web.ts): el cupo
+    // de accion irreversible ya consumido y el fallo al leer la politica llegan con el motivo CRUDO
+    // del contrato de detencion, que es lo que compone bloquearRegistrando. Ninguno ejecuto nada, y
+    // la conversion no puede ni debe distinguirlos del de arriba.
+    for (const motivo of [
+      'cancelada desde la consola',
+      'reintento irreversible ya agotado',
+      'efecto probable: el formulario verificado ya no esta en la pagina',
+      'otraAccion',
+      'politicaNoDisponible',
+    ]) {
+      const rechazo = construirPasoDeBloqueo(`guardia: la accion NO se ejecuto (${motivo}): click button Enviar`);
+      const resultado = promover([clickUtil(0), enTrayectoria(rechazo, 1)], OBJETIVO);
+      expect(resultado.promovida, motivo).toBe(true);
+    }
+  });
+
+  it('la VERIFICACION que detuvo o encontro incompleta la accion se descarta', () => {
+    // Las dos formas en que el paso de la verificacion determinista queda con exito false. La
+    // 'incompleto' es la que aparece en corridas que TERMINAN BIEN: el agente completa lo que
+    // faltaba y sigue.
+    const fallidos: Veredicto[] = [
+      { tipo: 'incompleto', comparaciones: [], faltantes: ['cuerpo'] },
+      { tipo: 'detener', detencion: { motivo: 'noCoincide' }, comparaciones: [] },
+    ];
+    for (const veredicto of fallidos) {
+      const sintetico = construirPasoDeVerificacion(veredicto);
+      expect(sintetico.exito, veredicto.tipo).toBe(false);
+      const resultado = promover([clickUtil(0), enTrayectoria(sintetico, 1)], OBJETIVO);
+      expect(resultado.promovida, veredicto.tipo).toBe(true);
+      if (!resultado.promovida) return;
+      expect(resultado.pasos.map((p) => p.accion), veredicto.tipo).toEqual(['click']);
+    }
+  });
+
+  it('la VERIFICACION que autorizo la accion sigue promoviendose como paso verificar', () => {
+    // El contrato de D7 no cambia: el unico paso de verificacion que la receta aprende es el que
+    // COMPARO y dejo pasar. Un exigeVerificacion sobre una traza cuya unica verificacion fallo NO se
+    // da por satisfecho, que es lo correcto: ahi no se verifico nada.
+    const autorizada = construirPasoDeVerificacion({ tipo: 'ejecutar', comparaciones: [] });
+    expect(autorizada.exito).toBe(true);
+    const conAutorizacion = promover([enTrayectoria(autorizada, 0), clickUtil(1)], OBJETIVO, 'exitosa', true);
+    expect(conAutorizacion.promovida).toBe(true);
+    if (!conAutorizacion.promovida) return;
+    expect(conAutorizacion.pasos.map((p) => p.accion)).toEqual(['verificar', 'click']);
+
+    const detenida = construirPasoDeVerificacion({
+      tipo: 'detener',
+      detencion: { motivo: 'noCoincide' },
+      comparaciones: [],
+    });
+    const soloFallida = promover([enTrayectoria(detenida, 0), clickUtil(1)], OBJETIVO, 'exitosa', true);
+    expect(soloFallida.promovida).toBe(false);
+    if (soloFallida.promovida) return;
+    expect(soloFallida.regla).toBe('sin_verificacion_de_accion_irreversible');
+  });
+
+  it('el BLOQUEO de la barrera de identidad se descarta, y sus otros tres veredictos no fallan', () => {
+    // La etiqueta y el `exito` los resuelve resumenDeIdentidad, que es la fuente compartida por el
+    // camino de recetas y el del motor libre: el unico veredicto con exito false es el bloqueo
+    // EFECTIVO (modo activa), y ese es el que la accion no llego a ejecutar.
+    const veredictos = [
+      { resultado: { tipo: 'bloquear', motivo: 'clase_no_corroborada' }, modo: 'activa' },
+      { resultado: { tipo: 'bloquear', motivo: 'clase_no_corroborada' }, modo: 'observacion' },
+      { resultado: { tipo: 'permitir' }, modo: 'activa' },
+      { resultado: { tipo: 'no_evaluable' }, modo: 'activa' },
+    ] as const;
+    for (const { resultado, modo } of veredictos) {
+      const { etiqueta, exito } = resumenDeIdentidad(resultado, modo);
+      expect(etiqueta.startsWith('identidad:'), etiqueta).toBe(true);
+      const sintetico = paso({
+        idx: 1,
+        accion: { tipo: etiqueta, instruccion: 'barrera de identidad sobre la accion del motor', metodo: null, argumentos: [] },
+        estrategias: [],
+        selector: null,
+        exito,
+      });
+      const promocion = promover([clickUtil(0), sintetico], OBJETIVO);
+      expect(promocion.promovida, etiqueta).toBe(true);
+      if (!promocion.promovida) return;
+      expect(promocion.pasos.map((p) => p.accion), etiqueta).toEqual(['click']);
+    }
+  });
+
+  it('una accion del MOTOR que SI llego al navegador y fallo sigue abortando la conversion', () => {
+    // El otro lado de la regla, y el que no se puede aflojar: un act, un click, una navegacion o un
+    // llenado que el navegador RECIBIO y que fallo es un fallo real del procedimiento, y una
+    // plantilla que lo omitiera haria una tarea distinta de la aprendida.
+    for (const tipo of ['act', 'click', 'goto', 'fillForm', 'fillFormVision']) {
+      const resultado = promover(
+        [clickUtil(0), paso({ idx: 1, accion: { tipo, instruccion: 'click button Enviar', metodo: 'click', argumentos: [] }, exito: false })],
+        OBJETIVO,
+      );
+      expect(resultado.promovida, tipo).toBe(false);
+      if (resultado.promovida) return;
+      expect(resultado.regla, tipo).toBe('paso_fallido');
+      expect(resultado.paso, tipo).toBe(1);
+    }
   });
 });
