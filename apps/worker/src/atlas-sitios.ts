@@ -325,10 +325,26 @@ export interface CorridaLibre {
  * escribio en cinco controles no escribio una sola entrada y NO habia una linea que dijera en cual
  * de los cuatro filtros se habia perdido el dato. El silencio absoluto costo una auditoria entera;
  * estos contadores son para que la proxima vez la respuesta este en el log de la corrida.
+ *
+ * LA SUMA CIERRA, y ese es el punto: `pasos` es exactamente
+ * `fallidos + sinEstrategias + conEstrategias`, y de los que entran, `clasificables` se reparte entre
+ * `conClase` y los tres motivos de descarte. Los dos primeros faltaban, asi que un paso descartado en
+ * la puerta desaparecia del resumen sin motivo, que es como el paso de la accion final -- el mas caro
+ * de todos y el unico irreversible -- podia ser invisible en un resumen que existe para eso.
  */
 export interface ResumenDeCorridaLibre {
   /** Pasos de la traza que se miraron (los sinteticos de verificacion incluidos). */
   pasos: number;
+  /** Descartados por venir marcados como fallidos: lo que no salio bien no es evidencia de nada. */
+  fallidos: number;
+  /**
+   * Descartados por llegar SIN una sola estrategia. Es el eslabon que faltaba contar y el que hacia
+   * invisible al paso mas importante de la corrida: el de la accion final, que la percepcion no
+   * alcanza a leer porque su elemento ya no existe, y el sintetico de la barrera de identidad, que se
+   * escribe con la lista vacia por contrato. Un numero alto aqui dice que la corrida vio controles
+   * que nadie logro describir.
+   */
+  sinEstrategias: number;
   /** Pasos EXITOSOS que llegaron con estrategias puestas (percepcion o complemento por selector). */
   conEstrategias: number;
   /** De esos, los que ademas son click o escribir, que es lo unico que el atlas clasifica. */
@@ -359,6 +375,8 @@ function recorrerCorridaLibre(params: CorridaLibre): {
   const entradas: EntradaDeAtlas[] = [];
   const resumen: ResumenDeCorridaLibre = {
     pasos: params.pasos.length,
+    fallidos: 0,
+    sinEstrategias: 0,
     conEstrategias: 0,
     clasificables: 0,
     conClase: 0,
@@ -367,7 +385,17 @@ function recorrerCorridaLibre(params: CorridaLibre): {
     sinNombreUtilizable: 0,
   };
   for (const paso of params.pasos) {
-    if (!paso.exito || paso.estrategias.length === 0) continue;
+    // Los DOS descartes de entrada se cuentan ANTES de saltar. Hasta hoy la guarda era una sola
+    // condicion con `continue` delante de los contadores, asi que un paso que no traia estrategias
+    // desaparecia del resumen sin dejar rastro: exactamente lo que este resumen existe para evitar.
+    if (!paso.exito) {
+      resumen.fallidos += 1;
+      continue;
+    }
+    if (paso.estrategias.length === 0) {
+      resumen.sinEstrategias += 1;
+      continue;
+    }
     resumen.conEstrategias += 1;
     const accion = accionDelPasoDeTraza(paso);
     if (accion === null) continue;

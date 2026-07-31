@@ -460,6 +460,8 @@ describe('resumen de por que una corrida no dejo nada', () => {
 
     expect(resumen).toEqual({
       pasos: 3,
+      fallidos: 0,
+      sinEstrategias: 0,
       conEstrategias: 3,
       clasificables: 3,
       conClase: 1,
@@ -494,6 +496,8 @@ describe('resumen de por que una corrida no dejo nada', () => {
 
     expect(resumen).toEqual({
       pasos: 2,
+      fallidos: 0,
+      sinEstrategias: 1,
       conEstrategias: 1,
       clasificables: 0,
       conClase: 0,
@@ -501,5 +505,33 @@ describe('resumen de por que una corrida no dejo nada', () => {
       porParanoiaDeValores: 0,
       sinNombreUtilizable: 0,
     });
+  });
+
+  /**
+   * EL HUECO QUE CERRO EL FIX C. El paso sintetico de la barrera de identidad se escribe con
+   * `estrategias: []` por contrato y el de la accion final llega sin nada que leer, asi que los dos
+   * caian por la puerta ANTES de tocar un contador y no aparecian en el resumen por ningun motivo.
+   */
+  it('los pasos descartados en la puerta se cuentan: la suma cierra contra el total', () => {
+    const fallido: PasoCensurado = { ...paso([LEIDO_REDACTAR]), exito: false };
+    const identidad: PasoCensurado = {
+      ...paso([]),
+      accion: {
+        tipo: 'identidad:permitida',
+        instruccion: 'barrera de identidad sobre la accion del motor',
+        metodo: null,
+        argumentos: [],
+      },
+    };
+    const resumen = resumenDeCorridaLibre({
+      dominio: DOMINIO,
+      pasos: [fallido, identidad, paso([]), paso([LEIDO_REDACTAR])],
+      valores: [],
+    });
+
+    expect(resumen.fallidos).toBe(1);
+    expect(resumen.sinEstrategias).toBe(2);
+    expect(resumen.conEstrategias).toBe(1);
+    expect(resumen.fallidos + resumen.sinEstrategias + resumen.conEstrategias).toBe(resumen.pasos);
   });
 });
