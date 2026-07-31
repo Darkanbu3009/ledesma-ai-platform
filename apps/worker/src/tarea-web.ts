@@ -116,6 +116,7 @@ import {
   type PromocionDeEstrategia,
 } from './promocion-estrategias.js';
 import {
+  ACCION_POR_METODO,
   firmaDeObjetivo,
   parametrosDeclaradosDesdeValores,
   promoverTrayectoria,
@@ -1081,7 +1082,7 @@ interface VerificacionEnLaTraza {
  * el que se envio). Es el unico dato de PRIMERA MANO que este camino tiene sobre el elemento que va a
  * consumar la accion, y hasta hoy se calculaba, se comparaba y se tiraba.
  */
-interface ControlDeLaAccionIrreversible {
+export interface ControlDeLaAccionIrreversible {
   dominio: string;
   /** Rol accesible del control (el mismo `rolDe` que leen la percepcion y el grabador). */
   rol: string;
@@ -2742,6 +2743,172 @@ function entradasDelControlAccionado(
   }
 }
 
+/**
+ * Prefijo de los tipos de paso SINTETICO que deja la barrera de identidad en la traza
+ * ('identidad:permitida', 'identidad:bloqueada', 'identidad:habria_bloqueado', 'identidad:no_evaluable';
+ * ver `resumenDeIdentidad`, barrera-identidad.ts, que es su unico productor).
+ */
+const PREFIJO_PASO_DE_IDENTIDAD = 'identidad:';
+
+/**
+ * POR QUE el paso de la accion irreversible quedo (o no) completado, en vocabulario CERRADO: ni un
+ * dato del usuario, del sitio ni de lo que la tarea escribio. Va al log con el mismo criterio que el
+ * resto de los veredictos de este cierre.
+ */
+type MotivoDelControlEnLaTraza =
+  | 'completado'
+  | 'sin_control_leido'
+  | 'control_no_unico'
+  | 'sin_paso_identificable'
+  | 'paso_ya_localizado'
+  | 'sin_estrategia_utilizable';
+
+/** El resultado de completar el paso final: la lista a publicar y por que quedo como quedo. */
+export interface ControlEnLaTraza {
+  pasos: readonly PasoCensurado[];
+  motivo: MotivoDelControlEnLaTraza;
+  /** `idx` del paso completado, o null si no se completo ninguno. */
+  idx: number | null;
+  /** La clase que ese paso pasa a declarar. Es la MISMA que el atlas escribe. null si no se completo. */
+  clase: string | null;
+}
+
+/**
+ * A que accion del vocabulario de las recetas corresponde un paso ACT de la traza del motor. Mismo
+ * criterio que la promocion y que el agregador del atlas: el metodo manda y un act sin metodo
+ * resuelto (Stagehand lo resolvio por vision) es un click.
+ */
+function accionDelActDeLaTraza(paso: PasoCensurado): 'click' | 'escribir' | null {
+  return paso.accion.metodo === null ? 'click' : (ACCION_POR_METODO[paso.accion.metodo] ?? null);
+}
+
+/**
+ * DONDE esta, en la traza ya armada, el paso que consumo la accion irreversible.
+ *
+ * COMO SE SABE, y es el punto delicado de todo esto. El veredicto de la barrera de identidad queda
+ * JUSTO ANTES del act que la barrera dejo pasar: la barrera se evalua UNICAMENTE en los dos puntos
+ * por los que la accion irreversible sale al navegador (el primer intento y su unico reintento) y el
+ * canal que intercala los pasos del sistema los pone delante de la accion numero N+1
+ * (`intercalarVerificaciones`). Una accion que la guardia NO deja pasar jamas llega a la traza
+ * (stagehand.ts: "la accion NO se registra en la traza"), asi que la cuenta de acciones de la
+ * guardia y la de acts de la traza son la misma cuenta.
+ *
+ * SE TOMA EL ULTIMO veredicto de la barrera, que es el de la lectura que `controlAccionado`
+ * conserva (cada lectura pisa a la anterior), y NO se busca hacia atras si no encaja: adivinar cual
+ * de dos candidatos fue el que se acciono es exactamente lo que no se puede hacer aqui.
+ *
+ * SUS CUATRO CONDICIONES, todas necesarias: el paso siguiente EXISTE, no es otro paso del sistema,
+ * es un ACT de CLICK y es del MISMO dominio en el que la barrera leyo (multisitio: la corrida pudo
+ * seguir en otro sitio). Si falla una sola, devuelve null y no se completa nada.
+ */
+function posicionDelPasoIrreversible(
+  pasos: readonly PasoCensurado[],
+  dominio: string,
+): number | null {
+  for (let posicion = pasos.length - 1; posicion >= 0; posicion--) {
+    if (!(pasos[posicion]?.accion.tipo ?? '').startsWith(PREFIJO_PASO_DE_IDENTIDAD)) continue;
+    const siguiente = pasos[posicion + 1];
+    if (siguiente === undefined || siguiente.sintetico === true) return null;
+    if (siguiente.accion.tipo !== 'act' || accionDelActDeLaTraza(siguiente) !== 'click') return null;
+    if ((siguiente.dominio ?? dominio) !== dominio) return null;
+    return posicion + 1;
+  }
+  return null;
+}
+
+/**
+ * EL LOCALIZADOR DEL CLICK FINAL, tomado de lo que la barrera ya habia leido del DOM.
+ *
+ * EL HUECO QUE CIERRA, y es el ultimo de esta cadena. El paso del CLICK FINAL de la traza del motor
+ * libre llega SIN NINGUNA ESTRATEGIA: la percepcion lee el elemento DESPUES de la accion y para
+ * entonces el sitio ya desmonto el formulario (ni el xpath resuelve ni el foco apunta al control), y
+ * el complemento por selector solo alcanza a los selectores que llevan predicados de atributo
+ * escritos, que en las corridas recientes son posicionales puros. La destilacion lo rechaza entonces
+ * con 'click_sin_localizacion_sin_cobertura' y la corrida no publica nada, aunque haya salido bien y
+ * con el efecto confirmado (corrida real del 31 jul 2026, 03:27 UTC: 17 pasos, correo enviado).
+ *
+ * EL DATO YA EXISTE Y ES DEL DOM. La barrera de identidad LEE ese mismo control ANTES de la accion,
+ * cuando todavia existe, y esa lectura (rol accesible y nombre accesible) es la que este cierre ya
+ * escribe en el atlas. Aqui se arma con la MISMA funcion (`entradaDelControlLeido`), asi que el paso
+ * completado declara EXACTAMENTE la clase que el atlas corrobora: si divergieran, la plantilla se
+ * caeria por 'clase_no_corroborada' y esto no serviria de nada. Ninguna descripcion del modelo
+ * participa en ningun punto.
+ *
+ * LAS DOS CONDICIONES son las MISMAS con las que la clase entra al atlas: la corrida cerro con el
+ * efecto irreversible CONFIRMADO (lo garantiza el llamador, que corre despues de los dos cortes del
+ * cierre) y la barrera localizo UN UNICO candidato de la familia del verbo. Con mas de uno no hay
+ * certeza de cual se acciono, y atribuirle a un paso un elemento que no acciono seria peor que no
+ * publicar.
+ *
+ * UN PASO QUE YA TRAE LOCALIZADOR NO SE TOCA: lo que la percepcion alcanzo a leer contra el selector
+ * del motor es al menos tan bueno como esto, y es el mismo criterio de `pasosConEstrategiasPercibidas`.
+ *
+ * NO TOCA NADA MAS: se aplica SOLO a la lista que va a la publicacion. Ni el atlas ni la promocion a
+ * receta ven esta lista, y por eso las dos siguen decidiendo exactamente lo mismo que antes.
+ */
+export function completarPasoDeLaAccionIrreversible(
+  pasos: readonly PasoCensurado[],
+  control: ControlDeLaAccionIrreversible | null,
+  valores: readonly string[],
+): ControlEnLaTraza {
+  const intacta = (motivo: MotivoDelControlEnLaTraza): ControlEnLaTraza => ({
+    pasos,
+    motivo,
+    idx: null,
+    clase: null,
+  });
+  if (control === null) return intacta('sin_control_leido');
+  if (control.candidatos !== 1) return intacta('control_no_unico');
+  const posicion = posicionDelPasoIrreversible(pasos, control.dominio);
+  const paso = posicion === null ? undefined : pasos[posicion];
+  if (posicion === null || paso === undefined) return intacta('sin_paso_identificable');
+  if (paso.estrategias.length > 0) return intacta('paso_ya_localizado');
+  // Por la MISMA puerta que el atlas: saneo del nombre accesible, filtro de tipos, recorte y
+  // paranoia de valores. Lo que no pueda entrar a la tabla global tampoco completa el paso.
+  const entrada = entradaDelControlLeido(control, valores);
+  if (entrada === null) return intacta('sin_estrategia_utilizable');
+  const completados = [...pasos];
+  completados[posicion] = { ...paso, estrategias: entrada.estrategias };
+  return {
+    pasos: completados,
+    motivo: 'completado',
+    idx: paso.idx,
+    clase: entrada.claseDeElemento,
+  };
+}
+
+/**
+ * El cableado best-effort de lo de arriba: completa, deja el veredicto en el log y NUNCA lanza. Un
+ * fallo aqui devuelve la traza intacta, o sea el comportamiento previo a este cambio: el desenlace
+ * del job ya esta decidido cuando esto corre.
+ */
+function pasosParaPublicar(
+  deps: TareaWebDeps,
+  job: Job,
+  corrida: { pasos: readonly PasoCensurado[]; valores: readonly string[] },
+  control: ControlDeLaAccionIrreversible | null,
+): readonly PasoCensurado[] {
+  try {
+    const completado = completarPasoDeLaAccionIrreversible(corrida.pasos, control, corrida.valores);
+    // Sin control leido no hay anomalia que reportar: es toda tarea reversible y toda corrida con la
+    // barrera apagada, o sea la mitad de las tareas.
+    const nivel = completado.motivo === 'sin_control_leido' ? 'debug' : 'info';
+    deps.logger[nivel]('tarea web: el paso de la accion irreversible y su localizador', {
+      jobId: job.id,
+      motivo: completado.motivo,
+      paso: completado.idx,
+      clase: completado.clase,
+    });
+    return completado.pasos;
+  } catch (error) {
+    deps.logger.warn(
+      'tarea web: no se pudo completar el localizador del paso final (se ignora, best-effort)',
+      { jobId: job.id, err: describir(error) },
+    );
+    return corrida.pasos;
+  }
+}
+
 /** Un sitio de la tarea con su sesion YA abierta, verificada e inyectada. */
 interface SitioAbierto {
   sitio: SitioConectado;
@@ -3422,8 +3589,14 @@ export async function procesarTareaWeb(
     // con el efecto irreversible confirmado, cada clase sigue exigiendo el aval de dos origenes
     // INDEPENDIENTES (`clasesParaPublicar`), lo que sale pasa por `esPublicable` en el worker y otra
     // vez en el backend, y el alcance esta declarado en los documentos legales vigentes.
+    //
+    // EL CLICK FINAL LLEGA AQUI CON SU LOCALIZADOR, y es lo unico que esta lista tiene de mas que la
+    // que alimenta al atlas: el paso que consumo la accion irreversible se completa con lo que la
+    // barrera LEYO del DOM justo antes de accionarlo (ver completarPasoDeLaAccionIrreversible). Sin
+    // eso, la destilacion lo rechaza por 'click_sin_localizacion_sin_cobertura' -- la percepcion
+    // corre DESPUES de la accion y el control ya no existe -- y ninguna corrida de envio publica.
     const veredictoDePlantilla = await publicarPlantillaBestEffort(deps, job, {
-      pasos: corridaLibre.pasos,
+      pasos: pasosParaPublicar(deps, job, corridaLibre, controlAccionado),
       objetivo,
       dominio: sitio.dominio,
       dominios: dominiosAutorizados,

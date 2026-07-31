@@ -1,8 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import type { EstrategiaLocalizacion } from '@ledesma-platform/shared';
-import { claseDeElemento, pasosConEstrategiasPercibidas } from '../src/atlas-sitios.js';
+import {
+  claseDeElemento,
+  entradaDelControlLeido,
+  pasosConEstrategiasPercibidas,
+  valoresTecleadosDeLaCorrida,
+} from '../src/atlas-sitios.js';
 import { plantillaDeLaCorrida } from '../src/plantillas-compartidas.js';
-import { promoverTrayectoria } from '../src/receta-web.js';
+import { promoverTrayectoria, valoresDeParametros } from '../src/receta-web.js';
+import { extraerParametrosDeclarados } from '../src/parametros-objetivo.js';
+import { completarPasoDeLaAccionIrreversible } from '../src/tarea-web.js';
+import type { ControlDeLaAccionIrreversible } from '../src/tarea-web.js';
 import { construirPasoDeBloqueo } from '../src/verificacion.js';
 import { resumenDeIdentidad } from '../src/barrera-identidad.js';
 import type { PasoCensurado } from '../src/trayectoria.js';
@@ -1110,17 +1118,214 @@ describe('la corrida real de las 03:27 del 31 jul (paso sintetico de la barrera 
     expect(material.paso).toBe(15);
   });
 
-  it('EL OTRO RECHAZO, que este arreglo no toca: el click de Enviar SIN localizacion', () => {
+  it('EL OTRO RECHAZO, SIN el localizador de la barrera: el click de Enviar sin localizacion', () => {
     // Con el control ya desmontado y sin nada que derivar del selector, el click de Enviar queda sin
-    // una sola estrategia. Ese paso SI llego al navegador, asi que la conversion lo sigue rechazando
-    // con 'click_sin_localizacion_sin_cobertura' y NOMBRANDO SU PROPIO indice (15), no el 14 del
-    // veredicto de la barrera. Queda fijado aqui para que los dos rechazos no se vuelvan a confundir:
-    // el de la barrera es el que este PR cierra, este otro es un problema de localizacion del control
-    // final y se arregla dandole al paso su localizador, no descartandolo.
+    // una sola estrategia. Ese paso SI llego al navegador, asi que la conversion lo rechaza con
+    // 'click_sin_localizacion_sin_cobertura' y NOMBRANDO SU PROPIO indice (15), no el 14 del
+    // veredicto de la barrera. Queda fijado aqui para que los dos rechazos no se vuelvan a confundir,
+    // y es ademas la LINEA BASE del bloque de abajo: es lo que devuelve la cadena cuando la lectura
+    // de la barrera no llega al paso.
     const material = procedimiento(corridaDeLas0327(clickDeEnvio([])));
     expect(material.promovida).toBe(false);
     if (material.promovida) return;
     expect(material.regla).toBe('click_sin_localizacion_sin_cobertura');
     expect(material.paso).toBe(15);
+  });
+
+  // -----------------------------------------------------------------------------------------------
+
+  /**
+   * LA MISMA CORRIDA DE LAS 03:27 EN SU FORMA DE PRODUCCION: el click de Enviar llega VACIO. La
+   * percepcion lee el elemento DESPUES de la accion y para entonces Gmail ya desmonto el compose (ni
+   * el xpath resuelve ni el foco apunta al boton), y el complemento por selector no alcanza porque el
+   * selector de la traza es posicional puro. Ese es el ultimo rechazo que quedaba en pie
+   * ('click_sin_localizacion_sin_cobertura', el test de aqui arriba).
+   *
+   * LO QUE LO CIERRA: la barrera de identidad LEE ese mismo control ANTES de la accion, cuando
+   * todavia existe, y esa lectura es la que la corrida ya escribio en el atlas de ese dia como
+   * 'click|rol:button|enviar (ctrl-enter)'. `completarPasoDeLaAccionIrreversible` la lleva al paso de
+   * la traza, por la MISMA puerta y con las MISMAS dos condiciones con las que entro al atlas.
+   *
+   * Cadena EXACTA del handler:
+   *   pasosConEstrategiasPercibidas -> completarPasoDeLaAccionIrreversible -> promoverTrayectoria
+   *   -> plantillaDeLaCorrida.
+   */
+  describe('el localizador del click final, tomado de lo que la barrera leyo', () => {
+    /** EL CONTROL que la barrera leyo del DOM justo antes de accionarlo (`controlAccionado`). */
+    const CONTROL: ControlDeLaAccionIrreversible = {
+      dominio: DOMINIO,
+      rol: 'button',
+      nombre: 'Enviar (Ctrl-Enter)',
+      candidatos: 1,
+    };
+
+    /**
+     * LAS SIETE CLASES que el atlas tiene corroboradas para el dominio despues de esta corrida: las
+     * cinco de antes, la del click de enfoque sobre el cuerpo (que la corrida tambien deja) y la del
+     * boton de envio, que aporta la barrera.
+     */
+    const SIETE_CLASES = new Set([
+      ...CINCO_CLASES,
+      'click|atributo:aria-label|cuerpo del mensaje',
+      CLASE_DEL_ENVIO,
+    ]);
+
+    /** Los valores tecleados de la corrida, con la MISMA cuenta que hace el cierre del handler. */
+    function valoresDe(pasos: readonly PasoCensurado[]): string[] {
+      return valoresTecleadosDeLaCorrida(
+        valoresDeParametros(extraerParametrosDeclarados(OBJETIVO)),
+        pasos,
+      );
+    }
+
+    /** La traza de produccion (click de Enviar vacio) con la percepcion ya puesta, sin completar. */
+    function trazaVacia(): PasoCensurado[] {
+      return pasosConEstrategiasPercibidas(corridaDeLas0327(clickDeEnvio([])));
+    }
+
+    /** El paso siguiente del handler: completar el click final con lo que la barrera leyo. */
+    function completar(
+      control: ControlDeLaAccionIrreversible | null = CONTROL,
+      pasos: PasoCensurado[] = trazaVacia(),
+    ) {
+      return completarPasoDeLaAccionIrreversible(pasos, control, valoresDe(pasos));
+    }
+
+    function publicarCompletada(clases: ReadonlySet<string>) {
+      const material = promoverTrayectoria({
+        pasos: [...completar().pasos],
+        dominio: DOMINIO,
+        objetivo: OBJETIVO,
+        estado: 'exitosa',
+        exigeVerificacion: true,
+      });
+      if (!material.promovida) throw new Error(`la conversion rechazo: ${material.motivo}`);
+      return {
+        material,
+        veredicto: plantillaDeLaCorrida({
+          pasos: material.pasos,
+          dominio: DOMINIO,
+          dominios: [DOMINIO],
+          verboBloqueado: 'enviar',
+          clasesCorroboradas: clases,
+        }),
+      };
+    }
+
+    it('la traza de produccion trae el click de Enviar sin una sola estrategia', () => {
+      const pasos = trazaVacia();
+      expect(pasos).toHaveLength(17);
+      expect(pasos[14]?.accion.tipo).toBe('identidad:habria_bloqueado');
+      expect(pasos[15]?.accion.instruccion).toBe('click the Enviar button');
+      expect(pasos[15]?.estrategias).toEqual([]);
+      // Y ninguno de los otros pasos perdio lo suyo por el camino: los siete que la percepcion si
+      // alcanzo a leer (Redactar, el campo Para en sus tres pasos, Asunto y el cuerpo en sus dos).
+      expect(pasos.filter((p) => p.estrategias.length > 0)).toHaveLength(7);
+    });
+
+    it('el paso que se completa es el del click de Enviar, no el veredicto de la barrera', () => {
+      const completado = completar();
+      expect(completado.motivo).toBe('completado');
+      expect(completado.idx).toBe(15);
+      expect(completado.pasos[15]?.estrategias).toEqual([
+        { tipo: 'rol', rol: 'button', nombre: 'Enviar (Ctrl-Enter)' },
+      ]);
+      // El veredicto de la barrera sigue sin estrategias: no acciono nada y no es un paso.
+      expect(completado.pasos[14]?.estrategias).toEqual([]);
+      // Ningun otro paso cambio.
+      const antes = trazaVacia();
+      expect(completado.pasos.filter((_, i) => i !== 15)).toEqual(antes.filter((_, i) => i !== 15));
+    });
+
+    it('LA CLASE DEL PASO COMPLETADO ES LA MISMA QUE LA BARRERA ESCRIBIO EN EL ATLAS', () => {
+      // Si divergieran, la plantilla se caeria por 'clase_no_corroborada' y esto no serviria de nada.
+      // Las dos salen de `entradaDelControlLeido` sobre la MISMA lectura del DOM.
+      const pasos = trazaVacia();
+      const enElAtlas = entradaDelControlLeido(CONTROL, valoresDe(pasos));
+      expect(enElAtlas?.claseDeElemento).toBe(CLASE_DEL_ENVIO);
+
+      const completado = completar(CONTROL, pasos);
+      expect(completado.clase).toBe(enElAtlas?.claseDeElemento);
+
+      // Y la que declara el paso YA PROMOVIDO, que es la que mira la puerta de publicacion.
+      const { material } = publicarCompletada(SIETE_CLASES);
+      const promovido = material.pasos[7];
+      if (promovido === undefined) throw new Error('la conversion perdio el click de Enviar');
+      expect(claseDeElemento(promovido.accion, promovido.estrategias)).toBe(CLASE_DEL_ENVIO);
+    });
+
+    it('con las siete clases corroboradas del atlas, la corrida PUBLICA', () => {
+      const { veredicto } = publicarCompletada(SIETE_CLASES);
+      expect(veredicto.publicable).toBe(true);
+      if (!veredicto.publicable) return;
+      expect(veredicto.plantilla.pasos).toHaveLength(7);
+      expect(veredicto.plantilla.codigoDeIntencion).toBe('enviar');
+      expect(veredicto.plantilla.dominiosClave).toBe(DOMINIO);
+      expect(veredicto.plantilla.marcadoresClave).toBe('asunto+cuerpo+destinatario');
+      // El paso del envio viaja con su localizador estructural y con su clase, y con nada mas.
+      expect(veredicto.plantilla.pasos[6]).toMatchObject({
+        accion: 'click',
+        claseDeElemento: CLASE_DEL_ENVIO,
+        estrategias: [{ tipo: 'rol', rol: 'button', nombre: 'Enviar (Ctrl-Enter)' }],
+      });
+      const serializado = JSON.stringify(veredicto.plantilla);
+      for (const prohibido of [DESTINATARIO, ASUNTO, CUERPO, 'xpath', 'ruta', '/html', 'identidad']) {
+        expect(serializado, prohibido).not.toContain(prohibido);
+      }
+    });
+
+    it('SIN controlAccionado el paso no se completa y el rechazo es el de siempre', () => {
+      const completado = completar(null);
+      expect(completado.motivo).toBe('sin_control_leido');
+      expect(completado.idx).toBeNull();
+      expect(completado.pasos).toEqual(trazaVacia());
+      const material = procedimiento(corridaDeLas0327(clickDeEnvio([])));
+      expect(material.promovida).toBe(false);
+      if (material.promovida) return;
+      expect(material.regla).toBe('click_sin_localizacion_sin_cobertura');
+      expect(material.paso).toBe(15);
+    });
+
+    it('con MAS DE UN candidato en la pagina tampoco se completa: no hay certeza de cual se acciono', () => {
+      // La MISMA condicion con la que la clase entra al atlas (`entradasDelControlAccionado`).
+      const completado = completar({ ...CONTROL, candidatos: 2 });
+      expect(completado.motivo).toBe('control_no_unico');
+      expect(completado.pasos).toEqual(trazaVacia());
+      const material = promoverTrayectoria({
+        pasos: [...completado.pasos],
+        dominio: DOMINIO,
+        objetivo: OBJETIVO,
+        estado: 'exitosa',
+        exigeVerificacion: true,
+      });
+      expect(material.promovida).toBe(false);
+      if (material.promovida) return;
+      expect(material.regla).toBe('click_sin_localizacion_sin_cobertura');
+      expect(material.paso).toBe(15);
+    });
+
+    it('un paso que YA trae localizador no se toca: lo que leyo la percepcion manda', () => {
+      // Es la corrida optimista (el complemento por selector si alcanzo al boton): la lectura contra
+      // el selector del motor es al menos tan buena como esta, y no se pisa.
+      const completado = completar(CONTROL, pasosConEstrategiasPercibidas(corridaDeLas0327()));
+      expect(completado.motivo).toBe('paso_ya_localizado');
+      expect(completado.idx).toBeNull();
+    });
+
+    it('si el paso siguiente al veredicto no es el click, NO se adivina ninguno', () => {
+      // El invariante que sostiene todo esto: sin un paso identificable con certeza se deja sin
+      // completar. Atribuirle a un paso un elemento que no acciono seria peor que no publicar.
+      const sinBarrera = trazaVacia().filter((p) => !p.accion.tipo.startsWith('identidad:'));
+      expect(completar(CONTROL, sinBarrera).motivo).toBe('sin_paso_identificable');
+
+      const conOtroDominio = trazaVacia().map((p, i) =>
+        i === 15 ? { ...p, dominio: 'otro.ejemplo.com' } : p,
+      );
+      expect(completar(CONTROL, conOtroDominio).motivo).toBe('sin_paso_identificable');
+
+      // Y el veredicto de la barrera al final de la traza, sin ningun paso detras.
+      const truncada = trazaVacia().slice(0, 15);
+      expect(completar(CONTROL, truncada).motivo).toBe('sin_paso_identificable');
+    });
   });
 });
