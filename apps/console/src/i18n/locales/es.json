@@ -1918,6 +1918,10 @@
       "titulo": "El paso final no se pudo confirmar",
       "detalle": "La tarea avanzo, pero el sistema detuvo los reintentos del paso final para no repetirlo por accidente. Es posible que haya quedado un borrador o un estado a medias en el sitio. Revisalo antes de volver a pedirla."
     },
+    "modeloSinAcceso": {
+      "titulo": "Tu clave de modelo no tiene saldo o no es valida",
+      "detalle": "La tarea se detuvo porque la clave que usas para el modelo se quedo sin saldo o dejo de ser valida. No es un problema de lo que pediste y volver a intentarlo no cambia nada. Entra a la cuenta de tu proveedor de modelo, revisa el saldo y la clave, y vuelve a pedir la tarea."
+    },
     "nada": "nada",
     "campos": {
       "destinatario": "a quien enviarlo",

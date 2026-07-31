@@ -21,6 +21,7 @@ import {
   esJobBloqueadoPorReintentos,
   esJobCancelado,
   esJobDetenido,
+  esJobSinAccesoAlModelo,
   esJobSinEfectoConfirmado,
   isJobInFlight,
   jobStatusLabel,
@@ -131,14 +132,23 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
   // PASO FINAL SIN CONFIRMAR (prefijos estables del worker): la tarea AVANZO y el paso final no se
   // pudo confirmar; puede haber quedado un borrador a medias en el sitio. Texto propio y veraz:
   // jamas se afirma "no se ejecuto nada" en estos cierres.
-  const textoPasoFinal = esJobSinEfectoConfirmado(job)
-    ? { titulo: t('verificacion.sinEfecto.titulo'), detalle: t('verificacion.sinEfecto.detalle') }
-    : esJobBloqueadoPorReintentos(job)
-      ? {
-          titulo: t('verificacion.bloqueoReintentos.titulo'),
-          detalle: t('verificacion.bloqueoReintentos.detalle'),
-        }
-      : null;
+  // LLAVE DEL MODELO SIN SALDO O INVALIDA (prefijo estable MODELO_SIN_ACCESO): no es un fallo de la
+  // tarea. Va PRIMERO en la cadena porque corta la corrida antes que cualquier otro desenlace, y
+  // lleva texto propio: nombra la causa y manda al unico lugar donde se arregla (la cuenta del
+  // proveedor del modelo), sin detalle tecnico que abrir.
+  const textoPasoFinal = esJobSinAccesoAlModelo(job)
+    ? {
+        titulo: t('verificacion.modeloSinAcceso.titulo'),
+        detalle: t('verificacion.modeloSinAcceso.detalle'),
+      }
+    : esJobSinEfectoConfirmado(job)
+      ? { titulo: t('verificacion.sinEfecto.titulo'), detalle: t('verificacion.sinEfecto.detalle') }
+      : esJobBloqueadoPorReintentos(job)
+        ? {
+            titulo: t('verificacion.bloqueoReintentos.titulo'),
+            detalle: t('verificacion.bloqueoReintentos.detalle'),
+          }
+        : null;
   const textoDetencion = detencion ? textoDeDetencion(detencion) : textoPasoFinal;
   // AVISO de tarea lenta: en curso por encima del umbral. El reloj por cubetas mantiene fresco el
   // tiempo mostrado aunque el refetch tarde.

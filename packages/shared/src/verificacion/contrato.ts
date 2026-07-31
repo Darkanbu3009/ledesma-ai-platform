@@ -65,6 +65,15 @@ export const GUARDIA_BLOQUEO_REINTENTOS_IRREVERSIBLES_PREFIX =
   'GUARDIA_BLOQUEO_REINTENTOS_IRREVERSIBLES:';
 
 /**
+ * Prefijo ESTABLE de last_error cuando la corrida se corto porque la LLAVE DEL MODELO no tiene saldo
+ * o no es valida (evidencia de produccion del 31 jul 2026: creditos agotados en el proveedor). Mismo
+ * mecanismo que los dos anteriores: el worker lo produce como `name` de su clase de error
+ * (fallo-modelo.ts) y la consola lo detecta con startsWith para decir que paso y que hacer, en vez
+ * del generico "La tarea no se pudo completar" con un detalle tecnico que no orienta. Nunca cambiar.
+ */
+export const MODELO_SIN_ACCESO_PREFIX = 'MODELO_SIN_ACCESO:';
+
+/**
  * Por que se detuvo la accion. Cada motivo tiene UN texto i18n propio en la consola:
  *  - noCoincide: lo que el objetivo pedia y lo que habia en el sitio no son lo mismo.
  *  - noLeible: el dato pedido no se pudo LEER del sitio para comprobarlo (el campo existe pero su

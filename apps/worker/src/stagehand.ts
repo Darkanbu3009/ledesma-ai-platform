@@ -9,6 +9,11 @@ import {
   FalloDeEsquemaDelMotorError,
   GuardiaBloqueoReintentosError,
 } from './errores.js';
+import {
+  FalloDeAccesoAlModeloError,
+  clasificarFalloDeAccesoAlModelo,
+  type ClaseDeFalloDeModelo,
+} from './fallo-modelo.js';
 import { estrategiasDelSelectorParaElAtlas } from './atlas-sitios.js';
 import { TOOL_CAMBIAR_DE_SITIO } from './prompt-tarea-web.js';
 import {
@@ -289,6 +294,12 @@ export interface ActBlindado {
    * nombre es el prefijo estable GUARDIA_BLOQUEO_REINTENTOS_IRREVERSIBLES del last_error.
    */
   reintentosAgotados(): string | null;
+  /**
+   * Clase del fallo si la llamada al modelo se corto por falta de acceso (saldo, cuota o credencial);
+   * null si no ocurrio. Viaja por el mismo camino que los demas desenlaces terminales: el adaptador
+   * lo convierte en FalloDeAccesoAlModeloError al terminar la corrida.
+   */
+  sinAccesoAlModelo(): ClaseDeFalloDeModelo | null;
 }
 
 /** Espera real entre reintentos; los tests inyectan la suya para no dormir. */
@@ -351,6 +362,7 @@ export function crearActBlindado(params: {
   let bloqueo: string | null = null;
   let sinConfirmar: string | null = null;
   let reintentosAgotados: string | null = null;
+  let sinAccesoAlModelo: ClaseDeFalloDeModelo | null = null;
   let autorizoIrreversible = false;
   /** Ultimo elementId que el motor rechazo; se compara con el del intento siguiente. */
   let elementIdRechazado: string | null = null;
@@ -383,6 +395,20 @@ export function crearActBlindado(params: {
           ...(primera !== undefined ? { playwrightArguments: primera } : {}),
         };
       } catch (error) {
+        // FALTA DE ACCESO AL MODELO: la llamada de act murio porque la llave no tiene saldo o no es
+        // valida. Se corta AQUI, antes que nada: devolverselo al modelo como fallo de tool lo dejaria
+        // probar otra accion, y la siguiente llamada moriria igual quemando otro paso. Mismo
+        // mecanismo que los demas desenlaces terminales: alTerminar aborta el bucle en el acto.
+        const claseDeModelo = clasificarFalloDeAccesoAlModelo(error);
+        if (claseDeModelo !== null) {
+          sinAccesoAlModelo = claseDeModelo;
+          params.logger.error(
+            'tarea web: la llave del modelo no tiene saldo o no es valida; se corta la corrida',
+            { clase: claseDeModelo },
+          );
+          params.alTerminar?.();
+          throw new FalloDeAccesoAlModeloError(claseDeModelo);
+        }
         if (!esFalloDeEsquemaDelMotor(error)) {
           return { success: false, error: mensajeDeError(error) };
         }
@@ -433,6 +459,7 @@ export function crearActBlindado(params: {
     bloqueo: () => bloqueo,
     sinConfirmar: () => sinConfirmar,
     reintentosAgotados: () => reintentosAgotados,
+    sinAccesoAlModelo: () => sinAccesoAlModelo,
     autorizoIrreversible: () => autorizoIrreversible,
     ejecutar: async (accion: string): Promise<SalidaDeActBlindado> => {
       // La accion NO se registra en la traza: no llego al navegador. La constancia de por que se
@@ -1136,9 +1163,13 @@ export class MotorStagehand implements MotorDeTareaWeb, EscaladorDePaso {
       // bucle: cuando el hook alTerminar aborta la corrida, el error que sube es un abort generico y
       // el motivo real vive en el blindaje. Se consulta en los DOS caminos (retorno y excepcion).
       //
-      // Orden: reintentos agotados y bloqueo primero (desenlaces decididos por el sistema, no fallos
-      // del motor), despues la accion sin efecto confirmado y al final el corte por esquema.
+      // Orden: la falta de acceso al modelo primero (no es un desenlace de la tarea sino la
+      // imposibilidad de seguir corriendo: nombrarla como cualquier otra cosa mandaria al usuario a
+      // diagnosticar su objetivo); despues reintentos agotados y bloqueo (desenlaces decididos por el
+      // sistema, no fallos del motor), la accion sin efecto confirmado y al final el corte por esquema.
       const convertirDesenlaceTerminal = (): Error | null => {
+        const sinAcceso = blindado.sinAccesoAlModelo();
+        if (sinAcceso !== null) return new FalloDeAccesoAlModeloError(sinAcceso);
         const agotados = blindado.reintentosAgotados();
         if (agotados !== null) return new GuardiaBloqueoReintentosError(agotados);
         const bloqueo = blindado.bloqueo();

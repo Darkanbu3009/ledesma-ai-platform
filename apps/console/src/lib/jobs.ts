@@ -11,6 +11,7 @@
 import {
   ACCION_SIN_EFECTO_CONFIRMADO_PREFIX,
   GUARDIA_BLOQUEO_REINTENTOS_IRREVERSIBLES_PREFIX,
+  MODELO_SIN_ACCESO_PREFIX,
 } from '@ledesma-platform/shared/verificacion';
 import i18n from '../i18n';
 
@@ -197,6 +198,16 @@ export function esJobBloqueadoPorReintentos(job: Pick<JobActivity, 'status' | 'l
     job.status === 'failed' &&
     (job.lastError?.startsWith(GUARDIA_BLOQUEO_REINTENTOS_IRREVERSIBLES_PREFIX) ?? false)
   );
+}
+
+/**
+ * true si la corrida se corto porque la LLAVE DEL MODELO no tiene saldo o no es valida (prefijo
+ * estable MODELO_SIN_ACCESO del worker). No es un fallo de la tarea ni del objetivo: no tiene sentido
+ * ofrecer un "detalle tecnico" que no orienta, ni invitar a reintentar. Lo unico accionable es
+ * revisar la cuenta del proveedor del modelo, y eso es lo que dice el texto.
+ */
+export function esJobSinAccesoAlModelo(job: Pick<JobActivity, 'status' | 'lastError'>): boolean {
+  return job.status === 'failed' && (job.lastError?.startsWith(MODELO_SIN_ACCESO_PREFIX) ?? false);
 }
 
 /**

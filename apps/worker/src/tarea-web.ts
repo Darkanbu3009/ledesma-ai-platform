@@ -19,6 +19,7 @@ import {
   MotorCortoPorElementoRepetidoError,
   PermanentExecutionError,
 } from './errores.js';
+import { FalloDeAccesoAlModeloError, clasificarFalloDeAccesoAlModelo } from './fallo-modelo.js';
 import { SalidaDeRedNoDisponibleError, expiracionDeContexto } from './sitios.js';
 import {
   clasificarDesenlace,
@@ -3483,6 +3484,15 @@ export async function procesarTareaWeb(
     }
 
     if (desenlace.tipo === 'requiere_aprobacion' || !resultado.exito) {
+      // FALTA DE ACCESO AL MODELO: `agent.execute` de Stagehand ATRAPA todo fallo que no sea un abort
+      // y lo devuelve como un resultado sin exito (v3AgentHandler), asi que por este camino no llega
+      // el error crudo sino su TEXTO. La marca que el middleware de modelo planto en el mensaje es lo
+      // unico que sobrevive, y se exige exactamente esa marca (nunca frases sueltas: el mensaje final
+      // del agente puede arrastrar contenido de la pagina). Va ANTES del mensaje generico: decir
+      // "la tarea se detuvo sin exito" cuando lo que paso es que la llave se quedo sin saldo manda al
+      // usuario a diagnosticar un objetivo que estaba bien.
+      const sinAcceso = corteDeAccesoAlModelo(deps, job, activo.sitio, resultado);
+      if (sinAcceso !== null) throw sinAcceso;
       // BUG C: mensaje VERAZ por causa (limite real de pasos / DONE sin cumplir / otro corte),
       // siempre con los pasos consumidos y el limite configurado.
       throw new PermanentExecutionError(describirFalloDelMotor(resultado, deps.maxPasos));
@@ -4093,6 +4103,32 @@ function crearObservadorDePasos(
 }
 
 /**
+ * EL CORTE POR FALTA DE ACCESO AL MODELO detras de un resultado del motor SIN EXITO, o null si el
+ * fallo fue otro (ahi el desenlace no cambia en nada).
+ *
+ * Por que se lee del TEXTO y no del error: `agent.execute` de Stagehand ATRAPA todo fallo que no sea
+ * un abort y devuelve un resultado sin exito cuyo unico rastro es un string (v3AgentHandler), asi que
+ * por este camino no sobreviven ni el status HTTP ni el tipo del proveedor. Lo que si sobrevive es la
+ * MARCA que el middleware de modelo planto en el mensaje, y es exactamente lo unico que se acepta:
+ * jamas frases sueltas, porque el mensaje final del agente puede arrastrar contenido de la pagina.
+ */
+function corteDeAccesoAlModelo(
+  deps: TareaWebDeps,
+  job: Job,
+  sitio: SitioConectado,
+  resultado: Pick<ResultadoMotor, 'mensaje'>,
+): FalloDeAccesoAlModeloError | null {
+  const clase = clasificarFalloDeAccesoAlModelo(resultado.mensaje);
+  if (clase === null) return null;
+  deps.logger.error('tarea web: la corrida se corto porque la llave del modelo no tiene acceso', {
+    jobId: job.id,
+    connectionId: sitio.id,
+    clase,
+  });
+  return new FalloDeAccesoAlModeloError(clase);
+}
+
+/**
  * Traduce el CORTE POR FALLO DE ESQUEMA del motor al fallo permanente del job (FIX D). Cuando el
  * corte fue por REPETICION del MISMO identificador, el error lleva el nombre-prefijo estable
  * MOTOR_CORTO_POR_ELEMENTO_REPETIDO, con lo que el last_error del job (describeError en
@@ -4193,6 +4229,16 @@ async function ejecutarMotor(
     // CORTE POR REINTENTOS AGOTADOS (FIX C): ya viene con su nombre-prefijo estable; pasa intacto.
     if (error instanceof GuardiaBloqueoReintentosError) {
       throw error;
+    }
+    // FALTA DE ACCESO AL MODELO (saldo, cuota o credencial): ya viene con su nombre-prefijo estable
+    // MODELO_SIN_ACCESO; pasa intacto para que la consola pueda decir que paso y que hacer. La
+    // segunda rama cubre el error crudo que llegue sin envolver por un camino que no sea el blindaje.
+    if (error instanceof FalloDeAccesoAlModeloError) {
+      throw error;
+    }
+    const claseDeModelo = clasificarFalloDeAccesoAlModelo(error);
+    if (claseDeModelo !== null) {
+      throw new FalloDeAccesoAlModeloError(claseDeModelo);
     }
     if (error instanceof FalloDeEsquemaDelMotorError) {
       throw convertirCorteDelMotor(error);
@@ -4341,6 +4387,11 @@ async function reanudarTrasDecision(
     }
 
     if (!resultado.exito) {
+      // La reanudacion tambien puede morir por falta de acceso al modelo: mismo corte y mismo
+      // mensaje que en la corrida inicial (si no, el usuario veria dos diagnosticos distintos para
+      // exactamente el mismo problema segun si hubo checkpoint).
+      const sinAcceso = corteDeAccesoAlModelo(deps, job, sitio, resultado);
+      if (sinAcceso !== null) throw sinAcceso;
       // BUG C: mismo mensaje veraz por causa que en la corrida inicial (diagnostico interno).
       throw new PermanentExecutionError(
         describirFalloDelMotor(resultado, deps.maxPasos, 'la tarea reanudada'),
