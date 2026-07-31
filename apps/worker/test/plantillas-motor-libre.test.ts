@@ -4,6 +4,7 @@ import { claseDeElemento, pasosConEstrategiasPercibidas } from '../src/atlas-sit
 import { plantillaDeLaCorrida } from '../src/plantillas-compartidas.js';
 import { promoverTrayectoria } from '../src/receta-web.js';
 import { construirPasoDeBloqueo } from '../src/verificacion.js';
+import { resumenDeIdentidad } from '../src/barrera-identidad.js';
 import type { PasoCensurado } from '../src/trayectoria.js';
 
 /**
@@ -803,5 +804,323 @@ describe('la corrida real de las 01:02 del 31 jul (rechazo de la guardia en el i
     if (material.promovida) return;
     expect(material.regla).toBe('paso_fallido');
     expect(material.paso).toBe(22);
+  });
+});
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * LA CORRIDA REAL DE LAS 03:27 DEL 31 JUL 2026: 17 pasos, correo enviado, verificacion previa
+ * superada y efecto confirmado -- y en el resultado del job
+ * `{"idx":14,"clases":5,"motivo":"sin_procedimiento_repetible","publicada":false,"submotivo":"click_sin_localizacion_sin_cobertura"}`.
+ *
+ * QUE TRAE DE NUEVO frente a la corrida de las 01:02: los pasos SINTETICOS que quedan en la traza con
+ * exito TRUE. El de la BARRERA DE IDENTIDAD (idx 14) va JUSTO ANTES del click de Enviar (idx 15) --
+ * la barrera se interpone en el ultimo punto por el que la accion irreversible sale al navegador --
+ * y se registra sin estrategias y sin metodo. La barrera no acciona nada: LEE el DOM y emite un
+ * veredicto. Aun asi, la conversion lo clasificaba por su FORMA junto con los gestos del motor, que
+ * es la misma clase de error que el rechazo de la guardia del PR 281: un veredicto no es un paso del
+ * procedimiento y no puede impedir armar la plantilla (ver el bloque de pasos sinteticos en
+ * receta-web.test.ts, donde se fija la categoria entera con todos sus productores).
+ *
+ * LAS CLASES DEL ATLAS son las de esta corrida: la del boton de envio ya entro como
+ * 'click|rol:button|enviar (ctrl-enter)' -- rol mas nombre accesible COMPLETO, sin marcas invisibles
+ * de direccion -- que es lo que dejo el PR 282.
+ */
+describe('la corrida real de las 03:27 del 31 jul (paso sintetico de la barrera en el idx 14)', () => {
+  /** Lo que la percepcion lee del boton de envio: rol y nombre accesible COMPLETO (PR 282). */
+  const LEIDO_ENVIO: EstrategiaLocalizacion = {
+    tipo: 'rol',
+    rol: 'button',
+    nombre: 'Enviar (Ctrl-Enter)',
+  };
+
+  /**
+   * EL PASO 14: el veredicto de la barrera, con la forma EXACTA de `construirPasoDeIdentidad`
+   * (tarea-web.ts) y sellado como sintetico por el canal que lo intercala en la traza
+   * (`intercalarVerificaciones`). La etiqueta y el `exito` salen de `resumenDeIdentidad`, que es la
+   * fuente compartida por el camino de recetas y el del motor libre, para que el fixture no pueda
+   * desincronizarse de lo que produce el sistema.
+   */
+  const barreraDeIdentidad = (idx: number): PasoCensurado => {
+    const { etiqueta, exito } = resumenDeIdentidad(
+      { tipo: 'bloquear', motivo: 'clase_no_corroborada' },
+      'observacion',
+    );
+    return paso({
+      idx,
+      sintetico: true,
+      accion: {
+        tipo: etiqueta,
+        instruccion: 'barrera de identidad sobre la accion del motor: click the Enviar button',
+        metodo: null,
+        argumentos: ['clase_no_corroborada'],
+      },
+      selector: null,
+      url: null,
+      exito,
+    });
+  };
+
+  /** El paso 13: la verificacion previa que SI comparo y dejo pasar el envio. */
+  const verificacionSuperada = (idx: number): PasoCensurado =>
+    paso({
+      idx,
+      sintetico: true,
+      accion: {
+        tipo: 'verificacion',
+        instruccion: 'verificacion previa: los datos coinciden con lo pedido',
+        metodo: null,
+        argumentos: [],
+      },
+      url: null,
+    });
+
+  /** El click de Enviar del idx 15, con lo que la percepcion leyo del control que consumo la accion. */
+  const clickDeEnvio = (estrategiasPercibidas: EstrategiaLocalizacion[]): PasoCensurado =>
+    paso({
+      idx: 15,
+      accion: { tipo: 'act', instruccion: 'click the Enviar button', metodo: 'click', argumentos: [] },
+      selector: '/html/body/div[7]/div[3]/div/form/div[2]',
+      estrategiasPercibidas,
+    });
+
+  function corridaDeLas0327(envio = clickDeEnvio([LEIDO_ENVIO])): PasoCensurado[] {
+    return [
+      paso({ idx: 0, accion: { tipo: 'goto', instruccion: null, metodo: null, argumentos: [] } }),
+      paso({ idx: 1, accion: { tipo: 'screenshot', instruccion: null, metodo: null, argumentos: [] } }),
+      paso({
+        idx: 2,
+        accion: { tipo: 'act', instruccion: 'click the Compose button', metodo: 'click', argumentos: [] },
+        selector: '/html/body/div/div[3]',
+        estrategiasPercibidas: [LEIDO_REDACTAR, xpath('/html/body/div/div[3]')],
+      }),
+      paso({ idx: 3, accion: { tipo: 'think', instruccion: null, metodo: null, argumentos: [] } }),
+      paso({
+        idx: 4,
+        accion: { tipo: 'act', instruccion: 'click the Para input field', metodo: 'click', argumentos: [] },
+        estrategiasPercibidas: [LEIDO_PARA],
+      }),
+      paso({
+        idx: 5,
+        accion: {
+          tipo: 'act',
+          instruccion: `type "${DESTINATARIO}" into the Para input field`,
+          metodo: 'fill',
+          argumentos: [DESTINATARIO],
+        },
+        selector: '/html/body/div[7]/div[3]/div/form/input[1]',
+        valorCensurado: DESTINATARIO,
+        estrategiasPercibidas: [LEIDO_PARA, xpath('/html/body/div[7]/div[3]/div/form/input[1]')],
+      }),
+      paso({
+        idx: 6,
+        accion: {
+          tipo: 'act',
+          instruccion: 'press Tab key to confirm the recipient',
+          metodo: 'press',
+          argumentos: ['Tab'],
+        },
+        selector: '/html/body/div[7]/div[3]/div/form/input[1]',
+        estrategiasPercibidas: [LEIDO_PARA],
+      }),
+      paso({
+        idx: 7,
+        accion: {
+          tipo: 'act',
+          instruccion: `type "${ASUNTO}" into the Asunto input field`,
+          metodo: 'fill',
+          argumentos: [ASUNTO],
+        },
+        selector: '/html/body/div[7]/div[3]/div/form/input[2]',
+        valorCensurado: ASUNTO,
+        estrategiasPercibidas: [LEIDO_ASUNTO, xpath('/html/body/div[7]/div[3]/div/form/input[2]')],
+      }),
+      paso({ idx: 8, accion: { tipo: 'screenshot', instruccion: null, metodo: null, argumentos: [] } }),
+      paso({
+        idx: 9,
+        accion: { tipo: 'act', instruccion: 'click the message body area', metodo: 'click', argumentos: [] },
+        estrategiasPercibidas: [LEIDO_CUERPO],
+      }),
+      paso({
+        idx: 10,
+        accion: {
+          tipo: 'act',
+          instruccion: `type "${CUERPO}" into the message body to finish the email`,
+          metodo: 'fill',
+          argumentos: [CUERPO],
+        },
+        selector: '/html/body/div[7]/div[3]/div/form/div[1]',
+        valorCensurado: CUERPO,
+        estrategiasPercibidas: [LEIDO_CUERPO, xpath('/html/body/div[7]/div[3]/div/form/div[1]')],
+      }),
+      paso({ idx: 11, accion: { tipo: 'screenshot', instruccion: null, metodo: null, argumentos: [] } }),
+      paso({ idx: 12, accion: { tipo: 'think', instruccion: null, metodo: null, argumentos: [] } }),
+      // Los DOS pasos del SISTEMA, en el orden en que el canal los intercala: primero la verificacion
+      // que comparo, despues el veredicto de la barrera, y detras el click que consumo el envio.
+      verificacionSuperada(13),
+      barreraDeIdentidad(14),
+      envio,
+      paso({ idx: 16, accion: { tipo: 'done', instruccion: null, metodo: null, argumentos: [] } }),
+    ];
+  }
+
+  function procedimiento(pasos = corridaDeLas0327()) {
+    return promoverTrayectoria({
+      pasos: pasosConEstrategiasPercibidas(pasos),
+      dominio: DOMINIO,
+      objetivo: OBJETIVO,
+      estado: 'exitosa',
+      exigeVerificacion: true,
+    });
+  }
+
+  /** Las cinco clases que el atlas tenia corroboradas ANTES de que entrara la del boton de envio. */
+  const CINCO_CLASES = new Set([
+    'click|rol:button|redactar',
+    'click|atributo:aria-label|destinatarios en para',
+    'escribir|atributo:aria-label|destinatarios en para',
+    'escribir|atributo:aria-label|asunto',
+    'escribir|atributo:aria-label|cuerpo del mensaje',
+  ]);
+
+  /** La sexta, la que el PR 282 dejo en el atlas: rol mas nombre accesible completo. */
+  const CLASE_DEL_ENVIO = 'click|rol:button|enviar (ctrl-enter)';
+
+  function publicarCon(clases: ReadonlySet<string>) {
+    const material = procedimiento();
+    if (!material.promovida) throw new Error(`la conversion rechazo: ${material.motivo}`);
+    return plantillaDeLaCorrida({
+      pasos: material.pasos,
+      dominio: DOMINIO,
+      dominios: [DOMINIO],
+      verboBloqueado: 'enviar',
+      clasesCorroboradas: clases,
+    });
+  }
+
+  it('la traza son 17 pasos, con la barrera en el idx 14 y el click de Enviar en el 15', () => {
+    const pasos = corridaDeLas0327();
+    expect(pasos).toHaveLength(17);
+    expect(pasos.every((p) => p.estrategias.length === 0)).toBe(true);
+    // Ningun paso de la corrida viene con exito false: el bloqueo del PR 281 ya no aplica aqui, y por
+    // eso este caso quedaba fuera de aquel arreglo.
+    expect(pasos.filter((p) => !p.exito)).toEqual([]);
+    expect(pasos[14]?.accion.tipo).toBe('identidad:habria_bloqueado');
+    expect(pasos[14]?.accion.instruccion).toContain('barrera de identidad sobre la accion del motor');
+    expect(pasos[14]?.estrategias).toEqual([]);
+    expect(pasos[15]?.accion.instruccion).toBe('click the Enviar button');
+    // Los DOS pasos del sistema llegan sellados; los quince del motor, no.
+    expect(pasos.filter((p) => p.sintetico === true).map((p) => p.idx)).toEqual([13, 14]);
+  });
+
+  it('ARMA EL PROCEDIMIENTO: el veredicto de la barrera se descarta y no aborta nada', () => {
+    const material = procedimiento();
+    expect(material.promovida).toBe(true);
+    if (!material.promovida) return;
+    expect(material.pasos.map((p) => p.accion)).toEqual([
+      'navegar',
+      'click',
+      'escribir',
+      'teclas',
+      'escribir',
+      'escribir',
+      'verificar',
+      'click',
+    ]);
+    // El veredicto no deja rastro de metodo descartado: nunca fue un metodo, ni un gesto, ni un paso.
+    expect(material.metodosDescartados).toBeUndefined();
+    // Los tres datos declarados viajan como marcadores, jamas como valores.
+    expect(material.pasos.filter((p) => p.accion === 'escribir').map((p) => p.valor)).toEqual([
+      { tipo: 'parametro', parametro: 'destinatario' },
+      { tipo: 'parametro', parametro: 'asunto' },
+      { tipo: 'parametro', parametro: 'cuerpo' },
+    ]);
+  });
+
+  it('las clases que declara incluyen la del boton de envio que el atlas ya tiene', () => {
+    const material = procedimiento();
+    if (!material.promovida) throw new Error(material.motivo);
+    expect(material.pasos.map((p) => claseDeElemento(p.accion, p.estrategias))).toEqual([
+      null, // navegar
+      'click|rol:button|redactar',
+      'escribir|atributo:aria-label|destinatarios en para',
+      null, // teclas
+      'escribir|atributo:aria-label|asunto',
+      'escribir|atributo:aria-label|cuerpo del mensaje',
+      null, // verificar
+      CLASE_DEL_ENVIO,
+    ]);
+  });
+
+  it('con las seis clases corroboradas, INCLUIDA la del boton de envio, la corrida PUBLICA', () => {
+    const veredicto = publicarCon(new Set([...CINCO_CLASES, CLASE_DEL_ENVIO]));
+    expect(veredicto.publicable).toBe(true);
+    if (!veredicto.publicable) return;
+    expect(veredicto.plantilla.pasos).toHaveLength(7);
+    expect(veredicto.plantilla.codigoDeIntencion).toBe('enviar');
+    expect(veredicto.plantilla.dominiosClave).toBe(DOMINIO);
+    expect(veredicto.plantilla.marcadoresClave).toBe('asunto+cuerpo+destinatario');
+    const serializado = JSON.stringify(veredicto.plantilla);
+    for (const prohibido of [DESTINATARIO, ASUNTO, CUERPO, 'xpath', 'ruta', '/html', 'identidad']) {
+      expect(serializado, prohibido).not.toContain(prohibido);
+    }
+  });
+
+  it('sin la clase del boton de envio el rechazo es el de la puerta de publicacion, no el de la conversion', () => {
+    const veredicto = publicarCon(CINCO_CLASES);
+    expect(veredicto.publicable).toBe(false);
+    if (veredicto.publicable) return;
+    expect(veredicto.motivo).toBe('clase_no_corroborada');
+  });
+
+  it('el mismo veredicto SIN el sello, como vuelve de la base, tambien se descarta', () => {
+    // pasos_trayectoria no persiste la marca (V030 no tiene columna), asi que el job de guardar como
+    // tarea aprendida reconstruye estos pasos sin ella. La cola por tipo de esPasoSintetico los cubre.
+    const pasos = corridaDeLas0327().map((p) => {
+      if (p.sintetico !== true) return p;
+      const sinSello: PasoCensurado = { ...p };
+      delete sinSello.sintetico;
+      return sinSello;
+    });
+    expect(pasos.some((p) => p.sintetico === true)).toBe(false);
+    const material = procedimiento(pasos);
+    expect(material.promovida).toBe(true);
+    if (!material.promovida) return;
+    expect(material.pasos.map((p) => p.accion)).toEqual([
+      'navegar',
+      'click',
+      'escribir',
+      'teclas',
+      'escribir',
+      'escribir',
+      'verificar',
+      'click',
+    ]);
+  });
+
+  it('el click de Enviar que SI llego al navegador y fallo sigue tumbando la publicacion', () => {
+    // La mitad de la regla que no se afloja: la accion irreversible la ejecuto el navegador, asi que
+    // un fallo suyo es un fallo real del procedimiento.
+    const pasos = corridaDeLas0327({ ...clickDeEnvio([LEIDO_ENVIO]), exito: false });
+    const material = procedimiento(pasos);
+    expect(material.promovida).toBe(false);
+    if (material.promovida) return;
+    expect(material.regla).toBe('paso_fallido');
+    expect(material.paso).toBe(15);
+  });
+
+  it('EL OTRO RECHAZO, que este arreglo no toca: el click de Enviar SIN localizacion', () => {
+    // Con el control ya desmontado y sin nada que derivar del selector, el click de Enviar queda sin
+    // una sola estrategia. Ese paso SI llego al navegador, asi que la conversion lo sigue rechazando
+    // con 'click_sin_localizacion_sin_cobertura' y NOMBRANDO SU PROPIO indice (15), no el 14 del
+    // veredicto de la barrera. Queda fijado aqui para que los dos rechazos no se vuelvan a confundir:
+    // el de la barrera es el que este PR cierra, este otro es un problema de localizacion del control
+    // final y se arregla dandole al paso su localizador, no descartandolo.
+    const material = procedimiento(corridaDeLas0327(clickDeEnvio([])));
+    expect(material.promovida).toBe(false);
+    if (material.promovida) return;
+    expect(material.regla).toBe('click_sin_localizacion_sin_cobertura');
+    expect(material.paso).toBe(15);
   });
 });

@@ -70,6 +70,20 @@ export interface PasoCensurado {
    */
   estrategiasPercibidas?: EstrategiaLocalizacion[];
   /**
+   * PASO SINTETICO: lo escribio el SISTEMA para dejar constancia de un VEREDICTO (la verificacion
+   * determinista, un rechazo de la guardia, la barrera de identidad), no el motor para dejar
+   * constancia de algo que hizo. La accion que describe JAMAS llego al navegador.
+   *
+   * ES UN CRITERIO ESTRUCTURAL, y por eso vive aqui y no en una lista de tipos: la conversion a
+   * receta y a plantilla descarta el paso por esta marca, sin tener que reconocer el tipo con el que
+   * cada veredicto se registra (ver esPasoSintetico, receta-web.ts). Un veredicto NUEVO que entre por
+   * el mismo canal queda cubierto sin tocar la conversion.
+   *
+   * Igual que `estrategias`, NO se persiste: pasos_trayectoria (V030) no tiene columna y este PR no la
+   * agrega. Vive el tiempo que dura la corrida, que es cuando la conversion lo necesita.
+   */
+  sintetico?: boolean;
+  /**
    * SITIO en el que ocurrio el paso (tareas multisitio). Lo estampa el handler al cerrar el tramo:
    * dentro de un tramo TODOS los pasos pertenecen al mismo sitio, porque un cambio de sitio termina
    * el tramo. Es lo que permite promover una receta que cruza sitios sabiendo a cual pertenece cada

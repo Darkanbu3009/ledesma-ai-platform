@@ -2269,6 +2269,9 @@ function conEtiquetasDePromocion(
 ): PasoCensurado[] {
   const etiquetas = promociones.map((promocion, i): PasoCensurado => ({
     idx: pasos.length + i,
+    // La etiqueta es un VEREDICTO del sistema, no una accion sobre la pagina: se sella sintetica por
+    // el mismo criterio con el que se sellan las de la guardia (ver `sintetico`, trayectoria.ts).
+    sintetico: true,
     accion: {
       tipo: 'receta:promovida',
       instruccion: `la tarea se ajusto sola: el paso ${promocion.pasoIdx + 1} ahora se localiza primero de otra forma (${promocion.clave})`,
@@ -3517,6 +3520,13 @@ async function cerrarSesionBestEffort(deps: TareaWebDeps, sesionExternaId: strin
  * Las acciones del agente son las de tipo 'act' de la traza (una por llamada a la tool, que es
  * exactamente lo que la guardia revisa). Una verificacion que BLOQUEO no tiene accion detras (nunca
  * llego al navegador) y cierra la traza.
+ *
+ * ES ADEMAS EL PUNTO EN EL QUE SE SELLA LO SINTETICO. Todo lo que llega por `verificaciones` lo
+ * escribio el SISTEMA (la verificacion determinista, CUALQUIER rechazo de la guardia y la barrera de
+ * identidad) y describe una accion que jamas llego al navegador; todo lo que llega por `delMotor` son
+ * las acciones que el motor SI ejecuto. Sellar aqui, y no en cada constructor, es lo que cierra la
+ * categoria: un veredicto NUEVO que se registre por este canal queda marcado sin tocar una linea mas,
+ * y ningun constructor tiene que acordarse de marcarlo (ver `sintetico`, trayectoria.ts).
  */
 function intercalarVerificaciones(
   delMotor: PasoCensurado[],
@@ -3530,7 +3540,7 @@ function intercalarVerificaciones(
     if (paso.accion.tipo === 'act') {
       let siguiente = pendientes[0];
       while (siguiente !== undefined && siguiente.accionesPrevias <= acciones) {
-        pasos.push(siguiente.paso);
+        pasos.push(comoPasoSintetico(siguiente.paso));
         pendientes.shift();
         siguiente = pendientes[0];
       }
@@ -3538,8 +3548,13 @@ function intercalarVerificaciones(
     }
     pasos.push(paso);
   }
-  for (const pendiente of pendientes) pasos.push(pendiente.paso);
+  for (const pendiente of pendientes) pasos.push(comoPasoSintetico(pendiente.paso));
   return pasos;
+}
+
+/** El paso del sistema, sellado como SINTETICO. Copia: los pasos del canal no se mutan. */
+function comoPasoSintetico(paso: PasoCensurado): PasoCensurado {
+  return { ...paso, sintetico: true };
 }
 
 /** Tamano del lote de la escritura incremental (FIX D): cada N acciones nuevas se vuelca un lote. */

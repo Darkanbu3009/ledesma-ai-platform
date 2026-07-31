@@ -374,6 +374,25 @@ describe('la barrera de identidad se interpone en el motor libre', () => {
     );
   });
 
+  it('el veredicto entra a la traza SELLADO como sintetico, y las acciones del motor no', async () => {
+    // EL SELLO ES ESTRUCTURAL y lo pone el canal por el que los veredictos del sistema entran a la
+    // traza (intercalarVerificaciones, tarea-web.ts), no cada constructor. Es lo que permite a la
+    // conversion a plantilla descartar un veredicto sin reconocer su tipo (esPasoSintetico,
+    // receta-web.ts) y lo que evita que la proxima clase de veredicto vuelva a tumbar la publicacion.
+    // No se persiste: pasos_trayectoria no tiene columna para el.
+    const { deps, trayectorias } = escenario({ barreraIdentidad: 'observacion' });
+    await expect(procesarTareaWeb(deps, makeJob())).resolves.toBe('completada');
+    const pasos = trayectorias.guardadas[0]?.pasos ?? [];
+    const sellados = pasos.filter((p: PasoCensurado) => p.sintetico === true);
+    // Los pasos del sistema de esta corrida: el de la barrera y el de la verificacion previa.
+    expect(sellados.map((p: PasoCensurado) => p.accion.tipo)).toContain('identidad:permitida');
+    expect(sellados.every((p: PasoCensurado) => p.accion.tipo !== 'act')).toBe(true);
+    // Y ni una accion del motor queda sellada: esas si llegaron al navegador.
+    expect(
+      pasos.filter((p: PasoCensurado) => p.accion.tipo === 'act').every((p) => p.sintetico === undefined),
+    ).toBe(true);
+  });
+
   it('APAGADA no evalua nada: ni lectura extra ni paso sintetico', async () => {
     const { deps, navegador, motor, trayectorias } = escenario({ barreraIdentidad: 'apagada' });
     await expect(procesarTareaWeb(deps, makeJob())).resolves.toBe('completada');

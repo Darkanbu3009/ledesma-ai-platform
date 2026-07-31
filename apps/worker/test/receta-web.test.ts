@@ -1112,16 +1112,33 @@ describe('promoverTrayectoria con escrituras sin localizacion (politica condicio
 // -------------------------------------------------------------------------------------------------
 
 /**
- * PASOS SINTETICOS FALLIDOS: los que el SISTEMA escribe en la traza para dejar constancia de una
- * accion que NUNCA LLEGO AL NAVEGADOR (caso real de produccion del 31 jul 2026 01:02 UTC, ver el
- * bloque de la corrida real en plantillas-motor-libre.test.ts).
+ * PASOS SINTETICOS: los que el SISTEMA escribe en la traza para dejar constancia de un VEREDICTO
+ * sobre una accion que NUNCA LLEGO AL NAVEGADOR. Dos casos reales de produccion, la misma categoria:
+ * el rechazo de la guardia del 31 jul 2026 01:02 UTC (que llegaba con exito false) y los veredictos
+ * de la barrera de identidad del 31 jul 03:27 UTC (que llegan con exito TRUE y sin estrategias, ver
+ * el bloque de la corrida real en plantillas-motor-libre.test.ts).
+ *
+ * Se cubren TODOS los productores de pasos sinteticos que hoy pueden aparecer en una trayectoria:
+ * la verificacion determinista, cualquier rechazo de la guardia, la barrera de identidad en sus DOS
+ * formas (la del motor libre, sin metodo, y la del ejecutor de recetas, con metodo 'click'), la
+ * etiqueta de promocion de estrategias -- y un veredicto de un tipo que TODAVIA NO EXISTE, que es lo
+ * que fija que el criterio sea la marca estructural y no una lista de tipos.
  *
  * Los pasos se construyen con las MISMAS funciones que corren en produccion -- no con literales
- * copiados aqui -- para que un cambio de tipo o de `exito` en cualquiera de las dos familias rompa
- * este test en vez de reabrir el rechazo en silencio.
+ * copiados aqui -- siempre que la funcion sea exportable; donde no lo es, la etiqueta y el `exito`
+ * salen igualmente de la fuente compartida (resumenDeIdentidad), para que un cambio en cualquiera de
+ * las dos familias rompa este test en vez de reabrir el rechazo en silencio.
  */
-describe('promoverTrayectoria con pasos sinteticos fallidos (la accion no llego al navegador)', () => {
+describe('promoverTrayectoria con pasos sinteticos (la accion no llego al navegador)', () => {
   const OBJETIVO = 'envia el correo a martin@x.com';
+
+  /** Los CUATRO veredictos de la barrera, tal como resumenDeIdentidad los resuelve. */
+  const VEREDICTOS_DE_IDENTIDAD = [
+    { resultado: { tipo: 'bloquear', motivo: 'clase_no_corroborada' }, modo: 'activa' },
+    { resultado: { tipo: 'bloquear', motivo: 'clase_no_corroborada' }, modo: 'observacion' },
+    { resultado: { tipo: 'permitir' }, modo: 'activa' },
+    { resultado: { tipo: 'no_evaluable' }, modo: 'activa' },
+  ] as const;
 
   /** El paso que la conversion tiene que conservar para que quede procedimiento que armar. */
   const clickUtil = (idx: number): PasoCensurado =>
@@ -1209,13 +1226,7 @@ describe('promoverTrayectoria con pasos sinteticos fallidos (la accion no llego 
     // La etiqueta y el `exito` los resuelve resumenDeIdentidad, que es la fuente compartida por el
     // camino de recetas y el del motor libre: el unico veredicto con exito false es el bloqueo
     // EFECTIVO (modo activa), y ese es el que la accion no llego a ejecutar.
-    const veredictos = [
-      { resultado: { tipo: 'bloquear', motivo: 'clase_no_corroborada' }, modo: 'activa' },
-      { resultado: { tipo: 'bloquear', motivo: 'clase_no_corroborada' }, modo: 'observacion' },
-      { resultado: { tipo: 'permitir' }, modo: 'activa' },
-      { resultado: { tipo: 'no_evaluable' }, modo: 'activa' },
-    ] as const;
-    for (const { resultado, modo } of veredictos) {
+    for (const { resultado, modo } of VEREDICTOS_DE_IDENTIDAD) {
       const { etiqueta, exito } = resumenDeIdentidad(resultado, modo);
       expect(etiqueta.startsWith('identidad:'), etiqueta).toBe(true);
       const sintetico = paso({
@@ -1230,6 +1241,132 @@ describe('promoverTrayectoria con pasos sinteticos fallidos (la accion no llego 
       if (!promocion.promovida) return;
       expect(promocion.pasos.map((p) => p.accion), etiqueta).toEqual(['click']);
     }
+  });
+
+  it('la barrera del MOTOR LIBRE con la forma EXACTA de produccion se descarta en los cuatro veredictos', () => {
+    // LA FORMA EXACTA de construirPasoDeIdentidad (tarea-web.ts): sin metodo, sin estrategias, con el
+    // motivo entre los argumentos y con la ACCION DEL MOTOR dentro de la instruccion -- o sea, con la
+    // palabra "click" y el nombre del boton irreversible dentro del texto del paso. Es la forma del
+    // idx 14 de la corrida del 31 jul 03:27 UTC. El paso llega SELLADO como sintetico por el canal
+    // de veredictos (intercalarVerificaciones), y ese sello es lo unico que la conversion mira.
+    for (const { resultado, modo } of VEREDICTOS_DE_IDENTIDAD) {
+      const { etiqueta, exito } = resumenDeIdentidad(resultado, modo);
+      const barrera = paso({
+        idx: 1,
+        sintetico: true,
+        accion: {
+          tipo: etiqueta,
+          instruccion: 'barrera de identidad sobre la accion del motor: click the Enviar button',
+          metodo: null,
+          argumentos: resultado.tipo === 'bloquear' ? [resultado.motivo] : [],
+        },
+        estrategias: [],
+        selector: null,
+        url: null,
+        exito,
+      });
+      const promocion = promover([clickUtil(0), barrera], OBJETIVO);
+      expect(promocion.promovida, etiqueta).toBe(true);
+      if (!promocion.promovida) return;
+      expect(promocion.pasos.map((p) => p.accion), etiqueta).toEqual(['click']);
+      // Y NO se contabiliza como un metodo no representable descartado: nunca fue un metodo.
+      expect(promocion.metodosDescartados, etiqueta).toBeUndefined();
+    }
+  });
+
+  it('la barrera del EJECUTOR DE RECETAS (metodo click) se descarta: es el mismo veredicto con otra forma', () => {
+    // LA OTRA FORMA de la MISMA barrera (pasoDeIdentidad, ejecutor-receta.ts): el paso lleva el
+    // METODO del paso de receta que iba a consumar la accion ('click' o 'teclas') y ninguna
+    // estrategia. Con esa forma la conversion lo leia como un CLICK SIN LOCALIZACION y, al no seguirle
+    // ninguna escritura, rechazaba la trayectoria entera con 'click_sin_localizacion_sin_cobertura'.
+    // Llega SIN sello (la traza de la receta se reconstruye desde la base, que no persiste la marca),
+    // asi que lo cubre la cola por tipo de esPasoSintetico.
+    for (const metodo of ['click', 'teclas']) {
+      for (const { resultado, modo } of VEREDICTOS_DE_IDENTIDAD) {
+        const { etiqueta, exito } = resumenDeIdentidad(resultado, modo);
+        const barrera = paso({
+          idx: 1,
+          accion: {
+            tipo: etiqueta,
+            instruccion: 'barrera de identidad sobre el paso 4',
+            metodo,
+            argumentos: resultado.tipo === 'bloquear' ? [resultado.motivo] : [],
+          },
+          estrategias: [],
+          selector: null,
+          exito,
+        });
+        const promocion = promover([clickUtil(0), barrera], OBJETIVO);
+        expect(promocion.promovida, `${metodo} ${etiqueta}`).toBe(true);
+        if (!promocion.promovida) return;
+        expect(promocion.pasos.map((p) => p.accion), `${metodo} ${etiqueta}`).toEqual(['click']);
+      }
+    }
+  });
+
+  it('la etiqueta de PROMOCION DE ESTRATEGIAS se descarta sin aportar nada', () => {
+    // conEtiquetasDePromocion (tarea-web.ts): "la tarea se ajusto sola". Es un veredicto del sistema
+    // sobre lo aprendido, no una accion sobre la pagina, y llega sellado como sintetico.
+    const etiqueta = paso({
+      idx: 1,
+      sintetico: true,
+      accion: {
+        tipo: 'receta:promovida',
+        instruccion: 'la tarea se ajusto sola: el paso 2 ahora se localiza primero de otra forma (atributo:aria-label)',
+        metodo: null,
+        argumentos: [],
+      },
+      estrategias: [],
+      selector: JSON.stringify(ROL),
+    });
+    const promocion = promover([clickUtil(0), etiqueta], OBJETIVO);
+    expect(promocion.promovida).toBe(true);
+    if (!promocion.promovida) return;
+    expect(promocion.pasos.map((p) => p.accion)).toEqual(['click']);
+    expect(promocion.metodosDescartados).toBeUndefined();
+  });
+
+  it('un veredicto SINTETICO DE UN TIPO QUE TODAVIA NO EXISTE se descarta por el sello, sin lista que actualizar', () => {
+    // ESTE ES EL TEST QUE FIJA LA CATEGORIA, no el caso. La lista de tipos se quedo corta dos veces
+    // (el rechazo de la guardia y despues la barrera de identidad); el sello no depende del tipo, asi
+    // que un veredicto FUTURO queda cubierto el dia que se registre, con la peor forma posible: la de
+    // un click sin localizacion al que no le sigue ninguna escritura, que es justo la que abortaba.
+    for (const exito of [true, false]) {
+      const futuro = paso({
+        idx: 1,
+        sintetico: true,
+        accion: {
+          tipo: 'politica:habria_detenido',
+          instruccion: 'click the Enviar button',
+          metodo: 'click',
+          argumentos: [],
+        },
+        estrategias: [],
+        selector: null,
+        exito,
+      });
+      const promocion = promover([clickUtil(0), futuro], OBJETIVO);
+      expect(promocion.promovida, `exito ${exito}`).toBe(true);
+      if (!promocion.promovida) return;
+      expect(promocion.pasos.map((p) => p.accion), `exito ${exito}`).toEqual(['click']);
+    }
+  });
+
+  it('el MISMO paso SIN sello y con tipo del motor sigue contando como accion de la pagina', () => {
+    // El contrapunto exacto del test de arriba: identica forma, sin `sintetico`. Es un act del motor
+    // que llego al navegador, asi que sigue reclamando cobertura (y abortando cuando falla). Es lo
+    // que impide que el sello se convierta en una puerta trasera para descartar acciones reales.
+    const real = paso({
+      idx: 1,
+      accion: { tipo: 'act', instruccion: 'click the Enviar button', metodo: 'click', argumentos: [] },
+      estrategias: [],
+      selector: null,
+    });
+    const promocion = promover([clickUtil(0), real], OBJETIVO);
+    expect(promocion.promovida).toBe(false);
+    if (promocion.promovida) return;
+    expect(promocion.regla).toBe('click_sin_localizacion_sin_cobertura');
+    expect(promocion.paso).toBe(1);
   });
 
   it('una accion del MOTOR que SI llego al navegador y fallo sigue abortando la conversion', () => {
