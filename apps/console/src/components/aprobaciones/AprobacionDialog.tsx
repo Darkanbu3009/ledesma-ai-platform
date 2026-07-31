@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, ImageOff, Loader2, ShieldAlert, X } from 'lucide-react';
 import type { AprobacionWeb } from '../../lib/aprobaciones';
-import { MAX_INSTRUCCION_CHARS } from '../../lib/aprobaciones';
+import { MAX_INSTRUCCION_CHARS, parsearOfrecimiento } from '../../lib/aprobaciones';
 import { useScreenshotAprobacion } from '../../lib/queries';
 import { useAprobarAprobacion, useRechazarAprobacion } from '../../lib/mutations';
 import { ApiError } from '../../lib/api';
@@ -33,6 +33,17 @@ export function AprobacionDialog({
   );
   const aprobar = useAprobarAprobacion();
   const rechazar = useRechazarAprobacion();
+
+  // OFRECIMIENTO DE UN PROCEDIMIENTO COMPARTIDO (V041): la descripcion persistida es un CODIGO de la
+  // plataforma, no una frase, y el texto se arma AQUI con las claves de i18n. Cuando no lo es (todo
+  // checkpoint anterior a este cambio), se muestra la descripcion tal cual, como siempre.
+  const ofrecimiento = parsearOfrecimiento(aprobacion.descripcion);
+  const datosDelOfrecimiento =
+    ofrecimiento === null || ofrecimiento.datos.length === 0
+      ? ''
+      : t('aprobaciones.plantilla.conDatos', {
+          lista: ofrecimiento.datos.map((dato) => t(`aprobaciones.plantilla.dato.${dato}`)).join(', '),
+        });
 
   // Sub-formulario "rechazar con instruccion": estado local del texto; se abre con el tercer boton.
   const [conInstruccion, setConInstruccion] = useState(false);
@@ -86,11 +97,13 @@ export function AprobacionDialog({
               {t('aprobaciones.modal.titulo')}
             </h2>
             <p className="mt-1 text-sm text-muted">
-              {t(
-                aprobacion.accionTipo === 'financiera'
-                  ? 'aprobaciones.modal.subtituloFinanciera'
-                  : 'aprobaciones.modal.subtituloIrreversible',
-              )}
+              {ofrecimiento !== null
+                ? t('aprobaciones.plantilla.subtitulo')
+                : t(
+                    aprobacion.accionTipo === 'financiera'
+                      ? 'aprobaciones.modal.subtituloFinanciera'
+                      : 'aprobaciones.modal.subtituloIrreversible',
+                  )}
             </p>
           </div>
           <button
@@ -128,8 +141,17 @@ export function AprobacionDialog({
 
           {/* La accion propuesta, en UNA linea de lenguaje natural. */}
           <p className="mt-4 rounded-xl border border-brasa-line bg-brasa-soft px-4 py-3 text-sm font-medium text-ink">
-            {aprobacion.descripcion}
+            {ofrecimiento !== null
+              ? t('aprobaciones.plantilla.descripcion', {
+                  dominio: ofrecimiento.dominio,
+                  accion: t(`aprobaciones.plantilla.accion.${ofrecimiento.intencion}`),
+                  datos: datosDelOfrecimiento,
+                })
+              : aprobacion.descripcion}
           </p>
+          {ofrecimiento !== null && (
+            <p className="mt-2 text-xs text-muted">{t('aprobaciones.plantilla.aclaracion')}</p>
+          )}
           <p className="mt-2 text-xs text-muted-soft">{t('aprobaciones.modal.expira')}</p>
 
           {conInstruccion && (

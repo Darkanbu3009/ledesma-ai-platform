@@ -192,10 +192,12 @@ function main(): void {
           vaultSecret: config.VAULT_SECRET,
         }),
       },
-      // PLANTILLAS COMPARTIDAS (V041): la segunda pieza del aprendizaje colectivo. Solo PUBLICA (nada
-      // lee esta tabla todavia) y solo las tareas de intencion irreversible. Activa desde el merge y
-      // sin flag, igual que el atlas: la clave se deriva de VAULT_SECRET con una ETIQUETA PROPIA, asi
-      // que no hace falta configurar nada nuevo en el despliegue.
+      // PLANTILLAS COMPARTIDAS (V041): la segunda pieza del aprendizaje colectivo, en sus dos
+      // sentidos. PUBLICA el procedimiento anonimo de una corrida de intencion irreversible con el
+      // efecto confirmado, y CONSUME el que descubrio otro origen -- siempre detras de un checkpoint
+      // de aprobacion humana, con la barrera de identidad en modo activo y sin escalada al modelo.
+      // Activa desde el merge y sin flag, igual que el atlas: la clave se deriva de VAULT_SECRET con
+      // una ETIQUETA PROPIA, asi que no hace falta configurar nada nuevo en el despliegue.
       //
       // La clave NO es la del atlas a proposito (ver clavePlantillas): con la misma clave, el mismo
       // owner produciria el mismo hash en las dos tablas globales y se podrian unir por ese hash.

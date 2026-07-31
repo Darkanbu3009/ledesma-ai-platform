@@ -1,16 +1,25 @@
 import { createHmac } from 'node:crypto';
 import {
+  actuaSobreElemento,
   dominiosClave,
+  esCodigoDeIntencion,
+  esDominioDePaso,
+  esMarcadorParametro,
   esPublicable,
+  marcadorDeRanura,
   marcadoresClave,
   marcadoresDePasosPublicables,
+  parsearPasosPublicables,
+  tienePasoDeVerificacion,
   type CodigoDeIntencion,
+  type MarcadorParametro,
   type MotivoDeNoPublicable,
   type PasoDeReceta,
   type PasoPublicable,
 } from '@ledesma-platform/shared';
 import { claseDeElemento } from './atlas-sitios.js';
 import { VERBOS_ACCION_BLOQUEADA, type AccionIrreversible } from './prompt-tarea-web.js';
+import type { ValoresDeParametros } from './receta-web.js';
 
 /**
  * PLANTILLAS COMPARTIDAS (V041), parte PURA: convierte una receta que el propio origen acaba de
@@ -26,8 +35,11 @@ import { VERBOS_ACCION_BLOQUEADA, type AccionIrreversible } from './prompt-tarea
  * receta-web.ts. La persistencia vive en el repositorio del backend
  * (PlantillasCompartidasRepository) y la orquestacion en tarea-web.ts.
  *
- * ESTE MODULO SOLO PRODUCE. No tiene ni una funcion que lea una plantilla ajena ni que la convierta
- * en pasos ejecutables: el consumo es un cambio aparte.
+ * DOS MITADES, y la frontera entre ellas es la misma en los dos sentidos. La de ARRIBA produce la
+ * plantilla que se publica; la de ABAJO (CONSUMO) decide si una plantilla AJENA se le puede ofrecer a
+ * otro usuario y la convierte en pasos ejecutables. Las dos comparten `claseDeElemento`, el contrato
+ * de `packages/shared` y la tabla de codigos de intencion: lo que una escribe es exactamente lo que
+ * la otra sabe leer, y ninguna de las dos toca la base ni el navegador.
  *
  * LOS TRES INVARIANTES, y donde los hace cumplir este archivo:
  *
@@ -195,4 +207,299 @@ export function plantillaDeLaCorrida(entrada: {
       pasos: veredicto.pasos,
     },
   };
+}
+
+// --- CONSUMO -------------------------------------------------------------------------------------
+
+/**
+ * EL ESTADO NO DECIDE EL CHECKPOINT. Que estados son SERVIBLES lo resuelve la query
+ * (`buscarServible`, apps/backend/src/plantillas-compartidas): 'retirada' no sale nunca. Lo que se
+ * decide aqui es otra cosa: el checkpoint de aprobacion humana es INCONDICIONAL para toda plantilla
+ * ajena, sea cual sea su estado. Hoy eso es equivalente (nadie escribe 'corroborada' todavia) y
+ * ejecutar un procedimiento ajeno sin que su dueno lo vea seria decidir por el.
+ */
+
+/** La CLAVE de tres columnas con la que un consumidor busca su plantilla. */
+export interface IdentidadDePlantilla {
+  dominiosClave: string;
+  codigoDeIntencion: CodigoDeIntencion;
+  marcadoresClave: string;
+}
+
+/**
+ * LA IDENTIDAD QUE ESTA TAREA BUSCARIA, calculada con lo que el consumidor ya tiene ANTES de mirar
+ * ninguna fila: sus dominios autorizados, el verbo irreversible que la deteccion determinista saco de
+ * su propio texto y los datos que su propio objetivo declara.
+ *
+ * ES UN WHERE DE TRES COLUMNAS Y NADA MAS, y esa es la decision de diseno completa: no hay modelo,
+ * no hay ranking y no hay texto libre en ninguno de los tres componentes (ocho codigos cerrados, seis
+ * marcadores cerrados y los hostnames que el propio usuario conecto). Por eso el consumo no toca el
+ * prompt del elector ni su catalogo: una plantilla no compite con las tareas propias, se busca por
+ * igualdad exacta despues de que las dos vias propias no encontraron nada.
+ *
+ * Devuelve null -- y no hay busqueda -- cuando la tarea no pide ninguna accion irreversible (sin
+ * codigo de intencion no hay plantilla que buscar: ver la cabecera) o cuando no hay dominios.
+ */
+export function identidadDeConsumo(entrada: {
+  dominios: readonly string[];
+  verboBloqueado: string | null;
+  /** Marcadores que el objetivo del consumidor DECLARA (valoresDeParametros, receta-web.ts). */
+  marcadores: readonly MarcadorParametro[];
+}): IdentidadDePlantilla | null {
+  const codigo = codigoDeIntencion(entrada.verboBloqueado);
+  if (codigo === null) return null;
+  const clave = dominiosClave(entrada.dominios);
+  if (clave === '') return null;
+  return {
+    dominiosClave: clave,
+    codigoDeIntencion: codigo,
+    marcadoresClave: marcadoresClave(entrada.marcadores),
+  };
+}
+
+/**
+ * POR QUE una plantilla ajena NO se le puede ofrecer a este consumidor. Conjunto CERRADO, cada motivo
+ * rechaza la plantilla COMPLETA y en todos los casos la tarea sigue por el motor libre. Es el
+ * vocabulario que viaja al campo de diagnostico del resultado del job, con el mismo criterio que
+ * `VeredictoDePlantilla` (tarea-web.ts): ni un dato del usuario, del sitio ni de la tabla.
+ */
+export type MotivoDeNoAplicable =
+  /** Los pasos de la fila no validan contra el contrato de plantillas. */
+  | 'contrato_invalido'
+  /** Un paso corre en un dominio que ESTA tarea no autorizo, o distinto del de la conexion. */
+  | 'dominio_no_autorizado'
+  /** Un paso que actua sobre un elemento declara una clase que el atlas no corroboro AQUI. */
+  | 'clase_no_corroborada'
+  /** La clase que el paso DECLARA no es la que producen sus propias estrategias. */
+  | 'clase_no_coincide'
+  /** Un dato que la plantilla teclea no esta declarado en el objetivo del consumidor. */
+  | 'dato_sin_declarar'
+  /** El objetivo pide una accion irreversible y la plantilla no trae su paso `verificar`. */
+  | 'sin_verificacion';
+
+export type ResultadoDeAplicabilidad =
+  | { aplica: true; pasos: PasoDeReceta[]; marcadores: MarcadorParametro[] }
+  | { aplica: false; motivo: MotivoDeNoAplicable; idx: number };
+
+/** El marcador con el que se llena un paso de escritura de plantilla. null = el paso no dice cual. */
+function marcadorDelPaso(valor: PasoPublicable['valor']): MarcadorParametro | null {
+  if (valor === null) return null;
+  return valor.tipo === 'parametro' ? valor.parametro : marcadorDeRanura(valor.clase);
+}
+
+/**
+ * ¿SE PUEDE OFRECER esta plantilla ajena a ESTE consumidor, y con que pasos? TODO falla cerrado: ante
+ * cualquiera de los seis motivos la plantilla NO aplica, la tarea sigue por el motor libre (que era la
+ * linea base) y el motivo queda en el diagnostico. No hay ninguna rama que recorte, complete o adivine
+ * para poder ejecutar igual.
+ *
+ * LAS CINCO PUERTAS, en este orden:
+ *
+ *  1. EL CONTRATO. `parsearPasosPublicables` es el MISMO parser que corre el repositorio antes del
+ *     insert. Una fila manipulada en la base no llega al navegador de nadie.
+ *  2. EL DOMINIO. Cada paso dice donde corre y ese dominio tiene que ser el de la conexion sobre la
+ *     que se va a ejecutar. Una plantilla que nombre otro dominio -- aunque la tarea lo autorice -- no
+ *     aplica en este cambio: el checkpoint guarda UNA sesion y el consumo multisitio necesita abrir
+ *     una por sitio DESPUES de la decision humana, que es un mecanismo distinto.
+ *  3. LA CLASE, en TODOS los pasos que tocan el DOM y no solo en el irreversible. Es la barrera de
+ *     identidad adelantada al momento de decidir, y el motivo es el paso EXTRA INTERCALADO: un paso
+ *     que crea un filtro de correo que reenvia todo a la direccion de un atacante es irreversible EN
+ *     EFECTO y completamente invisible para VERBOS_ACCION_BLOQUEADA (no existe el verbo "filtrar" ni
+ *     "reenviar siempre"), asi que no consume cupo, no dispara la verificacion determinista y el
+ *     checkpoint que el usuario aprobo habla de otra cosa. Lo unico que lo contiene es exigir que cada
+ *     paso apunte a un control que el atlas ya corroboro EN ESTE DOMINIO PARA ESTE CONSUMIDOR.
+ *     Se comprueban DOS cosas y no una: que la clase este corroborada, y que la clase DECLARADA sea la
+ *     que producen las propias estrategias del paso (`claseDeElemento`, la misma funcion del atlas).
+ *     Sin lo segundo, una fila podria declarar una clase inocente y llevar estrategias que apuntan a
+ *     otro control: la primera comprobacion pasaria y el paso actuaria sobre lo que nadie corroboro.
+ *  4. LOS DATOS. Cada paso de escritura resuelve su marcador (el del parametro, o el de la ranura por
+ *     su clase) y ese dato tiene que estar DECLARADO en el objetivo del consumidor. Un dato que falta
+ *     no se completa ni se hereda: la plantilla no aplica.
+ *  5. LA VERIFICACION. Misma exigencia que `recetaAplicable` (ejecutor-receta.ts) y por el mismo
+ *     motivo: sin el paso `verificar`, ejecutar se saltaria la comparacion contra la pagina.
+ *
+ * Lo que devuelve son PASOS DE RECETA, que es lo que el ejecutor determinista sabe correr: la ranura
+ * se convierte en el marcador que la llena y la clase se queda fuera (la barrera la vuelve a derivar
+ * de las estrategias en cada paso, que es la fuente que no se puede falsear).
+ */
+export function plantillaAplicable(entrada: {
+  /** Los pasos CRUDOS tal como vuelven del jsonb. Se parsean aqui: la entrada no se presume valida. */
+  pasos: unknown;
+  /** Dominio de la conexion sobre la que se ejecutaria. */
+  dominio: string;
+  /** Datos que el objetivo del consumidor declara, ya resueltos a texto. */
+  valores: ValoresDeParametros;
+  /** Verbo irreversible del objetivo del consumidor. */
+  verboBloqueado: string | null;
+  /** Clases que el atlas tiene CORROBORADAS para ese dominio y para este origen. */
+  clasesCorroboradas: ReadonlySet<string>;
+}): ResultadoDeAplicabilidad {
+  const pasos = parsearPasosPublicables(entrada.pasos);
+  if (pasos === null) return { aplica: false, motivo: 'contrato_invalido', idx: -1 };
+
+  const dominio = entrada.dominio.trim().toLowerCase();
+  const marcadores = new Set<MarcadorParametro>();
+  const deReceta: PasoDeReceta[] = [];
+
+  for (const paso of pasos) {
+    if (paso.dominio !== dominio) {
+      return { aplica: false, motivo: 'dominio_no_autorizado', idx: paso.idx };
+    }
+
+    if (actuaSobreElemento(paso.accion)) {
+      const declarada = paso.claseDeElemento;
+      if (declarada === null || !entrada.clasesCorroboradas.has(declarada)) {
+        return { aplica: false, motivo: 'clase_no_corroborada', idx: paso.idx };
+      }
+      // La MISMA `claseDeElemento` del atlas sobre las estrategias que la plantilla lleva: si no
+      // reproduce la clase declarada, el paso esta hablando de un control y apuntando a otro.
+      if (claseDeElemento(paso.accion, paso.estrategias) !== declarada) {
+        return { aplica: false, motivo: 'clase_no_coincide', idx: paso.idx };
+      }
+    }
+
+    let valor: PasoDeReceta['valor'] = null;
+    if (paso.accion === 'escribir') {
+      const marcador = marcadorDelPaso(paso.valor);
+      // Una escritura sin marcador al que atarla no dice que teclear: el contrato ya lo rechaza, y
+      // aqui se vuelve a mirar porque de esto depende que la plantilla no ejecute a medias.
+      if (marcador === null) return { aplica: false, motivo: 'contrato_invalido', idx: paso.idx };
+      const texto = entrada.valores[marcador];
+      if (texto === undefined || texto === '') {
+        return { aplica: false, motivo: 'dato_sin_declarar', idx: paso.idx };
+      }
+      marcadores.add(marcador);
+      valor = { tipo: 'parametro', parametro: marcador };
+    }
+
+    deReceta.push({
+      idx: deReceta.length,
+      accion: paso.accion,
+      dominio: paso.dominio,
+      estrategias: [...paso.estrategias],
+      valor,
+      teclas: paso.teclas,
+      // Una plantilla no lleva rutas (no existe la accion 'navegar' en su contrato): el paso jamas
+      // puede sacar la sesion del usuario de su sitio.
+      ruta: null,
+      esperaMs: paso.esperaMs,
+    });
+  }
+
+  if (entrada.verboBloqueado !== null && !tienePasoDeVerificacion(deReceta)) {
+    return { aplica: false, motivo: 'sin_verificacion', idx: -1 };
+  }
+  return { aplica: true, pasos: deReceta, marcadores: [...marcadores].sort() };
+}
+
+/**
+ * MOTIVO NUEVO de `aprobaciones_web` (V027): el checkpoint con el que se le OFRECE al usuario un
+ * procedimiento que descubrio OTRA cuenta. Viaja como PREFIJO de `descripcion` porque `accion_tipo`
+ * tiene un CHECK cerrado de dos valores y este cambio no trae migracion; el precedente exacto es
+ * INSTRUCCION_CANCELADA_POR_USUARIO (aprobaciones-repository.ts), que ya usa una columna de texto como
+ * marca de maquina.
+ *
+ * NO TOCA NINGUN MOTIVO EXISTENTE: una aprobacion cuya descripcion no empieza con este prefijo se lee
+ * y se decide exactamente como hasta hoy.
+ */
+export const MOTIVO_PLANTILLA_COMPARTIDA = 'plantilla_compartida';
+
+/**
+ * LO QUE SE LE MUESTRA AL USUARIO, en forma de CODIGO y no de frase. Los tres componentes son
+ * vocabulario CERRADO de la plataforma (uno de los ocho codigos de intencion, un subconjunto de los
+ * seis marcadores y un hostname que el propio usuario conecto): NI UN CARACTER sale de
+ * `plantillas_compartidas`. La frase la redacta quien muestra -- la consola en el idioma del usuario,
+ * el correo en espanol -- desde este codigo.
+ *
+ * Es la unica forma de que el texto del checkpoint no pueda ser un canal: en la tabla no hay un solo
+ * texto libre, y aunque lo hubiera, por aqui no pasaria.
+ */
+export interface OfrecimientoDePlantilla {
+  codigoDeIntencion: CodigoDeIntencion;
+  marcadores: MarcadorParametro[];
+  dominio: string;
+}
+
+export function descripcionDeOfrecimiento(ofrecimiento: OfrecimientoDePlantilla): string {
+  return [
+    MOTIVO_PLANTILLA_COMPARTIDA,
+    ofrecimiento.codigoDeIntencion,
+    marcadoresClave(ofrecimiento.marcadores),
+    ofrecimiento.dominio,
+  ].join(':');
+}
+
+/**
+ * LEE la descripcion de una aprobacion y dice si es un ofrecimiento de plantilla. Devuelve null ante
+ * cualquier otra cosa -- incluida una descripcion que empiece con el prefijo pero no valide entera --
+ * y con eso la aprobacion vuelve a ser una aprobacion normal de las de siempre. Falla cerrada: un
+ * codigo que no sea uno de los ocho, o un marcador que no sea uno de los seis, no se interpretan.
+ */
+export function parsearOfrecimiento(descripcion: string): OfrecimientoDePlantilla | null {
+  const partes = descripcion.split(':');
+  if (partes.length !== 4 || partes[0] !== MOTIVO_PLANTILLA_COMPARTIDA) return null;
+  const codigo = partes[1] ?? '';
+  if (!esCodigoDeIntencion(codigo)) return null;
+  const crudos = (partes[2] ?? '').split('+').filter((marcador) => marcador !== '');
+  if (!crudos.every(esMarcadorParametro)) return null;
+  const dominio = (partes[3] ?? '').trim().toLowerCase();
+  if (!esDominioDePaso(dominio)) return null;
+  return { codigoDeIntencion: codigo, marcadores: crudos as MarcadorParametro[], dominio };
+}
+
+/**
+ * TIPO DE ACCION del checkpoint (`aprobaciones_web.accion_tipo`, dos valores cerrados desde V027).
+ * Es INFORMATIVO para el humano y no cambia ninguna garantia: los dos tipos exigen exactamente el
+ * mismo checkpoint. Se deriva del codigo de intencion con el mismo criterio que PISTAS_FINANCIERAS
+ * (aprobaciones.ts), que ya cuenta la suscripcion como dinero.
+ */
+const INTENCIONES_FINANCIERAS: ReadonlySet<CodigoDeIntencion> = new Set<CodigoDeIntencion>([
+  'pagar',
+  'transferir',
+  'comprar',
+  'cancelarSuscripcion',
+]);
+
+export function accionTipoDeIntencion(codigo: CodigoDeIntencion): 'irreversible' | 'financiera' {
+  return INTENCIONES_FINANCIERAS.has(codigo) ? 'financiera' : 'irreversible';
+}
+
+/** Como se nombra en espanol cada codigo de intencion. Tabla cerrada: no hay texto de nadie aqui. */
+const ACCION_EN_ESPANOL: Readonly<Record<CodigoDeIntencion, string>> = {
+  enviar: 'enviar algo',
+  publicar: 'publicar algo',
+  borrar: 'borrar algo',
+  pagar: 'hacer un pago',
+  transferir: 'hacer una transferencia',
+  comprar: 'hacer una compra',
+  firmar: 'firmar algo',
+  cancelarSuscripcion: 'cancelar una suscripcion',
+};
+
+/** Como se nombra en espanol cada dato. Tabla cerrada, los seis marcadores del contrato. */
+const DATO_EN_ESPANOL: Readonly<Record<MarcadorParametro, string>> = {
+  destinatario: 'destinatario',
+  monto: 'monto',
+  producto: 'producto',
+  cantidad: 'cantidad',
+  asunto: 'asunto',
+  cuerpo: 'cuerpo',
+};
+
+/**
+ * LA FRASE EN ESPANOL del ofrecimiento, para el correo (el unico canal del worker, que no conoce el
+ * idioma del usuario; la consola arma la suya con sus propias claves de i18n). Se REDACTA aqui, desde
+ * el codigo: no se muestra ni se reenvia nada de la tabla.
+ *
+ * Dice explicitamente que pasa si se rechaza, porque es lo que evita el malentendido caro: rechazar
+ * NO cancela la tarea, descarta el procedimiento ajeno y la tarea sigue como siempre.
+ */
+export function textoDelOfrecimientoEs(ofrecimiento: OfrecimientoDePlantilla): string {
+  const datos = ofrecimiento.marcadores.map((marcador) => DATO_EN_ESPANOL[marcador]).join(', ');
+  const conDatos = datos === '' ? '' : `, con tus datos (${datos})`;
+  return (
+    `Usar en ${ofrecimiento.dominio} un procedimiento para ${ACCION_EN_ESPANOL[ofrecimiento.codigoDeIntencion]} ` +
+    `que descubrio otra cuenta${conDatos}. Nada de la otra cuenta viaja contigo. ` +
+    'Si lo rechazas, tu agente hace la tarea por su cuenta, como siempre.'
+  );
 }

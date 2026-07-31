@@ -1893,6 +1893,30 @@
       "conflicto": "This approval was already decided or has expired. The list will refresh.",
       "fallo": "We could not record your decision. Please try again.",
       "cerrarAria": "Close the approval (it stays pending)"
+    },
+    "plantilla": {
+      "subtitulo": "Another account already worked out how to do this on this site. You decide whether your agent uses it.",
+      "descripcion": "Use on {{dominio}} a procedure to {{accion}} that another account worked out{{datos}}.",
+      "conDatos": ", with your data ({{lista}})",
+      "aclaracion": "Nothing from the other account travels with you: only the order of the steps. If you reject it, your agent does the task on its own, as always.",
+      "accion": {
+        "enviar": "send something",
+        "publicar": "publish something",
+        "borrar": "delete something",
+        "pagar": "make a payment",
+        "transferir": "make a transfer",
+        "comprar": "make a purchase",
+        "firmar": "sign something",
+        "cancelarSuscripcion": "cancel a subscription"
+      },
+      "dato": {
+        "destinatario": "recipient",
+        "monto": "amount",
+        "producto": "product",
+        "cantidad": "quantity",
+        "asunto": "subject",
+        "cuerpo": "body"
+      }
     }
   },
   "verificacion": {

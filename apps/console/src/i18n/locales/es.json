@@ -1894,6 +1894,30 @@
       "conflicto": "Esta aprobación ya fue decidida o expiró. Se actualizará la lista.",
       "fallo": "No pudimos registrar tu decisión. Inténtalo de nuevo.",
       "cerrarAria": "Cerrar la aprobación (queda pendiente)"
+    },
+    "plantilla": {
+      "subtitulo": "Otra cuenta ya descubrió cómo hacer esto en este sitio. Tú decides si tu agente lo usa.",
+      "descripcion": "Usar en {{dominio}} un procedimiento para {{accion}} que descubrió otra cuenta{{datos}}.",
+      "conDatos": ", con tus datos ({{lista}})",
+      "aclaracion": "Nada de la otra cuenta viaja contigo: solo el orden de los pasos. Si lo rechazas, tu agente hace la tarea por su cuenta, como siempre.",
+      "accion": {
+        "enviar": "enviar algo",
+        "publicar": "publicar algo",
+        "borrar": "borrar algo",
+        "pagar": "hacer un pago",
+        "transferir": "hacer una transferencia",
+        "comprar": "hacer una compra",
+        "firmar": "firmar algo",
+        "cancelarSuscripcion": "cancelar una suscripción"
+      },
+      "dato": {
+        "destinatario": "destinatario",
+        "monto": "monto",
+        "producto": "producto",
+        "cantidad": "cantidad",
+        "asunto": "asunto",
+        "cuerpo": "cuerpo"
+      }
     }
   },
   "verificacion": {

@@ -22,14 +22,22 @@ import { parsearPasosDeReceta } from '@ledesma-platform/shared';
 export type EstadoReceta = 'activa' | 'obsoleta';
 
 /**
- * DE DONDE salio la receta (V036): 'automatica' = promovida sola desde una trayectoria exitosa del
- * agente; 'grabacion' = sembrada por el usuario ensenandole la tarea al sistema una vez.
+ * DE DONDE salio la receta (V036/V041): 'automatica' = promovida sola desde una trayectoria exitosa
+ * del agente; 'grabacion' = sembrada por el usuario ensenandole la tarea al sistema una vez;
+ * 'plantilla_compartida' = copiada de una plantilla que descubrio OTRO origen, despues de que su dueno
+ * la aprobara en un checkpoint y de que corriera con el efecto confirmado en su propia cuenta.
  *
- * Sirve para DISTINGUIRLAS, no para tratarlas distinto: una receta grabada se ejecuta con la MISMA
- * verificacion determinista de parametros y la MISMA politica del usuario que cualquier otra. Que el
- * usuario haya grabado los pasos no autoriza a ejecutar con datos que no coinciden con lo pedido.
+ * Sirve para DISTINGUIRLAS, no para tratarlas distinto: una receta grabada o copiada se ejecuta con la
+ * MISMA verificacion determinista de parametros y la MISMA politica del usuario que cualquier otra.
+ * Que el usuario haya grabado los pasos, o que vengan de una plantilla, no autoriza a ejecutar con
+ * datos que no coinciden con lo pedido.
+ *
+ * El CHECK de la columna admite los tres desde V041.
  */
-export type OrigenReceta = 'automatica' | 'grabacion';
+export type OrigenReceta = 'automatica' | 'grabacion' | 'plantilla_compartida';
+
+/** Los valores que el CHECK de `recetas_web.origen` admite (V041). Cualquier otro se lee como el default. */
+const ORIGENES: readonly OrigenReceta[] = ['automatica', 'grabacion', 'plantilla_compartida'];
 
 /** Una receta tal como la usa el worker: cabecera + pasos YA VALIDADOS. */
 export interface RecetaWeb {
@@ -121,7 +129,7 @@ function rowToReceta(row: RecetaRow): RecetaWeb | null {
     version: Number(row.version ?? 1),
     estado: row.estado === 'obsoleta' ? 'obsoleta' : 'activa',
     // Una fila anterior a V036 no tiene la columna: cuenta como 'automatica', que es lo que era.
-    origen: row.origen === 'grabacion' ? 'grabacion' : 'automatica',
+    origen: ORIGENES.find((origen) => origen === row.origen) ?? 'automatica',
     pasos,
     creadaDesdeTrayectoria: row.creada_desde_trayectoria,
     ejecucionesExitosas: Number(row.ejecuciones_exitosas ?? 0),

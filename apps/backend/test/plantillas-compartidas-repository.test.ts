@@ -273,18 +273,85 @@ describe('publicar: la SEGUNDA PUERTA (cinturon y tirantes)', () => {
   });
 });
 
-describe('publicar: NADA lee las plantillas todavia', () => {
-  it('el repositorio no expone ningun metodo de lectura de plantillas_compartidas', () => {
+describe('publicar: la superficie del repositorio es CERRADA', () => {
+  it('expone exactamente las tres operaciones del ciclo de vida y ni una mas', () => {
     const metodos = Object.getOwnPropertyNames(PlantillasCompartidasRepository.prototype).filter(
       (nombre) => nombre !== 'constructor',
     );
-    expect(metodos.sort()).toEqual(['clasesCorroboradas', 'publicar', 'upsert']);
+    // `buscarServible` y `registrarEjecucion` son el CONSUMO; no hay ningun metodo que lea o escriba
+    // acotado por dueno, porque una plantilla no tiene dueno (ver la cabecera del repositorio).
+    expect(metodos.sort()).toEqual([
+      'buscarServible',
+      'clasesCorroboradas',
+      'publicar',
+      'registrarEjecucion',
+      'upsert',
+    ]);
   });
 
-  it('ninguna query de este repositorio hace un select sobre plantillas_compartidas', async () => {
+  it('la publicacion no hace ningun select sobre plantillas_compartidas', async () => {
     const { sql } = await publicar();
     for (const [texto] of sql.queries) {
       expect(texto).not.toContain('from plantillas_compartidas');
     }
+  });
+});
+
+describe('buscarServible: la lectura del consumo', () => {
+  it('busca por las TRES columnas de la identidad, acotada al estado y excluyendo el origen propio', async () => {
+    const sql = makeSql([[{ id: 'p-1', estado: 'candidata', pasos: pasos(), origenes: 2 }]]);
+    const repo = new PlantillasCompartidasRepository(sql);
+
+    const servible = await repo.buscarServible({
+      dominiosClave: DOMINIO,
+      codigoDeIntencion: 'enviar',
+      marcadoresClave: 'destinatario',
+      origenHash: 'hash-del-consumidor',
+    });
+
+    expect(servible).toMatchObject({ id: 'p-1', estado: 'candidata', origenes: 2 });
+    const [texto, valores] = sql.queries[0] as [string, unknown[]];
+    expect(texto).toContain('dominios_clave = ');
+    expect(texto).toContain('codigo_de_intencion = ');
+    expect(texto).toContain('marcadores_clave = ');
+    expect(texto).toContain('estado in ');
+    // LA EXCLUSION DEL PROPIO ORIGEN vive DENTRO de la query: el hash no sale de la base.
+    expect(texto).toContain('not (origenes_hash @> ');
+    expect(valores).toContain(DOMINIO);
+    expect(valores).toContain('enviar');
+    // Ninguna query de esta tabla puede nombrar un dueno: la columna no existe.
+    expect(texto).not.toContain('owner_id');
+  });
+
+  it('sin fila devuelve null (y la tarea sigue por el motor libre)', async () => {
+    const repo = new PlantillasCompartidasRepository(makeSql([[]]));
+    const servible = await repo.buscarServible({
+      dominiosClave: DOMINIO,
+      codigoDeIntencion: 'enviar',
+      marcadoresClave: '',
+      origenHash: 'hash',
+    });
+    expect(servible).toBeNull();
+  });
+});
+
+describe('registrarEjecucion: los contadores agregados', () => {
+  it('un EXITO suma a exitosas y pone los fallos seguidos en cero', async () => {
+    const sql = makeSql([[]]);
+    await new PlantillasCompartidasRepository(sql).registrarEjecucion('p-1', true);
+    const [texto, valores] = sql.queries[0] as [string, unknown[]];
+    expect(texto).toContain('ejecuciones_exitosas = ejecuciones_exitosas + ');
+    expect(texto).toContain('fallos_consecutivos = case when ');
+    // 1 al contador de exitos, 0 al de fallos, 1 al discriminante del case, y el id.
+    expect(valores).toEqual([1, 0, 1, 'p-1']);
+    // NO toca el estado: la promocion y el retiro son decisiones aparte.
+    expect(texto).not.toContain('estado =');
+  });
+
+  it('un FALLO suma a fallidas y acumula los fallos seguidos', async () => {
+    const sql = makeSql([[]]);
+    await new PlantillasCompartidasRepository(sql).registrarEjecucion('p-1', false);
+    const [, valores] = sql.queries[0] as [string, unknown[]];
+    expect(valores).toEqual([0, 1, 0, 'p-1']);
   });
 });
