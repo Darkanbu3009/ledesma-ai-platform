@@ -185,6 +185,118 @@ function makeMotor(): MotorDeTareaWeb {
   } as unknown as MotorDeTareaWeb;
 }
 
+// --- LA CORRIDA DEL MOTOR LIBRE QUE ENVIA UN CORREO ---------------------------------------------
+//
+// La traza que el motor deja de verdad: `acciones` con sus `playwrightArguments` y, aparte,
+// `estrategiasPorAccion`, que es lo que la PERCEPCION leyo del elemento de cada paso. Es la fuente
+// de la publicacion con el observador de pasos APAGADO, o sea con el default de produccion.
+
+const CLASE_REDACTAR = 'click|rol:button|redactar';
+const CLASES_DE_LA_CORRIDA = [
+  CLASE_REDACTAR,
+  CLASE_DESTINATARIO,
+  CLASE_ASUNTO,
+  CLASE_CUERPO,
+  CLASE_ENVIAR,
+];
+
+const rol = (rolAria: string, nombre: string): EstrategiaLocalizacion => ({
+  tipo: 'rol',
+  rol: rolAria,
+  nombre,
+});
+const xpath = (ruta: string): EstrategiaLocalizacion => ({ tipo: 'xpath', xpath: ruta });
+
+/** Una accion del motor tal como llega en `AgentResult.actions`, con su selector resuelto. */
+function accionDelMotor(
+  instruccion: string,
+  metodo: string,
+  argumentos: string[],
+  selector: string,
+): Record<string, unknown> {
+  return {
+    type: 'act',
+    action: instruccion,
+    success: true,
+    pageUrl: `https://${DOMINIO}/`,
+    playwrightArguments: { selector, method: metodo, arguments: argumentos },
+  };
+}
+
+/** Las cinco acciones del envio, en orden. La ultima es la que pasa por la guardia. */
+const ACCIONES_DEL_ENVIO = [
+  accionDelMotor('click the Redactar button', 'click', [], '/html/body/div/div[3]'),
+  accionDelMotor(
+    'type the recipient into the Para field',
+    'fill',
+    ['martin@ejemplo.com'],
+    '/html/body/div[7]/form/input[1]',
+  ),
+  accionDelMotor(
+    'type the subject into the Asunto field',
+    'fill',
+    ['Hola'],
+    '/html/body/div[7]/form/input[2]',
+  ),
+  accionDelMotor(
+    'type the body into the Cuerpo del mensaje field',
+    'fill',
+    ['llego el paquete'],
+    '/html/body/div[7]/form/div[1]',
+  ),
+  accionDelMotor('click the Enviar button', 'click', [], '/html/body/div[7]/form/div[2]'),
+];
+
+/**
+ * LO QUE LA PERCEPCION LEYO del elemento de cada accion, una lista por accion y en su orden. La
+ * ultima va VACIA a proposito: el boton Enviar se lleva por delante su propio redactor, asi que la
+ * lectura que corre DESPUES de la accion ya no encuentra el elemento. Su localizador lo aporta lo
+ * que la barrera de identidad leyo JUSTO ANTES de accionarlo.
+ */
+const PERCIBIDAS_POR_ACCION: EstrategiaLocalizacion[][] = [
+  [rol('button', 'Redactar'), xpath('/html/body/div/div[3]')],
+  [rol('textbox', 'Destinatarios en Para'), xpath('/html/body/div[7]/form/input[1]')],
+  [rol('textbox', 'Asunto'), xpath('/html/body/div[7]/form/input[2]')],
+  [rol('textbox', 'Cuerpo del mensaje'), xpath('/html/body/div[7]/form/div[1]')],
+  [],
+];
+
+/**
+ * Motor fake que ejecuta ese envio: propone cada accion a la GUARDIA, confirma el efecto de la
+ * irreversible y devuelve la traza con lo que la percepcion leyo. Es el mismo contrato que el
+ * adaptador real.
+ */
+function makeMotorQueEnvia(): MotorDeTareaWeb {
+  return {
+    ejecutar: vi.fn(
+      async (params: {
+        guardia?: {
+          revisar(accion: string): Promise<{ tipo: string; confirmar?: boolean }>;
+          confirmar(): Promise<{ confirmada: boolean; terminal?: boolean }>;
+        };
+      }) => {
+        for (const accion of ACCIONES_DEL_ENVIO) {
+          const veredicto = await params.guardia?.revisar(accion.action as string);
+          if (veredicto !== undefined && veredicto.tipo !== 'permitir') {
+            throw new Error(`la guardia no dejo pasar ${String(accion.action)}: ${veredicto.tipo}`);
+          }
+          if (veredicto?.confirmar === true) await params.guardia?.confirmar();
+        }
+        return {
+          exito: true,
+          completado: true,
+          mensaje: 'correo enviado',
+          acciones: ACCIONES_DEL_ENVIO,
+          estrategiasPorAccion: PERCIBIDAS_POR_ACCION,
+          tokensIn: 1000,
+          tokensOut: 100,
+        };
+      },
+    ),
+  } as unknown as MotorDeTareaWeb;
+}
+
+
 /** `noLocalizados` son los INDICES de llamada que devuelven 'no_localizado'. */
 function makeDeterminista(
   noLocalizados: number[] = [],
@@ -1075,105 +1187,6 @@ describe('simetria: lo que una corrida publica es lo que otra corrida encuentra'
     { contexto: 'cuerpo del mensaje', valor: 'nos vemos a las 5' },
   ];
 
-  const CLASE_REDACTAR = 'click|rol:button|redactar';
-  const CLASES_DE_LA_CORRIDA = [CLASE_REDACTAR, ...CLASES_DEL_PROCEDIMIENTO];
-
-  const rol = (rolAria: string, nombre: string): EstrategiaLocalizacion => ({
-    tipo: 'rol',
-    rol: rolAria,
-    nombre,
-  });
-  const xpath = (ruta: string): EstrategiaLocalizacion => ({ tipo: 'xpath', xpath: ruta });
-
-  /** Una accion del motor tal como llega en `AgentResult.actions`, con su selector resuelto. */
-  function accionDelMotor(
-    instruccion: string,
-    metodo: string,
-    argumentos: string[],
-    selector: string,
-  ): Record<string, unknown> {
-    return {
-      type: 'act',
-      action: instruccion,
-      success: true,
-      pageUrl: `https://${DOMINIO}/`,
-      playwrightArguments: { selector, method: metodo, arguments: argumentos },
-    };
-  }
-
-  /** Las cinco acciones del envio, en orden. La ultima es la que pasa por la guardia. */
-  const ACCIONES_DEL_ENVIO = [
-    accionDelMotor('click the Redactar button', 'click', [], '/html/body/div/div[3]'),
-    accionDelMotor(
-      'type the recipient into the Para field',
-      'fill',
-      ['martin@ejemplo.com'],
-      '/html/body/div[7]/form/input[1]',
-    ),
-    accionDelMotor(
-      'type the subject into the Asunto field',
-      'fill',
-      ['Hola'],
-      '/html/body/div[7]/form/input[2]',
-    ),
-    accionDelMotor(
-      'type the body into the Cuerpo del mensaje field',
-      'fill',
-      ['llego el paquete'],
-      '/html/body/div[7]/form/div[1]',
-    ),
-    accionDelMotor('click the Enviar button', 'click', [], '/html/body/div[7]/form/div[2]'),
-  ];
-
-  /**
-   * LO QUE LA PERCEPCION LEYO del elemento de cada accion, una lista por accion y en su orden. La
-   * ultima va VACIA a proposito: el boton Enviar se lleva por delante su propio redactor, asi que la
-   * lectura que corre DESPUES de la accion ya no encuentra el elemento. Su localizador lo aporta lo
-   * que la barrera de identidad leyo JUSTO ANTES de accionarlo.
-   */
-  const PERCIBIDAS_POR_ACCION: EstrategiaLocalizacion[][] = [
-    [rol('button', 'Redactar'), xpath('/html/body/div/div[3]')],
-    [rol('textbox', 'Destinatarios en Para'), xpath('/html/body/div[7]/form/input[1]')],
-    [rol('textbox', 'Asunto'), xpath('/html/body/div[7]/form/input[2]')],
-    [rol('textbox', 'Cuerpo del mensaje'), xpath('/html/body/div[7]/form/div[1]')],
-    [],
-  ];
-
-  /**
-   * Motor fake que ejecuta ese envio: propone cada accion a la GUARDIA, confirma el efecto de la
-   * irreversible y devuelve la traza con lo que la percepcion leyo. Es el mismo contrato que el
-   * adaptador real.
-   */
-  function makeMotorQueEnvia(): MotorDeTareaWeb {
-    return {
-      ejecutar: vi.fn(
-        async (params: {
-          guardia?: {
-            revisar(accion: string): Promise<{ tipo: string; confirmar?: boolean }>;
-            confirmar(): Promise<{ confirmada: boolean; terminal?: boolean }>;
-          };
-        }) => {
-          for (const accion of ACCIONES_DEL_ENVIO) {
-            const veredicto = await params.guardia?.revisar(accion.action as string);
-            if (veredicto !== undefined && veredicto.tipo !== 'permitir') {
-              throw new Error(`la guardia no dejo pasar ${String(accion.action)}: ${veredicto.tipo}`);
-            }
-            if (veredicto?.confirmar === true) await params.guardia?.confirmar();
-          }
-          return {
-            exito: true,
-            completado: true,
-            mensaje: 'correo enviado',
-            acciones: ACCIONES_DEL_ENVIO,
-            estrategiasPorAccion: PERCIBIDAS_POR_ACCION,
-            tokensIn: 1000,
-            tokensOut: 100,
-          };
-        },
-      ),
-    } as unknown as MotorDeTareaWeb;
-  }
-
   /** Corre la tarea con el motor libre y devuelve la plantilla que la corrida publico. */
   async function publicarConElMotorLibre(job: Job): Promise<{ pasos: unknown; marcadores: string }> {
     const publicadas: Array<{ pasos: unknown }> = [];
@@ -1284,5 +1297,135 @@ describe('simetria: lo que una corrida publica es lo que otra corrida encuentra'
     };
     // Cinco primitivas: el click de Redactar, las tres escrituras y el click de Enviar.
     expect(determinista.ejecutarPasoDeterminista).toHaveBeenCalledTimes(5);
+  });
+});
+
+// --- DIAGNOSTICO DEL MISS -------------------------------------------------------------------------
+
+/**
+ * EL VEREDICTO 'sin_plantilla' TIENE QUE DECIR ALGO. A secas ya obligo a TRES investigaciones
+ * read-only completas para averiguar la causa (el origen propio que excluia para siempre, la igualdad
+ * exacta de marcadores y la divergencia entre los textos de los dos lados). No debe haber una cuarta.
+ *
+ * Lo que lleva ahora, y todo es vocabulario CERRADO: las TRES PARTES de la clave que se buscaron, EN
+ * CUAL DE LOS FILTROS se corto la busqueda, y cuantos origenes tiene la fila que si matcheo la clave.
+ */
+describe('el veredicto del miss dice que se busco y donde se corto', () => {
+  /** Corre la tarea entera con el motor libre y devuelve el veredicto que quedo en el resultado. */
+  async function veredictoDeLaCorrida(
+    deps: TareaWebDeps,
+    job: Job = makeJob(),
+  ): Promise<Record<string, unknown>> {
+    expect(await procesarTareaWeb(deps, job)).toBe('completada');
+    const guardar = deps.guardarResultado as unknown as ReturnType<typeof vi.fn>;
+    const resultado = guardar.mock.calls.at(-1)?.[1] as { plantillaAjena?: Record<string, unknown> };
+    return resultado.plantillaAjena ?? {};
+  }
+
+  /** Los deps de una corrida que termina bien con el motor libre, con la tabla que se le indique. */
+  function conTablaDePlantillas(
+    repo: Partial<RepositorioPlantillasParaWorker>,
+    extra: Partial<TareaWebDeps> = {},
+  ): TareaWebDeps {
+    return makeDeps({
+      motor: makeMotorQueEnvia(),
+      determinista: makeDeterminista([], 'Enviar'),
+      barreraIdentidad: 'observacion',
+      atlas: { repo: makeAtlas(CLASES_DE_LA_CORRIDA), clave: 'clave-del-atlas' },
+      plantillas: {
+        repo: { publicar: vi.fn(async () => ({ publicada: true })), ...repo },
+        clave: CLAVE_PLANTILLAS,
+      },
+      ...extra,
+    } as unknown as Partial<TareaWebDeps>);
+  }
+
+  it('el miss lleva las TRES PARTES de la clave que se busco', async () => {
+    const deps = conTablaDePlantillas({
+      buscarServible: vi.fn(async () => null),
+      diagnosticarMiss: vi.fn(async () => ({ corte: 'sin_identidad_en_tabla', origenes: null })),
+    });
+
+    const veredicto = await veredictoDeLaCorrida(deps);
+
+    expect(veredicto).toMatchObject({
+      consumida: false,
+      motivo: 'sin_plantilla',
+      clave: {
+        dominios: DOMINIO,
+        intencion: 'enviar',
+        marcadores: 'asunto+cuerpo+destinatario',
+      },
+      corte: 'sin_identidad_en_tabla',
+      origenes: null,
+    });
+  });
+
+  it('el corte y los origenes de la fila que SI matcheo la clave viajan al resultado', async () => {
+    const deps = conTablaDePlantillas({
+      buscarServible: vi.fn(async () => null),
+      diagnosticarMiss: vi.fn(async () => ({ corte: 'origen_propio', origenes: 1 })),
+    });
+
+    expect(await veredictoDeLaCorrida(deps)).toMatchObject({ corte: 'origen_propio', origenes: 1 });
+  });
+
+  it('la consulta del corte SOLO corre cuando ya hubo miss, nunca en el camino feliz', async () => {
+    const diagnosticarMiss = vi.fn(async () => ({ corte: 'origen_propio', origenes: 1 }));
+    const fila = { id: 'p-1', estado: 'candidata', pasos: pasosDeLaPlantilla(), origenes: 2 };
+    const deps = conTablaDePlantillas({
+      buscarServible: vi.fn(async () => fila),
+      diagnosticarMiss,
+    });
+
+    // Encuentra la plantilla y la ofrece: el job se pausa sin llegar al motor.
+    expect(await procesarTareaWeb(deps, makeJob())).toBe('pausada');
+    expect(diagnosticarMiss).not.toHaveBeenCalled();
+  });
+
+  it('sin el puerto de diagnostico el veredicto sale igual, solo que sin corte', async () => {
+    const deps = conTablaDePlantillas({ buscarServible: vi.fn(async () => null) });
+
+    const veredicto = await veredictoDeLaCorrida(deps);
+
+    expect(veredicto).toMatchObject({ motivo: 'sin_plantilla' });
+    expect(veredicto.corte).toBeUndefined();
+    expect(veredicto.clave).toBeDefined();
+  });
+
+  it('si el diagnostico falla, la corrida no se entera (best-effort)', async () => {
+    const deps = conTablaDePlantillas({
+      buscarServible: vi.fn(async () => null),
+      diagnosticarMiss: vi.fn(async () => {
+        throw new Error('base caida');
+      }),
+    });
+
+    const veredicto = await veredictoDeLaCorrida(deps);
+
+    expect(veredicto).toMatchObject({ motivo: 'sin_plantilla' });
+    expect(veredicto.corte).toBeUndefined();
+  });
+
+  it('el diagnostico recibe las claves de marcadores con las que se busco, no otra cosa', async () => {
+    const diagnosticarMiss = vi.fn(async () => ({ corte: 'marcadores_no_contenidos', origenes: null }));
+    const deps = conTablaDePlantillas({ buscarServible: vi.fn(async () => null), diagnosticarMiss });
+
+    await veredictoDeLaCorrida(deps);
+
+    expect(diagnosticarMiss).toHaveBeenCalledWith({
+      dominiosClave: DOMINIO,
+      codigoDeIntencion: 'enviar',
+      marcadoresPosibles: [
+        '',
+        'asunto',
+        'asunto+cuerpo',
+        'asunto+cuerpo+destinatario',
+        'asunto+destinatario',
+        'cuerpo',
+        'cuerpo+destinatario',
+        'destinatario',
+      ],
+    });
   });
 });

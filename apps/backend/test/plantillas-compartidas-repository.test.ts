@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { PasoPublicable, Sql } from '@ledesma-platform/shared';
 import {
   MAX_CLASES_POR_DOMINIO,
+  MAX_FILAS_DE_DIAGNOSTICO,
   ORIGENES_PARA_PUBLICAR,
   PlantillasCompartidasRepository,
 } from '../src/plantillas-compartidas/plantillas-compartidas-repository.js';
@@ -278,11 +279,13 @@ describe('publicar: la superficie del repositorio es CERRADA', () => {
     const metodos = Object.getOwnPropertyNames(PlantillasCompartidasRepository.prototype).filter(
       (nombre) => nombre !== 'constructor',
     );
-    // `buscarServible` y `registrarEjecucion` son el CONSUMO; no hay ningun metodo que lea o escriba
-    // acotado por dueno, porque una plantilla no tiene dueno (ver la cabecera del repositorio).
+    // `buscarServible`, `diagnosticarMiss` y `registrarEjecucion` son el CONSUMO; no hay ningun
+    // metodo que lea o escriba acotado por dueno, porque una plantilla no tiene dueno (ver la
+    // cabecera del repositorio).
     expect(metodos.sort()).toEqual([
       'buscarServible',
       'clasesCorroboradas',
+      'diagnosticarMiss',
       'publicar',
       'registrarEjecucion',
       'upsert',
@@ -406,5 +409,70 @@ describe('registrarEjecucion: los contadores agregados', () => {
     await new PlantillasCompartidasRepository(sql).registrarEjecucion('p-1', false);
     const [, valores] = sql.queries[0] as [string, unknown[]];
     expect(valores).toEqual([0, 1, 0, 'p-1']);
+  });
+});
+
+describe('diagnosticarMiss: donde se corto la lectura del consumo', () => {
+  const CLAVE = {
+    dominiosClave: DOMINIO,
+    codigoDeIntencion: 'enviar',
+    marcadoresPosibles: ['', 'asunto', 'asunto+destinatario', 'destinatario'],
+  };
+
+  /** Una fila de la tabla tal como la devuelve la consulta del diagnostico. */
+  function fila(marcadores: string, estado = 'candidata', origenes = 2) {
+    return { marcadores_clave: marcadores, estado, origenes };
+  }
+
+  async function diagnosticar(filas: unknown[]) {
+    const sql = makeSql([filas]);
+    const diagnostico = await new PlantillasCompartidasRepository(sql).diagnosticarMiss(CLAVE);
+    return { diagnostico, sql };
+  }
+
+  it('sin ninguna fila de esta identidad: sin_identidad_en_tabla', async () => {
+    const { diagnostico, sql } = await diagnosticar([]);
+    expect(diagnostico).toEqual({ corte: 'sin_identidad_en_tabla', origenes: null });
+    // La consulta busca por los DOS componentes que no se relajan, sin el de marcadores.
+    const [texto, valores] = sql.queries[0] as [string, unknown[]];
+    expect(texto).toContain('dominios_clave = ');
+    expect(texto).toContain('codigo_de_intencion = ');
+    expect(texto).not.toContain('marcadores_clave = ');
+    expect(texto).not.toContain('marcadores_clave in ');
+    expect(valores).toContain(MAX_FILAS_DE_DIAGNOSTICO);
+  });
+
+  it('hay filas pero ninguna pide un subconjunto de lo declarado: marcadores_no_contenidos', async () => {
+    const { diagnostico } = await diagnosticar([fila('asunto+cuerpo+destinatario+monto')]);
+    expect(diagnostico).toEqual({ corte: 'marcadores_no_contenidos', origenes: null });
+  });
+
+  it('la fila casa pero esta retirada: estado_no_servible, con sus origenes', async () => {
+    const { diagnostico } = await diagnosticar([fila('asunto+destinatario', 'retirada', 4)]);
+    expect(diagnostico).toEqual({ corte: 'estado_no_servible', origenes: 4 });
+  });
+
+  it('la fila casa y es servible: el unico filtro que queda es el ORIGEN', async () => {
+    const { diagnostico } = await diagnosticar([fila('asunto+destinatario', 'candidata', 1)]);
+    expect(diagnostico).toEqual({ corte: 'origen_propio', origenes: 1 });
+  });
+
+  it('con varias filas contenidas, los origenes son los de la que el desempate habria elegido', async () => {
+    const { diagnostico } = await diagnosticar([
+      fila('destinatario', 'candidata', 9),
+      fila('asunto+destinatario', 'candidata', 3),
+    ]);
+    // La MAS ESPECIFICA gana aunque tenga menos origenes: el mismo orden que el `order by`.
+    expect(diagnostico).toEqual({ corte: 'origen_propio', origenes: 3 });
+  });
+
+  it('NO le pregunta nada al hash de origen: la consulta no lo nombra', async () => {
+    const { sql } = await diagnosticar([fila('destinatario')]);
+    const [texto] = sql.queries[0] as [string, unknown[]];
+    expect(texto).not.toContain('@>');
+    expect(texto).not.toContain('jsonb_array_elements_text');
+    expect(texto).not.toContain('owner_id');
+    // Solo el LARGO del arreglo, que es un conteo y no un identificador.
+    expect(texto).toContain('jsonb_array_length(origenes_hash) as origenes');
   });
 });

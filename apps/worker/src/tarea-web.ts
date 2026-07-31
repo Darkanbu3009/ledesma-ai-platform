@@ -112,6 +112,7 @@ import {
   plantillaAplicable,
   plantillaDeLaCorrida,
   textoDelOfrecimientoEs,
+  type IdentidadDePlantilla,
   type OfrecimientoDePlantilla,
   type PlantillaDeLaCorrida,
 } from './plantillas-compartidas.js';
@@ -595,6 +596,16 @@ export interface RepositorioPlantillasParaWorker {
     marcadoresPosibles: readonly string[];
     origenHash: string;
   }): Promise<{ id: string; estado: string; pasos: unknown; origenes: number } | null>;
+  /**
+   * DONDE SE CORTO la lectura de arriba cuando no devolvio nada. SOLO se llama despues de un miss:
+   * es una consulta mas y el camino feliz no la paga. Best-effort: sin ella el veredicto sale igual,
+   * solo que sin el corte.
+   */
+  diagnosticarMiss?(clave: {
+    dominiosClave: string;
+    codigoDeIntencion: string;
+    marcadoresPosibles: readonly string[];
+  }): Promise<{ corte: string; origenes: number | null }>;
   /** Contadores agregados de como le fue. Best-effort: su fallo no cambia el desenlace del job. */
   registrarEjecucion?(id: string, exitosa: boolean): Promise<void>;
 }
@@ -2655,6 +2666,19 @@ interface VeredictoDeConsumo {
   motivo: string | null;
   /** `idx` del paso que la rechazo, o null cuando el rechazo no es de un paso concreto. */
   idx: number | null;
+  /**
+   * LA CLAVE CON LA QUE SE BUSCO, sus tres partes. Solo viaja en el miss ('sin_plantilla'), que es
+   * cuando hace falta para saber que se pregunto.
+   *
+   * NO ABRE NINGUN CANAL: los tres componentes son vocabulario CERRADO de la plataforma (uno de los
+   * ocho codigos de intencion, un subconjunto de los seis marcadores y los hostnames que el propio
+   * usuario conecto). Ni un caracter sale de `plantillas_compartidas` ni del texto de nadie.
+   */
+  clave?: { dominios: string; intencion: string; marcadores: string };
+  /** En cual de los filtros se corto la busqueda (`CorteDelConsumo`). Solo en el miss. */
+  corte?: string;
+  /** Cuantos origenes tiene la fila que SI matcheo la clave, o null si ninguna. Solo en el miss. */
+  origenes?: number | null;
 }
 
 /**
@@ -2734,7 +2758,9 @@ async function buscarPlantillaAjena(
     });
     return sin('error_al_leer');
   }
-  if (fila === null) return sin('sin_plantilla');
+  if (fila === null) {
+    return { plantilla: null, veredicto: await veredictoDelMiss(deps, job, plantillas.repo, identidad) };
+  }
 
   const veredicto = plantillaAplicable({
     pasos: fila.pasos,
@@ -2768,6 +2794,53 @@ async function buscarPlantillaAjena(
     },
     veredicto: { consumida: false, motivo: null, idx: null },
   };
+}
+
+/**
+ * EL VEREDICTO DE UN MISS, con lo que hace falta para no tener que auditar: las TRES PARTES de la
+ * clave que se buscaron y EN CUAL DE LOS FILTROS se corto.
+ *
+ * POR QUE: 'sin_plantilla' a secas ya obligo a tres investigaciones read-only completas para
+ * averiguar la causa (el origen propio que excluia para siempre, la igualdad exacta de marcadores y
+ * la divergencia entre los textos de los dos lados). No debe haber una cuarta.
+ *
+ * LA CONSULTA DEL CORTE SOLO CORRE AQUI, o sea despues de que la lectura del consumo ya devolvio
+ * vacio: el camino feliz no paga ni una query de mas. Y es best-effort: sin el puerto, o si falla, el
+ * veredicto sale igual con su clave y sin el corte.
+ */
+async function veredictoDelMiss(
+  deps: TareaWebDeps,
+  job: Job,
+  repo: RepositorioPlantillasParaWorker,
+  identidad: IdentidadDePlantilla,
+): Promise<VeredictoDeConsumo> {
+  const veredicto: VeredictoDeConsumo = {
+    consumida: false,
+    motivo: 'sin_plantilla',
+    idx: null,
+    clave: {
+      dominios: identidad.dominiosClave,
+      intencion: identidad.codigoDeIntencion,
+      // El conjunto EXACTO que el objetivo declara. Los subconjuntos con los que se busco de verdad
+      // se derivan de este sin ambiguedad, asi que no hace falta repetirlos.
+      marcadores: identidad.marcadoresClave,
+    },
+  };
+  if (!repo.diagnosticarMiss) return veredicto;
+  try {
+    const diagnostico = await repo.diagnosticarMiss({
+      dominiosClave: identidad.dominiosClave,
+      codigoDeIntencion: identidad.codigoDeIntencion,
+      marcadoresPosibles: identidad.marcadoresPosibles,
+    });
+    return { ...veredicto, corte: diagnostico.corte, origenes: diagnostico.origenes };
+  } catch (error) {
+    deps.logger.warn('tarea web: no se pudo diagnosticar por que no habia procedimiento compartido', {
+      jobId: job.id,
+      err: describir(error),
+    });
+    return veredicto;
+  }
 }
 
 /** ¿El ofrecimiento que el usuario aprobo es EL MISMO que la busqueda acaba de resolver? */
