@@ -321,9 +321,17 @@ function pasosDeLaPlantilla(): unknown[] {
   ];
 }
 
+/** El origen de LA OTRA CUENTA: el que hace que la plantilla sea ajena y por tanto servible. */
+const ORIGEN_AJENO = 'origen-de-otra-cuenta';
+
 /**
  * Fake del repositorio de plantillas. Emula la query real: devuelve la fila solo si la identidad
- * coincide, el estado es servible y el hash del consumidor NO esta entre sus origenes.
+ * coincide, el estado es servible y QUEDA AL MENOS UN ORIGEN DISTINTO del consumidor.
+ *
+ * Ese ultimo punto es el predicado exacto de `buscarServible` (FIX A): que el consumidor tambien
+ * figure entre los origenes NO la excluye mientras haya otro. El fake anterior copiaba el predicado
+ * viejo ("yo no estoy dentro"), y por eso la exclusion permanente de una fila con dos origenes
+ * reales no se veia en CI.
  */
 function makePlantillas(
   fila: { id: string; estado: string; pasos: unknown; origenes: number; origenesHash?: string[] } | null,
@@ -335,7 +343,8 @@ function makePlantillas(
     publicar: vi.fn(async () => ({ publicada: true })),
     buscarServible: vi.fn(async (clave: { origenHash: string }) => {
       if (fila === null) return null;
-      if ((fila.origenesHash ?? []).includes(clave.origenHash)) return null;
+      const origenes = fila.origenesHash ?? [];
+      if (!origenes.some((hash) => hash !== clave.origenHash)) return null;
       return { id: fila.id, estado: fila.estado, pasos: fila.pasos, origenes: fila.origenes };
     }),
     registrarEjecucion: vi.fn(async () => {}),
@@ -408,7 +417,7 @@ function conPlantilla(
   pasos: unknown[],
   clases: string[] = CLASES_DEL_PROCEDIMIENTO,
   extra: Partial<TareaWebDeps> = {},
-  origenesHash: string[] = [],
+  origenesHash: string[] = [ORIGEN_AJENO],
 ): TareaWebDeps {
   return makeDeps({
     atlas: { repo: makeAtlas(clases), clave: 'clave-del-atlas' },
@@ -659,9 +668,13 @@ describe('aplicabilidad: falla cerrada y la tarea sigue por el motor libre', () 
     expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
   });
 
-  it('una plantilla PROPIA (su hash esta entre los origenes) no se ofrece como ajena', async () => {
-    const hashPropio = hashDeOrigenDePlantilla(OWNER, CLAVE_PLANTILLAS);
-    const deps = conPlantilla(pasosDeLaPlantilla(), CLASES_DEL_PROCEDIMIENTO, {}, [hashPropio]);
+});
+
+describe('el origen propio: solo excluye la plantilla que NADIE MAS descubrio', () => {
+  const HASH_PROPIO = hashDeOrigenDePlantilla(OWNER, CLAVE_PLANTILLAS);
+
+  it('SOLO YO entre los origenes: no se sirve (ya la tengo por mis propias recetas)', async () => {
+    const deps = conPlantilla(pasosDeLaPlantilla(), CLASES_DEL_PROCEDIMIENTO, {}, [HASH_PROPIO]);
     const plantillas = deps.plantillas as unknown as {
       repo: { buscarServible: ReturnType<typeof vi.fn> };
     };
@@ -670,9 +683,33 @@ describe('aplicabilidad: falla cerrada y la tarea sigue por el motor libre', () 
 
     // Se consulto (la via propia no encontro nada) y la query la excluyo por su propio hash.
     expect(plantillas.repo.buscarServible).toHaveBeenCalledWith(
-      expect.objectContaining({ origenHash: hashPropio }),
+      expect.objectContaining({ origenHash: HASH_PROPIO }),
     );
     expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
+  });
+
+  it('SOLO OTROS entre los origenes: se sirve', async () => {
+    const deps = conPlantilla(pasosDeLaPlantilla(), CLASES_DEL_PROCEDIMIENTO, {}, [ORIGEN_AJENO]);
+
+    const resultado = await procesarTareaWeb(deps, makeJob());
+
+    expect(resultado).toBe('pausada');
+    expect(deps.aprobaciones.crear).toHaveBeenCalled();
+  });
+
+  it('YO Y OTROS entre los origenes: se sirve (el caso que quedaba excluido para siempre)', async () => {
+    // Es la fila medida en produccion: dos origenes distintos, las dos cuentas dentro. Con el
+    // predicado viejo NINGUNA de las dos podia consumirla nunca, pese a que cada una tenia el aval
+    // de la otra, y el lazo no se recuperaba solo (fallaba, publicaba, deduplicaba y volvia a fallar).
+    const deps = conPlantilla(pasosDeLaPlantilla(), CLASES_DEL_PROCEDIMIENTO, {}, [
+      HASH_PROPIO,
+      ORIGEN_AJENO,
+    ]);
+
+    const resultado = await procesarTareaWeb(deps, makeJob());
+
+    expect(resultado).toBe('pausada');
+    expect(deps.aprobaciones.crear).toHaveBeenCalled();
   });
 });
 

@@ -183,10 +183,16 @@ export class PlantillasCompartidasRepository {
    *
    * LOS DOS FILTROS:
    *  - `estado`: 'retirada' no se sirve nunca.
-   *  - EL ORIGEN PROPIO: una plantilla entre cuyos `origenes_hash` esta el del consumidor NO se le
-   *    sirve como ajena. La produjo el mismo, asi que ya la tiene por sus propias recetas y ofrecersela
-   *    como descubrimiento de otra cuenta seria falso. El `@>` de jsonb decide la pertenencia dentro
-   *    del propio statement: el hash no sale de la base ni se compara en el worker.
+   *  - EL ORIGEN PROPIO: no se sirve la plantilla cuyo UNICO origen es el consumidor. La produjo el
+   *    mismo, asi que ya la tiene por sus propias recetas y ofrecersela como descubrimiento de otra
+   *    cuenta seria falso. BASTA CON QUE QUEDE UN ORIGEN DISTINTO del suyo, y la diferencia no es
+   *    teorica: el predicado anterior decia "cualquier plantilla a la que yo haya contribuido alguna
+   *    vez", asi que una fila con DOS origenes reales quedaba fuera del alcance de LAS DOS cuentas
+   *    para siempre, pese a que cada una tenia el aval de la otra. El lazo tampoco se recuperaba
+   *    solo: la consulta fallaba, la tarea caia al motor libre, el exito volvia a publicar, el `on
+   *    conflict` deduplicaba el origen y la corrida siguiente volvia a fallar igual.
+   *    La comparacion sigue ocurriendo DENTRO del propio statement: el hash no sale de la base ni se
+   *    compara en el worker.
    *
    * El hash es OPACO para este repositorio, igual que en `publicar`: no lo deriva, no lo guarda y no
    * puede volver de el al usuario.
@@ -198,7 +204,6 @@ export class PlantillasCompartidasRepository {
     /** HMAC del origen del CONSUMIDOR, con la clave de plantillas del worker. */
     origenHash: string;
   }): Promise<PlantillaServible | null> {
-    const propio = this.sql.json([clave.origenHash] as unknown as Parameters<Sql['json']>[0]);
     const filas = await this.sql<FilaServible[]>`
       select id, estado, pasos, jsonb_array_length(origenes_hash) as origenes
       from plantillas_compartidas
@@ -206,7 +211,11 @@ export class PlantillasCompartidasRepository {
         and codigo_de_intencion = ${clave.codigoDeIntencion}
         and marcadores_clave = ${clave.marcadoresClave}
         and estado in ${this.sql([...ESTADOS_SERVIBLES])}
-        and not (origenes_hash @> ${propio})
+        and exists (
+          select 1
+          from jsonb_array_elements_text(origenes_hash) as origen(hash)
+          where origen.hash <> ${clave.origenHash}
+        )
       limit 1
     `;
     const fila = filas[0];

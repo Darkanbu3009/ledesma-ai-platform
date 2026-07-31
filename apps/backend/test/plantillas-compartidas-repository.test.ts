@@ -316,11 +316,29 @@ describe('buscarServible: la lectura del consumo', () => {
     expect(texto).toContain('marcadores_clave = ');
     expect(texto).toContain('estado in ');
     // LA EXCLUSION DEL PROPIO ORIGEN vive DENTRO de la query: el hash no sale de la base.
-    expect(texto).toContain('not (origenes_hash @> ');
+    expect(texto).toContain('from jsonb_array_elements_text(origenes_hash) as origen(hash)');
+    expect(texto).toContain('where origen.hash <> ');
+    expect(valores).toContain('hash-del-consumidor');
     expect(valores).toContain(DOMINIO);
     expect(valores).toContain('enviar');
     // Ninguna query de esta tabla puede nombrar un dueno: la columna no existe.
     expect(texto).not.toContain('owner_id');
+  });
+
+  it('la regla del origen es "queda alguno DISTINTO del mio", no "yo no estoy"', async () => {
+    const sql = makeSql([[]]);
+    await new PlantillasCompartidasRepository(sql).buscarServible({
+      dominiosClave: DOMINIO,
+      codigoDeIntencion: 'enviar',
+      marcadoresClave: 'destinatario',
+      origenHash: 'hash-del-consumidor',
+    });
+    const [texto] = sql.queries[0] as [string, unknown[]];
+    // El predicado viejo ("cualquier plantilla a la que yo haya contribuido alguna vez") dejaba una
+    // fila con DOS origenes reales fuera del alcance de LAS DOS cuentas, para siempre. Los tres
+    // casos de la regla nueva (solo yo, solo otros, yo y otros) se ejercitan de punta a punta en
+    // apps/worker/test/tarea-web-plantillas-consumo.test.ts, contra el fake que copia este predicado.
+    expect(texto).not.toContain('not (origenes_hash @>');
   });
 
   it('sin fila devuelve null (y la tarea sigue por el motor libre)', async () => {
