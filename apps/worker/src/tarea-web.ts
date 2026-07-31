@@ -117,6 +117,11 @@ import {
   type PlantillaDeLaCorrida,
 } from './plantillas-compartidas.js';
 import {
+  construirPeticionDeDatos,
+  datosConLoQueElModeloAgrego,
+  parsearDatosDelObjetivo,
+} from './datos-del-objetivo.js';
+import {
   aplicarPromociones,
   evaluarPromociones,
   ganadorasDeCorrida,
@@ -2679,6 +2684,126 @@ interface VeredictoDeConsumo {
   corte?: string;
   /** Cuantos origenes tiene la fila que SI matcheo la clave, o null si ninguna. Solo en el miss. */
   origenes?: number | null;
+  /**
+   * COMO LE FUE al segundo escalon de los datos (FIX E), y solo aparece cuando se intento: el
+   * extractor determinista no alcanzo y se le pregunto al modelo. Vocabulario cerrado
+   * (`MotivoDeInterpretacion`): es lo que responde "se intento interpretar y por que no salio".
+   */
+  interpretacion?: string;
+}
+
+/**
+ * COMO LE FUE al SEGUNDO ESCALON de los datos. Vocabulario CERRADO, y todos menos `resuelta` terminan
+ * igual: la tarea sigue por el motor libre, sin ruido, con el motivo en el diagnostico.
+ */
+type MotivoDeInterpretacion =
+  /** No hizo falta: el extractor alcanzo, o el miss no era de los que un dato arregla. Cero tokens. */
+  | 'no_intentada'
+  /** No hay puerto de consulta cableado en este worker. */
+  | 'no_cableada'
+  /** El modelo no contesto (error, deadline o respuesta vacia). */
+  | 'sin_respuesta'
+  /** La respuesta no trae el objeto JSON esperado. */
+  | 'no_parseable'
+  /** Un nombre fuera de los seis, o un valor vacio, no textual o demasiado largo. */
+  | 'dato_invalido'
+  /** UN VALOR QUE NO ESTA EN EL TEXTO DEL USUARIO. Invalida la interpretacion entera (el ancla). */
+  | 'dato_no_anclado'
+  /** El modelo no agrego nada que el extractor no tuviera: volver a buscar daria lo mismo. */
+  | 'sin_datos_nuevos'
+  /** Los datos resueltos no se pueden traducir a la forma que compara la verificacion determinista. */
+  | 'no_comparables'
+  /** Se resolvieron datos nuevos y la busqueda se repitio con ellos. */
+  | 'resuelta';
+
+/**
+ * LOS MOTIVOS DE MISS QUE UN DATO MAS PODRIA ARREGLAR, y ninguno mas. `sin_plantilla` es no haber
+ * encontrado fila para el conjunto declarado; `dato_sin_declarar` es haberla encontrado y que pida un
+ * dato que el objetivo no trae. Todos los demas (sin cableado, sin intencion irreversible, clase sin
+ * corroborar, dominio ajeno, contrato invalido, sin verificacion) no dependen de los datos, asi que
+ * preguntarle al modelo seria gastar tokens en algo que no puede cambiar.
+ */
+const MISS_QUE_UN_DATO_ARREGLA: ReadonlySet<string> = new Set(['sin_plantilla', 'dato_sin_declarar']);
+
+/**
+ * EL SEGUNDO ESCALON DE LOS DATOS (FIX E): UNA consulta al modelo para resolver que datos trae el
+ * pedido, cuando el extractor determinista no alcanzo para encontrar una plantilla.
+ *
+ * CUANDO CORRE, y son tres condiciones a la vez: las dos vias PROPIAS no resolvieron (si no, ni se
+ * llega aqui), la busqueda con los datos del extractor fallo, y fallo por un motivo que un dato mas
+ * puede arreglar. Cuando el extractor alcanza, esto NO se llama y la corrida sigue costando cero
+ * tokens, igual que hasta hoy.
+ *
+ * QUE SE REUSA Y QUE NO. Se reusa el PUERTO (`deps.elector`), que es una consulta puntual al modelo
+ * sin herramientas, sin historial y sin bucle, con temperatura 0 y deadline propio, y se reusan el
+ * ANCLA al texto del usuario y el tope de largo del valor. NO se reusa nada del elector de tareas
+ * propias: ni su catalogo, ni `construirPeticionDeEleccion`, ni `parsearEleccion`. La peticion es
+ * OTRA (ver `construirPeticionDeDatos`) y por ella no viaja ni un id, ni una descripcion, ni nada que
+ * el usuario no haya escrito.
+ *
+ * FALLA CERRADA SIEMPRE: cualquier desenlace que no sea `resuelta` deja los datos como estaban y la
+ * tarea sigue por el motor libre, que es la linea base.
+ */
+async function interpretarDatosDelObjetivo(
+  deps: TareaWebDeps,
+  job: Job,
+  opciones: {
+    /** El texto del que salen los datos: el literal del usuario si llego (CAMBIO 3). */
+    textoParametros: string;
+    /** Lo que el extractor determinista YA reconocio. El modelo solo puede agregar sobre esto. */
+    delExtractor: ValoresDeParametros;
+    apiKey: string;
+    control?: ControlDeTareaWeb | undefined;
+  },
+): Promise<{
+  datos: { valores: ValoresDeParametros; parametros: ParametrosDeclarados } | null;
+  motivo: MotivoDeInterpretacion;
+}> {
+  const elector = deps.elector;
+  if (!elector) return { datos: null, motivo: 'no_cableada' };
+
+  let respuesta: string;
+  try {
+    respuesta = await elector.consultar({
+      peticion: construirPeticionDeDatos({ texto: opciones.textoParametros }),
+      // La key es la del OWNER, la MISMA que usa el motor y que sale de su boveda. No se guarda.
+      apiKey: opciones.apiKey,
+      signal: opciones.control?.signal,
+    });
+  } catch (error) {
+    deps.logger.warn('tarea web: no se pudo interpretar el objetivo; se ejecuta con el motor', {
+      jobId: job.id,
+      err: describir(error),
+    });
+    return { datos: null, motivo: 'sin_respuesta' };
+  }
+  if (respuesta.trim() === '') return { datos: null, motivo: 'sin_respuesta' };
+
+  const leido = parsearDatosDelObjetivo(respuesta, opciones.textoParametros);
+  if (!leido.ok) {
+    deps.logger.info('tarea web: la interpretacion del objetivo no se pudo usar; sigue el motor', {
+      jobId: job.id,
+      motivo: leido.motivo,
+    });
+    return { datos: null, motivo: leido.motivo };
+  }
+
+  const valores = datosConLoQueElModeloAgrego(opciones.delExtractor, leido.valores);
+  if (Object.keys(valores).length === Object.keys(opciones.delExtractor).length) {
+    return { datos: null, motivo: 'sin_datos_nuevos' };
+  }
+  // A la forma que consume la VERIFICACION DETERMINISTA. Si un valor no se puede interpretar como lo
+  // que dice ser, no hay con que compararlo contra la pagina y no se usa (misma regla que el camino
+  // de tareas propias).
+  const parametros = parametrosDeclaradosDesdeValores(valores);
+  if (parametros === null) return { datos: null, motivo: 'no_comparables' };
+
+  deps.logger.info('tarea web: el objetivo se interpreto para buscar un procedimiento compartido', {
+    jobId: job.id,
+    // Solo los NOMBRES de los datos: cuales se resolvieron explica la decision; los valores no.
+    datos: nombresDeParametrosDeclarados(parametros),
+  });
+  return { datos: { valores, parametros }, motivo: 'resuelta' };
 }
 
 /**
@@ -3148,6 +3273,11 @@ async function ejecutarPorPlantilla(
           politica: opciones.politica,
           verboBloqueado: opciones.verboBloqueado,
           textoParametros: opciones.textoParametros,
+          // LOS DATOS DE ESTA CORRIDA, que son los MISMOS que la plantilla teclea. Con los del
+          // extractor determinista es exactamente lo que esta funcion calcularia sola; con los que
+          // resolvio el modelo (FIX E) es lo unico que hace que se compare contra la pagina lo que se
+          // va a escribir en ella, y no contra un extracto mas pobre del mismo texto.
+          parametros: opciones.parametros,
         },
       );
       foto.antes = pagina;
@@ -4021,8 +4151,14 @@ export async function procesarTareaWeb(
     //
     //      El veredicto se registra SIEMPRE, se haya consumido o no: es el campo de diagnostico que
     //      responde "por que esta corrida no uso el procedimiento compartido" sin una auditoria.
-    const parametrosDelObjetivo = extraerParametrosDeclarados(textoParametros);
-    const valoresDelObjetivo = valoresDeParametros(parametrosDelObjetivo);
+    //
+    //      DOS ESCALONES PARA LOS DATOS (FIX E). El extractor determinista PRIMERO: si con lo que saca
+    //      se encuentra una plantilla, se usa, y cuesta cero tokens igual que hasta hoy. Solo si NO
+    //      alcanza -- y solo por un motivo que un dato mas pueda arreglar -- se le pregunta al modelo
+    //      UNA vez, con el mismo anclaje al texto del usuario que ya usa la eleccion entre tareas
+    //      propias. Lo que resuelva pasa por las mismas puertas que todo lo demas.
+    let parametrosDelObjetivo = extraerParametrosDeclarados(textoParametros);
+    let valoresDelObjetivo = valoresDeParametros(parametrosDelObjetivo);
     let veredictoDeConsumo: VeredictoDeConsumo = {
       consumida: false,
       // Los DOS motivos que se deciden antes de mirar la tabla: alguna via propia ya resolvio, o el
@@ -4031,12 +4167,37 @@ export async function procesarTareaWeb(
       idx: null,
     };
     if (receta === null && (decisionDePlantilla === null || plantillaAprobada !== null)) {
-      const consulta = await buscarPlantillaAjena(deps, job, activo.sitio, atlas, {
+      let consulta = await buscarPlantillaAjena(deps, job, activo.sitio, atlas, {
         dominios: dominiosAutorizados,
         verboBloqueado,
         valores: valoresDelObjetivo,
       });
-      veredictoDeConsumo = consulta.veredicto;
+      let interpretacion: MotivoDeInterpretacion = 'no_intentada';
+      if (consulta.plantilla === null && MISS_QUE_UN_DATO_ARREGLA.has(consulta.veredicto.motivo ?? '')) {
+        const interpretada = await interpretarDatosDelObjetivo(deps, job, {
+          textoParametros,
+          delExtractor: valoresDelObjetivo,
+          apiKey: credential.apiKey,
+          control,
+        });
+        interpretacion = interpretada.motivo;
+        if (interpretada.datos !== null) {
+          // LOS DATOS DE LA CORRIDA pasan a ser estos, PARA LOS DOS LADOS a la vez: lo que la
+          // plantilla teclea y lo que la verificacion determinista compara contra la pagina. Que no
+          // puedan divergir es lo que impide verificar contra una cosa y escribir otra.
+          valoresDelObjetivo = interpretada.datos.valores;
+          parametrosDelObjetivo = interpretada.datos.parametros;
+          consulta = await buscarPlantillaAjena(deps, job, activo.sitio, atlas, {
+            dominios: dominiosAutorizados,
+            verboBloqueado,
+            valores: valoresDelObjetivo,
+          });
+        }
+      }
+      veredictoDeConsumo =
+        interpretacion === 'no_intentada'
+          ? consulta.veredicto
+          : { ...consulta.veredicto, interpretacion };
       const candidata = consulta.plantilla;
       if (candidata !== null && plantillaAprobada === null) {
         const pausa = await ofrecerPlantillaEnCheckpoint(deps, job, activo, candidata);

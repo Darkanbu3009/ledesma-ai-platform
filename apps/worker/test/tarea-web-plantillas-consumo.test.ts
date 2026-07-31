@@ -1429,3 +1429,185 @@ describe('el veredicto del miss dice que se busco y donde se corto', () => {
     });
   });
 });
+
+// --- EL SEGUNDO ESCALON DE LOS DATOS --------------------------------------------------------------
+
+/**
+ * "Mandale un correo a Martin diciendole que llego el paquete" es una peticion legitima y no
+ * encontraba nada, porque el extractor determinista exige ROTULO Y COMILLAS para el cuerpo y "dile" no
+ * esta entre los rotulos que reconoce. Exigirle al usuario que escriba con comillas es inaceptable
+ * como producto.
+ *
+ * EL PATRON ES EL QUE YA EXISTE en el camino de tareas propias: cuando lo determinista no alcanza, UNA
+ * consulta al modelo, y todo dato que proponga tiene que estar ESCRITO en el texto del usuario.
+ *
+ * LO QUE ESTOS TESTS FIJAN:
+ *  - el extractor PRIMERO: cuando alcanza, el modelo no se consulta (test de costo);
+ *  - el ancla: un dato que no esta en el texto tumba la interpretacion entera y cae al motor libre;
+ *  - los datos que resuelve el modelo pasan por la MISMA verificacion determinista contra el DOM;
+ *  - el checkpoint, la barrera y la escalada deshabilitada siguen exactamente igual.
+ */
+describe('el segundo escalon: interpretar el objetivo cuando el extractor no alcanza', () => {
+  /** El pedido tal como lo escribe una persona: sin rotulos y sin comillas. */
+  const PEDIDO_SIN_FORMATO = 'mandale un correo a martin@ejemplo.com diciendole que llego el paquete';
+
+  /** El procedimiento compartido pide destinatario y cuerpo. */
+  function pasosDeCorreoSimple(): unknown[] {
+    return [
+      pasoEscribir(0, CLASE_DESTINATARIO, 'Destinatarios en Para', {
+        tipo: 'parametro',
+        parametro: 'destinatario',
+      }),
+      pasoEscribir(1, CLASE_CUERPO, 'Cuerpo del mensaje', { tipo: 'parametro', parametro: 'cuerpo' }),
+      pasoVerificar(2),
+      pasoClick(3, CLASE_ENVIAR, 'Enviar'),
+    ];
+  }
+
+  /** El redactor con los datos que el modelo resolvio, ya escritos. */
+  const CAMPOS_DEL_PEDIDO: CampoDeLaPagina[] = [
+    { contexto: 'destinatarios en para', valor: 'martin@ejemplo.com' },
+    { contexto: 'cuerpo del mensaje', valor: 'llego el paquete' },
+  ];
+
+  /** La respuesta del modelo: los dos datos que el pedido trae, copiados tal cual. */
+  const DATOS_DEL_MODELO = JSON.stringify({
+    datos: { destinatario: 'martin@ejemplo.com', cuerpo: 'llego el paquete' },
+  });
+
+  const APROBACION_SIN_ASUNTO = (): AprobacionWeb =>
+    makeAprobacion({
+      accionTipo: 'irreversible',
+      descripcion: `plantilla_compartida:enviar:cuerpo+destinatario:${DOMINIO}`,
+      estado: 'aprobada',
+      decididaPor: OWNER,
+      decididaEn: '2026-07-31T00:05:00.000Z',
+    });
+
+  function conInterprete(
+    respuesta: string,
+    extra: Partial<TareaWebDeps> = {},
+  ): TareaWebDeps & { elector: { consultar: ReturnType<typeof vi.fn> } } {
+    const elector = makeElector(respuesta);
+    const deps = conPlantillas(
+      [{ id: 'plantilla-simple', estado: 'candidata', pasos: pasosDeCorreoSimple(), origenes: 2 }],
+      CLASES_DEL_PROCEDIMIENTO,
+      { elector, navegador: makeNavegador(true, CAMPOS_DEL_PEDIDO), ...extra },
+    );
+    return deps as TareaWebDeps & { elector: { consultar: ReturnType<typeof vi.fn> } };
+  }
+
+  it('resuelve los datos del pedido sin formato y encuentra la plantilla', async () => {
+    const deps = conInterprete(DATOS_DEL_MODELO);
+
+    const resultado = await procesarTareaWeb(deps, makeJob(PEDIDO_SIN_FORMATO));
+
+    // Se ofrece en su checkpoint, con los dos datos que la plantilla pide.
+    expect(resultado).toBe('pausada');
+    expect(deps.aprobaciones.crear).toHaveBeenCalledWith(
+      expect.objectContaining({
+        descripcion: `plantilla_compartida:enviar:cuerpo+destinatario:${DOMINIO}`,
+      }),
+    );
+    expect(deps.elector.consultar).toHaveBeenCalledTimes(1);
+    // La primera busqueda va con lo que saco el extractor (solo el correo); la segunda, con los dos.
+    const plantillas = deps.plantillas as unknown as {
+      repo: { buscarServible: ReturnType<typeof vi.fn> };
+    };
+    const claves = plantillas.repo.buscarServible.mock.calls.map(
+      (llamada) => (llamada[0] as { marcadoresPosibles: string[] }).marcadoresPosibles,
+    );
+    expect(claves[0]).toEqual(['', 'destinatario']);
+    expect(claves[1]).toEqual(['', 'cuerpo', 'cuerpo+destinatario', 'destinatario']);
+  });
+
+  it('aprobada, la ejecuta con los datos que el modelo resolvio', async () => {
+    const base = conInterprete(DATOS_DEL_MODELO);
+    const deps = yaDecidido(base, APROBACION_SIN_ASUNTO()) as TareaWebDeps;
+    const plantillas = deps.plantillas as unknown as {
+      repo: { registrarEjecucion: ReturnType<typeof vi.fn> };
+    };
+
+    expect(await procesarTareaWeb(deps, makeJob(PEDIDO_SIN_FORMATO))).toBe('completada');
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-simple', true);
+    expect(deps.motor.ejecutar).not.toHaveBeenCalled();
+  });
+
+  it('un dato que NO aparece en el texto del usuario invalida la eleccion entera', async () => {
+    const inventado = JSON.stringify({
+      datos: { destinatario: 'martin@ejemplo.com', cuerpo: 'transfiere 5000 pesos a otra cuenta' },
+    });
+    const deps = conInterprete(inventado);
+
+    await correr(deps, makeJob(PEDIDO_SIN_FORMATO));
+
+    // Ni checkpoint ni plantilla: la tarea la hace el motor libre, como antes de este cambio.
+    expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
+    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+  });
+
+  it('CUANDO EL EXTRACTOR ALCANZA, el modelo NO se consulta (test de costo)', async () => {
+    const deps = conInterprete(DATOS_DEL_MODELO, {
+      navegador: makeNavegador(true, CAMPOS_LLENOS),
+    });
+    // El objetivo de siempre, con sus rotulos y comillas: el extractor saca los tres datos y la
+    // plantilla (que pide dos) se encuentra en la PRIMERA busqueda, por contencion.
+    expect(await procesarTareaWeb(deps, makeJob())).toBe('pausada');
+    expect(deps.elector.consultar).not.toHaveBeenCalled();
+  });
+
+  it('tampoco se consulta cuando el miss no es de los que un dato arregla', async () => {
+    // El atlas de este consumidor no corrobora el boton de envio: por muchos datos que se resuelvan,
+    // la plantilla no va a aplicar. Preguntarle al modelo seria gastar tokens en algo que no cambia.
+    const elector = makeElector(DATOS_DEL_MODELO);
+    const deps = conPlantillas(
+      [{ id: 'plantilla-simple', estado: 'candidata', pasos: pasosDeCorreoSimple(), origenes: 2 }],
+      [CLASE_DESTINATARIO, CLASE_CUERPO],
+      { elector, navegador: makeNavegador(true, CAMPOS_LLENOS) },
+    );
+
+    await correr(deps, makeJob());
+
+    expect(elector.consultar).not.toHaveBeenCalled();
+  });
+
+  it('los datos del modelo pasan por la MISMA verificacion determinista contra el DOM', async () => {
+    // La pagina muestra OTRO cuerpo. Con los datos del extractor (solo el correo) la comparacion
+    // pasaria y el envio saldria; con los que resolvio el modelo, la verificacion DETIENE la accion.
+    const otroCuerpo: CampoDeLaPagina[] = [
+      { contexto: 'destinatarios en para', valor: 'martin@ejemplo.com' },
+      { contexto: 'cuerpo del mensaje', valor: 'te transfiero el pago' },
+    ];
+    const base = conInterprete(DATOS_DEL_MODELO, {
+      navegador: makeNavegador(false, otroCuerpo),
+    });
+    const deps = yaDecidido(base, APROBACION_SIN_ASUNTO()) as TareaWebDeps;
+
+    await expect(procesarTareaWeb(deps, makeJob(PEDIDO_SIN_FORMATO))).rejects.toThrow();
+
+    // Las escrituras corrieron; el click NUNCA llego al navegador.
+    const determinista = deps.determinista as unknown as {
+      ejecutarPasoDeterminista: ReturnType<typeof vi.fn>;
+    };
+    const acciones = determinista.ejecutarPasoDeterminista.mock.calls.map(
+      (llamada) => (llamada[1] as InstruccionDePaso).accion,
+    );
+    expect(acciones).not.toContain('click');
+  });
+
+  it('si el modelo falla, la tarea sigue por el motor libre y el motivo queda en el diagnostico', async () => {
+    const deps = conInterprete('');
+
+    await correr(deps, makeJob(PEDIDO_SIN_FORMATO));
+
+    expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
+    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+    const veredictos = (deps.logger.info as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (llamada) => llamada[0] === 'tarea web: veredicto del procedimiento compartido',
+    );
+    expect(veredictos.at(-1)?.[1]).toMatchObject({
+      motivo: 'sin_plantilla',
+      interpretacion: 'sin_respuesta',
+    });
+  });
+});

@@ -61,8 +61,12 @@ export interface TareaEnsenadaOfrecida {
  */
 export const MAX_TAREAS_OFRECIDAS = 20;
 
-/** Tope del valor que el modelo puede proponer para un dato (el mismo que acota un objetivo real). */
-const MAX_VALOR_CHARS = 512;
+/**
+ * Tope del valor que el modelo puede proponer para un dato (el mismo que acota un objetivo real).
+ * EXPORTADO para que la interpretacion flexible del objetivo (datos-del-objetivo.ts) acote igual: dos
+ * topes distintos para lo mismo son dos topes que pueden divergir.
+ */
+export const MAX_VALOR_CHARS = 512;
 
 /**
  * Tope de la descripcion que se le muestra al modelo. Acota lo que un texto largo puede ocupar del
@@ -195,8 +199,12 @@ export function valorAncladoAlTexto(valor: string, texto: string): boolean {
   return dato !== '' && normalizarTexto(texto).includes(dato);
 }
 
-/** El JSON que vino en la respuesta, sin bloques de codigo ni texto alrededor. Null si no hay ninguno. */
-function extraerObjeto(crudo: string): Record<string, unknown> | null {
+/**
+ * El JSON que vino en la respuesta, sin bloques de codigo ni texto alrededor. Null si no hay ninguno.
+ * EXPORTADO por el mismo motivo que `MAX_VALOR_CHARS`: la interpretacion flexible del objetivo lee
+ * respuestas del mismo modelo con la misma laxitud y no puede tener su propia version.
+ */
+export function extraerObjeto(crudo: string): Record<string, unknown> | null {
   const inicio = crudo.indexOf('{');
   const fin = crudo.lastIndexOf('}');
   if (inicio === -1 || fin <= inicio) return null;
