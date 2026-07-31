@@ -430,8 +430,14 @@ type Conversion =
        * para que descartarlo no le quite nada a la receta.
        */
       noRepresentable?: { metodo: string; parametro: MarcadorParametro | null };
+      /**
+       * ESCRITURA SIN LOCALIZACION que teclea un dato DECLARADO del objetivo, descartada de forma
+       * CONDICIONADA (ver convertirPaso): la promocion verifica al final que algun paso conservado
+       * teclee ese mismo dato, y si no lo hay aborta con este mismo motivo y este mismo paso.
+       */
+      escrituraSinLocalizacion?: { idx: number; motivo: string; parametro: MarcadorParametro };
     }
-  | { omitible: false; motivo: string };
+  | { omitible: false; motivo: string; regla: ReglaDeRechazo; paso: number };
 
 /** Estrategias del paso que la receta puede usar: ordenadas y sin las que dependen del valor (D8). */
 function estrategiasUtilizables(
@@ -634,9 +640,51 @@ function heredarEstrategiasEnPulsaciones(
   });
 }
 
-/** ¿Los dos pasos apuntan al MISMO campo? Selector identico, o descripciones del mismo campo. */
+/**
+ * Localizadores del paso que IDENTIFICAN al elemento para cualquier corrida: los que no son la ruta
+ * posicional del DOM de ESTA sesion. Dos pasos que comparten uno tocaron el mismo elemento.
+ */
+function localizadoresDeIdentidad(paso: PasoCensurado): string[] {
+  const claves: string[] = [];
+  for (const estrategia of paso.estrategias ?? []) {
+    // El NOMBRE entero, no la clave de `claveDeEstrategia`: esa agrupa por CLASE de estrategia
+    // ('atributo:aria-label') y la comparten dos elementos distintos que tengan aria-label.
+    const clave =
+      estrategia.tipo === 'atributo'
+        ? `atributo:${estrategia.atributo}:${normalizarTexto(estrategia.valor)}`
+        : estrategia.tipo === 'rol'
+          ? `rol:${estrategia.rol}:${normalizarTexto(estrategia.nombre)}`
+          : estrategia.tipo === 'texto'
+            ? `texto:${normalizarTexto(estrategia.texto)}`
+            : null;
+    // Sin nombre, la estrategia describe a una familia entera de elementos ("un boton"): no
+    // identifica a ninguno y no puede decidir que dos pasos tocaron el mismo.
+    if (clave !== null && !clave.endsWith(':')) claves.push(clave);
+  }
+  return claves;
+}
+
+/**
+ * ¿Los dos pasos apuntan al MISMO campo? Selector identico, LOCALIZADOR compartido, o descripciones
+ * del mismo campo.
+ *
+ * EL LOCALIZADOR COMPARTIDO (30 jul 2026) es lo que reconoce a los clicks POR COORDENADAS. Stagehand
+ * no resuelve selector para ellos y la traza los persiste ademas sin instruccion (sus argumentos son
+ * `describe` y `coordinates`, no `action`), asi que las otras dos vias no los alcanzan: en una corrida
+ * real, ocho clicks de enfoque seguidos sobre el cuerpo del mensaje se colapsaban todos menos ese, que
+ * se colaba en el procedimiento como un paso propio. Lo que si tiene es el nombre accesible que la
+ * PERCEPCION leyo del elemento sobre el que cayo, y ese nombre es el mismo del campo que la escritura
+ * posterior vuelve a tocar. El xpath queda fuera a proposito: es la ruta de UNA sesion, dos pasos que
+ * la comparten es lo que ya decide el selector, y dos que no la comparten pueden ser el mismo campo.
+ *
+ * NO cambia el camino de la RECETA: alli los pasos llegan con `estrategias` vacia (el observador de
+ * pasos esta apagado por defecto en produccion), asi que no hay localizador que compartir y las dos
+ * vias que deciden siguen siendo las de siempre.
+ */
 function apuntaAlMismoCampo(a: PasoCensurado, b: PasoCensurado): boolean {
   if (a.selector !== null && b.selector !== null && a.selector === b.selector) return true;
+  const deA = localizadoresDeIdentidad(a);
+  if (deA.length > 0 && localizadoresDeIdentidad(b).some((clave) => deA.includes(clave))) return true;
   return describenElMismoCampo(a.accion.instruccion, b.accion.instruccion);
 }
 
@@ -823,13 +871,27 @@ function convertirPaso(
     const ruta = rutaDelPaso(paso.url, dominioDelPaso);
     // Una navegacion fuera del dominio DEL PASO no se promueve NUNCA: una receta solo sabe operar
     // dentro de los sitios que el usuario conecto y que la tarea autorizo.
-    if (ruta === null) return { omitible: false, motivo: 'navegacion fuera del dominio' };
+    if (ruta === null) {
+      return {
+        omitible: false,
+        motivo: 'navegacion fuera del dominio',
+        regla: 'navegacion_fuera_de_dominio',
+        paso: paso.idx,
+      };
+    }
     return { promovido: { ...base, accion: 'navegar', estrategias: [], ruta } };
   }
 
   if (tipo === 'keys') {
     const teclas = paso.accion.argumentos[0];
-    if (teclas === undefined) return { omitible: false, motivo: 'pulsacion sin teclas registradas' };
+    if (teclas === undefined) {
+      return {
+        omitible: false,
+        motivo: 'pulsacion sin teclas registradas',
+        regla: 'pulsacion_sin_teclas',
+        paso: paso.idx,
+      };
+    }
     return { promovido: { ...base, accion: 'teclas', estrategias: [], teclas } };
   }
 
@@ -851,7 +913,12 @@ function convertirPaso(
     if (estrategias.length > 0 && accionDeCampo === 'escribir' && texto !== '') {
       const valor = valorDePaso(texto, valores);
       if (valor === null) {
-        return { omitible: false, motivo: 'escritura de un valor sensible sin parametro al que atarlo' };
+        return {
+          omitible: false,
+          motivo: 'escritura de un valor sensible sin parametro al que atarlo',
+          regla: 'valor_sensible_sin_parametro',
+          paso: paso.idx,
+        };
       }
       return { promovido: { ...base, accion: 'escribir', estrategias, valor } };
     }
@@ -868,7 +935,12 @@ function convertirPaso(
   if (paso.accion.metodo === 'press') {
     const teclas = paso.accion.argumentos[0]?.trim();
     if (teclas === undefined || teclas === '') {
-      return { omitible: false, motivo: 'pulsacion sin teclas registradas' };
+      return {
+        omitible: false,
+        motivo: 'pulsacion sin teclas registradas',
+        regla: 'pulsacion_sin_teclas',
+        paso: paso.idx,
+      };
     }
     return { promovido: { ...base, accion: 'teclas', estrategias, teclas } };
   }
@@ -890,11 +962,23 @@ function convertirPaso(
     // ESCRITURA con dato sin localizacion: la derivacion cruzada (FIX A) ya intento adoptar el
     // localizador de un paso adyacente del mismo campo antes de llegar aqui. Sin adyacente que lo
     // cubra, el rechazo procede con el indice y la descripcion del paso que bloqueo (FIX B).
+    //
+    // CONDICIONADO AL DATO (30 jul 2026, ultimo aborto del conversor que no seguia la politica del
+    // PR 274): si lo que este paso tecleaba es un dato DECLARADO del objetivo y OTRO paso conservado
+    // teclea ese mismo dato, descartarlo no le quita nada al procedimiento -- es el intento fallido
+    // de escribir un campo que despues se escribio bien, y castigar a la corrida entera por el
+    // intento es la misma injusticia que el PR 274 cerro para los metodos no representables. La
+    // cobertura la verifica promoverTrayectoria al final, con la MISMA mecanica condicionada de los
+    // clicks de foco; sin cobertura aborta con este motivo y este paso, identicos a los de antes.
+    // Una escritura de un texto que el objetivo NO declara sigue abortando aqui mismo: no hay dato
+    // contra el que comprobar cobertura, asi que descartarla si cambiaria lo que la receta hace.
     if (esEscrituraConDato(paso)) {
-      return {
-        omitible: false,
-        motivo: `paso ${paso.idx}: ${descriptorDePaso(paso)}, sin estrategia y sin paso adyacente que cubra el campo`,
-      };
+      const motivo = `paso ${paso.idx}: ${descriptorDePaso(paso)}, sin estrategia y sin paso adyacente que cubra el campo`;
+      const parametro = datoDeclaradoDelPaso(paso, valores);
+      if (parametro === null) {
+        return { omitible: false, motivo, regla: 'escritura_sin_localizacion', paso: paso.idx };
+      }
+      return { omitible: true, escrituraSinLocalizacion: { idx: paso.idx, motivo, parametro } };
     }
     // NO es un click de foco ni una escritura: sin estrategias, es un gesto no representable (un
     // clickAndHold, una tool desconocida). No aborta, se descarta salvo que lleve un dato declarado
@@ -915,6 +999,8 @@ function convertirPaso(
       return {
         omitible: false,
         motivo: `paso ${paso.idx}: ${descriptorDePaso(paso)}, escribio un texto que el objetivo de la corrida no declara`,
+        regla: 'escritura_de_texto_no_declarado',
+        paso: paso.idx,
       };
     }
     return {
@@ -934,18 +1020,59 @@ function convertirPaso(
   }
 
   const texto = paso.accion.argumentos.join(' ').trim();
-  if (texto === '') return { omitible: false, motivo: 'escritura sin valor registrado' };
+  if (texto === '') {
+    return {
+      omitible: false,
+      motivo: 'escritura sin valor registrado',
+      regla: 'escritura_sin_valor',
+      paso: paso.idx,
+    };
+  }
   const valor = valorDePaso(texto, valores);
   if (valor === null) {
-    return { omitible: false, motivo: 'escritura de un valor sensible sin parametro al que atarlo' };
+    return {
+      omitible: false,
+      motivo: 'escritura de un valor sensible sin parametro al que atarlo',
+      regla: 'valor_sensible_sin_parametro',
+      paso: paso.idx,
+    };
   }
   return { promovido: { ...base, accion: 'escribir', estrategias, valor } };
 }
+
+/**
+ * LA REGLA CONCRETA que impidio armar el procedimiento, en vocabulario CERRADO (30 jul 2026).
+ *
+ * POR QUE EXISTE: `motivo` es texto libre y lleva dentro el indice y la descripcion del paso, asi que
+ * no se puede guardar en el resultado de un job (es donde viven los relatos del modelo). El veredicto
+ * de la publicacion de plantillas guardaba entonces solo `sin_procedimiento_repetible`, que son TRECE
+ * reglas distintas metidas en una palabra, y averiguar cual habia disparado costo leer el conversor
+ * entero dos veces. Esto es lo que viaja: un identificador de vocabulario cerrado, sin un solo dato
+ * del usuario, del sitio ni de lo que la tarea escribio.
+ */
+export type ReglaDeRechazo =
+  | 'trayectoria_no_exitosa'
+  | 'paso_fallido'
+  | 'navegacion_fuera_de_dominio'
+  | 'pulsacion_sin_teclas'
+  | 'valor_sensible_sin_parametro'
+  | 'escritura_sin_valor'
+  | 'escritura_sin_localizacion'
+  | 'escritura_de_texto_no_declarado'
+  | 'click_sin_localizacion_sin_cobertura'
+  | 'dato_no_representable_sin_cobertura'
+  | 'sin_pasos_reejecutables'
+  | 'excede_el_tope_de_pasos'
+  | 'sin_verificacion_de_accion_irreversible';
 
 /** Por que una trayectoria NO se promovio (diagnostico interno; nunca se le muestra al usuario). */
 export interface PromocionRechazada {
   promovida: false;
   motivo: string;
+  /** La regla que corto, para registrarla donde `motivo` no puede ir (ver ReglaDeRechazo). */
+  regla: ReglaDeRechazo;
+  /** `idx` del paso implicado en la traza de la corrida, o null cuando la regla no apunta a uno. */
+  paso: number | null;
   /**
    * Los metodos NO representables descartados HASTA el punto del rechazo (FIX C). Viajan tambien en
    * el camino de aborto para que el log del job diga que se omitio ADEMAS del motivo: sin esto, el
@@ -973,9 +1100,16 @@ export type ResultadoDePromocion = PromocionAceptada | PromocionRechazada;
  * PROMUEVE una trayectoria a los pasos de una receta (D4). Solo se promueve si TODOS los pasos con
  * efecto sobre la pagina son re-ejecutables y tienen al menos una estrategia de localizacion valida;
  * un solo paso que no lo sea descarta la trayectoria entera (una receta a la que le falta un paso
- * hace una tarea distinta de la aprendida). La UNICA excepcion es el click de FOCO sin estrategias
- * cubierto por una escritura posterior (ver convertirPaso): su unico efecto es el que la escritura
- * conservada ya repite.
+ * hace una tarea distinta de la aprendida).
+ *
+ * LAS EXCEPCIONES son todas de la MISMA forma, la politica CONDICIONADA: el paso se descarta y la
+ * conversion solo se cae si con el se perdia algo que ningun paso conservado repite. Son tres, y las
+ * tres las comprueba esta funcion al final, sobre los pasos que de verdad quedaron:
+ *  - el click de FOCO sin estrategias, inocuo si una ESCRITURA POSTERIOR con localizador lo cubre;
+ *  - el METODO NO REPRESENTABLE (un gesto, un select nativo, una tool futura), inocuo salvo que
+ *    llevara un dato declarado del objetivo que ningun paso conservado teclee;
+ *  - la ESCRITURA SIN LOCALIZACION, con la misma regla del dato: el intento fallido de escribir un
+ *    campo que despues se escribio bien no puede tumbar la corrida entera.
  *
  * Los pasos que el motor ejecuto para MIRAR (extract, ariaTree, screenshot, think, done) se omiten:
  * existian para informar al modelo, que en la ejecucion determinista no participa.
@@ -994,7 +1128,12 @@ export function promoverTrayectoria(entrada: {
   exigeVerificacion: boolean;
 }): ResultadoDePromocion {
   if (entrada.estado !== 'exitosa') {
-    return { promovida: false, motivo: `la trayectoria termino ${entrada.estado}` };
+    return {
+      promovida: false,
+      motivo: `la trayectoria termino ${entrada.estado}`,
+      regla: 'trayectoria_no_exitosa',
+      paso: null,
+    };
   }
   const valores = valoresDeParametros(extraerParametrosDeclarados(entrada.objetivo));
   const pasos: PasoDeReceta[] = [];
@@ -1004,11 +1143,21 @@ export function promoverTrayectoria(entrada: {
   // llevaban un dato DECLARADO del objetivo, que hay que verificar que otro paso cubra al final.
   const metodosDescartados: string[] = [];
   const datosNoRepresentablesSinCubrir: Array<{ metodo: string; parametro: MarcadorParametro }> = [];
+  // Escrituras SIN LOCALIZACION que tecleaban un dato declarado (ver convertirPaso): se descartan y
+  // solo abortan si ningun paso conservado teclea ese mismo dato.
+  const escriturasSinLocalizacion: Array<{ idx: number; motivo: string; parametro: MarcadorParametro }> =
+    [];
   // Todo rechazo posterior a esta linea viaja CON los metodos descartados hasta ese punto (FIX C):
   // el log del job los emite tambien cuando la conversion aborta.
-  const rechazar = (motivo: string): PromocionRechazada => ({
+  const rechazar = (
+    regla: ReglaDeRechazo,
+    motivo: string,
+    paso: number | null = null,
+  ): PromocionRechazada => ({
     promovida: false,
     motivo,
+    regla,
+    paso,
     ...(metodosDescartados.length > 0 ? { metodosDescartados } : {}),
   });
   // Primero la adopcion (una escritura sin selector toma el localizador del adyacente), despues la
@@ -1021,7 +1170,7 @@ export function promoverTrayectoria(entrada: {
   );
   for (const paso of descartarDesviosDeLaTrayectoria(preparados, valores)) {
     if (paso.exito === false) {
-      return rechazar('la trayectoria contiene un paso fallido');
+      return rechazar('paso_fallido', 'la trayectoria contiene un paso fallido', paso.idx);
     }
     const conversion = convertirPaso(paso, entrada.dominio, valores, pasos.length);
     if ('promovido' in conversion) {
@@ -1029,9 +1178,12 @@ export function promoverTrayectoria(entrada: {
       pasos.push(conversion.promovido);
       continue;
     }
-    if (!conversion.omitible) return rechazar(conversion.motivo);
+    if (!conversion.omitible) return rechazar(conversion.regla, conversion.motivo, conversion.paso);
     if (conversion.clickSinLocalizacion === true) {
       clicksSinLocalizacion.push({ idx: paso.idx, descriptor: descriptorDePaso(paso) });
+    }
+    if (conversion.escrituraSinLocalizacion !== undefined) {
+      escriturasSinLocalizacion.push(conversion.escrituraSinLocalizacion);
     }
     if (conversion.noRepresentable !== undefined) {
       metodosDescartados.push(conversion.noRepresentable.metodo);
@@ -1043,6 +1195,16 @@ export function promoverTrayectoria(entrada: {
       }
     }
   }
+  // COBERTURA de una ESCRITURA SIN LOCALIZACION descartada (convertirPaso): la misma mecanica, y con
+  // el motivo y el paso que esa escritura ya traia. Solo aborta si el dato que tecleaba no lo teclea
+  // ningun paso conservado: entonces el procedimiento haria una tarea distinta de la aprendida.
+  if (escriturasSinLocalizacion.length > 0) {
+    const cubiertos = new Set(marcadoresDeParametros(pasos));
+    const perdida = escriturasSinLocalizacion.find((dato) => !cubiertos.has(dato.parametro));
+    if (perdida !== undefined) {
+      return rechazar('escritura_sin_localizacion', perdida.motivo, perdida.idx);
+    }
+  }
   // COBERTURA de un click de foco descartado (convertirPaso): solo es inocuo si una ESCRITURA
   // POSTERIOR con estrategias lo cubre (el ejecutor enfoca el localizador de esa escritura antes de
   // teclear). Un click sin estrategias al que ninguna escritura sigue puede ser el click con efecto
@@ -1050,7 +1212,9 @@ export function promoverTrayectoria(entrada: {
   for (const click of clicksSinLocalizacion) {
     if (!escriturasPromovidas.some((idxEscritura) => idxEscritura > click.idx)) {
       return rechazar(
+        'click_sin_localizacion_sin_cobertura',
         `el click del paso ${click.idx} (${click.descriptor}) quedo sin ninguna estrategia de localizacion y ninguna escritura posterior lo cubre`,
+        click.idx,
       );
     }
   }
@@ -1064,18 +1228,20 @@ export function promoverTrayectoria(entrada: {
     const perdido = datosNoRepresentablesSinCubrir.find((dato) => !cubiertos.has(dato.parametro));
     if (perdido !== undefined) {
       return rechazar(
+        'dato_no_representable_sin_cobertura',
         `el paso con metodo ${perdido.metodo} llevaba el dato ${perdido.parametro} del objetivo y ningun otro paso lo cubre`,
       );
     }
   }
   if (pasos.length === 0) {
-    return rechazar('la trayectoria no dejo ningun paso re-ejecutable');
+    return rechazar('sin_pasos_reejecutables', 'la trayectoria no dejo ningun paso re-ejecutable');
   }
   if (pasos.length > MAX_PASOS_RECETA) {
-    return rechazar('la trayectoria excede el tope de pasos de una receta');
+    return rechazar('excede_el_tope_de_pasos', 'la trayectoria excede el tope de pasos de una receta');
   }
   if (entrada.exigeVerificacion && !tienePasoDeVerificacion(pasos)) {
     return rechazar(
+      'sin_verificacion_de_accion_irreversible',
       'el objetivo pide una accion irreversible y la trayectoria no dejo constancia de la verificacion',
     );
   }

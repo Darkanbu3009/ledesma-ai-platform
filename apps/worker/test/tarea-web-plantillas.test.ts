@@ -628,7 +628,13 @@ describe('el veredicto de la publicacion queda registrado en el resultado del jo
   it('cuando se publica, lo dice con las clases que lo autorizaron', async () => {
     const deps = makeDeps();
     await procesarTareaWeb(deps, makeJob(OBJETIVO));
-    expect(veredictoDe(deps)).toEqual({ publicada: true, motivo: null, idx: null, clases: 2 });
+    expect(veredictoDe(deps)).toEqual({
+      publicada: true,
+      motivo: null,
+      submotivo: null,
+      idx: null,
+      clases: 2,
+    });
   });
 
   it('la promocion de la receta que FALLA ya no impide publicar', async () => {
@@ -638,7 +644,13 @@ describe('el veredicto de la publicacion queda registrado en el resultado del jo
     recetas.promover.mockRejectedValue(new Error('base caida'));
     const deps = makeDeps({ recetas });
     await procesarTareaWeb(deps, makeJob(OBJETIVO));
-    expect(veredictoDe(deps)).toEqual({ publicada: true, motivo: null, idx: null, clases: 2 });
+    expect(veredictoDe(deps)).toEqual({
+      publicada: true,
+      motivo: null,
+      submotivo: null,
+      idx: null,
+      clases: 2,
+    });
     expect(plantillasDe(deps)).toHaveLength(1);
   });
 
@@ -657,9 +669,16 @@ describe('el veredicto de la publicacion queda registrado en el resultado del jo
       pagina,
     );
     await procesarTareaWeb(deps, makeJob(OBJETIVO));
-    expect(veredictoDe(deps)).toMatchObject({
+    // EL SUB-MOTIVO, que es lo que hasta hoy no quedaba en ningun lado: `sin_procedimiento_repetible`
+    // son las trece reglas del conversor metidas en una palabra, y averiguar cual habia cortado
+    // costo leer el conversor entero. Ahora la regla y el paso implicado viajan con el veredicto.
+    expect(veredictoDe(deps)).toEqual({
       publicada: false,
       motivo: 'sin_procedimiento_repetible',
+      submotivo: 'click_sin_localizacion_sin_cobertura',
+      // El paso implicado en la TRAZA: el click de Enviar, que va detras de la navegacion inicial.
+      idx: 1,
+      clases: 2,
     });
     expect(plantillasDe(deps)).toHaveLength(0);
   });
@@ -670,6 +689,7 @@ describe('el veredicto de la publicacion queda registrado en el resultado del jo
     expect(veredictoDe(deps)).toEqual({
       publicada: false,
       motivo: 'sin_intencion_irreversible',
+      submotivo: null,
       idx: null,
       clases: 2,
     });
@@ -681,6 +701,7 @@ describe('el veredicto de la publicacion queda registrado en el resultado del jo
     expect(veredictoDe(deps)).toEqual({
       publicada: false,
       motivo: 'clase_no_corroborada',
+      submotivo: null,
       idx: 0,
       clases: 0,
     });
@@ -692,6 +713,7 @@ describe('el veredicto de la publicacion queda registrado en el resultado del jo
     expect(veredictoDe(deps)).toEqual({
       publicada: false,
       motivo: 'publicacion_no_cableada',
+      submotivo: null,
       idx: null,
       clases: 2,
     });
@@ -706,6 +728,7 @@ describe('el veredicto de la publicacion queda registrado en el resultado del jo
     expect(veredictoDe(deps)).toEqual({
       publicada: false,
       motivo: 'rechazada_por_el_backend',
+      submotivo: null,
       idx: null,
       clases: 2,
     });
@@ -717,6 +740,7 @@ describe('el veredicto de la publicacion queda registrado en el resultado del jo
     expect(veredictoDe(deps)).toEqual({
       publicada: false,
       motivo: 'error_al_publicar',
+      submotivo: null,
       idx: null,
       clases: 2,
     });
