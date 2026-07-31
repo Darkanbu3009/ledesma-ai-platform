@@ -14,8 +14,9 @@ import {
  * un origen descubrio y que la plataforma podra reusar. Recibe el cliente sql por inyeccion
  * (testeable), mismo patron que AprendizajeSitiosRepository y RecetasWebRepository.
  *
- * TRES OPERACIONES: `publicar` (upsert anonimo), `buscarServible` (la lectura del CONSUMO, por la
- * clave de tres columnas de la identidad) y `registrarEjecucion` (los contadores de como le fue).
+ * CUATRO OPERACIONES: `publicar` (upsert anonimo), `buscarServible` (la lectura del CONSUMO, por la
+ * clave de tres columnas de la identidad), `diagnosticarMiss` (donde se corto esa lectura cuando no
+ * devolvio nada, y SOLO despues de un miss) y `registrarEjecucion` (los contadores de como le fue).
  *
  * INVARIANTES A NIVEL DE QUERY, y son el mecanismo del anonimato, no una promesa:
  *  - Ninguna query de este repositorio nombra `owner_id`, ni un id de trayectoria, de receta o de job,
@@ -108,6 +109,66 @@ interface FilaServible {
   origenes: number | string | null;
 }
 
+/**
+ * DONDE SE CORTO la lectura del consumo cuando no devolvio nada. Conjunto CERRADO de cuatro, uno por
+ * cada filtro de `buscarServible` y en el orden en que la consulta los aplica.
+ *
+ * POR QUE EXISTE: el veredicto 'sin_plantilla' no decia nada, y averiguar la causa costo TRES
+ * investigaciones read-only completas (el origen propio que excluia para siempre, la igualdad exacta
+ * de marcadores y la divergencia entre los textos de los dos lados). Con este campo, la cuarta se
+ * responde mirando el resultado del job.
+ *
+ * ES VOCABULARIO CERRADO, igual que los motivos del worker: ni un dato del usuario, del sitio ni de la
+ * tabla. Y el diagnostico NO mira el hash de nadie -- ni siquiera para decir `origen_propio`, que es el
+ * corte RESIDUAL: si hay una fila con esta identidad, con los marcadores contenidos y en estado
+ * servible, y aun asi la lectura no la devolvio, el unico filtro que queda es el del origen.
+ */
+export type CorteDelConsumo =
+  /** No hay ninguna fila para este conjunto de dominios y esta intencion. */
+  | 'sin_identidad_en_tabla'
+  /** Las hay, pero ninguna pide un subconjunto de los marcadores que el consumidor declara. */
+  | 'marcadores_no_contenidos'
+  /** La fila existe y su clave casa, pero su estado no se sirve ('retirada'). */
+  | 'estado_no_servible'
+  /** La fila existe, casa y es servible: el unico origen que la avala es el del consumidor. */
+  | 'origen_propio';
+
+export interface DiagnosticoDelMiss {
+  corte: CorteDelConsumo;
+  /** Cuantos origenes tiene la fila que SI matcheo la clave, o null si ninguna la matcheo. */
+  origenes: number | null;
+}
+
+interface FilaDeDiagnostico {
+  marcadores_clave: string;
+  estado: string;
+  origenes: number | string | null;
+}
+
+/**
+ * TOPE de filas del diagnostico. No es un limite arbitrario: con una identidad de dominios y una
+ * intencion fijas, el indice unico de V041 deja como mucho UNA fila por conjunto de marcadores, y los
+ * conjuntos posibles son los subconjuntos de los seis marcadores del contrato. 2^6 = 64.
+ */
+export const MAX_FILAS_DE_DIAGNOSTICO = 64;
+
+/** Cuantos marcadores exige una clave ('' = ninguno). El MISMO conteo que hace el `order by`. */
+function marcadoresDeLaClave(clave: string): number {
+  return clave === '' ? 0 : clave.split('+').length;
+}
+
+/**
+ * EL MISMO DESEMPATE del `order by` de `buscarServible`, en TypeScript: la mas especifica primero y
+ * despues la mas corroborada. Existe para que "la fila que si matcheo la clave" del diagnostico sea la
+ * MISMA que la consulta habria elegido, y no otra cualquiera.
+ */
+function porElDesempate(a: FilaDeDiagnostico, b: FilaDeDiagnostico): number {
+  return (
+    marcadoresDeLaClave(b.marcadores_clave) - marcadoresDeLaClave(a.marcadores_clave) ||
+    Number(b.origenes ?? 0) - Number(a.origenes ?? 0)
+  );
+}
+
 export class PlantillasCompartidasRepository {
   constructor(private readonly sql: Sql) {}
 
@@ -177,16 +238,38 @@ export class PlantillasCompartidasRepository {
   /**
    * LA LECTURA DEL CONSUMO: la plantilla de esta IDENTIDAD que se le puede servir a un consumidor.
    *
-   * ES UN WHERE DE TRES COLUMNAS mas dos filtros, y no hay un ranking, un LIKE ni un orden por
-   * popularidad: la identidad es UNICA (el indice unico de V041 es exactamente esta clave), asi que la
-   * consulta devuelve una fila o ninguna. Cero texto libre entra a esta query.
+   * ES UN WHERE DE TRES COLUMNAS mas dos filtros, y no hay un LIKE ni un orden por popularidad. Cero
+   * texto libre entra a esta query.
+   *
+   * LA CONTENCION, y es la unica diferencia con una igualdad de tres columnas: `marcadores_clave` se
+   * compara contra el conjunto que el consumidor declara Y CONTRA TODOS SUS SUBCONJUNTOS, que el
+   * worker genera antes de llamar (`clavesDeMarcadoresContenidos`, apps/worker). La plantilla aplica
+   * si lo que ELLA exige esta contenido en lo que el consumidor trae; con la igualdad exacta, un dato
+   * de mas del consumidor la volvia inencontrable. Sigue siendo IGUALDAD contra una lista, o sea las
+   * mismas tres columnas del indice unico de V041 y en el mismo orden: sin migracion, sin columna
+   * nueva y sin un segundo indice. La lista tiene 64 cadenas como maximo (2^6, los subconjuntos de los
+   * seis marcadores del contrato).
+   *
+   * EL DESEMPATE, porque con contencion pueden calificar varias filas y elegir al azar significaria
+   * que la misma tarea corre un procedimiento distinto en cada corrida:
+   *  1. LA MAS ESPECIFICA: la que exige mas marcadores. Es la que mas cerca esta de lo que el usuario
+   *     pidio, y la que deja menos campos sin llenar.
+   *  2. LA MAS CORROBORADA: mas origenes distintos y despues mas ejecuciones exitosas.
+   *  3. EL `id`, que es UNICO. No es un criterio de calidad: es lo que convierte un orden parcial en
+   *     TOTAL, para que dos corridas con los mismos datos elijan siempre la misma fila.
    *
    * LOS DOS FILTROS:
    *  - `estado`: 'retirada' no se sirve nunca.
-   *  - EL ORIGEN PROPIO: una plantilla entre cuyos `origenes_hash` esta el del consumidor NO se le
-   *    sirve como ajena. La produjo el mismo, asi que ya la tiene por sus propias recetas y ofrecersela
-   *    como descubrimiento de otra cuenta seria falso. El `@>` de jsonb decide la pertenencia dentro
-   *    del propio statement: el hash no sale de la base ni se compara en el worker.
+   *  - EL ORIGEN PROPIO: no se sirve la plantilla cuyo UNICO origen es el consumidor. La produjo el
+   *    mismo, asi que ya la tiene por sus propias recetas y ofrecersela como descubrimiento de otra
+   *    cuenta seria falso. BASTA CON QUE QUEDE UN ORIGEN DISTINTO del suyo, y la diferencia no es
+   *    teorica: el predicado anterior decia "cualquier plantilla a la que yo haya contribuido alguna
+   *    vez", asi que una fila con DOS origenes reales quedaba fuera del alcance de LAS DOS cuentas
+   *    para siempre, pese a que cada una tenia el aval de la otra. El lazo tampoco se recuperaba
+   *    solo: la consulta fallaba, la tarea caia al motor libre, el exito volvia a publicar, el `on
+   *    conflict` deduplicaba el origen y la corrida siguiente volvia a fallar igual.
+   *    La comparacion sigue ocurriendo DENTRO del propio statement: el hash no sale de la base ni se
+   *    compara en el worker.
    *
    * El hash es OPACO para este repositorio, igual que en `publicar`: no lo deriva, no lo guarda y no
    * puede volver de el al usuario.
@@ -194,19 +277,34 @@ export class PlantillasCompartidasRepository {
   async buscarServible(clave: {
     dominiosClave: string;
     codigoDeIntencion: string;
-    marcadoresClave: string;
+    /** El conjunto de marcadores del consumidor y todos sus subconjuntos, ya en formato de clave. */
+    marcadoresPosibles: readonly string[];
     /** HMAC del origen del CONSUMIDOR, con la clave de plantillas del worker. */
     origenHash: string;
   }): Promise<PlantillaServible | null> {
-    const propio = this.sql.json([clave.origenHash] as unknown as Parameters<Sql['json']>[0]);
+    // Un consumidor siempre trae al menos la clave vacia (el subconjunto vacio). Sin ninguna no hay
+    // nada que preguntar, y un `in ()` no seria una consulta valida.
+    if (clave.marcadoresPosibles.length === 0) return null;
     const filas = await this.sql<FilaServible[]>`
       select id, estado, pasos, jsonb_array_length(origenes_hash) as origenes
       from plantillas_compartidas
       where dominios_clave = ${clave.dominiosClave}
         and codigo_de_intencion = ${clave.codigoDeIntencion}
-        and marcadores_clave = ${clave.marcadoresClave}
+        and marcadores_clave in ${this.sql([...clave.marcadoresPosibles])}
         and estado in ${this.sql([...ESTADOS_SERVIBLES])}
-        and not (origenes_hash @> ${propio})
+        and exists (
+          select 1
+          from jsonb_array_elements_text(origenes_hash) as origen(hash)
+          where origen.hash <> ${clave.origenHash}
+        )
+      order by
+        case
+          when marcadores_clave = '' then 0
+          else length(marcadores_clave) - length(replace(marcadores_clave, '+', '')) + 1
+        end desc,
+        origenes desc,
+        ejecuciones_exitosas desc,
+        id asc
       limit 1
     `;
     const fila = filas[0];
@@ -217,6 +315,46 @@ export class PlantillasCompartidasRepository {
       pasos: fila.pasos,
       origenes: Number(fila.origenes ?? 0),
     };
+  }
+
+  /**
+   * DONDE SE CORTO la busqueda cuando `buscarServible` no devolvio nada (ver `CorteDelConsumo`).
+   *
+   * SOLO CORRE DESPUES DE UN MISS, nunca en el camino feliz: es una consulta mas, y el consumo no
+   * puede pagarla cuando ya encontro lo que buscaba. El llamador la trata como best-effort.
+   *
+   * ES LA MISMA IDENTIDAD SIN EL FILTRO DE MARCADORES: se traen las filas de este conjunto de dominios
+   * y esta intencion (como mucho 64, ver MAX_FILAS_DE_DIAGNOSTICO) y los cuatro cortes se deciden
+   * aqui, en orden. NO se le pregunta nada al hash de origen: `origen_propio` es el corte residual, y
+   * eso mantiene esta consulta todavia mas anonima que la del consumo.
+   */
+  async diagnosticarMiss(clave: {
+    dominiosClave: string;
+    codigoDeIntencion: string;
+    /** Las mismas claves con las que se busco: el conjunto declarado y todos sus subconjuntos. */
+    marcadoresPosibles: readonly string[];
+  }): Promise<DiagnosticoDelMiss> {
+    const filas = await this.sql<FilaDeDiagnostico[]>`
+      select marcadores_clave, estado, jsonb_array_length(origenes_hash) as origenes
+      from plantillas_compartidas
+      where dominios_clave = ${clave.dominiosClave}
+        and codigo_de_intencion = ${clave.codigoDeIntencion}
+      limit ${MAX_FILAS_DE_DIAGNOSTICO}
+    `;
+    if (filas.length === 0) return { corte: 'sin_identidad_en_tabla', origenes: null };
+
+    const posibles = new Set(clave.marcadoresPosibles);
+    const contenidas = filas
+      .filter((fila) => posibles.has(fila.marcadores_clave))
+      .sort(porElDesempate);
+    const mejor = contenidas[0];
+    if (mejor === undefined) return { corte: 'marcadores_no_contenidos', origenes: null };
+
+    const servible = contenidas.find((fila) => ESTADOS_SERVIBLES.includes(fila.estado));
+    if (servible === undefined) {
+      return { corte: 'estado_no_servible', origenes: Number(mejor.origenes ?? 0) };
+    }
+    return { corte: 'origen_propio', origenes: Number(servible.origenes ?? 0) };
   }
 
   /**
