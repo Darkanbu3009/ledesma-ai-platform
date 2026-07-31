@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { Job } from '@ledesma-platform/shared';
+import type { EstrategiaLocalizacion, Job } from '@ledesma-platform/shared';
 import type { SitioConectado } from '@ledesma-platform/backend/sitios';
 import type { AprobacionWeb } from '@ledesma-platform/backend/aprobaciones';
 import type { RecetaWeb } from '@ledesma-platform/backend/recetas-web';
@@ -72,14 +72,21 @@ function makeLogger(): Logger {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 }
 
-function makeJob(objetivo: string = OBJETIVO): Job {
+function makeJob(objetivo: string = OBJETIVO, textoUsuario?: string): Job {
   return {
     id: 'job-1',
     agentId: null,
     ownerId: OWNER,
     credentialId: 'cred-1',
     status: 'running',
-    payload: { kind: 'tarea_web', connectionId: CONNECTION_ID, objetivo },
+    payload: {
+      kind: 'tarea_web',
+      connectionId: CONNECTION_ID,
+      objetivo,
+      // EL TEXTO LITERAL DEL USUARIO (CAMBIO 3), que el backend adjunta por codigo. Ausente en los
+      // jobs encolados antes de ese cambio, y ahi manda el objetivo que redacto el modelo.
+      ...(textoUsuario !== undefined ? { textoUsuario } : {}),
+    },
     scheduledFor: null,
     attempts: 1,
     lastError: null,
@@ -134,7 +141,7 @@ const CAMPOS_LLENOS: CampoDeLaPagina[] = [
  * el formulario lleno (la de la verificacion) y las siguientes ya no lo encuentran, que es como el
  * sitio dice "enviado"; con false el formulario sigue ahi y el efecto NO se confirma.
  */
-function makeNavegador(cierraElRedactor = true): NavegadorParaTarea {
+function makeNavegador(cierraElRedactor = true, campos = CAMPOS_LLENOS): NavegadorParaTarea {
   let lecturas = 0;
   return {
     abrirSesionParaTarea: vi.fn(async () => ({
@@ -149,10 +156,18 @@ function makeNavegador(cierraElRedactor = true): NavegadorParaTarea {
     capturarPantalla: vi.fn(async () => 'cGxhY2Vob2xkZXI='),
     leerCamposDeLaPagina: vi.fn(async () => {
       lecturas += 1;
-      return cierraElRedactor && lecturas > 1 ? [] : CAMPOS_LLENOS;
+      return cierraElRedactor && lecturas > 1 ? [] : campos;
     }),
     leerTextoVisible: vi.fn(async () => ''),
     observarSalida: vi.fn(async () => ({ egressIp: '203.0.113.7', egressCountry: 'MX' })),
+    // Lo que la BARRERA DE IDENTIDAD lee del DOM en el camino del MOTOR LIBRE (por el del ejecutor
+    // determinista lo lee el navegador determinista). Con la barrera apagada -- el default de estos
+    // deps -- no se llama nunca.
+    localizarBotonPorAriaLabel: vi.fn(async () => ({
+      ariaLabel: 'Enviar',
+      rol: 'button',
+      candidatos: 1,
+    })),
     cerrarSesion: vi.fn(async () => {}),
   } as unknown as NavegadorParaTarea;
 }
@@ -339,11 +354,17 @@ interface FilaDePlantilla {
 }
 
 /**
- * `marcadores_clave` DE LA FILA, derivado de sus propios pasos igual que en la publicacion: es lo que
- * la plantilla EXIGE, y lo que la contencion compara contra lo que el consumidor declara.
+ * `marcadores_clave` de unos pasos publicables, con la MISMA derivacion que hace el repositorio antes
+ * del insert: es lo que la plantilla EXIGE, y lo que la contencion compara contra lo que el
+ * consumidor declara.
  */
+function marcadoresDePasos(pasos: unknown): string {
+  return marcadoresClave(marcadoresDePasosPublicables(parsearPasosPublicables(pasos) ?? []));
+}
+
+/** El mismo calculo sobre una fila de la tabla. */
 function marcadoresDeLaFila(fila: FilaDePlantilla): string {
-  return marcadoresClave(marcadoresDePasosPublicables(parsearPasosPublicables(fila.pasos) ?? []));
+  return marcadoresDePasos(fila.pasos);
 }
 
 /**
@@ -1011,5 +1032,257 @@ describe('ejecucion de la plantilla aprobada', () => {
     expect(deps.barreraIdentidad).toBeUndefined();
     // La tarea la termina el motor libre, que era la linea base.
     expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+// --- SIMETRIA ENTRE LA PUBLICACION Y EL CONSUMO ---------------------------------------------------
+
+/**
+ * EL TEST QUE FALTABA, y el que habria atrapado los tres primeros problemas de este PR: una corrida
+ * del MOTOR LIBRE publica un procedimiento y otra corrida del mismo tipo, con OTRO FRASEO
+ * equivalente, lo ENCUENTRA y lo ejecuta.
+ *
+ * POR QUE NO EXISTIA: los dos lados se testeaban por separado. La publicacion, contra trayectorias
+ * reales (plantillas-motor-libre.test.ts); el consumo, contra filas escritas a mano (este archivo).
+ * Ninguno de los dos podia ver que la clave que UNO escribe no es la que el OTRO busca.
+ *
+ * LAS DOS CORRIDAS PASAN POR `procesarTareaWeb` ENTERO. La primera lleva su traza por donde la lleva
+ * el motor de verdad -- `acciones` con sus `playwrightArguments` y `estrategiasPorAccion`, que es lo
+ * que la PERCEPCION leyo del DOM despues de cada paso -- con el observador de pasos APAGADO, que es
+ * el default de produccion, y con la barrera de identidad en 'observacion', que tambien lo es.
+ */
+describe('simetria: lo que una corrida publica es lo que otra corrida encuentra', () => {
+  /** Lo que el USUARIO tecleo en la corrida que descubrio el procedimiento: con rotulos y comillas. */
+  const TEXTO_DEL_USUARIO =
+    'envia un correo a martin@ejemplo.com con el asunto "Hola" y el cuerpo "llego el paquete"';
+  /**
+   * Lo que el modelo conversacional REDACTO de ESE MISMO pedido al llamar a su tool. Es una
+   * parafrasis, y se lleva por delante los rotulos y las comillas, que es justo de lo que depende el
+   * extractor determinista. Medido en produccion (ver el CAMBIO 3 de tarea-web.ts).
+   */
+  const OBJETIVO_DEL_MODELO =
+    'Enviar un correo electronico a martin@ejemplo.com avisando que llego el paquete. ' +
+    'La tarea termina cuando el correo se haya enviado exitosamente.';
+  /** OTRA CUENTA pide LO MISMO con otras palabras y otros datos. */
+  const OTRO_FRASEO =
+    'manda un mail a ana@ejemplo.com con el asunto "Reunion" y el mensaje "nos vemos a las 5"';
+
+  /** El redactor de la SEGUNDA corrida, con SUS datos: es lo que la verificacion compara. */
+  const CAMPOS_DEL_OTRO_FRASEO: CampoDeLaPagina[] = [
+    { contexto: 'destinatarios en para', valor: 'ana@ejemplo.com' },
+    { contexto: 'asunto', valor: 'Reunion' },
+    { contexto: 'cuerpo del mensaje', valor: 'nos vemos a las 5' },
+  ];
+
+  const CLASE_REDACTAR = 'click|rol:button|redactar';
+  const CLASES_DE_LA_CORRIDA = [CLASE_REDACTAR, ...CLASES_DEL_PROCEDIMIENTO];
+
+  const rol = (rolAria: string, nombre: string): EstrategiaLocalizacion => ({
+    tipo: 'rol',
+    rol: rolAria,
+    nombre,
+  });
+  const xpath = (ruta: string): EstrategiaLocalizacion => ({ tipo: 'xpath', xpath: ruta });
+
+  /** Una accion del motor tal como llega en `AgentResult.actions`, con su selector resuelto. */
+  function accionDelMotor(
+    instruccion: string,
+    metodo: string,
+    argumentos: string[],
+    selector: string,
+  ): Record<string, unknown> {
+    return {
+      type: 'act',
+      action: instruccion,
+      success: true,
+      pageUrl: `https://${DOMINIO}/`,
+      playwrightArguments: { selector, method: metodo, arguments: argumentos },
+    };
+  }
+
+  /** Las cinco acciones del envio, en orden. La ultima es la que pasa por la guardia. */
+  const ACCIONES_DEL_ENVIO = [
+    accionDelMotor('click the Redactar button', 'click', [], '/html/body/div/div[3]'),
+    accionDelMotor(
+      'type the recipient into the Para field',
+      'fill',
+      ['martin@ejemplo.com'],
+      '/html/body/div[7]/form/input[1]',
+    ),
+    accionDelMotor(
+      'type the subject into the Asunto field',
+      'fill',
+      ['Hola'],
+      '/html/body/div[7]/form/input[2]',
+    ),
+    accionDelMotor(
+      'type the body into the Cuerpo del mensaje field',
+      'fill',
+      ['llego el paquete'],
+      '/html/body/div[7]/form/div[1]',
+    ),
+    accionDelMotor('click the Enviar button', 'click', [], '/html/body/div[7]/form/div[2]'),
+  ];
+
+  /**
+   * LO QUE LA PERCEPCION LEYO del elemento de cada accion, una lista por accion y en su orden. La
+   * ultima va VACIA a proposito: el boton Enviar se lleva por delante su propio redactor, asi que la
+   * lectura que corre DESPUES de la accion ya no encuentra el elemento. Su localizador lo aporta lo
+   * que la barrera de identidad leyo JUSTO ANTES de accionarlo.
+   */
+  const PERCIBIDAS_POR_ACCION: EstrategiaLocalizacion[][] = [
+    [rol('button', 'Redactar'), xpath('/html/body/div/div[3]')],
+    [rol('textbox', 'Destinatarios en Para'), xpath('/html/body/div[7]/form/input[1]')],
+    [rol('textbox', 'Asunto'), xpath('/html/body/div[7]/form/input[2]')],
+    [rol('textbox', 'Cuerpo del mensaje'), xpath('/html/body/div[7]/form/div[1]')],
+    [],
+  ];
+
+  /**
+   * Motor fake que ejecuta ese envio: propone cada accion a la GUARDIA, confirma el efecto de la
+   * irreversible y devuelve la traza con lo que la percepcion leyo. Es el mismo contrato que el
+   * adaptador real.
+   */
+  function makeMotorQueEnvia(): MotorDeTareaWeb {
+    return {
+      ejecutar: vi.fn(
+        async (params: {
+          guardia?: {
+            revisar(accion: string): Promise<{ tipo: string; confirmar?: boolean }>;
+            confirmar(): Promise<{ confirmada: boolean; terminal?: boolean }>;
+          };
+        }) => {
+          for (const accion of ACCIONES_DEL_ENVIO) {
+            const veredicto = await params.guardia?.revisar(accion.action as string);
+            if (veredicto !== undefined && veredicto.tipo !== 'permitir') {
+              throw new Error(`la guardia no dejo pasar ${String(accion.action)}: ${veredicto.tipo}`);
+            }
+            if (veredicto?.confirmar === true) await params.guardia?.confirmar();
+          }
+          return {
+            exito: true,
+            completado: true,
+            mensaje: 'correo enviado',
+            acciones: ACCIONES_DEL_ENVIO,
+            estrategiasPorAccion: PERCIBIDAS_POR_ACCION,
+            tokensIn: 1000,
+            tokensOut: 100,
+          };
+        },
+      ),
+    } as unknown as MotorDeTareaWeb;
+  }
+
+  /** Corre la tarea con el motor libre y devuelve la plantilla que la corrida publico. */
+  async function publicarConElMotorLibre(job: Job): Promise<{ pasos: unknown; marcadores: string }> {
+    const publicadas: Array<{ pasos: unknown }> = [];
+    const deps = makeDeps({
+      motor: makeMotorQueEnvia(),
+      // El nombre que la BARRERA lee del control que consumo la accion: de ahi sale el localizador
+      // del click final, que la percepcion no pudo leer.
+      determinista: makeDeterminista([], 'Enviar'),
+      // El default de PRODUCCION de TAREA_WEB_BARRERA_IDENTIDAD. Sin ella no hay control leido y el
+      // click final se queda sin localizador, que es como la publicacion se cortaba antes.
+      barreraIdentidad: 'observacion',
+      atlas: { repo: makeAtlas(CLASES_DE_LA_CORRIDA), clave: 'clave-del-atlas' },
+      plantillas: {
+        repo: {
+          publicar: vi.fn(async (plantilla: { pasos: unknown }) => {
+            publicadas.push(plantilla);
+            return { publicada: true };
+          }),
+        },
+        clave: CLAVE_PLANTILLAS,
+      },
+    } as unknown as Partial<TareaWebDeps>);
+
+    expect(await procesarTareaWeb(deps, job)).toBe('completada');
+    const publicada = publicadas[0];
+    expect(publicada, 'la corrida del motor libre no publico ninguna plantilla').toBeDefined();
+    // La clave se DERIVA de los pasos, igual que en el repositorio: nadie la manda.
+    return {
+      pasos: (publicada as { pasos: unknown }).pasos,
+      marcadores: marcadoresDePasos((publicada as { pasos: unknown }).pasos),
+    };
+  }
+
+  it('la clave publicada sale del TEXTO DEL USUARIO y dice lo que la plantilla va a pedir', async () => {
+    const { pasos, marcadores } = await publicarConElMotorLibre(
+      makeJob(OBJETIVO_DEL_MODELO, TEXTO_DEL_USUARIO),
+    );
+    expect(marcadores).toBe('asunto+cuerpo+destinatario');
+
+    // Y son EXACTAMENTE los que la aplicabilidad le va a exigir al consumidor: la clave no promete
+    // de menos que lo que la plantilla teclea.
+    const aplicabilidad = plantillaAplicable({
+      pasos,
+      dominio: DOMINIO,
+      valores: { destinatario: 'ana@ejemplo.com', asunto: 'Reunion', cuerpo: 'nos vemos a las 5' },
+      verboBloqueado: 'enviar',
+      clasesCorroboradas: new Set(CLASES_DE_LA_CORRIDA),
+    });
+    expect(aplicabilidad.aplica).toBe(true);
+    if (!aplicabilidad.aplica) return;
+    expect(marcadoresClave(aplicabilidad.marcadores)).toBe(marcadores);
+  });
+
+  it('con solo el objetivo del MODELO la misma corrida publica una clave que miente', async () => {
+    // Un job encolado ANTES de CAMBIO 3 no trae el texto del usuario, asi que manda la parafrasis:
+    // pierde los rotulos y las comillas, el extractor saca un dato de tres, y el asunto y el cuerpo
+    // se publican como RANURAS. La clave dice 'destinatario' y al ejecutarse la plantilla pide tres.
+    // Es el estado anterior a este cambio, y queda fijado para que no se pueda volver a el en silencio.
+    const { pasos, marcadores } = await publicarConElMotorLibre(makeJob(OBJETIVO_DEL_MODELO));
+    expect(marcadores).toBe('destinatario');
+
+    const aplicabilidad = plantillaAplicable({
+      pasos,
+      dominio: DOMINIO,
+      valores: { destinatario: 'ana@ejemplo.com', asunto: 'Reunion', cuerpo: 'nos vemos a las 5' },
+      verboBloqueado: 'enviar',
+      clasesCorroboradas: new Set(CLASES_DE_LA_CORRIDA),
+    });
+    expect(aplicabilidad.aplica).toBe(true);
+    if (!aplicabilidad.aplica) return;
+    // Pide tres datos y su identidad declara uno: los origenes del MISMO procedimiento se reparten
+    // entre dos filas distintas y la corroboracion no llega nunca.
+    expect(marcadoresClave(aplicabilidad.marcadores)).toBe('asunto+cuerpo+destinatario');
+  });
+
+  it('OTRA corrida, con otro fraseo, encuentra y ejecuta lo que la primera publico', async () => {
+    const { pasos } = await publicarConElMotorLibre(makeJob(OBJETIVO_DEL_MODELO, TEXTO_DEL_USUARIO));
+    const fila: FilaDePlantilla = {
+      id: 'plantilla-publicada',
+      estado: 'candidata',
+      pasos,
+      origenes: 2,
+    };
+
+    // 1. La encuentra y la OFRECE: el checkpoint nombra los tres datos que la plantilla pide.
+    const consumidor = conPlantillas([fila], CLASES_DE_LA_CORRIDA, {
+      navegador: makeNavegador(true, CAMPOS_DEL_OTRO_FRASEO),
+    });
+    expect(await procesarTareaWeb(consumidor, makeJob(OTRO_FRASEO))).toBe('pausada');
+    expect(consumidor.aprobaciones.crear).toHaveBeenCalledWith(
+      expect.objectContaining({
+        descripcion: `plantilla_compartida:enviar:asunto+cuerpo+destinatario:${DOMINIO}`,
+      }),
+    );
+
+    // 2. Aprobada, corre entera con los datos del SEGUNDO objetivo y sin tocar el motor libre.
+    const aprobado = conPlantillas([fila], CLASES_DE_LA_CORRIDA, {
+      navegador: makeNavegador(true, CAMPOS_DEL_OTRO_FRASEO),
+    });
+    const segunda = await procesarTareaWeb(
+      yaDecidido(aprobado, aprobacionDelOfrecimiento()),
+      makeJob(OTRO_FRASEO),
+    );
+    expect(segunda).toBe('completada');
+    expect(aprobado.motor.ejecutar).not.toHaveBeenCalled();
+    const determinista = aprobado.determinista as unknown as {
+      ejecutarPasoDeterminista: ReturnType<typeof vi.fn>;
+    };
+    // Cinco primitivas: el click de Redactar, las tres escrituras y el click de Enviar.
+    expect(determinista.ejecutarPasoDeterminista).toHaveBeenCalledTimes(5);
   });
 });

@@ -2461,7 +2461,17 @@ interface VeredictoDePlantilla {
  * libre podia publicar. La conversion a pasos de receta la hace `promoverTrayectoria`, que es la
  * MISMA de la promocion: aqui corre sobre la fuente buena.
  *
- * `objetivo` NO SALE DE ESTA FUNCION. Entra solo porque `promoverTrayectoria` lo necesita para
+ * EL TEXTO DE LOS DATOS ES EL MISMO QUE USA EL CONSUMO, y esta es la mitad simetrica del arreglo:
+ * `textoParametros` es el literal del usuario cuando llego, con el objetivo del modelo de respaldo
+ * (ver el paso 0.5 de `procesarTareaWeb`). Antes entraba el `objetivo` que REDACTA el modelo
+ * conversacional, y los dos textos divergen en produccion: la parafrasis del modelo pierde los
+ * rotulos y las comillas de las que depende el extractor determinista, asi que del mismo envio la
+ * PUBLICACION reconocia menos datos que el CONSUMO. La clave que se publicaba decia entonces que la
+ * plantilla necesita menos de lo que va a pedir de verdad al ejecutarse, que es exactamente lo que la
+ * identidad existe para impedir. CAMBIO 3 ya habia corregido la verificacion para leer el texto del
+ * usuario y no propago el cambio hasta aqui.
+ *
+ * EL TEXTO NO SALE DE ESTA FUNCION. Entra solo porque `promoverTrayectoria` lo necesita para
  * reconocer los datos que el usuario declaro y convertirlos en marcadores; lo que se publica pasa
  * despues por `esPublicable`, que rechaza la plantilla entera ante cualquier literal.
  *
@@ -2484,8 +2494,8 @@ async function publicarPlantillaBestEffort(
   entrada: {
     /** La traza del job con las estrategias que la PERCEPCION leyo del DOM ya puestas. */
     pasos: readonly PasoCensurado[];
-    /** Objetivo del usuario. Solo para reconocer sus datos declarados; no viaja a ningun lado. */
-    objetivo: string;
+    /** EL MISMO TEXTO del que el consumo saca sus datos: el literal del usuario si llego. */
+    textoParametros: string;
     dominio: string;
     dominios: readonly string[];
     verboBloqueado: string | null;
@@ -2524,7 +2534,7 @@ async function publicarPlantillaBestEffort(
     const material = promoverTrayectoria({
       pasos: [...entrada.pasos],
       dominio: entrada.dominio,
-      objetivo: entrada.objetivo,
+      objetivo: entrada.textoParametros,
       estado: 'exitosa',
       exigeVerificacion: entrada.verboBloqueado !== null,
     });
@@ -4344,7 +4354,9 @@ export async function procesarTareaWeb(
     // corre DESPUES de la accion y el control ya no existe -- y ninguna corrida de envio publica.
     const veredictoDePlantilla = await publicarPlantillaBestEffort(deps, job, {
       pasos: pasosParaPublicar(deps, job, corridaLibre, controlAccionado),
-      objetivo,
+      // EL MISMO TEXTO QUE LEE EL CONSUMO (y no el `objetivo` que redacta el modelo): de otro modo la
+      // clave publicada dice que la plantilla necesita menos datos de los que va a pedir al ejecutarse.
+      textoParametros,
       dominio: sitio.dominio,
       dominios: dominiosAutorizados,
       verboBloqueado,
