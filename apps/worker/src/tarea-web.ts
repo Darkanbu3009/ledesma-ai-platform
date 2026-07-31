@@ -89,6 +89,7 @@ import {
 import {
   bloqueDelMapa,
   claseDeElemento,
+  entradaDelControlLeido,
   entradasDeCorridaLibre,
   entradasDeCorridaPorReceta,
   entradasServibles,
@@ -1074,6 +1075,22 @@ interface VerificacionEnLaTraza {
   paso: PasoCensurado;
 }
 
+/**
+ * EL CONTROL DE LA ACCION IRREVERSIBLE tal como la barrera de identidad lo LEYO DEL DOM, con el
+ * dominio en el que se leyo (multisitio: la corrida puede terminar en otro sitio distinto de aquel en
+ * el que se envio). Es el unico dato de PRIMERA MANO que este camino tiene sobre el elemento que va a
+ * consumar la accion, y hasta hoy se calculaba, se comparaba y se tiraba.
+ */
+interface ControlDeLaAccionIrreversible {
+  dominio: string;
+  /** Rol accesible del control (el mismo `rolDe` que leen la percepcion y el grabador). */
+  rol: string;
+  /** Nombre accesible COMPLETO leido del DOM. */
+  nombre: string;
+  /** Cuantos controles de la familia del verbo matchearon en la pagina, visibles u ocultos. */
+  candidatos: number;
+}
+
 /** La guardia tal como la usa el handler: el puerto mas lo que hay que saber al terminar la corrida. */
 interface GuardiaDeTareaWeb extends GuardiaDeAccion {
   /** ¿Alguna accion llego a pasar por la verificacion y fue autorizada EN ESTE SITIO? */
@@ -1084,6 +1101,13 @@ interface GuardiaDeTareaWeb extends GuardiaDeAccion {
   faltantes(): string[] | null;
   /** Pasos sinteticos de verificacion de esta corrida, para la trayectoria. */
   verificaciones(): VerificacionEnLaTraza[];
+  /**
+   * El control que la barrera de identidad leyo del DOM antes de dejar salir la accion irreversible,
+   * o null si no llego a leer ninguno (barrera apagada, objetivo sin verbo bloqueado, pagina sin
+   * control de la familia o fallo de la lectura). Lo consume el CIERRE de la corrida, que es donde
+   * consta que la accion ademas surtio efecto.
+   */
+  controlAccionado(): ControlDeLaAccionIrreversible | null;
 }
 
 /** Cuantas veces se relee el DOM buscando la confirmacion de la accion antes de darla por no confirmada. */
@@ -1257,6 +1281,8 @@ function crearGuardiaDeAccion(
   let ejecucionPendienteEsReintento = false;
   /** Intentos irreversibles bloqueados DESPUES de agotar el reintento (FIX C): al segundo, corte. */
   let bloqueosTrasReintento = 0;
+  /** El control que la barrera leyo del DOM en la accion irreversible. Lo consume el cierre. */
+  let controlAccionado: ControlDeLaAccionIrreversible | null = null;
 
   const bloquear = (veredicto: Extract<Veredicto, { tipo: 'detener' }>): VeredictoDeGuardia => {
     mensajeDeBloqueo = mensajeDeDetencion(veredicto);
@@ -1269,6 +1295,7 @@ function crearGuardiaDeAccion(
     bloqueo: () => mensajeDeBloqueo,
     faltantes: () => ultimosFaltantes,
     verificaciones: () => verificaciones,
+    controlAccionado: () => controlAccionado,
     revisar: async (accion: string): Promise<VeredictoDeGuardia> => {
       // Cuantas acciones del agente LLEGARON al navegador antes que esta. Solo avanza con las
       // permitidas (permitir()): una accion que no paso no deja paso en la traza, y si se contara
@@ -1329,6 +1356,18 @@ function crearGuardiaDeAccion(
               ? null
               : await localizar.call(deps.navegador, sesionExternaId, prefijos);
           sinElemento = boton === null;
+          // LO LEIDO SE GUARDA, no se tira. Es el mismo dato con el que se arma la clase de abajo, y
+          // el unico de este camino que describe el elemento que va a consumar la accion. Quien
+          // decide si llega al atlas es el CIERRE de la corrida (ahi consta el efecto confirmado):
+          // aqui el boton esta localizado, pero todavia no accionado.
+          if (boton !== null) {
+            controlAccionado = {
+              dominio: sitio.dominio,
+              rol: boton.rol,
+              nombre: boton.ariaLabel,
+              candidatos: boton.candidatos,
+            };
+          }
           resultado = verificarIdentidadDeElemento({
             // La clase se construye con la MISMA funcion con la que el atlas escribio las suyas, a
             // partir del elemento LEIDO DEL DOM: es la unica identidad disponible en este camino.
@@ -2640,6 +2679,66 @@ async function registrarEnAtlasBestEffort(
   }
 }
 
+/**
+ * LA ENTRADA DEL CONTROL QUE CONSUMO LA ACCION IRREVERSIBLE, para el aprendizaje comun.
+ *
+ * EL HUECO QUE CIERRA. Las acciones finales (enviar, comprar, publicar, borrar, pagar, transferir,
+ * firmar, cancelar) DESTRUYEN SU PROPIO CONTEXTO: al accionarlas el sitio desmonta el formulario, asi
+ * que la lectura de percepcion -- que corre DESPUES de cada paso -- ya no encuentra el elemento y ese
+ * control jamas llegaba al atlas. La barrera de identidad si lo lee, porque corre ANTES, y hasta hoy
+ * su lectura moria en un paso sintetico con `estrategias: []`. Sin esa clase, la barrera exigia una
+ * corroboracion que solo ella misma podia producir: un circuito cerrado.
+ *
+ * POR QUE SE ESCRIBE AQUI Y NO EN LA GUARDIA. En el cierre la corrida ya paso los dos cortes (salio
+ * bien Y el efecto irreversible quedo CONFIRMADO), que es la MISMA evidencia que el atlas exige para
+ * todo lo demas que aprende. Desde la guardia se registraria un boton LOCALIZADO que quiza nunca se
+ * acciono, o que se acciono sin efecto.
+ *
+ * CANDIDATOS === 1 PARA ESCRIBIR. Con mas de un control de la familia en la pagina, la expresion
+ * devuelve el PRIMER VISIBLE y no hay certeza de cual se acciono: aprender de una suposicion
+ * contaminaria una tabla global. La COMPROBACION de la barrera no cambia (ahi el dato se compara
+ * contra el DOM del propio usuario y no se persiste en ningun lado).
+ *
+ * BEST-EFFORT: cualquier fallo propio queda en el log y devuelve la lista vacia. Aprender es una
+ * mejora, jamas parte del desenlace de la tarea del usuario.
+ */
+function entradasDelControlAccionado(
+  deps: TareaWebDeps,
+  job: Job,
+  control: ControlDeLaAccionIrreversible | null,
+  valores: readonly string[],
+  yaAgregadas: readonly EntradaDeAtlas[],
+): EntradaDeAtlas[] {
+  if (control === null) return [];
+  try {
+    if (control.candidatos !== 1) {
+      deps.logger.info(
+        'tarea web: el control de la accion no era unico en la pagina; su clase NO se aprende',
+        { jobId: job.id, dominio: control.dominio, candidatos: control.candidatos },
+      );
+      return [];
+    }
+    const entrada = entradaDelControlLeido(control, valores);
+    if (entrada === null) {
+      deps.logger.info('tarea web: el control de la accion no dejo una clase utilizable', {
+        jobId: job.id,
+        dominio: control.dominio,
+      });
+      return [];
+    }
+    const repetida = yaAgregadas.some(
+      (otra) => otra.dominio === entrada.dominio && otra.claseDeElemento === entrada.claseDeElemento,
+    );
+    return repetida ? [] : [entrada];
+  } catch (error) {
+    deps.logger.warn('tarea web: no se pudo armar la clase del control accionado (se ignora)', {
+      jobId: job.id,
+      err: describir(error),
+    });
+    return [];
+  }
+}
+
 /** Un sitio de la tarea con su sesion YA abierta, verificada e inyectada. */
 interface SitioAbierto {
   sitio: SitioConectado;
@@ -3055,6 +3154,9 @@ export async function procesarTareaWeb(
     let guardia: GuardiaDeTareaWeb;
     let resultado: ResultadoMotor;
     let desenlace: DesenlaceTareaWeb;
+    // El control de la accion irreversible sobrevive al cambio de tramo: la guardia se crea de nuevo
+    // en cada uno y la accion pudo consumarse en un sitio del que la tarea despues se fue.
+    let controlAccionado: ControlDeLaAccionIrreversible | null = null;
 
     for (;;) {
       guardia = crearGuardiaDeAccion(deps, job, activo.sitio, activo.sesionExternaId, {
@@ -3116,6 +3218,7 @@ export async function procesarTareaWeb(
         );
         throw error;
       }
+      controlAccionado = guardia.controlAccionado() ?? controlAccionado;
 
       const cambio = resultado.cambioDeSitio ?? null;
       if (cambio === null) break;
@@ -3282,7 +3385,19 @@ export async function procesarTareaWeb(
         ...resumenDeCorridaLibre(corridaLibre),
       });
     }
-    await registrarEnAtlasBestEffort(deps, job, entradasLibres);
+    // EL CONTROL DE LA ACCION IRREVERSIBLE, que la traza no puede aportar porque la accion se lleva
+    // por delante su propio elemento: lo aporta lo que la barrera LEYO justo antes de accionarlo (ver
+    // entradasDelControlAccionado). Va con las demas y por la misma puerta.
+    await registrarEnAtlasBestEffort(deps, job, [
+      ...entradasLibres,
+      ...entradasDelControlAccionado(
+        deps,
+        job,
+        controlAccionado,
+        corridaLibre.valores,
+        entradasLibres,
+      ),
+    ]);
     // PLANTILLAS COMPARTIDAS (V041): la version ANONIMA del procedimiento que esta corrida acaba de
     // demostrar. Va AQUI, en la rama de cierre exitoso del motor libre, y no colgando de la promocion
     // de receta: ese era el unico punto de llamada del repo y estaba en un camino muerto, porque la

@@ -1,7 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { JSDOM } from 'jsdom';
 import type { EstrategiaLocalizacion } from '@ledesma-platform/shared';
-import { expresionResolverElemento, leerElementoResuelto } from '../src/localizacion.js';
+import {
+  expresionLeerEstrategias,
+  expresionResolverElemento,
+  leerElementoResuelto,
+} from '../src/localizacion.js';
+import {
+  expresionLocalizarBotonPorAriaLabel,
+  expresionPercepcionConEstrategias,
+} from '../src/browserbase.js';
+import { GUION_GRABADOR } from '../src/guion-grabador.js';
 
 /**
  * EL RESOLUTOR DE ESTRATEGIAS, CORRIENDO DE VERDAD sobre un DOM (FIX estrategias multiples, 28 jul
@@ -93,5 +102,37 @@ describe('resolutor de estrategias sobre el DOM: matcheo de rol por prefijo', ()
     );
     expect(resuelto).not.toBeNull();
     expect(resuelto?.usada).toBe('xpath');
+  });
+});
+
+/**
+ * EL NORMALIZADOR DEL NOMBRE ACCESIBLE, COMPARTIDO. `claveDeNombre` vivia dentro del resolutor y
+ * ahora vive en AYUDANTES_DOM, que es lo que se inyecta ademas en la percepcion, en el localizador de
+ * controles y en el guion del grabador. Se movio TAL CUAL: estos tests fijan que se define una sola
+ * vez en cada guion inyectado y que el resolutor sigue comportandose exactamente igual.
+ */
+describe('ayudantes de DOM compartidos: una sola definicion', () => {
+  const guiones: Array<[string, string]> = [
+    ['resolutor', expresionResolverElemento([{ tipo: 'rol', rol: 'button', nombre: 'Enviar' }])],
+    ['lector de estrategias', expresionLeerEstrategias({ tipo: 'punto', x: 1, y: 1 })],
+    ['percepcion con estrategias', expresionPercepcionConEstrategias({ tipo: 'campo', texto: 'x' })],
+    ['localizador de controles', expresionLocalizarBotonPorAriaLabel(['Enviar'])],
+    ['guion del grabador', GUION_GRABADOR],
+  ];
+
+  it('cada guion inyectado define claveDeNombre, nombreDe y rolDe UNA sola vez', () => {
+    for (const [nombre, guion] of guiones) {
+      for (const funcion of ['claveDeNombre', 'nombreDe', 'rolDe']) {
+        const definiciones = guion.split(`function ${funcion}(`).length - 1;
+        expect(definiciones, `${nombre}: ${funcion}`).toBe(1);
+      }
+    }
+  });
+
+  it('el resolutor sigue ignorando las marcas invisibles con el ayudante compartido', () => {
+    const resuelto = resolver(`<div role="button" aria-label="Enviar ‪(Ctrl-Enter)‬">Enviar</div>`, [
+      { tipo: 'rol', rol: 'button', nombre: 'Enviar' },
+    ]);
+    expect(resuelto?.usada).toBe('rol');
   });
 });

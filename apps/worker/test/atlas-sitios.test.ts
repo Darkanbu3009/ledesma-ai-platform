@@ -242,6 +242,41 @@ describe('clase de elemento', () => {
     expect(claseDeElemento('navegar', [ROL_ENVIAR])).toBeNull();
     expect(claseDeElemento('verificar', [ROL_ENVIAR])).toBeNull();
   });
+
+  /**
+   * NO MIGRACION (FIX A). Las clases que el atlas ya tiene escritas son las SEIS de la corrida de
+   * referencia de Gmail (plantillas-motor-libre.test.ts). Normalizar las marcas de direccion cambia
+   * la forma de una clase SOLO si su nombre las lleva dentro, y ninguna de estas las lleva: se
+   * reconstruyen aqui desde sus nombres reales y tienen que dar EXACTAMENTE la misma cadena que hoy.
+   */
+  it('las SEIS clases que el atlas ya tiene escritas no cambian de forma', () => {
+    const yaEscritas: Array<[string, string | null]> = [
+      ['click|rol:button|redactar', claseDeElemento('click', [{ tipo: 'rol', rol: 'button', nombre: 'Redactar' }])],
+      [
+        'click|atributo:aria-label|destinatarios en para',
+        claseDeElemento('click', [{ tipo: 'atributo', atributo: 'aria-label', valor: 'Destinatarios en Para' }]),
+      ],
+      [
+        'escribir|atributo:aria-label|destinatarios en para',
+        claseDeElemento('escribir', [{ tipo: 'atributo', atributo: 'aria-label', valor: 'Destinatarios en Para' }]),
+      ],
+      [
+        'escribir|atributo:aria-label|asunto',
+        claseDeElemento('escribir', [{ tipo: 'atributo', atributo: 'aria-label', valor: 'Asunto' }]),
+      ],
+      [
+        'escribir|atributo:aria-label|cuerpo del mensaje',
+        claseDeElemento('escribir', [{ tipo: 'atributo', atributo: 'aria-label', valor: 'Cuerpo del mensaje' }]),
+      ],
+      [
+        'click|atributo:aria-label|enviar',
+        claseDeElemento('click', [{ tipo: 'atributo', atributo: 'aria-label', valor: 'Enviar' }]),
+      ],
+    ];
+    for (const [escrita, reconstruida] of yaEscritas) {
+      expect(reconstruida, escrita).toBe(escrita);
+    }
+  });
 });
 
 // -------------------------------------------------------------------------------------------------

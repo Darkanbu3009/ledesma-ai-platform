@@ -23,6 +23,22 @@ describe('normalizarTexto', () => {
     // escrito con enie coincide con "Compania" escrito sin ella: tolerar esa diferencia es correcto.
     expect(normalizarTexto('Compañía')).toBe(normalizarTexto('Compania'));
   });
+
+  it('las marcas invisibles de direccion se retiran: el nombre real de Gmail y el limpio son uno', () => {
+    // El aria-label REAL del boton Enviar, byte a byte, con su aislante bidi alrededor del atajo.
+    expect(normalizarTexto('Enviar ‪(Ctrl-Enter)‬')).toBe('enviar (ctrl-enter)');
+    expect(normalizarTexto('Enviar ‪(Ctrl-Enter)‬')).toBe(normalizarTexto('Enviar (Ctrl-Enter)'));
+  });
+
+  it('una marca entre dos espacios no los deja pegados (se retira antes de colapsar)', () => {
+    expect(normalizarTexto('Enviar ‎ correo')).toBe('enviar correo');
+  });
+
+  it('un texto sin marcas queda EXACTAMENTE como antes de este cambio', () => {
+    for (const texto of ['Enviar (Ctrl-Enter)', 'Redactar', 'Destinatarios en Para', 'Comprar ahora']) {
+      expect(normalizarTexto(texto)).toBe(texto.toLowerCase());
+    }
+  });
 });
 
 describe('extraerCorreos', () => {

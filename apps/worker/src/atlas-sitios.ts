@@ -29,7 +29,9 @@ import type { PasoCensurado } from './trayectoria.js';
  *
  *  2. EL ATLAS ES PISTA, NO RECETA. Lo que se sirve son ESTRATEGIAS ADICIONALES de fallback y un
  *     bloque de contexto de percepcion. Nada de lo que hay aqui puede decidir que se ejecuta: la
- *     verificacion determinista y la guardia no importan este modulo.
+ *     verificacion determinista no importa este modulo. La GUARDIA si lo importa desde la barrera de
+ *     identidad (posterior a V040), y en una sola direccion: que una clase FALTE puede hacer que una
+ *     accion NO se ejecute; que ESTE no ejecuta nada por si sola.
  *
  *  3. CORROBORACION. `esServible` es la regla completa: una entrada se sirve a un origen que NO la
  *     produjo solo cuando la produjeron al menos ORIGENES_PARA_COMPARTIR origenes independientes. El
@@ -323,10 +325,26 @@ export interface CorridaLibre {
  * escribio en cinco controles no escribio una sola entrada y NO habia una linea que dijera en cual
  * de los cuatro filtros se habia perdido el dato. El silencio absoluto costo una auditoria entera;
  * estos contadores son para que la proxima vez la respuesta este en el log de la corrida.
+ *
+ * LA SUMA CIERRA, y ese es el punto: `pasos` es exactamente
+ * `fallidos + sinEstrategias + conEstrategias`, y de los que entran, `clasificables` se reparte entre
+ * `conClase` y los tres motivos de descarte. Los dos primeros faltaban, asi que un paso descartado en
+ * la puerta desaparecia del resumen sin motivo, que es como el paso de la accion final -- el mas caro
+ * de todos y el unico irreversible -- podia ser invisible en un resumen que existe para eso.
  */
 export interface ResumenDeCorridaLibre {
   /** Pasos de la traza que se miraron (los sinteticos de verificacion incluidos). */
   pasos: number;
+  /** Descartados por venir marcados como fallidos: lo que no salio bien no es evidencia de nada. */
+  fallidos: number;
+  /**
+   * Descartados por llegar SIN una sola estrategia. Es el eslabon que faltaba contar y el que hacia
+   * invisible al paso mas importante de la corrida: el de la accion final, que la percepcion no
+   * alcanza a leer porque su elemento ya no existe, y el sintetico de la barrera de identidad, que se
+   * escribe con la lista vacia por contrato. Un numero alto aqui dice que la corrida vio controles
+   * que nadie logro describir.
+   */
+  sinEstrategias: number;
   /** Pasos EXITOSOS que llegaron con estrategias puestas (percepcion o complemento por selector). */
   conEstrategias: number;
   /** De esos, los que ademas son click o escribir, que es lo unico que el atlas clasifica. */
@@ -357,6 +375,8 @@ function recorrerCorridaLibre(params: CorridaLibre): {
   const entradas: EntradaDeAtlas[] = [];
   const resumen: ResumenDeCorridaLibre = {
     pasos: params.pasos.length,
+    fallidos: 0,
+    sinEstrategias: 0,
     conEstrategias: 0,
     clasificables: 0,
     conClase: 0,
@@ -365,7 +385,17 @@ function recorrerCorridaLibre(params: CorridaLibre): {
     sinNombreUtilizable: 0,
   };
   for (const paso of params.pasos) {
-    if (!paso.exito || paso.estrategias.length === 0) continue;
+    // Los DOS descartes de entrada se cuentan ANTES de saltar. Hasta hoy la guarda era una sola
+    // condicion con `continue` delante de los contadores, asi que un paso que no traia estrategias
+    // desaparecia del resumen sin dejar rastro: exactamente lo que este resumen existe para evitar.
+    if (!paso.exito) {
+      resumen.fallidos += 1;
+      continue;
+    }
+    if (paso.estrategias.length === 0) {
+      resumen.sinEstrategias += 1;
+      continue;
+    }
     resumen.conEstrategias += 1;
     const accion = accionDelPasoDeTraza(paso);
     if (accion === null) continue;
@@ -444,6 +474,36 @@ export function estrategiasDelSelectorParaElAtlas(
 ): EstrategiaLocalizacion[] {
   const derivadas = derivarEstrategiasDeSelector(selector).filter(esEstrategiaDeAtlas);
   return derivadas.length === 0 ? [] : sanearEstrategias(JSON.stringify(derivadas));
+}
+
+/**
+ * LA ENTRADA DEL CONTROL QUE SE LEYO DEL DOM ANTES DE ACCIONARLO. Es la tercera fuente de este
+ * modulo, y la unica que alcanza a las ACCIONES FINALES leyendo el elemento VIVO: la barrera de
+ * identidad lo localiza (rol accesible y nombre) JUSTO ANTES de que la accion salga al navegador,
+ * cuando el control todavia existe. La percepcion corre DESPUES y ahi el elemento ya se desmonto; el
+ * complemento por selector alcanza solo lo que el selector llevara escrito.
+ *
+ * Un `click` sobre un elemento del que se sabe rol y nombre: exactamente lo que el eje mas estable de
+ * `claseDeElemento` describe, y la misma cadena que producen la percepcion y el grabador para ese
+ * mismo control (`estrategiasDe`, localizacion.ts, siempre emite `rol` cuando hay rol y nombre).
+ *
+ * PASA POR LAS MISMAS DOS PUERTAS que las otras dos fuentes, y por eso se arma aqui y no en el
+ * cableado: `sanearEstrategias` (un nombre accesible con un dato sensible dentro no entra a una tabla
+ * GLOBAL) y `entradaDeAtlas`, o sea el filtro de tipos, el recorte a MAX_NOMBRE_ATLAS y la paranoia
+ * de valores del invariante 4. null = no quedo nada que se pueda guardar.
+ *
+ * QUIEN decide que la corrida merece escribir (efecto confirmado) y que el control era UNICO en la
+ * pagina es el llamador: aqui no hay forma de saberlo.
+ */
+export function entradaDelControlLeido(
+  params: { dominio: string; rol: string; nombre: string },
+  valores: readonly string[],
+): EntradaDeAtlas | null {
+  const estrategias = sanearEstrategias(
+    JSON.stringify([{ tipo: 'rol', rol: params.rol, nombre: params.nombre }]),
+  );
+  if (estrategias.length === 0) return null;
+  return entradaDeAtlas({ dominio: params.dominio, accion: 'click', estrategias }, valores);
 }
 
 /**
