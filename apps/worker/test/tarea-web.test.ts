@@ -1265,6 +1265,64 @@ describe('detectarAccionQueExigeVerificacion (la accion del agente contra el VER
       detectarAccionQueExigeVerificacion('click the element with aria-label Send', 'enviar'),
     ).toBe('send');
   });
+
+  it('el CONTENIDO que se teclea no es la accion que se ejecuta (FIX G)', () => {
+    // El caso exacto de produccion (31 jul 2026): el asunto del correo contenia "envio", la guardia
+    // trato ese tecleo como el envio, verifico con solo el destinatario escrito, consumio el cupo,
+    // no pudo confirmar efecto y la corrida murio con un borrador a medias.
+    expect(
+      detectarAccionQueExigeVerificacion(
+        'type "Clase envio uno" into the Asunto subject input field',
+        'enviar',
+      ),
+    ).toBeNull();
+    expect(
+      detectarAccionQueExigeVerificacion('type "envio de facturas" into the Asunto', 'enviar'),
+    ).toBeNull();
+    expect(detectarAccionQueExigeVerificacion('type "compra urgente" into the body', 'comprar')).toBeNull();
+    // Mismo caso escrito en espanol y con los otros delimitadores que usa el modelo.
+    expect(
+      detectarAccionQueExigeVerificacion('escribe "Clase envio uno" en el campo Asunto', 'enviar'),
+    ).toBeNull();
+    expect(
+      detectarAccionQueExigeVerificacion('type “envio de facturas” into the subject', 'enviar'),
+    ).toBeNull();
+  });
+
+  it('el verbo FUERA del contenido tecleado sigue siendo la accion irreversible (FIX G)', () => {
+    // Lo que el FIX G no puede aflojar: un falso negativo aqui dejaria pasar la accion sin
+    // verificar. Las comillas que envuelven la ETIQUETA DE UN CONTROL no son contenido tecleado.
+    expect(detectarAccionQueExigeVerificacion('click the Enviar button', 'enviar')).toBe('enviar');
+    expect(detectarAccionQueExigeVerificacion('click button "Enviar (Ctrl-Enter)"', 'enviar')).toBe(
+      'enviar',
+    );
+    expect(detectarAccionQueExigeVerificacion('click the "Comprar ahora" button', 'comprar')).toBe(
+      'comprar',
+    );
+    // Descripcion COMPUESTA: tambien describe un clic, asi que se evalua entera.
+    expect(
+      detectarAccionQueExigeVerificacion('type the message and click "Enviar"', 'enviar'),
+    ).toBe('enviar');
+    // El verbo esta fuera de las comillas: el atajo sigue siendo el envio.
+    expect(
+      detectarAccionQueExigeVerificacion('type "Ctrl+Enter" to send the email', 'enviar'),
+    ).toBe('send');
+    // Sin delimitadores no hay nada que separar: se evalua entero (falso positivo, nunca hueco).
+    expect(
+      detectarAccionQueExigeVerificacion('type Clase envio uno into the Asunto', 'enviar'),
+    ).not.toBeNull();
+  });
+
+  it('FIX G: el verbo en el OBJETIVO del usuario sigue activando la guardia de la corrida', () => {
+    // La deteccion sobre el texto del USUARIO es la que decide si la corrida lleva guardia y NO se
+    // toca: sigue siendo laxa a proposito.
+    expect(
+      detectarVerboBloqueado(
+        'Manda un correo a X con el asunto Clase envio uno y dile: Primera corrida.',
+      ),
+    ).toBe('enviar');
+    expect(detectarVerboBloqueado('compra el teclado del carrito')).toBe('comprar');
+  });
 });
 
 /**
