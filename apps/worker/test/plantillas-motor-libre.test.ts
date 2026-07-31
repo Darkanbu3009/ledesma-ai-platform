@@ -3,6 +3,7 @@ import type { EstrategiaLocalizacion } from '@ledesma-platform/shared';
 import { claseDeElemento, pasosConEstrategiasPercibidas } from '../src/atlas-sitios.js';
 import { plantillaDeLaCorrida } from '../src/plantillas-compartidas.js';
 import { promoverTrayectoria } from '../src/receta-web.js';
+import { construirPasoDeBloqueo } from '../src/verificacion.js';
 import type { PasoCensurado } from '../src/trayectoria.js';
 
 /**
@@ -529,5 +530,278 @@ describe('la corrida real de las 20:51, con el observador apagado', () => {
     const material = procedimiento();
     if (!material.promovida) throw new Error(material.motivo);
     expect(veredicto.idx).toBe(material.pasos[7]?.idx);
+  });
+});
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * LA CORRIDA REAL DE LAS 01:02 DEL 31 JUL 2026: 24 pasos, correo enviado, verificacion previa
+ * superada y efecto confirmado -- y en el resultado del job
+ * `{"idx":12,"clases":5,"motivo":"sin_procedimiento_repetible","publicada":false,"submotivo":"paso_fallido"}`.
+ *
+ * EL IDX 12 ES EL RECHAZO DE LA GUARDIA que introdujo el PR 279: el agente propuso clickear el
+ * control "Pantalla completa" del compose, la guardia no lo dejo salir al navegador y la corrida
+ * siguio (los pasos posteriores conservan el mismo prefijo del DOM, que es la prueba de que el
+ * compose no se destruyo). La guardia hizo exactamente lo que debia; lo que estaba mal era leer su
+ * rechazo como un paso FALLIDO del procedimiento. Una accion que nunca ocurrio sobre la pagina no
+ * aporta nada que repetir y no puede impedir armar el procedimiento (ver el bloque de pasos
+ * sinteticos fallidos en receta-web.test.ts, donde se fija la categoria entera).
+ *
+ * LO QUE LA DISTINGUE de las dos corridas de arriba: el rechazo de la guardia en el idx 12 y DOS
+ * `fillFormVision` (el agente reintento el llenado por vision despues de abrir el compose), ninguno
+ * de los cuales dejo constancia de haber llenado un campo.
+ */
+describe('la corrida real de las 01:02 del 31 jul (rechazo de la guardia en el idx 12)', () => {
+  /** Un click de enfoque sobre el cuerpo, con lo que la percepcion leyo del elemento. */
+  const focoDelCuerpo = (idx: number): PasoCensurado =>
+    paso({
+      idx,
+      accion: { tipo: 'act', instruccion: 'click the message body area', metodo: 'click', argumentos: [] },
+      estrategiasPercibidas: [LEIDO_CUERPO],
+    });
+
+  /**
+   * EL PASO 12: el rechazo de la guardia, tal como construirPasoDeBloqueo lo deja en la traza
+   * (verificacion.ts). Se construye con la funcion REAL para que el fixture no pueda desincronizarse
+   * del productor.
+   */
+  const rechazoDeLaGuardia = (idx: number): PasoCensurado => ({
+    ...construirPasoDeBloqueo(
+      'guardia: la accion NO se ejecuto (control de ventana fuera del alcance de la tarea: pantalla completa): click button Pantalla completa',
+    ),
+    idx,
+    url: `https://${DOMINIO}/`,
+  });
+
+  function corridaDeLas0102(): PasoCensurado[] {
+    return [
+      paso({ idx: 0, accion: { tipo: 'goto', instruccion: null, metodo: null, argumentos: [] } }),
+      paso({ idx: 1, accion: { tipo: 'screenshot', instruccion: null, metodo: null, argumentos: [] } }),
+      // PRIMER llenado por vision, antes de abrir el compose: no lleno nada.
+      paso({
+        idx: 2,
+        accion: { tipo: 'fillFormVision', instruccion: 'llenar los campos del correo', metodo: null, argumentos: [] },
+      }),
+      paso({
+        idx: 3,
+        accion: { tipo: 'act', instruccion: 'click the Compose button', metodo: 'click', argumentos: [] },
+        selector: '/html/body/div/div[3]',
+        estrategiasPercibidas: [LEIDO_REDACTAR, xpath('/html/body/div/div[3]')],
+      }),
+      paso({ idx: 4, accion: { tipo: 'think', instruccion: null, metodo: null, argumentos: [] } }),
+      paso({
+        idx: 5,
+        accion: { tipo: 'act', instruccion: 'click the Para input field', metodo: 'click', argumentos: [] },
+        estrategiasPercibidas: [LEIDO_PARA],
+      }),
+      paso({
+        idx: 6,
+        accion: {
+          tipo: 'act',
+          instruccion: `type "${DESTINATARIO}" into the Para input field`,
+          metodo: 'fill',
+          argumentos: [DESTINATARIO],
+        },
+        selector: '/html/body/div[7]/div[3]/div/form/input[1]',
+        valorCensurado: DESTINATARIO,
+        estrategiasPercibidas: [LEIDO_PARA, xpath('/html/body/div[7]/div[3]/div/form/input[1]')],
+      }),
+      paso({
+        idx: 7,
+        accion: {
+          tipo: 'act',
+          instruccion: 'press Tab key to confirm the recipient',
+          metodo: 'press',
+          argumentos: ['Tab'],
+        },
+        selector: '/html/body/div[7]/div[3]/div/form/input[1]',
+        estrategiasPercibidas: [LEIDO_PARA],
+      }),
+      paso({
+        idx: 8,
+        accion: {
+          tipo: 'act',
+          instruccion: `type "${ASUNTO}" into the Asunto input field`,
+          metodo: 'fill',
+          argumentos: [ASUNTO],
+        },
+        selector: '/html/body/div[7]/div[3]/div/form/input[2]',
+        valorCensurado: ASUNTO,
+        estrategiasPercibidas: [LEIDO_ASUNTO, xpath('/html/body/div[7]/div[3]/div/form/input[2]')],
+      }),
+      paso({ idx: 9, accion: { tipo: 'screenshot', instruccion: null, metodo: null, argumentos: [] } }),
+      // SEGUNDO llenado por vision, ya con el compose abierto: tampoco dejo constancia de nada.
+      paso({
+        idx: 10,
+        accion: { tipo: 'fillFormVision', instruccion: 'llenar el cuerpo del mensaje', metodo: null, argumentos: [] },
+      }),
+      focoDelCuerpo(11),
+      // IDX 12: el rechazo de la guardia. Los pasos 13 en adelante conservan el MISMO prefijo del DOM
+      // que los de antes (/html/body/div[7]/div[3]/div/form), que es la prueba de produccion de que
+      // el compose no se destruyo porque la accion no se ejecuto.
+      rechazoDeLaGuardia(12),
+      focoDelCuerpo(13),
+      focoDelCuerpo(14),
+      paso({
+        idx: 15,
+        accion: {
+          tipo: 'act',
+          instruccion: `type "${CUERPO}" into the message body to finish the email`,
+          metodo: 'fill',
+          argumentos: [CUERPO],
+        },
+        selector: '/html/body/div[7]/div[3]/div/form/div[1]',
+        valorCensurado: CUERPO,
+        estrategiasPercibidas: [LEIDO_CUERPO, xpath('/html/body/div[7]/div[3]/div/form/div[1]')],
+      }),
+      paso({ idx: 16, accion: { tipo: 'screenshot', instruccion: null, metodo: null, argumentos: [] } }),
+      paso({ idx: 17, accion: { tipo: 'think', instruccion: null, metodo: null, argumentos: [] } }),
+      paso({ idx: 18, accion: { tipo: 'extract', instruccion: null, metodo: null, argumentos: [] } }),
+      paso({ idx: 19, accion: { tipo: 'screenshot', instruccion: null, metodo: null, argumentos: [] } }),
+      paso({ idx: 20, accion: { tipo: 'think', instruccion: null, metodo: null, argumentos: [] } }),
+      paso({ idx: 21, accion: { tipo: 'verificacion', instruccion: 'ok', metodo: null, argumentos: [] } }),
+      paso({
+        idx: 22,
+        accion: { tipo: 'act', instruccion: 'click the Send button', metodo: 'click', argumentos: [] },
+        selector: '/html/body/div/form/div[2]',
+        estrategiasPercibidas: [LEIDO_ENVIAR, xpath('/html/body/div/form/div[2]')],
+      }),
+      paso({ idx: 23, accion: { tipo: 'done', instruccion: null, metodo: null, argumentos: [] } }),
+    ];
+  }
+
+  function procedimiento() {
+    return promoverTrayectoria({
+      pasos: pasosConEstrategiasPercibidas(corridaDeLas0102()),
+      dominio: DOMINIO,
+      objetivo: OBJETIVO,
+      estado: 'exitosa',
+      exigeVerificacion: true,
+    });
+  }
+
+  /** Las MISMAS cinco clases que el atlas tenia corroboradas: el boton Enviar sigue sin estar. */
+  const CINCO_CLASES = new Set([
+    'click|rol:button|redactar',
+    'click|atributo:aria-label|destinatarios en para',
+    'escribir|atributo:aria-label|destinatarios en para',
+    'escribir|atributo:aria-label|asunto',
+    'escribir|atributo:aria-label|cuerpo del mensaje',
+  ]);
+
+  function publicarCon(clases: ReadonlySet<string>) {
+    const material = procedimiento();
+    if (!material.promovida) throw new Error(`la conversion rechazo: ${material.motivo}`);
+    return plantillaDeLaCorrida({
+      pasos: material.pasos,
+      dominio: DOMINIO,
+      dominios: [DOMINIO],
+      verboBloqueado: 'enviar',
+      clasesCorroboradas: clases,
+    });
+  }
+
+  it('la traza son 24 pasos, con el rechazo de la guardia en el idx 12 y dos fillFormVision', () => {
+    const pasos = corridaDeLas0102();
+    expect(pasos).toHaveLength(24);
+    expect(pasos.every((p) => p.estrategias.length === 0)).toBe(true);
+    // El unico paso de la corrida con exito false, y es el que tumbaba la publicacion.
+    const fallidos = pasos.filter((p) => !p.exito);
+    expect(fallidos.map((p) => p.idx)).toEqual([12]);
+    expect(fallidos[0]?.accion.instruccion).toContain('la accion NO se ejecuto');
+    expect(fallidos[0]?.accion.instruccion).toContain('pantalla completa');
+    expect(pasos.filter((p) => p.accion.tipo === 'fillFormVision')).toHaveLength(2);
+    expect(pasos[22]?.accion.instruccion).toBe('click the Send button');
+  });
+
+  it('ARMA EL PROCEDIMIENTO: el rechazo de la guardia se descarta y no aborta nada', () => {
+    const material = procedimiento();
+    expect(material.promovida).toBe(true);
+    if (!material.promovida) return;
+    // Ni un paso 'verificar' de mas por el rechazo: el unico que queda es la verificacion previa que
+    // SI comparo y dejo pasar el envio (idx 21).
+    expect(material.pasos.map((p) => p.accion)).toEqual([
+      'navegar',
+      'click',
+      'escribir',
+      'teclas',
+      'escribir',
+      'escribir',
+      'verificar',
+      'click',
+    ]);
+    // Los DOS llenados por vision se descartan sin abortar y sin reclamar cobertura de ningun dato.
+    expect(material.metodosDescartados).toEqual(['fillFormVision', 'fillFormVision']);
+    // Los tres datos declarados viajan como marcadores, jamas como valores.
+    expect(material.pasos.filter((p) => p.accion === 'escribir').map((p) => p.valor)).toEqual([
+      { tipo: 'parametro', parametro: 'destinatario' },
+      { tipo: 'parametro', parametro: 'asunto' },
+      { tipo: 'parametro', parametro: 'cuerpo' },
+    ]);
+  });
+
+  it('las clases que declara son las mismas cinco del atlas mas la del boton Enviar', () => {
+    const material = procedimiento();
+    if (!material.promovida) throw new Error(material.motivo);
+    expect(material.pasos.map((p) => claseDeElemento(p.accion, p.estrategias))).toEqual([
+      null, // navegar
+      'click|rol:button|redactar',
+      'escribir|atributo:aria-label|destinatarios en para',
+      null, // teclas
+      'escribir|atributo:aria-label|asunto',
+      'escribir|atributo:aria-label|cuerpo del mensaje',
+      null, // verificar
+      'click|atributo:aria-label|enviar',
+    ]);
+  });
+
+  it('con las seis clases corroboradas, la corrida PUBLICA', () => {
+    const veredicto = publicarCon(new Set([...CINCO_CLASES, 'click|atributo:aria-label|enviar']));
+    expect(veredicto.publicable).toBe(true);
+    if (!veredicto.publicable) return;
+    expect(veredicto.plantilla.pasos).toHaveLength(7);
+    expect(veredicto.plantilla.codigoDeIntencion).toBe('enviar');
+    expect(veredicto.plantilla.dominiosClave).toBe(DOMINIO);
+    expect(veredicto.plantilla.marcadoresClave).toBe('asunto+cuerpo+destinatario');
+    const serializado = JSON.stringify(veredicto.plantilla);
+    for (const prohibido of [DESTINATARIO, ASUNTO, CUERPO, 'xpath', 'ruta', '/html', 'Pantalla completa']) {
+      expect(serializado, prohibido).not.toContain(prohibido);
+    }
+  });
+
+  it('con las CINCO clases reales el unico rechazo que queda es el del boton Enviar', () => {
+    // EL PROBLEMA CONOCIDO Y DISTINTO que queda en pie despues de este arreglo, fijado aqui como el
+    // comportamiento esperado: `clasesParaPublicar` exige DOS origenes independientes y la clase del
+    // boton Enviar no los tiene todavia. Ya no es un fallo de la conversion -- el procedimiento se
+    // arma entero -- y el motivo es el de la puerta de publicacion y NOMBRA el paso, en lugar del
+    // `sin_procedimiento_repetible` / `paso_fallido` con el idx 12 que devolvia produccion.
+    const veredicto = publicarCon(CINCO_CLASES);
+    expect(veredicto.publicable).toBe(false);
+    if (veredicto.publicable) return;
+    expect(veredicto.motivo).toBe('clase_no_corroborada');
+    const material = procedimiento();
+    if (!material.promovida) throw new Error(material.motivo);
+    expect(veredicto.idx).toBe(material.pasos[7]?.idx);
+  });
+
+  it('un paso del MOTOR que SI fallo en la pagina sigue tumbando la publicacion de esta corrida', () => {
+    // El contrapunto sobre la MISMA traza real: si el click de Enviar hubiera llegado al navegador y
+    // fallado, la plantilla no se publica. Es la mitad de la regla que no se afloja.
+    const pasos = pasosConEstrategiasPercibidas(corridaDeLas0102());
+    const envio = pasos[22];
+    if (envio === undefined) throw new Error('la corrida de referencia perdio el click de Enviar');
+    pasos[22] = { ...envio, exito: false };
+    const material = promoverTrayectoria({
+      pasos,
+      dominio: DOMINIO,
+      objetivo: OBJETIVO,
+      estado: 'exitosa',
+      exigeVerificacion: true,
+    });
+    expect(material.promovida).toBe(false);
+    if (material.promovida) return;
+    expect(material.regla).toBe('paso_fallido');
+    expect(material.paso).toBe(22);
   });
 });
