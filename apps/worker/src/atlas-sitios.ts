@@ -29,7 +29,9 @@ import type { PasoCensurado } from './trayectoria.js';
  *
  *  2. EL ATLAS ES PISTA, NO RECETA. Lo que se sirve son ESTRATEGIAS ADICIONALES de fallback y un
  *     bloque de contexto de percepcion. Nada de lo que hay aqui puede decidir que se ejecuta: la
- *     verificacion determinista y la guardia no importan este modulo.
+ *     verificacion determinista no importa este modulo. La GUARDIA si lo importa desde la barrera de
+ *     identidad (posterior a V040), y en una sola direccion: que una clase FALTE puede hacer que una
+ *     accion NO se ejecute; que ESTE no ejecuta nada por si sola.
  *
  *  3. CORROBORACION. `esServible` es la regla completa: una entrada se sirve a un origen que NO la
  *     produjo solo cuando la produjeron al menos ORIGENES_PARA_COMPARTIR origenes independientes. El
@@ -444,6 +446,36 @@ export function estrategiasDelSelectorParaElAtlas(
 ): EstrategiaLocalizacion[] {
   const derivadas = derivarEstrategiasDeSelector(selector).filter(esEstrategiaDeAtlas);
   return derivadas.length === 0 ? [] : sanearEstrategias(JSON.stringify(derivadas));
+}
+
+/**
+ * LA ENTRADA DEL CONTROL QUE SE LEYO DEL DOM ANTES DE ACCIONARLO. Es la tercera fuente de este
+ * modulo, y la unica que alcanza a las ACCIONES FINALES leyendo el elemento VIVO: la barrera de
+ * identidad lo localiza (rol accesible y nombre) JUSTO ANTES de que la accion salga al navegador,
+ * cuando el control todavia existe. La percepcion corre DESPUES y ahi el elemento ya se desmonto; el
+ * complemento por selector alcanza solo lo que el selector llevara escrito.
+ *
+ * Un `click` sobre un elemento del que se sabe rol y nombre: exactamente lo que el eje mas estable de
+ * `claseDeElemento` describe, y la misma cadena que producen la percepcion y el grabador para ese
+ * mismo control (`estrategiasDe`, localizacion.ts, siempre emite `rol` cuando hay rol y nombre).
+ *
+ * PASA POR LAS MISMAS DOS PUERTAS que las otras dos fuentes, y por eso se arma aqui y no en el
+ * cableado: `sanearEstrategias` (un nombre accesible con un dato sensible dentro no entra a una tabla
+ * GLOBAL) y `entradaDeAtlas`, o sea el filtro de tipos, el recorte a MAX_NOMBRE_ATLAS y la paranoia
+ * de valores del invariante 4. null = no quedo nada que se pueda guardar.
+ *
+ * QUIEN decide que la corrida merece escribir (efecto confirmado) y que el control era UNICO en la
+ * pagina es el llamador: aqui no hay forma de saberlo.
+ */
+export function entradaDelControlLeido(
+  params: { dominio: string; rol: string; nombre: string },
+  valores: readonly string[],
+): EntradaDeAtlas | null {
+  const estrategias = sanearEstrategias(
+    JSON.stringify([{ tipo: 'rol', rol: params.rol, nombre: params.nombre }]),
+  );
+  if (estrategias.length === 0) return null;
+  return entradaDeAtlas({ dominio: params.dominio, accion: 'click', estrategias }, valores);
 }
 
 /**

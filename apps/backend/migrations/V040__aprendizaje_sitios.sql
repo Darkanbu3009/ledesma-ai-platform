@@ -25,9 +25,16 @@
 -- su interpretacion en promocion-estrategias.ts.
 --
 -- EL ATLAS ES PISTA, NO RECETA: se inyecta como estrategias ADICIONALES de fallback y como contexto de
--- percepcion. La VERIFICACION DETERMINISTA previa a una accion irreversible (verificacion.ts) y la
--- GUARDIA DE ACCION (tarea-web.ts) NO consultan esta tabla y son ignorantes de su existencia: lo que
--- el atlas puede cambiar es COMO se encuentra un boton, jamas SI una accion se ejecuta.
+-- percepcion. La VERIFICACION DETERMINISTA previa a una accion irreversible (verificacion.ts) sigue
+-- sin consultar esta tabla y es ignorante de su existencia.
+--
+-- LA GUARDIA DE ACCION (tarea-web.ts) SI LA CONSULTA desde la BARRERA DE IDENTIDAD DEL ELEMENTO
+-- (barrera-identidad.ts), y esta linea decia lo contrario porque la barrera es posterior a esta
+-- migracion. Lo que consulta son las CLASES CORROBORADAS del dominio, para comparar contra el
+-- elemento que lee del DOM. La direccion de esa consulta es de una sola via y es lo que sostiene el
+-- invariante: que una clase FALTE en esta tabla puede hacer que una accion NO se ejecute; que ESTE
+-- no ejecuta nada por si sola. El atlas puede cambiar COMO se encuentra un boton y puede retener una
+-- accion, jamas provocarla.
 --
 -- ESTA TABLA NO ES `recetas_web` (V035) ni `trayectorias_web` (V030): aquellas son POR DUENO y llevan
 -- su owner_id; esta es GLOBAL y no puede llevarlo.
