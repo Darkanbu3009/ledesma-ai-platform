@@ -246,6 +246,49 @@ export function esNavegacionDeSoloLectura(descripcion: string): boolean {
 }
 
 /**
+ * CONTENIDO TECLEADO (FIX G): lo que una accion de escritura ESCRIBE, separado de lo que la accion
+ * HACE. La descripcion de un act mezcla las dos cosas -- "type "Clase envio uno" into the Asunto
+ * subject input field" -- y el matcheo sobre el texto entero trataba el ASUNTO del correo como si
+ * fuera el envio. Evidencia de produccion (31 jul 2026): la guardia verifico con solo el
+ * destinatario escrito, consumio el cupo de accion irreversible, no pudo confirmar efecto (teclear
+ * un asunto no envia nada), gasto el unico reintento y la corrida murio dejando un borrador a
+ * medias. Es la misma familia del bug de la carpeta "Enviados", que quedo resuelto solo para el
+ * caso de la NAVEGACION (FIX F).
+ *
+ * TECLEAR UN TEXTO QUE CONTIENE EL VERBO NO ES EJECUTAR EL VERBO. Pero la asimetria de D3 no se
+ * puede romper: un falso negativo aqui dejaria pasar la accion irreversible sin verificar. Por eso
+ * el contenido se retira SOLO cuando las dos condiciones se cumplen a la vez:
+ *
+ *  1. un VERBO DE ESCRITURA introduce el segmento delimitado (es su objeto directo). Retirar
+ *     cualquier texto entrecomillado seria el falso negativo inaceptable: en "click the "Comprar
+ *     ahora" button" las comillas envuelven la ETIQUETA DEL BOTON, que si es la accion;
+ *  2. la descripcion NO nombra ningun GATILLO DE CLICK. Una descripcion compuesta ("type the
+ *     message and click "Enviar"") describe tambien un clic, y ahi el segmento entrecomillado
+ *     vuelve a ser la etiqueta del control: se evalua entera, como antes.
+ *
+ * Sin delimitadores no hay nada que separar y el texto se evalua entero: preferimos el falso
+ * positivo de hoy a un hueco en la guardia.
+ */
+const VERBOS_DE_ESCRITURA =
+  /\b(?:types?|typed|typing|writes?|writing|fills?|filled|filling|inputs?|escrib\w*|teclea\w*|tipea\w*|ingresa\w*|introduc\w*|rellena\w*)\b/;
+const GATILLOS_DE_CLICK =
+  /\b(?:click\w*|clic|clica\w*|press\w*|pulsa\w*|presiona\w*|tap|boton|button|submit|selecciona\w*|select)\b/;
+const CONTENIDO_ENTRE_DELIMITADORES = new RegExp(
+  `(${VERBOS_DE_ESCRITURA.source}[^"'\`«»“”‘’]{0,24})` +
+    '(?:"[^"]*"|\'[^\']*\'|`[^`]*`|«[^»]*»|“[^”]*”|‘[^’]*’)',
+  'g',
+);
+
+/**
+ * La descripcion SIN el contenido que la accion teclea, sobre el texto ya normalizado. Devuelve el
+ * texto intacto cuando no hay un contenido que se pueda separar de la accion con certeza.
+ */
+function sinContenidoTecleado(texto: string): string {
+  if (GATILLOS_DE_CLICK.test(texto)) return texto;
+  return texto.replace(CONTENIDO_ENTRE_DELIMITADORES, '$1 ');
+}
+
+/**
  * ¿La accion que el agente PROPONE ejecutar es LA ACCION IRREVERSIBLE QUE PIDIO EL USUARIO, y por
  * tanto exige que el sistema compare antes de dejarla pasar? (CAMBIO 1)
  *
@@ -271,7 +314,9 @@ export function detectarAccionQueExigeVerificacion(
   // FIX F: la navegacion y la lectura pasan SIEMPRE, tambien con el cupo consumido. Que el nombre de
   // una carpeta ("Enviados", "Sent") contenga el verbo no la convierte en la accion irreversible.
   if (esNavegacionDeSoloLectura(descripcion)) return null;
-  const texto = normalizarObjetivo(descripcion);
+  // FIX G: el verbo tiene que estar en lo que la accion HACE, no en el CONTENIDO que teclea. Que el
+  // asunto de un correo diga "envio" no convierte ese tecleo en el envio.
+  const texto = sinContenidoTecleado(normalizarObjetivo(descripcion));
   const accion = VERBOS_ACCION_BLOQUEADA.find((v) => v.verbo === verboDelObjetivo)?.accion;
   for (const entrada of VERBOS_ACCION_BLOQUEADA) {
     if (entrada.accion !== accion) continue;
