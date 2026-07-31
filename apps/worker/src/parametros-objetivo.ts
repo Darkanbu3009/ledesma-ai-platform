@@ -41,14 +41,32 @@ export interface ParametrosDeclarados {
 }
 
 /**
- * Normalizacion TEXTUAL de la comparacion (D2): minusculas, sin acentos, sin espacios extremos y con
- * los espacios internos colapsados. Es la MISMA funcion para el valor del objetivo y para el valor
- * leido del sitio: comparar con criterios distintos a cada lado seria comparar otra cosa.
+ * MARCAS INVISIBLES DE DIRECCION DE TEXTO (LRM, RLM, ALM, los de formato bidi, los aislantes y el
+ * BOM) que un sitio incrusta DENTRO de un nombre accesible. No son texto: no se ven, no se teclean y
+ * no describen nada del control, pero parten en dos la identidad del elemento segun quien la lea.
+ *
+ * El caso medido: el aria-label del boton Enviar de Gmail es `Enviar \u202a(Ctrl-Enter)\u202c`, asi
+ * que el nombre que se lee del DOM y el mismo nombre escrito a mano dejan de ser la misma cadena.
+ *
+ * ES EL MISMO CONJUNTO que ya retira `claveDeNombre` (localizacion.ts) dentro de la pagina antes de
+ * comparar un nombre accesible: los dos lados de esa comparacion tienen que quitar lo mismo.
+ */
+const MARCAS_DIRECCIONALES = /[\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069\ufeff]/g;
+
+/**
+ * Normalizacion TEXTUAL de la comparacion (D2): minusculas, sin acentos, sin marcas invisibles de
+ * direccion, sin espacios extremos y con los espacios internos colapsados. Es la MISMA funcion para
+ * el valor del objetivo y para el valor leido del sitio: comparar con criterios distintos a cada
+ * lado seria comparar otra cosa.
+ *
+ * Las marcas se retiran ANTES de colapsar los espacios: una marca entre dos espacios los dejaria
+ * pegados uno al lado del otro si se quitara despues.
  */
 export function normalizarTexto(texto: string): string {
   return texto
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    .replace(MARCAS_DIRECCIONALES, '')
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim();

@@ -115,6 +115,17 @@ type BotonFake = { ariaLabel: string; rol: string; candidatos: number } | null;
 
 const BOTON_ENVIAR: BotonFake = { ariaLabel: 'Enviar (Ctrl-Enter)', rol: 'button', candidatos: 1 };
 
+/**
+ * EL MISMO BOTON, con el aria-label REAL de Gmail: el atajo va envuelto en un aislante bidi
+ * (U+202A / U+202C) que no se ve, no se teclea y hasta el FIX A partia en dos la clase del elemento.
+ * Es el string que produce el sitio de verdad, verificado contra el fixture de efecto-envio-dom.
+ */
+const BOTON_ENVIAR_REAL: BotonFake = {
+  ariaLabel: 'Enviar ‪(Ctrl-Enter)‬',
+  rol: 'button',
+  candidatos: 1,
+};
+
 function makeNavegador(
   pagina: PaginaFake,
   boton: BotonFake | 'sin_primitiva' | 'falla' = BOTON_ENVIAR,
@@ -311,6 +322,20 @@ describe('la barrera de identidad se interpone en el motor libre', () => {
     expect(identidad).toHaveLength(1);
     expect(identidad[0]?.accion.tipo).toBe('identidad:permitida');
     expect(identidad[0]?.exito).toBe(true);
+  });
+
+  it('el aria-label REAL de Gmail (con sus marcas bidi) produce la MISMA clase que el limpio (FIX A)', async () => {
+    // Sin el FIX A este mismo boton daba 'click|rol:button|enviar ‪(ctrl-enter)‬', una clase
+    // que el atlas no puede tener y que ademas no arranca con el nombre declarado: bloqueo doble.
+    const { deps, motor, trayectorias } = escenario({
+      barreraIdentidad: 'observacion',
+      boton: BOTON_ENVIAR_REAL,
+      clasesDelAtlas: [CLASE_ENVIAR],
+    });
+    await expect(procesarTareaWeb(deps, makeJob())).resolves.toBe('completada');
+    expect(motor.ejecutadas).toEqual(ACCIONES_HASTA_ENVIAR);
+    const identidad = pasosDeIdentidad(trayectorias);
+    expect(identidad[0]?.accion.tipo).toBe('identidad:permitida');
   });
 
   it('el nombre accesible se lee SOLO en la accion irreversible: una lectura por corrida, no por accion', async () => {
