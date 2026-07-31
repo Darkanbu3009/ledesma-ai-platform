@@ -1,3 +1,8 @@
+import {
+  clasificarFalloDeAccesoAlModelo,
+  marcaDeFalloDeModelo,
+  type ClaseDeFalloDeModelo,
+} from './fallo-modelo.js';
 import type { Logger } from './logger.js';
 
 /**
@@ -448,8 +453,36 @@ export function normalizarSalidaGenerada(
 }
 
 /**
- * El middleware que construirOpcionesStagehand cuelga de `model.middleware`. Nunca lanza: cualquier
- * duda deja pasar la llamada tal cual (es una red de seguridad, no un requisito).
+ * FIX B (jul 2026): CORTA EL REINTENTO INTERNO DEL MOTOR ante un fallo de acceso al modelo.
+ *
+ * El AI SDK reintenta CADA llamada hasta 2 veces (`maxRetries` default 2, backoff 2s/4s y respeto del
+ * `retry-after` hasta 60 s) siempre que el error sea un APICallError con `isRetryable === true`.
+ * Stagehand llama a generateText/generateObject SIN pasar `maxRetries`, y su superficie publica no lo
+ * expone: no hay opcion que acotar. Este middleware es el unico punto de paso obligatorio de TODA
+ * llamada del motor, y corre DENTRO del bucle de reintento, asi que es donde si se puede intervenir.
+ *
+ * Al detectar el fallo se relanza un Error PLANO (no un APICallError): el bucle de reintento del AI
+ * SDK solo reintenta APICallError retryables, asi que con esto propaga en el acto en vez de dormir el
+ * backoff. El mensaje lleva la MARCA `[MODELO_SIN_ACCESO:clase]` porque `agent.execute` de Stagehand
+ * atrapa el error y lo devuelve como texto: la marca es lo unico que sobrevive ese canal.
+ *
+ * NUNCA cambia el desenlace de un error que no se pueda clasificar con certeza: ese se relanza tal
+ * cual y el reintento del motor sigue exactamente como hoy.
+ *
+ * ALCANCE: solo `wrapGenerate`, que es por donde pasan TODAS las llamadas que este worker hace al
+ * modelo (el bucle del agente corre por generateText y act/observe/extract por generateObject; la
+ * variante en streaming de Stagehand, `agent.stream`, no se usa desde aqui). Si algun dia se usara,
+ * agregar `wrapStream` con el mismo cuerpo.
+ */
+function conMarcaDeFalloDeModelo(clase: ClaseDeFalloDeModelo, error: unknown): Error {
+  const original = error instanceof Error ? `${error.name}: ${error.message}` : 'error desconocido';
+  return new Error(`${marcaDeFalloDeModelo(clase)} ${original}`);
+}
+
+/**
+ * El middleware que construirOpcionesStagehand cuelga de `model.middleware`. Nunca lanza por su
+ * cuenta: cualquier duda deja pasar la llamada tal cual (es una red de seguridad, no un requisito).
+ * La UNICA excepcion es el fallo de acceso al modelo, que se relanza marcado (ver arriba).
  */
 export function crearMiddlewareDeModelo(logger: Logger): MiddlewareDeModelo {
   return {
@@ -461,7 +494,20 @@ export function crearMiddlewareDeModelo(logger: Logger): MiddlewareDeModelo {
       }
     },
     wrapGenerate: async ({ doGenerate, params }) => {
-      const resultado = await doGenerate();
+      let resultado: ResultadoDeGeneracion;
+      try {
+        resultado = await doGenerate();
+      } catch (error) {
+        const clase = clasificarFalloDeAccesoAlModelo(error);
+        if (clase === null) throw error;
+        // Sin el mensaje del proveedor en los campos del log: va dentro del error, que ya esta
+        // sanitizado antes de llegar al last_error del job.
+        logger.error(
+          'tarea web: la llave del modelo no tiene saldo o no es valida; se corta la corrida sin reintentar',
+          { clase },
+        );
+        throw conMarcaDeFalloDeModelo(clase, error);
+      }
       try {
         return normalizarSalidaGenerada(resultado, params.prompt, logger) ?? resultado;
       } catch {

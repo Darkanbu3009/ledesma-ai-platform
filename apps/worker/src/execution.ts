@@ -88,6 +88,7 @@ const RECIPE_MAX_CONTEXT_CHARS = 200_000;
 // un ciclo de imports con este modulo. Se RE-EXPORTAN aca: la superficie publica no cambia.
 import { PermanentExecutionError, RunTimeoutError, ShutdownAbortError } from './errores.js';
 export { PermanentExecutionError, RunTimeoutError, ShutdownAbortError };
+import { FalloDeAccesoAlModeloError, clasificarFalloDeAccesoAlModelo } from './fallo-modelo.js';
 
 /** Subconjunto del JobsRepository que la ejecucion necesita (facil de mockear en tests). */
 export interface JobQueue {
@@ -509,7 +510,8 @@ function combinarSenales(
  *  - exito (el run llega a un stop natural) -> markCompleted;
  *  - fallo TRANSITORIO (agente ausente, credencial irresoluble, error de proveedor, timeout) ->
  *    si attempts < MAX_ATTEMPTS vuelve a 'pending' con backoff (markPendingRetry); si attempts >=
- *    MAX_ATTEMPTS queda 'failed' definitivo;
+ *    MAX_ATTEMPTS queda 'failed' definitivo. EXCEPCION: un fallo de acceso al modelo (saldo, cuota,
+ *    credencial) NO es transitorio y va directo a 'failed' sin reencolar (ver handleFailure);
  *  - apagado del worker a media ejecucion -> vuelve a 'pending' SIN gastar el intento como permanente.
  * Captura TODO el flujo: nunca propaga (el loop no se cae por un job roto). Las transiciones de cierre
  * tambien estan protegidas; si una falla de DB, se propaga al loop, que hace back off por intervalo.
@@ -932,6 +934,28 @@ async function handleFailure(deps: JobRunnerDeps, job: Job, error: unknown): Pro
       reason,
     });
     await notifyDefinitiveFailure(deps, job, reason);
+    return;
+  }
+
+  // FALTA DE ACCESO AL MODELO (saldo agotado, cuota consumida, llave invalida o sin permiso): es
+  // PERMANENTE por naturaleza y va directo a 'failed', SIN reencolar. Cada reintento costaba una
+  // sesion de navegador con su proxy y los minutos del backoff por un fallo que ningun reintento
+  // podia resolver (produccion, 31 jul 2026). Va DESPUES de la rama permanente -- un error que ya
+  // llego tipado como FalloDeAccesoAlModeloError se cierra alli con su prefijo intacto -- y ANTES de
+  // la transitoria, que es la que reencolaba. El clasificador es conservador: lo que no se pueda
+  // afirmar permanente con certeza (429 de tasa, 5xx, timeout, red) cae abajo y se reintenta igual
+  // que hoy.
+  const claseDeFalloDeModelo = clasificarFalloDeAccesoAlModelo(error);
+  if (claseDeFalloDeModelo !== null) {
+    const motivo = describeError(new FalloDeAccesoAlModeloError(claseDeFalloDeModelo, reason));
+    await deps.jobs.markFailed(job.id, motivo);
+    logger.error('job fallido permanente: la llave del modelo no tiene saldo o no es valida (sin reintento)', {
+      jobId: job.id,
+      attempts: job.attempts,
+      clase: claseDeFalloDeModelo,
+      reason,
+    });
+    await notifyDefinitiveFailure(deps, job, motivo);
     return;
   }
 

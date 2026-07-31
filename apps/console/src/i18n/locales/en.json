@@ -1917,6 +1917,10 @@
       "titulo": "The final step could not be confirmed",
       "detalle": "The task made progress, but the system stopped retrying the final step to avoid repeating it by accident. A draft or a half-finished state may remain on the site. Check it before asking again."
     },
+    "modeloSinAcceso": {
+      "titulo": "Your model key has no balance or is not valid",
+      "detalle": "The task stopped because the key you use for the model ran out of balance or is no longer valid. This is not about what you asked for, and trying again will not change it. Sign in to your model provider account, check the balance and the key, and ask for the task again."
+    },
     "nada": "nothing",
     "campos": {
       "destinatario": "who to send it to",
