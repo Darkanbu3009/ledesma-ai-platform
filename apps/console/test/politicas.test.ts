@@ -109,9 +109,15 @@ describe('textoDeDetencion (ES)', () => {
     expect(texto.detalle).not.toContain('aparecia');
   });
 
-  it('no leible sin campo (la pagina entera no se pudo leer): nombra los datos en generico', () => {
+  it('no leible sin campo (la pagina entera no se pudo leer): dice que la pagina no se pudo leer', () => {
+    // FIX C, caso real de produccion del 3 ago 2026: la sesion de navegador quedo degradada y el
+    // mensaje culpaba al destinatario ("No pudimos leer a quien enviarlo") con el dato escrito y
+    // visible. Sin campo, lo ilegible fue la pagina, y eso es lo que se dice.
     const texto = textoDeDetencion({ motivo: 'noLeible' });
-    expect(texto.detalle).toBe('No pudimos leer los datos en el sitio para comprobarlo. No se ejecuto nada.');
+    expect(texto.detalle).toBe(
+      'No pudimos leer la pagina del sitio para comprobar la tarea. No se ejecuto nada y se reintentara. Si vuelve a pasar, pide la tarea de nuevo.',
+    );
+    expect(texto.detalle).not.toContain('a quien enviarlo');
   });
 
   it('tope excedido: cita monto, limite y donde cambiarlo', () => {

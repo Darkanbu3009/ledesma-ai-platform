@@ -65,12 +65,17 @@ export function textoDeDetencion(detencion: DetencionDeVerificacion): TextoDeDet
       };
     case 'noLeible':
       // El dato no se pudo LEER del sitio: se dice eso, jamas "en el sitio aparecia nada" (ese
-      // era el diagnostico falso de la evidencia de produccion). Sin campo (la pagina entera no
-      // se pudo leer y el objetivo no declaro datos), se nombran "los datos" en generico.
+      // era el diagnostico falso de la evidencia de produccion). SIN campo, lo ilegible fue LA
+      // PAGINA entera (una sesion de navegador degradada): culpar a un dato del usuario mandaba a
+      // diagnosticar lo que no fue, asi que se dice que la pagina no se pudo leer y que se puede
+      // reintentar.
+      if (detencion.campo === undefined) {
+        return { titulo, detalle: i18n.t('verificacion.noLeible.pagina') };
+      }
       return {
         titulo,
         detalle: i18n.t('verificacion.noLeible.detalle', {
-          campo: i18n.t(`verificacion.campos.${detencion.campo ?? 'datos'}`),
+          campo: i18n.t(`verificacion.campos.${detencion.campo}`),
         }),
       };
     case 'faltaDato':

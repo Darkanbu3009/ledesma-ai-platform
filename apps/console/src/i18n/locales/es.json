@@ -1926,7 +1926,8 @@
       "detalle": "Pediste {{pedido}} y en el sitio aparecia {{encontrado}}. No se ejecuto nada. Revisa y vuelve a pedirlo."
     },
     "noLeible": {
-      "detalle": "No pudimos leer {{campo}} en el sitio para comprobarlo. No se ejecuto nada."
+      "detalle": "No pudimos leer {{campo}} en el sitio para comprobarlo. No se ejecuto nada.",
+      "pagina": "No pudimos leer la pagina del sitio para comprobar la tarea. No se ejecuto nada y se reintentara. Si vuelve a pasar, pide la tarea de nuevo."
     },
     "faltaDato": {
       "detalle": "Falta un dato para completar esta accion: {{campo}}. Pidelo de nuevo incluyendolo."

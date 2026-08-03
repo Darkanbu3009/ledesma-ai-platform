@@ -280,10 +280,14 @@ export function verificarAccion(entrada: {
     // Sin foto del DOM no hay verificacion posible. Jamas se ejecuta a ciegas. Es un NO LEIBLE
     // (CAMBIO 2), no un "no coincide": decirle al usuario que "en el sitio aparecia nada" cuando lo
     // que paso es que no se pudo leer manda a diagnosticar lo que no fue.
-    const campo = primerParametroDeclarado(parametros);
+    //
+    // SIN `campo`, a proposito (FIX C, caso real de produccion del 3 ago 2026): lo que no se pudo
+    // leer fue LA PAGINA (una sesion de navegador degradada), no un dato del usuario. Nombrar aqui el
+    // primer parametro declarado hacia que la consola dijera "No pudimos leer a quien enviarlo"
+    // cuando el destinatario estaba escrito y visible; con el campo ausente la consola dice que la
+    // pagina no se pudo leer y que se reintentara, que es lo que paso.
     return detener({
       motivo: 'noLeible',
-      ...(campo !== null ? { campo } : {}),
       detalle: 'no se pudo leer el estado de la pagina antes de ejecutar',
     });
   }
@@ -475,20 +479,6 @@ export function formularioVerificadoPresente(
  */
 const PATRON_CONFIRMACION =
   /\b(?:mensaje enviado|correo enviado|se envio|enviado con exito|enviada correctamente|message sent|email sent|pago (?:realizado|enviado|exitoso|aprobado)|payment (?:sent|complete|completed|successful)|transferencia (?:realizada|enviada|exitosa)|compra (?:realizada|confirmada|exitosa)|gracias por tu compra|pedido (?:confirmado|realizado)|order (?:confirmed|placed)|se elimino|eliminado correctamente|deleted successfully|publicado correctamente|published successfully)\b/;
-
-/**
- * El PRIMER parametro que el objetivo declara (orden fijo, el mismo de contarParametrosDeclarados):
- * es el dato que se nombra cuando la pagina entera no se pudo leer. null = no declaro ninguno.
- */
-function primerParametroDeclarado(parametros: ParametrosDeclarados): NombreDeParametro | null {
-  if (parametros.destinatarios.length > 0) return 'destinatario';
-  if (parametros.monto !== null) return 'monto';
-  if (parametros.producto !== null) return 'producto';
-  if (parametros.cantidad !== null) return 'cantidad';
-  if (parametros.asunto !== null) return 'asunto';
-  if (parametros.cuerpo !== null) return 'cuerpo';
-  return null;
-}
 
 /**
  * Compara cada parametro DECLARADO contra la pagina. Un parametro no declarado no genera comparacion

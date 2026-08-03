@@ -521,7 +521,10 @@ describe('sin poder leer la pagina', () => {
     });
     expect(motivo(veredicto)).toBe('noLeible');
     if (veredicto.tipo !== 'detener') throw new Error('inalcanzable');
-    expect(veredicto.detencion.campo).toBe('destinatario');
+    // FIX C: lo que no se pudo leer fue LA PAGINA, no un dato del usuario. Nombrar el destinatario
+    // aqui producia "No pudimos leer a quien enviarlo" con el destinatario escrito y visible.
+    expect(veredicto.detencion.campo).toBeUndefined();
+    expect(veredicto.detencion.detalle).toBe('no se pudo leer el estado de la pagina antes de ejecutar');
   });
 });
 
