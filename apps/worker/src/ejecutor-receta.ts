@@ -383,6 +383,14 @@ async function evaluarIdentidadBestEffort(
   const barrera = deps.barreraIdentidad;
   if (barrera === undefined || barrera.modo === 'apagada') return null;
   if (instruccion.accion === 'navegar' || instruccion.accion === 'esperar') return null;
+  // Un paso 'teclas' NO localiza un elemento propio: pulsa sobre el foco, y su clase es null POR
+  // CONTRATO (claseDeElemento solo clasifica click y escribir; PasoPublicable exige clase NULA en
+  // teclas). Evaluarle la clase aqui bloqueaba SIEMPRE con 'clase_no_corroborada' toda receta o
+  // plantilla con una pulsacion intermedia (caso real de produccion del 3 ago 2026: el Tab entre el
+  // destinatario y el asunto abandono la primera plantilla compartida consumida). No es relajar la
+  // barrera: no hay elemento cuya identidad comparar. El paso IRREVERSIBLE si se evalua igual que
+  // hoy, y sigue fallando cerrado (sin clase y sin nombre accesible no se consuma nada a ciegas).
+  if (instruccion.accion === 'teclas' && !esPasoIrreversible) return null;
   try {
     // El nombre accesible se lee SOLO cuando hace falta (el paso irreversible) y solo cuando el paso
     // resuelve un elemento propio: una pulsacion sobre el foco no tiene elemento que identificar, y

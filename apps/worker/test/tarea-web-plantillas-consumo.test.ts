@@ -426,6 +426,19 @@ function pasoClick(idx: number, clase: string, nombre: string): unknown {
   };
 }
 
+function pasoTeclas(idx: number, teclas: string): unknown {
+  return {
+    idx,
+    accion: 'teclas',
+    dominio: DOMINIO,
+    claseDeElemento: null,
+    estrategias: [],
+    valor: null,
+    teclas,
+    esperaMs: null,
+  };
+}
+
 function pasoVerificar(idx: number): unknown {
   return {
     idx,
@@ -1085,6 +1098,44 @@ describe('ejecucion de la plantilla aprobada', () => {
 
     expect(recetas.promover).not.toHaveBeenCalled();
     expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-1', false);
+  });
+
+  it('FIXTURE REAL (3 ago 2026): una pulsacion intermedia NO bloquea la barrera y la plantilla corre entera', async () => {
+    // La primera plantilla compartida consumida en produccion: click en Redactar, escritura del
+    // destinatario y el Tab que pasa al asunto. La barrera activa bloqueaba esa pulsacion con
+    // 'clase_no_corroborada' porque un paso 'teclas' tiene clase null POR CONTRATO, y la corrida
+    // entera caia al motor libre. Un paso sin elemento propio no tiene identidad que comparar.
+    const pasos = [
+      pasoClick(0, CLASE_REDACTAR, 'Redactar'),
+      pasoEscribir(1, CLASE_DESTINATARIO, 'Destinatarios en Para', {
+        tipo: 'parametro',
+        parametro: 'destinatario',
+      }),
+      pasoTeclas(2, 'Tab'),
+      pasoEscribir(3, CLASE_ASUNTO, 'Asunto', { tipo: 'parametro', parametro: 'asunto' }),
+      pasoEscribir(4, CLASE_CUERPO, 'Cuerpo del mensaje', { tipo: 'parametro', parametro: 'cuerpo' }),
+      pasoVerificar(5),
+      pasoClick(6, CLASE_ENVIAR, 'Enviar'),
+    ];
+    const base = conPlantilla(pasos, [CLASE_REDACTAR, ...CLASES_DEL_PROCEDIMIENTO]);
+    const deps = yaDecidido(base, aprobacionDelOfrecimiento());
+    const plantillas = deps.plantillas as unknown as {
+      repo: { registrarEjecucion: ReturnType<typeof vi.fn> };
+    };
+
+    const resultado = await procesarTareaWeb(deps, makeJob());
+
+    expect(resultado).toBe('completada');
+    // Seis primitivas: dos clicks, tres escrituras y la pulsacion. El motor libre no corrio.
+    const determinista = deps.determinista as unknown as {
+      ejecutarPasoDeterminista: ReturnType<typeof vi.fn>;
+    };
+    const acciones = determinista.ejecutarPasoDeterminista.mock.calls.map(
+      (llamada) => (llamada[1] as InstruccionDePaso).accion,
+    );
+    expect(acciones).toEqual(['click', 'escribir', 'teclas', 'escribir', 'escribir', 'click']);
+    expect(deps.motor.ejecutar).not.toHaveBeenCalled();
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-1', true);
   });
 
   it('un paso que no resuelve ABANDONA la plantilla y NO escala al modelo', async () => {
