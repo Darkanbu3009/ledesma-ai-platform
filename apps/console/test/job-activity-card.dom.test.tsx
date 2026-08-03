@@ -163,3 +163,51 @@ describe('JobActivityCard: error amable con detalle tecnico colapsable (BUG C)',
     expect(screen.getByText(/supera tu limite configurado de 5000 MXN/)).toBeInTheDocument();
   });
 });
+
+describe('JobActivityCard: la etiqueta de procedimiento de otra cuenta (V041, consumo directo)', () => {
+  it('una tarea con procedimiento ajeno muestra la etiqueta SIEMPRE (no hubo aprobacion previa)', () => {
+    render(
+      <JobActivityCard
+        job={makeJob({ status: 'completed', lastError: null, conProcedimientoAjeno: true })}
+        agentName={null}
+      />,
+    );
+    expect(screen.getByText('Procedimiento de otra cuenta')).toBeInTheDocument();
+    expect(
+      screen.getByText(/uso un procedimiento que otra cuenta ya habia descubierto/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Corroborado')).not.toBeInTheDocument();
+  });
+
+  it('el badge Corroborado aparece solo cuando la plantilla ya estaba corroborada (D3)', () => {
+    render(
+      <JobActivityCard
+        job={makeJob({
+          status: 'completed',
+          lastError: null,
+          conProcedimientoAjeno: true,
+          procedimientoCorroborado: true,
+        })}
+        agentName={null}
+      />,
+    );
+    expect(screen.getByText('Procedimiento de otra cuenta')).toBeInTheDocument();
+    expect(screen.getByText('Corroborado')).toBeInTheDocument();
+  });
+
+  it('en ingles usa las claves EN de la etiqueta', async () => {
+    await i18n.changeLanguage('en');
+    render(
+      <JobActivityCard
+        job={makeJob({ status: 'completed', lastError: null, conProcedimientoAjeno: true })}
+        agentName={null}
+      />,
+    );
+    expect(screen.getByText('Procedure from another account')).toBeInTheDocument();
+  });
+
+  it('sin la marca, la tarjeta no dice nada de procedimientos ajenos', () => {
+    render(<JobActivityCard job={makeJob({ status: 'completed', lastError: null })} agentName={null} />);
+    expect(screen.queryByText('Procedimiento de otra cuenta')).not.toBeInTheDocument();
+  });
+});

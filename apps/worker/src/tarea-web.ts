@@ -109,14 +109,11 @@ import {
   type EntradaDeAtlas,
 } from './atlas-sitios.js';
 import {
-  accionTipoDeIntencion,
-  descripcionDeOfrecimiento,
   hashDeOrigenDePlantilla,
   identidadDeConsumo,
   parsearOfrecimiento,
   plantillaAplicable,
   plantillaDeLaCorrida,
-  textoDelOfrecimientoEs,
   type IdentidadDePlantilla,
   type OfrecimientoDePlantilla,
   type PlantillaDeLaCorrida,
@@ -592,7 +589,7 @@ export interface RepositorioPlantillasParaWorker {
     codigoDeIntencion: string;
     pasos: unknown;
     origenHash: string;
-  }): Promise<{ publicada: boolean; motivo?: string }>;
+  }): Promise<{ publicada: boolean; motivo?: string; rehabilitada?: boolean }>;
   /**
    * La plantilla de esta IDENTIDAD que se le puede servir a este origen. null = no hay ninguna.
    *
@@ -617,10 +614,26 @@ export interface RepositorioPlantillasParaWorker {
     marcadoresPosibles: readonly string[];
   }): Promise<{ corte: string; origenes: number | null }>;
   /**
-   * Contadores agregados de como le fue. Best-effort: su fallo no cambia el desenlace del job.
+   * Contadores agregados de como le fue, MAS las transiciones de estado que la ejecucion dispara
+   * (corroborada con el exito doble, retirada al tercer fallo imputable seguido). Best-effort: su
+   * fallo no cambia el desenlace del job.
    * `motivo` (V042): por que fallo el ultimo intento, con el vocabulario cerrado del contrato.
+   * `consumidorHash` (V043): el hash del consumidor de ESTA corrida; solo se persiste en el exito.
+   * Devuelve estado previo y nuevo con la IDENTIDAD de la fila (dominios, intencion, marcadores)
+   * para el log de transiciones; void en fakes legados que no lo implementan.
    */
-  registrarEjecucion?(id: string, exitosa: boolean, motivo?: MotivoDeFallaDePlantilla): Promise<void>;
+  registrarEjecucion?(
+    id: string,
+    exitosa: boolean,
+    motivo?: MotivoDeFallaDePlantilla,
+    consumidorHash?: string,
+  ): Promise<{
+    estado: string;
+    estadoPrevio: string;
+    dominiosClave: string;
+    codigoDeIntencion: string;
+    marcadoresClave: string;
+  } | null | void>;
 }
 
 /** Dependencias del job de tarea web. index.ts cablea las reales; los tests pasan fakes. */
@@ -2699,6 +2712,16 @@ async function publicar(
     // del job es el vocabulario acotado del veredicto.
     return { publicada: false, motivo: 'rechazada_por_el_backend', submotivo: null, idx: null, clases };
   }
+  if (resultado.rehabilitada === true) {
+    // D5: la publicacion cayo sobre una fila RETIRADA y la regreso a candidata (racha y consumidores
+    // en cero; los origenes se conservan). Identidad de la fila, jamas hashes.
+    deps.logger.info('tarea web: la plantilla retirada quedo rehabilitada como candidata', {
+      jobId: job.id,
+      dominios: plantilla.dominiosClave,
+      intencion: plantilla.codigoDeIntencion,
+      marcadores: plantilla.marcadoresClave,
+    });
+  }
   deps.logger.info('tarea web: el procedimiento de la corrida quedo compartido como plantilla', {
     jobId: job.id,
     dominios: plantilla.dominiosClave,
@@ -2750,11 +2773,12 @@ interface VeredictoDeConsumo {
   /** ¿La tarea corrio con la plantilla ajena? */
   consumida: boolean;
   /**
-   * Por que no. Son los seis motivos de `plantillaAplicable` mas los del cableado y del flujo:
-   * `via_propia` (alguna via propia resolvio y ni se consulto), `rechazada_por_el_usuario`,
-   * `no_cableado`, `sin_identidad` (la tarea no pide una accion irreversible, o no hay dominios),
-   * `sin_plantilla`, `error_al_leer`, `checkpoint_no_persistido`, `ofrecimiento_distinto` y
+   * Por que no. Son los siete motivos de `plantillaAplicable` mas los del cableado y del flujo:
+   * `via_propia` (alguna via propia resolvio y ni se consulto), `no_cableado`, `sin_identidad` (la
+   * tarea no pide una accion irreversible, o no hay dominios), `sin_plantilla`, `error_al_leer` y
    * `abandonada` (se ejecuto y no resolvio; la termino el motor libre). null cuando si se consumio.
+   * Los motivos del checkpoint (`rechazada_por_el_usuario`, `checkpoint_no_persistido`,
+   * `ofrecimiento_distinto`) ya no existen: el consumo ejecuta directo, sin aprobacion humana.
    */
   motivo: string | null;
   /** `idx` del paso que la rechazo, o null cuando el rechazo no es de un paso concreto. */
@@ -3056,129 +3080,6 @@ async function veredictoDelMiss(
   }
 }
 
-/** ¿El ofrecimiento que el usuario aprobo es EL MISMO que la busqueda acaba de resolver? */
-function mismoOfrecimiento(a: OfrecimientoDePlantilla, b: OfrecimientoDePlantilla): boolean {
-  return (
-    a.codigoDeIntencion === b.codigoDeIntencion &&
-    a.dominio === b.dominio &&
-    a.marcadores.length === b.marcadores.length &&
-    a.marcadores.every((marcador, i) => marcador === b.marcadores[i])
-  );
-}
-
-/**
- * OFRECE la plantilla ajena en un CHECKPOINT DE APROBACION HUMANA (V027) y PAUSA el job. Es la misma
- * maquinaria de `pausarEnCheckpoint` con UNA diferencia deliberada: aqui la sesion de navegador NO
- * tiene que sobrevivir. Un checkpoint clasico pausa A MITAD de una accion y perder la pagina seria
- * perder el estado del formulario; este pausa ANTES de que nada haya tocado el DOM, asi que el
- * llamador la cierra como cualquier corrida y la reanudacion abre una nueva. Es ademas la razon de que
- * la reanudacion NO pase por `reanudarTrasDecision`, que exige la sesion viva.
- *
- * EL TEXTO QUE VE EL USUARIO LO GENERA LA PLATAFORMA. Lo que se persiste en `descripcion` es un CODIGO
- * cerrado (motivo + codigo de intencion + marcadores + dominio); la frase la redactan la consola en el
- * idioma del usuario y el correo en espanol, desde ese codigo. De `plantillas_compartidas` no sale ni
- * un caracter hacia el usuario.
- *
- * Si el checkpoint no se puede persistir devuelve 'fallback': no se ofrece nada, la plantilla no se
- * ejecuta y la tarea sigue con el motor libre. Jamas se ejecuta un procedimiento ajeno sin aprobacion.
- */
-async function ofrecerPlantillaEnCheckpoint(
-  deps: TareaWebDeps,
-  job: Job,
-  abierto: { sitio: SitioConectado; sesionExternaId: string; contexto: string },
-  plantilla: PlantillaParaEstaTarea,
-): Promise<'pausada' | 'fallback'> {
-  const descripcion = descripcionDeOfrecimiento(plantilla.ofrecimiento);
-  const textoParaElCorreo = textoDelOfrecimientoEs(plantilla.ofrecimiento);
-
-  let screenshotBase64: string | null = null;
-  try {
-    screenshotBase64 = await deps.navegador.capturarPantalla(abierto.sesionExternaId);
-  } catch (error) {
-    deps.logger.warn('tarea web: no se pudo capturar el screenshot del ofrecimiento (se sigue sin el)', {
-      jobId: job.id,
-      err: describir(error),
-    });
-  }
-
-  let aprobacion: AprobacionWeb;
-  try {
-    aprobacion = await deps.aprobaciones.crear({
-      ownerId: job.ownerId,
-      jobId: job.id,
-      connectionId: abierto.sitio.id,
-      sesionExternaId: abierto.sesionExternaId,
-      // Informativo para el humano y derivado del codigo de intencion: los dos tipos exigen
-      // exactamente el mismo checkpoint (ver clasificarTipoAccion).
-      accionTipo: accionTipoDeIntencion(plantilla.ofrecimiento.codigoDeIntencion),
-      descripcion,
-      screenshotPath: null,
-      expiraEn: new Date(Date.now() + deps.aprobacionTtlMs),
-    });
-  } catch (error) {
-    deps.logger.error(
-      'tarea web: no se pudo crear el checkpoint del procedimiento compartido; no se ofrece y sigue el motor',
-      { jobId: job.id, err: describir(error) },
-    );
-    return 'fallback';
-  }
-
-  if (screenshotBase64 !== null && deps.subidorScreenshots) {
-    const path = await deps.subidorScreenshots.subir(job.ownerId, aprobacion.id, screenshotBase64);
-    if (path !== null) {
-      try {
-        await deps.aprobaciones.guardarScreenshotPath(aprobacion.id, path);
-      } catch (error) {
-        deps.logger.warn('tarea web: no se pudo guardar el path del screenshot (se sigue sin el)', {
-          jobId: job.id,
-          err: describir(error),
-        });
-      }
-    }
-  }
-
-  await refrescarContextoBestEffort(
-    deps,
-    abierto.sitio,
-    job.ownerId,
-    abierto.sesionExternaId,
-    abierto.contexto,
-  );
-
-  if (deps.notificadorAprobaciones) {
-    await deps.notificadorAprobaciones.notificarPendiente({
-      ownerId: job.ownerId,
-      jobId: job.id,
-      dominio: abierto.sitio.dominio,
-      // El correo lleva la FRASE, no el codigo: es lo unico de este checkpoint que el usuario lee
-      // fuera de la consola.
-      descripcion: textoParaElCorreo,
-      expiraEnIso: aprobacion.expiraEn,
-    });
-  }
-
-  await deps.guardarResultado(job.id, {
-    estado: 'esperando_aprobacion',
-    aprobacionId: aprobacion.id,
-    descripcion,
-    expiraEn: aprobacion.expiraEn,
-  });
-  await deps.marcarJobPausado(job.id);
-
-  deps.logger.info('tarea web PAUSADA para ofrecer un procedimiento que descubrio otra cuenta', {
-    jobId: job.id,
-    connectionId: abierto.sitio.id,
-    dominio: abierto.sitio.dominio,
-    aprobacionId: aprobacion.id,
-    intencion: plantilla.ofrecimiento.codigoDeIntencion,
-    marcadores: plantilla.ofrecimiento.marcadores,
-    pasos: plantilla.pasos.length,
-    estado: plantilla.estado,
-    origenes: plantilla.origenes,
-  });
-  return 'pausada';
-}
-
 /**
  * Mensaje del cierre cuando la plantilla se ABANDONO a mitad pero su accion irreversible SI surtio
  * efecto. No se sigue con el motor libre a proposito: el motor volveria a intentar la accion y ese es
@@ -3235,9 +3136,14 @@ async function confirmarEfectoDeLaPlantilla(
 }
 
 /**
- * Contadores agregados de la plantilla. Best-effort: el desenlace del job ya esta decidido.
- * `motivo` (V042) dice por que fallo el ultimo intento, con el vocabulario cerrado del contrato;
- * solo viaja en los fallos, y un exito lo limpia en la fila.
+ * Contadores agregados de la plantilla y sus TRANSICIONES de estado. Best-effort: el desenlace del
+ * job ya esta decidido. `motivo` (V042) dice por que fallo el ultimo intento, con el vocabulario
+ * cerrado del contrato; solo viaja en los fallos, y un exito lo limpia en la fila.
+ *
+ * EN EL EXITO viaja ademas el hash del CONSUMIDOR de esta corrida (V043, la misma derivacion que el
+ * hash de origen: incomparable con el del atlas), que es la evidencia con la que 'candidata' pasa a
+ * 'corroborada'. Las transiciones (corroborada, retirada) se LOGUEAN aqui con la IDENTIDAD de la
+ * fila -- dominios, intencion, marcadores -- y jamas con un hash.
  */
 async function registrarEjecucionDePlantillaBestEffort(
   deps: TareaWebDeps,
@@ -3249,8 +3155,27 @@ async function registrarEjecucionDePlantillaBestEffort(
   const registrar = deps.plantillas?.repo.registrarEjecucion;
   if (registrar === undefined || deps.plantillas === undefined) return;
   try {
-    if (motivo === undefined) await registrar.call(deps.plantillas.repo, plantillaId, exitosa);
-    else await registrar.call(deps.plantillas.repo, plantillaId, exitosa, motivo);
+    const consumidorHash = exitosa
+      ? hashDeOrigenDePlantilla(job.ownerId, deps.plantillas.clave)
+      : undefined;
+    const registro = await registrar.call(
+      deps.plantillas.repo,
+      plantillaId,
+      exitosa,
+      motivo,
+      consumidorHash,
+    );
+    if (registro !== null && registro !== undefined && registro.estado !== registro.estadoPrevio) {
+      const nivel = registro.estado === 'retirada' ? 'warn' : 'info';
+      deps.logger[nivel]('tarea web: la plantilla compartida cambio de estado', {
+        jobId: job.id,
+        dominios: registro.dominiosClave,
+        intencion: registro.codigoDeIntencion,
+        marcadores: registro.marcadoresClave,
+        de: registro.estadoPrevio,
+        a: registro.estado,
+      });
+    }
   } catch (error) {
     deps.logger.warn('tarea web: no se pudo contabilizar la plantilla (se ignora, best-effort)', {
       jobId: job.id,
@@ -3310,9 +3235,11 @@ async function copiarPlantillaComoRecetaBestEffort(
 }
 
 /**
- * EJECUTA la plantilla ajena YA APROBADA por su dueno. Es el MISMO ejecutor determinista de una receta
- * propia (`ejecutarReceta`), con la MISMA verificacion determinista en su paso `verificar` y la MISMA
- * politica del usuario, y con TRES diferencias, todas hacia el lado estricto:
+ * EJECUTA la plantilla ajena que paso todas las puertas tecnicas, DIRECTO y sin checkpoint (el
+ * consentimiento vive en los documentos legales aceptados al conectar sitios). Es el MISMO ejecutor
+ * determinista de una receta propia (`ejecutarReceta`), con la MISMA verificacion determinista en su
+ * paso `verificar` y la MISMA politica del usuario, y con TRES diferencias, todas hacia el lado
+ * estricto:
  *
  *  1. LA BARRERA DE IDENTIDAD CORRE EN MODO 'activa' SIEMPRE, sea cual sea el valor global de
  *     TAREA_WEB_BARRERA_IDENTIDAD (hoy 'observacion'). No se cambia el env ni el comportamiento de
@@ -4114,17 +4041,16 @@ export async function procesarTareaWeb(
   //      retoma LA MISMA sesion que quedo viva al pausar. Un job recien encolado no tiene aprobacion
   //      y sigue el camino de siempre.
   const aprobacion = await deps.aprobaciones.obtenerVigentePorJob(job.id, job.ownerId);
-  // 2.6. LA DECISION SOBRE UN OFRECIMIENTO DE PLANTILLA AJENA (V041, consumo) no se reanuda por
-  //      `reanudarTrasDecision`, y no es una excepcion caprichosa: esa funcion exige la sesion de
-  //      navegador VIVA porque un checkpoint clasico pausa a mitad de una accion. Este pausa ANTES de
-  //      tocar el DOM, la sesion se cerro como en cualquier corrida y la tarea vuelve a empezar por el
-  //      camino normal, que es exactamente donde el cuarto peldano sabe que hacer con la decision.
-  //      Una aprobacion 'pendiente' NO se lee como decidida: cae al camino de siempre, que la rechaza.
-  const decisionDePlantilla =
-    aprobacion !== null && aprobacion.estado !== 'expirada' && aprobacion.estado !== 'pendiente'
-      ? parsearOfrecimiento(aprobacion.descripcion)
-      : null;
-  if (aprobacion !== null && aprobacion.estado !== 'expirada' && decisionDePlantilla === null) {
+  // 2.6. UNA APROBACION LEGADA DE OFRECIMIENTO DE PLANTILLA (V041, consumo con checkpoint) NO se
+  //      reanuda por `reanudarTrasDecision`: esa funcion exige la sesion de navegador VIVA porque un
+  //      checkpoint clasico pausa a mitad de una accion, y el ofrecimiento pausaba ANTES de tocar el
+  //      DOM. El checkpoint de plantillas YA NO EXISTE (el consumo ejecuta directo), pero un job
+  //      pausado antes de ese cambio puede traer todavia su fila: se detecta por el codigo cerrado de
+  //      la descripcion y se cae al camino normal, donde el cuarto peldano decide solo. Cualquier
+  //      OTRA aprobacion (las de V027 de otros origenes) se reanuda exactamente como siempre.
+  const aprobacionDePlantillaLegada =
+    aprobacion !== null && parsearOfrecimiento(aprobacion.descripcion) !== null;
+  if (aprobacion !== null && aprobacion.estado !== 'expirada' && !aprobacionDePlantillaLegada) {
     // La reanudacion es SIEMPRE de un solo sitio: el checkpoint guarda UNA sesion y esa sesion es de
     // UN sitio. Su contexto se descifra aqui, igual que antes.
     const contexto = await deps.repo.obtenerContextoDescifrado(sitio.id, job.ownerId, deps.vaultSecret);
@@ -4133,9 +4059,6 @@ export async function procesarTareaWeb(
     }
     return reanudarTrasDecision(deps, job, sitio, objetivo, credential, contexto, aprobacion, control);
   }
-  /** La plantilla que el usuario APROBO, o null (no hubo ofrecimiento, o lo rechazo). */
-  const plantillaAprobada =
-    decisionDePlantilla !== null && aprobacion?.estado === 'aprobada' ? decisionDePlantilla : null;
 
   // 2.7. DETECCION DETERMINISTA (D2a) sobre el TEXTO DEL USUARIO: si el objetivo contiene un verbo de
   //      accion bloqueada, la corrida lleva GUARDIA y ninguna accion que corresponda a ese verbo
@@ -4267,11 +4190,28 @@ export async function procesarTareaWeb(
     //      de control de flujo: con una receta propia en la mano la tabla global ni se consulta. Corre
     //      ademas ANTES del motor libre, que es la linea base a la que se vuelve ante cualquier duda.
     //
-    //      DOS MOMENTOS, uno por corrida:
-    //       - SIN decision previa: si hay una plantilla que aplica, se OFRECE en un checkpoint de
-    //         aprobacion humana y el job se PAUSA. Nada se ejecuta.
-    //       - CON la decision ya tomada: aprobada, se ejecuta; rechazada, ni se busca (el usuario dijo
-    //         que no a usar lo de otra cuenta) y la tarea la hace el motor libre, como siempre.
+    //      SIN CHECKPOINT DE APROBACION HUMANA, por decision de producto: el consentimiento vive en
+    //      los documentos legales que el usuario acepto al conectar sitios, y la proteccion en runtime
+    //      es TECNICA. Si `buscarServible` encuentra plantilla y `plantillaAplicable` pasa, se ejecuta
+    //      DIRECTO. A cambio, la transparencia es obligatoria: el resultado del job y la tarjeta de
+    //      /actividad llevan la etiqueta de que la tarea uso un procedimiento aprendido por otra
+    //      cuenta (via 'plantilla_compartida' + plantillaAjena.consumida).
+    //
+    //      LIMITE DOCUMENTADO (no implementado a proposito): sin humano en el circuito, la defensa
+    //      contra una plantilla MALICIOSA es la cadena tecnica de plantillaAplicable y del ejecutor:
+    //       - contrato cerrado sin valores, sin xpath y sin rutas (parsearPasosPublicables);
+    //       - dominio por paso igual a la conexion sobre la que se ejecuta;
+    //       - clase corroborada en el atlas DEL CONSUMIDOR en todos los pasos con elemento, y clase
+    //         declarada igual a la que producen las propias estrategias del paso;
+    //       - blindaje estructural: exactamente UN click de la familia del verbo, ultimo paso, con
+    //         `verificar` inmediatamente antes (estructura_no_permitida);
+    //       - barrera de identidad en modo 'activa' en todos los pasos, escalada deshabilitada y
+    //         apiKey vacia, verificacion determinista con los datos anclados al texto del usuario;
+    //       - retiro automatico a los 3 fallos imputables consecutivos (unica defensa contra
+    //         plantillas rotas) y corroboracion por origenes y consumidores distintos.
+    //      La corroboracion por hashes es VULNERABLE A SYBIL: quien controle varias cuentas puede
+    //      fabricar origenes y consumidores "distintos". Se deja constancia y no se agrega ninguna
+    //      defensa nueva fuera de las anteriores.
     //
     //      El veredicto se registra SIEMPRE, se haya consumido o no: es el campo de diagnostico que
     //      responde "por que esta corrida no uso el procedimiento compartido" sin una auditoria.
@@ -4285,12 +4225,12 @@ export async function procesarTareaWeb(
     let valoresDelObjetivo = valoresDeParametros(parametrosDelObjetivo);
     let veredictoDeConsumo: VeredictoDeConsumo = {
       consumida: false,
-      // Los DOS motivos que se deciden antes de mirar la tabla: alguna via propia ya resolvio, o el
-      // usuario rechazo el ofrecimiento. En cualquier otro caso lo reemplaza la busqueda de abajo.
-      motivo: receta !== null ? 'via_propia' : 'rechazada_por_el_usuario',
+      // El unico motivo que se decide antes de mirar la tabla: alguna via propia ya resolvio. En
+      // cualquier otro caso lo reemplaza la busqueda de abajo.
+      motivo: 'via_propia',
       idx: null,
     };
-    if (receta === null && (decisionDePlantilla === null || plantillaAprobada !== null)) {
+    if (receta === null) {
       let consulta = await buscarPlantillaAjena(deps, job, activo.sitio, atlas, {
         dominios: dominiosAutorizados,
         verboBloqueado,
@@ -4323,55 +4263,48 @@ export async function procesarTareaWeb(
           ? consulta.veredicto
           : { ...consulta.veredicto, interpretacion };
       const candidata = consulta.plantilla;
-      if (candidata !== null && plantillaAprobada === null) {
-        const pausa = await ofrecerPlantillaEnCheckpoint(deps, job, activo, candidata);
-        if (pausa === 'pausada') return 'pausada';
-        veredictoDeConsumo = { consumida: false, motivo: 'checkpoint_no_persistido', idx: null };
-      } else if (candidata !== null && plantillaAprobada !== null) {
-        // LO QUE SE EJECUTA TIENE QUE SER LO QUE SE APROBO. La identidad se recalcula desde el mismo
-        // objetivo, asi que coincidir es lo normal; no coincidir significa que entre el ofrecimiento y
-        // la decision cambio la fila o el objetivo, y entonces la aprobacion no cubre esto.
-        if (!mismoOfrecimiento(candidata.ofrecimiento, plantillaAprobada)) {
-          veredictoDeConsumo = { consumida: false, motivo: 'ofrecimiento_distinto', idx: null };
-        } else {
-          const porPlantilla = await ejecutarPorPlantilla(
-            deps,
-            job,
-            activo.sitio,
-            objetivo,
-            activo.sesionExternaId,
-            candidata,
-            {
-              politica,
-              verboBloqueado,
-              textoParametros,
-              contexto: activo.contexto,
-              dominios: dominiosAutorizados,
-              valores: valoresDelObjetivo,
-              parametros: parametrosDelObjetivo,
-              control,
-              atlas,
-            },
-          );
-          if (porPlantilla.tipo === 'completada') {
-            await deps.guardarResultado(job.id, {
-              estado: 'ok',
-              resumen: 'tarea completada con un procedimiento que descubrio otra cuenta',
-              via: 'plantilla_compartida',
-              tokensIn: 0,
-              tokensOut: 0,
-              sesionExternaId: activo.sesionExternaId,
-              plantillaAjena: { consumida: true, motivo: null, idx: null },
-            });
-            return 'completada';
-          }
-          veredictoDeConsumo = { consumida: false, motivo: 'abandonada', idx: null };
-          if (porPlantilla.paginaTocada) {
-            // FIX B: aqui el reset es OBLIGATORIO, no tolerante como en el camino por receta: se
-            // descarta el estado a medio llenar, se navega al inicio y, si la sesion no responde,
-            // se abre una nueva en vez de entregarle al motor una sesion degradada.
-            activo = await resetObligatorioTrasPlantilla(deps, job, gestor, activo);
-          }
+      if (candidata !== null) {
+        // EJECUCION DIRECTA, sin ofrecimiento y sin pausa: las puertas tecnicas ya pasaron todas.
+        const porPlantilla = await ejecutarPorPlantilla(
+          deps,
+          job,
+          activo.sitio,
+          objetivo,
+          activo.sesionExternaId,
+          candidata,
+          {
+            politica,
+            verboBloqueado,
+            textoParametros,
+            contexto: activo.contexto,
+            dominios: dominiosAutorizados,
+            valores: valoresDelObjetivo,
+            parametros: parametrosDelObjetivo,
+            control,
+            atlas,
+          },
+        );
+        if (porPlantilla.tipo === 'completada') {
+          await deps.guardarResultado(job.id, {
+            estado: 'ok',
+            resumen: 'tarea completada con un procedimiento que descubrio otra cuenta',
+            via: 'plantilla_compartida',
+            tokensIn: 0,
+            tokensOut: 0,
+            sesionExternaId: activo.sesionExternaId,
+            // LA ETIQUETA DE TRANSPARENCIA: consumida + el estado de la fila que se uso, para que
+            // /actividad pueda decir "procedimiento de otra cuenta" (y "corroborado" cuando lo es)
+            // sin exponer nada mas de la tabla.
+            plantillaAjena: { consumida: true, motivo: null, idx: null, estado: candidata.estado },
+          });
+          return 'completada';
+        }
+        veredictoDeConsumo = { consumida: false, motivo: 'abandonada', idx: null };
+        if (porPlantilla.paginaTocada) {
+          // FIX B: aqui el reset es OBLIGATORIO, no tolerante como en el camino por receta: se
+          // descarta el estado a medio llenar, se navega al inicio y, si la sesion no responde,
+          // se abre una nueva en vez de entregarle al motor una sesion degradada.
+          activo = await resetObligatorioTrasPlantilla(deps, job, gestor, activo);
         }
       }
     }
@@ -4401,24 +4334,7 @@ export async function procesarTareaWeb(
         : undefined;
     const systemPrompt = construirSystemPromptTareaWeb(dominiosAutorizados);
     const finEnMs = Date.now() + deps.runTimeoutMs;
-    // EL AJUSTE DEL USUARIO AL RECHAZAR el procedimiento compartido: rechazar no cancela la tarea (el
-    // texto del checkpoint lo dice), la hace el motor libre; si ademas escribio una instruccion, entra
-    // como ajuste del objetivo con el MISMO constructor que usa cualquier otro rechazo con
-    // instruccion. La descripcion que ve el prompt es la FRASE que redacta la plataforma desde el
-    // codigo, jamas el codigo ni nada de la tabla.
-    const ajusteTrasRechazo =
-      decisionDePlantilla !== null &&
-      plantillaAprobada === null &&
-      aprobacion !== null &&
-      aprobacion.instruccionRechazo !== null &&
-      aprobacion.instruccionRechazo.trim() !== ''
-        ? construirReanudacionRechazada(
-            { ...aprobacion, descripcion: textoDelOfrecimientoEs(decisionDePlantilla) },
-            objetivo,
-            aprobacion.instruccionRechazo,
-          ).objetivo
-        : null;
-    let instruccion = ajusteTrasRechazo ?? objetivo;
+    let instruccion = objetivo;
     let pasosRestantes = deps.maxPasos;
     let cambios = 0;
     let guardia: GuardiaDeTareaWeb;

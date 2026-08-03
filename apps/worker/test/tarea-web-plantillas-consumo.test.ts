@@ -40,8 +40,10 @@ import type { Logger } from '../src/logger.js';
  *  - LA PRECEDENCIA: lo propio gana SIEMPRE y la tabla global ni se consulta;
  *  - EL PROMPT DEL ELECTOR es byte a byte el mismo con y sin plantillas disponibles, y su catalogo
  *    sigue siendo solo de tareas propias aunque haya mas de MAX_TAREAS_OFRECIDAS;
- *  - LA APLICABILIDAD falla cerrada: clase sin corroborar, dato sin declarar, paso extra;
- *  - EL CHECKPOINT es obligatorio: sin aprobacion no se ejecuta un solo paso ajeno;
+ *  - LA APLICABILIDAD falla cerrada: clase sin corroborar, dato sin declarar, paso extra, y el
+ *    blindaje estructural (D1): un solo click de la familia del verbo, ultimo y con verificar antes;
+ *  - EL CONSUMO ES DIRECTO (D0): sin checkpoint, sin fila de aprobacion y sin pausa; la etiqueta de
+ *    transparencia queda en el resultado del job;
  *  - LA BARRERA DE IDENTIDAD corre en TODOS los pasos y en modo ACTIVO, con el default de produccion
  *    de TAREA_WEB_BARRERA_IDENTIDAD sin tocar;
  *  - LA ESCALADA esta deshabilitada: un paso que no resuelve abandona y NO llama al modelo;
@@ -65,7 +67,6 @@ const CLASE_DESTINATARIO = 'escribir|rol:textbox|destinatarios en para';
 const CLASE_ASUNTO = 'escribir|rol:textbox|asunto';
 const CLASE_CUERPO = 'escribir|rol:textbox|cuerpo del mensaje';
 const CLASE_ENVIAR = 'click|rol:button|enviar';
-const CLASE_ELIMINAR = 'click|rol:button|eliminar definitivamente';
 const CLASE_FILTRO = 'click|rol:button|crear filtro';
 
 function makeLogger(): Logger {
@@ -469,6 +470,9 @@ function pasosDeLaPlantilla(): unknown[] {
 /** El origen de LA OTRA CUENTA: el que hace que la plantilla sea ajena y por tanto servible. */
 const ORIGEN_AJENO = 'origen-de-otra-cuenta';
 
+/** El hash del CONSUMIDOR de estas corridas (V043): viaja con cada exito, jamas con un fallo. */
+const HASH_CONSUMIDOR = hashDeOrigenDePlantilla(OWNER, CLAVE_PLANTILLAS);
+
 /** Una fila de `plantillas_compartidas` tal como la devolveria la base. */
 interface FilaDePlantilla {
   id: string;
@@ -501,8 +505,9 @@ function marcadoresDeLaFila(fila: FilaDePlantilla): string {
  *     tambien figure entre los origenes NO la excluye. El fake anterior copiaba el predicado viejo
  *     ("yo no estoy dentro"), y por eso la exclusion permanente de una fila con dos origenes reales no
  *     se veia en CI.
- *  3. EL DESEMPATE: gana la mas especifica (mas marcadores), despues la mas corroborada (mas origenes,
- *     mas exitos) y al final el `id`, que es unico. Nunca al azar.
+ *  3. EL DESEMPATE: gana la mas especifica (mas marcadores), despues la CORROBORADA sobre la
+ *     candidata (D3), despues la mas corroborada por origenes (mas origenes, mas exitos) y al final
+ *     el `id`, que es unico. Nunca al azar.
  */
 function makePlantillas(filas: FilaDePlantilla[]): RepositorioPlantillasParaWorker & {
   buscarServible: ReturnType<typeof vi.fn>;
@@ -521,9 +526,13 @@ function makePlantillas(filas: FilaDePlantilla[]): RepositorioPlantillasParaWork
           const clave = marcadoresDeLaFila(fila);
           return clave === '' ? 0 : clave.split('+').length;
         };
+        const rango = (fila: FilaDePlantilla): number => (fila.estado === 'corroborada' ? 1 : 0);
         const elegida = [...candidatas].sort(
           (a, b) =>
-            cuantos(b) - cuantos(a) || b.origenes - a.origenes || a.id.localeCompare(b.id),
+            cuantos(b) - cuantos(a) ||
+            rango(b) - rango(a) ||
+            b.origenes - a.origenes ||
+            a.id.localeCompare(b.id),
         )[0];
         if (elegida === undefined) return null;
         return {
@@ -714,6 +723,86 @@ describe('plantillaAplicable: la puerta pura, paso por paso', () => {
       { aplica: false, motivo: 'contrato_invalido' },
     );
   });
+
+  // --- D1: EL BLINDAJE ESTRUCTURAL que sustituye al checkpoint humano -----------------------------
+
+  it('D1a: DOS clicks de la familia del verbo rechazan con estructura_no_permitida', () => {
+    // Un segundo "enviar" intercalado: dos disparos de la accion irreversible en un procedimiento.
+    const pasos = [
+      pasoEscribir(0, CLASE_DESTINATARIO, 'Destinatarios en Para', {
+        tipo: 'parametro',
+        parametro: 'destinatario',
+      }),
+      pasoClick(1, CLASE_ENVIAR, 'Enviar'),
+      pasoEscribir(2, CLASE_ASUNTO, 'Asunto', { tipo: 'parametro', parametro: 'asunto' }),
+      pasoVerificar(3),
+      pasoClick(4, CLASE_ENVIAR, 'Enviar'),
+    ];
+    expect(evaluar(pasos)).toMatchObject({ aplica: false, motivo: 'estructura_no_permitida', idx: 4 });
+  });
+
+  it('D1a: un click EXTRA despues del click final rechaza con estructura_no_permitida', () => {
+    // El click irreversible tiene que ser el ULTIMO paso: nada puede correr despues de el. La clase
+    // del extra esta CORROBORADA a proposito: lo que lo rechaza es la ESTRUCTURA, no el atlas.
+    const pasos = [...pasosDeLaPlantilla(), pasoClick(5, CLASE_FILTRO, 'Crear filtro')];
+    expect(evaluar(pasos, new Set([...CLASES_DEL_PROCEDIMIENTO, CLASE_FILTRO]))).toMatchObject({
+      aplica: false,
+      motivo: 'estructura_no_permitida',
+      idx: 5,
+    });
+  });
+
+  it('D1a: CUALQUIER paso posterior al click final invalida, no solo un click', () => {
+    const pasos = [...pasosDeLaPlantilla(), pasoTeclas(5, 'Tab')];
+    expect(evaluar(pasos)).toMatchObject({ aplica: false, motivo: 'estructura_no_permitida', idx: 5 });
+  });
+
+  it('D1a: sin ningun click de la familia del verbo no hay click irreversible reconocible', () => {
+    // El procedimiento "envia" sin un solo control de enviar: la estructura no es la permitida.
+    const pasos = [
+      pasoEscribir(0, CLASE_DESTINATARIO, 'Destinatarios en Para', {
+        tipo: 'parametro',
+        parametro: 'destinatario',
+      }),
+      pasoVerificar(1),
+      pasoClick(2, CLASE_FILTRO, 'Crear filtro'),
+    ];
+    expect(evaluar(pasos, new Set([...CLASES_DEL_PROCEDIMIENTO, CLASE_FILTRO]))).toMatchObject({
+      aplica: false,
+      motivo: 'estructura_no_permitida',
+      idx: -1,
+    });
+  });
+
+  it('D1b: el `verificar` tiene que ser el paso INMEDIATAMENTE anterior al click final', () => {
+    // Existe (pasa la puerta de sin_verificacion) pero entre la comparacion y el click se cuela una
+    // escritura: lo verificado ya no es lo que habia al accionar.
+    const pasos = [
+      pasoVerificar(0),
+      pasoEscribir(1, CLASE_DESTINATARIO, 'Destinatarios en Para', {
+        tipo: 'parametro',
+        parametro: 'destinatario',
+      }),
+      pasoClick(2, CLASE_ENVIAR, 'Enviar'),
+    ];
+    expect(evaluar(pasos)).toMatchObject({ aplica: false, motivo: 'estructura_no_permitida', idx: 2 });
+  });
+
+  it('D1: los clicks de FOCO previos (clase fuera de la familia) siguen permitidos', () => {
+    // El click en Redactar que abre el formulario: no es de la familia de 'enviar' y va antes del
+    // final, o sea exactamente la forma que el contrato permite distinguir hoy.
+    const pasos = [
+      pasoClick(0, CLASE_REDACTAR, 'Redactar'),
+      pasoEscribir(1, CLASE_DESTINATARIO, 'Destinatarios en Para', {
+        tipo: 'parametro',
+        parametro: 'destinatario',
+      }),
+      pasoVerificar(2),
+      pasoClick(3, CLASE_ENVIAR, 'Enviar'),
+    ];
+    const veredicto = evaluar(pasos, new Set([...CLASES_DEL_PROCEDIMIENTO, CLASE_REDACTAR]));
+    expect(veredicto.aplica).toBe(true);
+  });
 });
 
 describe('el texto del checkpoint es un codigo cerrado de la plataforma', () => {
@@ -881,25 +970,26 @@ describe('contencion: la plantilla aplica si sus marcadores caben en los que el 
     ];
   }
 
-  it('el objetivo declara EXACTAMENTE lo que la plantilla pide: se sirve', async () => {
+  it('el objetivo declara EXACTAMENTE lo que la plantilla pide: se sirve y se ejecuta', async () => {
     const deps = conPlantilla(pasosDeLaPlantilla());
 
     // El objetivo de siempre declara destinatario, asunto y cuerpo, que es lo que la plantilla exige.
     const resultado = await procesarTareaWeb(deps, makeJob());
 
-    expect(resultado).toBe('pausada');
-    expect(deps.aprobaciones.crear).toHaveBeenCalled();
+    expect(resultado).toBe('completada');
+    expect(deps.motor.ejecutar).not.toHaveBeenCalled();
   });
 
   it('el objetivo declara DE MAS: se sirve igual (un dato de mas no puede esconderla)', async () => {
     const deps = conPlantilla(pasosDeLaPlantilla());
     // El mismo pedido, mas un monto. Con la igualdad exacta la clave pasaba a ser
-    // asunto+cuerpo+destinatario+monto y la plantilla no se encontraba nunca.
+    // asunto+cuerpo+destinatario+monto y la plantilla no se encontraba nunca. La verificacion
+    // determinista despues detiene el click final (el monto declarado no aparece en el redactor),
+    // y ese freno es EXACTAMENTE el que este cambio no toca; lo que se fija aqui es la busqueda.
     const conMonto = makeJob(`${OBJETIVO} por 2,400 MXN`);
 
-    const resultado = await procesarTareaWeb(deps, conMonto);
+    await correr(deps, conMonto);
 
-    expect(resultado).toBe('pausada');
     const plantillas = deps.plantillas as unknown as {
       repo: { buscarServible: ReturnType<typeof vi.fn> };
     };
@@ -909,6 +999,11 @@ describe('contencion: la plantilla aplica si sus marcadores caben en los que el 
     // Los 16 subconjuntos de los cuatro datos declarados, con el de la plantilla entre ellos.
     expect(clave.marcadoresPosibles).toHaveLength(16);
     expect(clave.marcadoresPosibles).toContain('asunto+cuerpo+destinatario');
+    // La plantilla se SIRVIO y empezo a ejecutarse (las escrituras corrieron): no quedo escondida.
+    const determinista = deps.determinista as unknown as {
+      ejecutarPasoDeterminista: ReturnType<typeof vi.fn>;
+    };
+    expect(determinista.ejecutarPasoDeterminista).toHaveBeenCalled();
   });
 
   it('el objetivo declara DE MENOS: NO se sirve (la plantilla pide un dato que no hay)', async () => {
@@ -934,14 +1029,16 @@ describe('contencion: la plantilla aplica si sus marcadores caben en los que el 
       repo: { registrarEjecucion: ReturnType<typeof vi.fn> };
     };
 
-    const resultado = await procesarTareaWeb(
-      yaDecidido(deps, aprobacionDelOfrecimiento()),
-      makeJob(),
-    );
+    const resultado = await procesarTareaWeb(deps, makeJob());
 
     expect(resultado).toBe('completada');
     // Gana la de TRES marcadores aunque la otra tenga MAS origenes: la especificidad va primero.
-    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-especifica', true);
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith(
+      'plantilla-especifica',
+      true,
+      undefined,
+      HASH_CONSUMIDOR,
+    );
   });
 
   it('el orden de las filas en la tabla no cambia cual gana', async () => {
@@ -954,9 +1051,47 @@ describe('contencion: la plantilla aplica si sus marcadores caben en los que el 
       repo: { registrarEjecucion: ReturnType<typeof vi.fn> };
     };
 
-    await procesarTareaWeb(yaDecidido(deps, aprobacionDelOfrecimiento()), makeJob());
+    await procesarTareaWeb(deps, makeJob());
 
-    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-especifica', true);
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith(
+      'plantilla-especifica',
+      true,
+      undefined,
+      HASH_CONSUMIDOR,
+    );
+  });
+
+  it('D3: corroborada GANA a candidata a igualdad de marcadores (desempate del fake)', async () => {
+    // Dos filas que exigen DOS marcadores cada una (misma especificidad): la corroborada gana aunque
+    // tenga menos origenes. El desempate real vive en el order by de buscarServible (fijado en el
+    // test del repositorio); el fake lo replica para medir este camino de punta a punta.
+    const pasosSinCuerpo = [
+      pasoEscribir(0, CLASE_DESTINATARIO, 'Destinatarios en Para', {
+        tipo: 'parametro',
+        parametro: 'destinatario',
+      }),
+      pasoEscribir(1, CLASE_ASUNTO, 'Asunto', { tipo: 'parametro', parametro: 'asunto' }),
+      pasoVerificar(2),
+      pasoClick(3, CLASE_ENVIAR, 'Enviar'),
+    ];
+    const filas: FilaDePlantilla[] = [
+      { id: 'a-candidata', estado: 'candidata', pasos: pasosSinAsunto(), origenes: 9 },
+      { id: 'b-corroborada', estado: 'corroborada', pasos: pasosSinCuerpo, origenes: 2 },
+    ];
+    const deps = conPlantillas(filas);
+    const plantillas = deps.plantillas as unknown as {
+      repo: { registrarEjecucion: ReturnType<typeof vi.fn> };
+    };
+
+    const resultado = await procesarTareaWeb(deps, makeJob());
+
+    expect(resultado).toBe('completada');
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith(
+      'b-corroborada',
+      true,
+      undefined,
+      HASH_CONSUMIDOR,
+    );
   });
 });
 
@@ -975,16 +1110,17 @@ describe('el origen propio: solo excluye la plantilla que NADIE MAS descubrio', 
     expect(plantillas.repo.buscarServible).toHaveBeenCalledWith(
       expect.objectContaining({ origenHash: HASH_PROPIO }),
     );
-    expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
+    // Nada que ejecutar: la tarea la hace el motor libre.
+    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
   });
 
-  it('SOLO OTROS entre los origenes: se sirve', async () => {
+  it('SOLO OTROS entre los origenes: se sirve y se ejecuta', async () => {
     const deps = conPlantilla(pasosDeLaPlantilla(), CLASES_DEL_PROCEDIMIENTO, {}, [ORIGEN_AJENO]);
 
     const resultado = await procesarTareaWeb(deps, makeJob());
 
-    expect(resultado).toBe('pausada');
-    expect(deps.aprobaciones.crear).toHaveBeenCalled();
+    expect(resultado).toBe('completada');
+    expect(deps.motor.ejecutar).not.toHaveBeenCalled();
   });
 
   it('YO Y OTROS entre los origenes: se sirve (el caso que quedaba excluido para siempre)', async () => {
@@ -998,67 +1134,88 @@ describe('el origen propio: solo excluye la plantilla que NADIE MAS descubrio', 
 
     const resultado = await procesarTareaWeb(deps, makeJob());
 
-    expect(resultado).toBe('pausada');
-    expect(deps.aprobaciones.crear).toHaveBeenCalled();
+    expect(resultado).toBe('completada');
+    expect(deps.motor.ejecutar).not.toHaveBeenCalled();
   });
 });
 
-describe('checkpoint obligatorio: sin aprobacion no se ejecuta un solo paso ajeno', () => {
-  it('la plantilla que aplica se OFRECE y el job queda pausado, sin tocar la pagina', async () => {
+describe('consumo directo (D0): sin checkpoint, sin fila de aprobacion y sin pausa', () => {
+  it('la plantilla servible y aplicable se EJECUTA DIRECTO, sin crear fila de aprobacion', async () => {
     const deps = conPlantilla(pasosDeLaPlantilla());
 
     const resultado = await procesarTareaWeb(deps, makeJob());
 
-    expect(resultado).toBe('pausada');
-    expect(deps.marcarJobPausado).toHaveBeenCalledWith('job-1');
-    // EL TEXTO ES UN CODIGO DE LA PLATAFORMA: intencion, datos y dominio. Nada de la tabla.
-    expect(deps.aprobaciones.crear).toHaveBeenCalledWith(
-      expect.objectContaining({
-        descripcion: `plantilla_compartida:enviar:asunto+cuerpo+destinatario:${DOMINIO}`,
-        accionTipo: 'irreversible',
-      }),
-    );
+    // ANTES: 'pausada' con una fila en aprobaciones_web. AHORA: la tarea corre entera.
+    expect(resultado).toBe('completada');
+    expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
+    expect(deps.marcarJobPausado).not.toHaveBeenCalled();
+    // Cuatro primitivas: tres escrituras y el click final. El `verificar` no toca el navegador.
     const determinista = deps.determinista as unknown as {
       ejecutarPasoDeterminista: ReturnType<typeof vi.fn>;
     };
-    expect(determinista.ejecutarPasoDeterminista).not.toHaveBeenCalled();
+    expect(determinista.ejecutarPasoDeterminista).toHaveBeenCalledTimes(4);
     expect(deps.motor.ejecutar).not.toHaveBeenCalled();
   });
 
-  it('si el checkpoint no se puede persistir, no se ofrece nada y la tarea la hace el motor', async () => {
-    const deps = conPlantilla(pasosDeLaPlantilla(), CLASES_DEL_PROCEDIMIENTO, {
-      aprobaciones: makeAprobacionesRepo({
-        crear: vi.fn(async () => {
-          throw new Error('base caida');
-        }),
-      }),
+  it('LA ETIQUETA de procedimiento ajeno queda en el resultado del job (y de ahi en /actividad)', async () => {
+    const deps = conPlantilla(pasosDeLaPlantilla());
+
+    expect(await procesarTareaWeb(deps, makeJob())).toBe('completada');
+
+    const guardar = deps.guardarResultado as unknown as ReturnType<typeof vi.fn>;
+    const resultado = guardar.mock.calls.at(-1)?.[1] as Record<string, unknown>;
+    // `via` y `plantillaAjena` son los escalares de los que el backend deriva la etiqueta de la
+    // tarjeta de /actividad (conProcedimientoAjeno / procedimientoCorroborado).
+    expect(resultado.via).toBe('plantilla_compartida');
+    expect(resultado.plantillaAjena).toEqual({
+      consumida: true,
+      motivo: null,
+      idx: null,
+      estado: 'candidata',
     });
-
-    await correr(deps);
-
-    expect(deps.marcarJobPausado).not.toHaveBeenCalled();
-    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
   });
 
-  it('rechazado el ofrecimiento, la plantilla ni se busca y la tarea la hace el motor', async () => {
+  it('una plantilla CORROBORADA deja su estado en la etiqueta (el badge de /actividad)', async () => {
+    const deps = conPlantillas([
+      { id: 'plantilla-1', estado: 'corroborada', pasos: pasosDeLaPlantilla(), origenes: 2 },
+    ]);
+
+    expect(await procesarTareaWeb(deps, makeJob())).toBe('completada');
+
+    const guardar = deps.guardarResultado as unknown as ReturnType<typeof vi.fn>;
+    const resultado = guardar.mock.calls.at(-1)?.[1] as Record<string, unknown>;
+    expect(resultado.plantillaAjena).toMatchObject({ consumida: true, estado: 'corroborada' });
+  });
+
+  it('una aprobacion LEGADA de ofrecimiento (rechazada) queda inerte: el consumo ejecuta igual', async () => {
+    // El codigo de decision previa se retiro del peldano: una fila legada del checkpoint viejo ni
+    // bloquea el consumo ni manda el job a la reanudacion clasica (que exigiria la sesion viva).
     const base = conPlantilla(pasosDeLaPlantilla());
     const deps = yaDecidido(base, aprobacionDelOfrecimiento('rechazada'));
     const plantillas = deps.plantillas as unknown as {
       repo: { buscarServible: ReturnType<typeof vi.fn> };
     };
 
-    await correr(deps);
+    const resultado = await procesarTareaWeb(deps, makeJob());
 
-    expect(plantillas.repo.buscarServible).not.toHaveBeenCalled();
-    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+    expect(resultado).toBe('completada');
+    expect(plantillas.repo.buscarServible).toHaveBeenCalled();
+    expect(deps.motor.ejecutar).not.toHaveBeenCalled();
+  });
+
+  it('una aprobacion legada APROBADA tampoco cambia nada: el mismo camino directo', async () => {
+    const base = conPlantilla(pasosDeLaPlantilla());
+    const deps = yaDecidido(base, aprobacionDelOfrecimiento());
+
+    expect(await procesarTareaWeb(deps, makeJob())).toBe('completada');
+    expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
   });
 });
 
-describe('ejecucion de la plantilla aprobada', () => {
+describe('ejecucion directa de la plantilla', () => {
   it('con efecto confirmado: completa la tarea, copia la receta propia y suma el exito', async () => {
     const recetas = makeRecetas();
-    const base = conPlantilla(pasosDeLaPlantilla(), CLASES_DEL_PROCEDIMIENTO, { recetas });
-    const deps = yaDecidido(base, aprobacionDelOfrecimiento());
+    const deps = conPlantilla(pasosDeLaPlantilla(), CLASES_DEL_PROCEDIMIENTO, { recetas });
     const plantillas = deps.plantillas as unknown as {
       repo: { registrarEjecucion: ReturnType<typeof vi.fn> };
     };
@@ -1077,17 +1234,22 @@ describe('ejecucion de la plantilla aprobada', () => {
     expect(recetas.promover).toHaveBeenCalledWith(
       expect.objectContaining({ ownerId: OWNER, dominio: DOMINIO, origen: 'plantilla_compartida' }),
     );
-    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-1', true);
+    // D2: el exito viaja con el hash del CONSUMIDOR, que es la evidencia de la corroboracion.
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith(
+      'plantilla-1',
+      true,
+      undefined,
+      HASH_CONSUMIDOR,
+    );
   });
 
   it('SIN efecto confirmado: NO se copia, se cuenta como fallo y la tarea no se reintenta', async () => {
     const recetas = makeRecetas();
     // El redactor sigue en la pagina despues del click: el efecto no se puede confirmar.
-    const base = conPlantilla(pasosDeLaPlantilla(), CLASES_DEL_PROCEDIMIENTO, {
+    const deps = conPlantilla(pasosDeLaPlantilla(), CLASES_DEL_PROCEDIMIENTO, {
       recetas,
       navegador: makeNavegador(false),
     });
-    const deps = yaDecidido(base, aprobacionDelOfrecimiento());
     const plantillas = deps.plantillas as unknown as {
       repo: { registrarEjecucion: ReturnType<typeof vi.fn> };
     };
@@ -1097,8 +1259,14 @@ describe('ejecucion de la plantilla aprobada', () => {
     });
 
     expect(recetas.promover).not.toHaveBeenCalled();
-    // V042: el fallo viaja con su motivo del vocabulario cerrado.
-    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-1', false, 'sin_efecto');
+    // V042: el fallo viaja con su motivo del vocabulario cerrado, y SIN hash de consumidor (D2: los
+    // fallos no escriben evidencia de consumo).
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith(
+      'plantilla-1',
+      false,
+      'sin_efecto',
+      undefined,
+    );
   });
 
   it('FIXTURE REAL (3 ago 2026): una pulsacion intermedia NO bloquea la barrera y la plantilla corre entera', async () => {
@@ -1118,8 +1286,7 @@ describe('ejecucion de la plantilla aprobada', () => {
       pasoVerificar(5),
       pasoClick(6, CLASE_ENVIAR, 'Enviar'),
     ];
-    const base = conPlantilla(pasos, [CLASE_REDACTAR, ...CLASES_DEL_PROCEDIMIENTO]);
-    const deps = yaDecidido(base, aprobacionDelOfrecimiento());
+    const deps = conPlantilla(pasos, [CLASE_REDACTAR, ...CLASES_DEL_PROCEDIMIENTO]);
     const plantillas = deps.plantillas as unknown as {
       repo: { registrarEjecucion: ReturnType<typeof vi.fn> };
     };
@@ -1136,19 +1303,23 @@ describe('ejecucion de la plantilla aprobada', () => {
     );
     expect(acciones).toEqual(['click', 'escribir', 'teclas', 'escribir', 'escribir', 'click']);
     expect(deps.motor.ejecutar).not.toHaveBeenCalled();
-    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-1', true);
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith(
+      'plantilla-1',
+      true,
+      undefined,
+      HASH_CONSUMIDOR,
+    );
   });
 
   it('un paso que no resuelve ABANDONA la plantilla y NO escala al modelo', async () => {
     const escalador = makeEscalador();
     // El primer paso no localiza su elemento NI con sus estrategias (intento 0) NI con la pista del
     // atlas (intento 1). Lo unico que quedaria seria escalar al modelo, y por aqui no se escala.
-    const base = conPlantilla(pasosDeLaPlantilla(), CLASES_DEL_PROCEDIMIENTO, {
+    const deps = conPlantilla(pasosDeLaPlantilla(), CLASES_DEL_PROCEDIMIENTO, {
       escalador,
       determinista: makeDeterminista([0, 1]),
       navegador: makeNavegador(false),
     });
-    const deps = yaDecidido(base, aprobacionDelOfrecimiento());
     const plantillas = deps.plantillas as unknown as {
       repo: { registrarEjecucion: ReturnType<typeof vi.fn> };
     };
@@ -1158,7 +1329,12 @@ describe('ejecucion de la plantilla aprobada', () => {
     // LA ASERCION CENTRAL: la escalada al modelo no ocurre por este camino.
     expect(escalador.ejecutarPasoConModelo).not.toHaveBeenCalled();
     expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
-    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-1', false, 'abandonada');
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith(
+      'plantilla-1',
+      false,
+      'abandonada',
+      undefined,
+    );
   });
 
   it('una sesion que LANZA a mitad de la ejecucion se contabiliza como falla de sesion (V042)', async () => {
@@ -1169,40 +1345,35 @@ describe('ejecucion de la plantilla aprobada', () => {
       leerEstrategiasDeElemento: vi.fn(async () => []),
       localizarBotonPorAriaLabel: vi.fn(async () => null),
     };
-    const base = conPlantilla(pasosDeLaPlantilla(), CLASES_DEL_PROCEDIMIENTO, {
+    const deps = conPlantilla(pasosDeLaPlantilla(), CLASES_DEL_PROCEDIMIENTO, {
       determinista,
       navegador: makeNavegador(false),
     });
-    const deps = yaDecidido(base, aprobacionDelOfrecimiento());
     const plantillas = deps.plantillas as unknown as {
       repo: { registrarEjecucion: ReturnType<typeof vi.fn> };
     };
 
     await correr(deps);
 
-    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-1', false, 'sesion');
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith(
+      'plantilla-1',
+      false,
+      'sesion',
+      undefined,
+    );
   });
 
   it('FIXTURE HOSTIL: el paso final apunta a otro control y la barrera lo bloquea antes de accionar', async () => {
-    // La clase esta CORROBORADA (el atlas la conoce) y el DOM lleva ese mismo nombre: lo que no
-    // corresponde es el VERBO. Es exactamente lo que la barrera de identidad existe para atrapar.
-    const pasos = [
-      pasoEscribir(0, CLASE_DESTINATARIO, 'Destinatarios en Para', {
-        tipo: 'parametro',
-        parametro: 'destinatario',
-      }),
-      pasoEscribir(1, CLASE_ASUNTO, 'Asunto', { tipo: 'parametro', parametro: 'asunto' }),
-      pasoEscribir(2, CLASE_CUERPO, 'Cuerpo del mensaje', { tipo: 'parametro', parametro: 'cuerpo' }),
-      pasoVerificar(3),
-      pasoClick(4, CLASE_ELIMINAR, 'Eliminar definitivamente'),
-    ];
+    // La clase declara 'enviar' (corroborada, de la familia del verbo: pasa todas las puertas
+    // estaticas, incluida la estructural de D1), pero el control que hay EN EL DOM se llama
+    // 'Eliminar definitivamente'. Es la deriva que solo la barrera de identidad, leyendo la pagina
+    // justo antes de accionar, puede atrapar.
+    const pasos = pasosDeLaPlantilla();
     const determinista = makeDeterminista([], 'Eliminar definitivamente');
-    const base = conPlantilla(
-      pasos,
-      [CLASE_DESTINATARIO, CLASE_ASUNTO, CLASE_CUERPO, CLASE_ELIMINAR],
-      { determinista, navegador: makeNavegador(false) },
-    );
-    const deps = yaDecidido(base, aprobacionDelOfrecimiento());
+    const deps = conPlantilla(pasos, CLASES_DEL_PROCEDIMIENTO, {
+      determinista,
+      navegador: makeNavegador(false),
+    });
 
     await correr(deps);
 
@@ -1226,26 +1397,21 @@ describe('ejecucion de la plantilla aprobada', () => {
       'plantilla-1',
       false,
       'barrera_bloqueada',
+      undefined,
     );
   });
 });
 
 
 describe('fallback limpio tras una plantilla fallida o bloqueada (FIX B)', () => {
-  /** La plantilla cuyo paso final bloquea la barrera por el verbo: toca el DOM y se abandona. */
+  /**
+   * La plantilla cuyo paso final bloquea la barrera: declara 'enviar' pero el DOM tiene un control
+   * que se llama 'Eliminar definitivamente'. Toca el DOM (las escrituras corren) y se abandona.
+   */
   function pasosBloqueadosAlFinal(): unknown[] {
-    return [
-      pasoEscribir(0, CLASE_DESTINATARIO, 'Destinatarios en Para', {
-        tipo: 'parametro',
-        parametro: 'destinatario',
-      }),
-      pasoEscribir(1, CLASE_ASUNTO, 'Asunto', { tipo: 'parametro', parametro: 'asunto' }),
-      pasoEscribir(2, CLASE_CUERPO, 'Cuerpo del mensaje', { tipo: 'parametro', parametro: 'cuerpo' }),
-      pasoVerificar(3),
-      pasoClick(4, CLASE_ELIMINAR, 'Eliminar definitivamente'),
-    ];
+    return pasosDeLaPlantilla();
   }
-  const CLASES_CON_ELIMINAR = [CLASE_DESTINATARIO, CLASE_ASUNTO, CLASE_CUERPO, CLASE_ELIMINAR];
+  const CLASES_CON_ELIMINAR = CLASES_DEL_PROCEDIMIENTO;
 
   /** Un determinista cuyo `navegar` SIEMPRE falla: la sesion degradada del caso resumedOk false. */
   function deterministaSinNavegacion(ariaLabel: string): NavegadorDeterminista & {
@@ -1282,11 +1448,10 @@ describe('fallback limpio tras una plantilla fallida o bloqueada (FIX B)', () =>
 
   it('el reset previo al motor es OBLIGATORIO: descarte generico y goto antes de arrancar el motor', async () => {
     const determinista = makeDeterminista([], 'Eliminar definitivamente');
-    const base = conPlantilla(pasosBloqueadosAlFinal(), CLASES_CON_ELIMINAR, {
+    const deps = conPlantilla(pasosBloqueadosAlFinal(), CLASES_CON_ELIMINAR, {
       determinista,
       navegador: makeNavegador(false),
     });
-    const deps = yaDecidido(base, aprobacionDelOfrecimiento());
 
     await correr(deps);
 
@@ -1310,11 +1475,10 @@ describe('fallback limpio tras una plantilla fallida o bloqueada (FIX B)', () =>
   it('si la sesion no responde al reset, se abre una sesion NUEVA en vez de continuar sobre la degradada', async () => {
     const determinista = deterministaSinNavegacion('Eliminar definitivamente');
     const navegador = navegadorConSesionesNumeradas();
-    const base = conPlantilla(pasosBloqueadosAlFinal(), CLASES_CON_ELIMINAR, {
+    const deps = conPlantilla(pasosBloqueadosAlFinal(), CLASES_CON_ELIMINAR, {
       determinista,
       navegador,
     });
-    const deps = yaDecidido(base, aprobacionDelOfrecimiento());
 
     await correr(deps);
 
@@ -1453,28 +1617,15 @@ describe('simetria: lo que una corrida publica es lo que otra corrida encuentra'
       origenes: 2,
     };
 
-    // 1. La encuentra y la OFRECE: el checkpoint nombra los tres datos que la plantilla pide.
+    // La encuentra y la EJECUTA DIRECTO, con los datos del SEGUNDO objetivo, sin fila de aprobacion
+    // y sin tocar el motor libre.
     const consumidor = conPlantillas([fila], CLASES_DE_LA_CORRIDA, {
       navegador: makeNavegador(true, CAMPOS_DEL_OTRO_FRASEO),
     });
-    expect(await procesarTareaWeb(consumidor, makeJob(OTRO_FRASEO))).toBe('pausada');
-    expect(consumidor.aprobaciones.crear).toHaveBeenCalledWith(
-      expect.objectContaining({
-        descripcion: `plantilla_compartida:enviar:asunto+cuerpo+destinatario:${DOMINIO}`,
-      }),
-    );
-
-    // 2. Aprobada, corre entera con los datos del SEGUNDO objetivo y sin tocar el motor libre.
-    const aprobado = conPlantillas([fila], CLASES_DE_LA_CORRIDA, {
-      navegador: makeNavegador(true, CAMPOS_DEL_OTRO_FRASEO),
-    });
-    const segunda = await procesarTareaWeb(
-      yaDecidido(aprobado, aprobacionDelOfrecimiento()),
-      makeJob(OTRO_FRASEO),
-    );
-    expect(segunda).toBe('completada');
-    expect(aprobado.motor.ejecutar).not.toHaveBeenCalled();
-    const determinista = aprobado.determinista as unknown as {
+    expect(await procesarTareaWeb(consumidor, makeJob(OTRO_FRASEO))).toBe('completada');
+    expect(consumidor.aprobaciones.crear).not.toHaveBeenCalled();
+    expect(consumidor.motor.ejecutar).not.toHaveBeenCalled();
+    const determinista = consumidor.determinista as unknown as {
       ejecutarPasoDeterminista: ReturnType<typeof vi.fn>;
     };
     // Cinco primitivas: el click de Redactar, las tres escrituras y el click de Enviar.
@@ -1560,8 +1711,8 @@ describe('el veredicto del miss dice que se busco y donde se corto', () => {
       diagnosticarMiss,
     });
 
-    // Encuentra la plantilla y la ofrece: el job se pausa sin llegar al motor.
-    expect(await procesarTareaWeb(deps, makeJob())).toBe('pausada');
+    // Encuentra la plantilla y la ejecuta directo: el diagnostico no corre en el camino feliz.
+    expect(await procesarTareaWeb(deps, makeJob())).toBe('completada');
     expect(diagnosticarMiss).not.toHaveBeenCalled();
   });
 
@@ -1657,15 +1808,6 @@ describe('el segundo escalon: interpretar el objetivo cuando el extractor no alc
     datos: { destinatario: 'martin@ejemplo.com', cuerpo: 'llego el paquete' },
   });
 
-  const APROBACION_SIN_ASUNTO = (): AprobacionWeb =>
-    makeAprobacion({
-      accionTipo: 'irreversible',
-      descripcion: `plantilla_compartida:enviar:cuerpo+destinatario:${DOMINIO}`,
-      estado: 'aprobada',
-      decididaPor: OWNER,
-      decididaEn: '2026-07-31T00:05:00.000Z',
-    });
-
   function conInterprete(
     respuesta: string,
     extra: Partial<TareaWebDeps> = {},
@@ -1684,13 +1826,9 @@ describe('el segundo escalon: interpretar el objetivo cuando el extractor no alc
 
     const resultado = await procesarTareaWeb(deps, makeJob(PEDIDO_SIN_FORMATO));
 
-    // Se ofrece en su checkpoint, con los dos datos que la plantilla pide.
-    expect(resultado).toBe('pausada');
-    expect(deps.aprobaciones.crear).toHaveBeenCalledWith(
-      expect.objectContaining({
-        descripcion: `plantilla_compartida:enviar:cuerpo+destinatario:${DOMINIO}`,
-      }),
-    );
+    // Se ejecuta DIRECTO con los dos datos que la plantilla pide: sin checkpoint y sin pausa.
+    expect(resultado).toBe('completada');
+    expect(deps.aprobaciones.crear).not.toHaveBeenCalled();
     expect(deps.elector.consultar).toHaveBeenCalledTimes(1);
     // La primera busqueda va con lo que saco el extractor (solo el correo); la segunda, con los dos.
     const plantillas = deps.plantillas as unknown as {
@@ -1703,15 +1841,19 @@ describe('el segundo escalon: interpretar el objetivo cuando el extractor no alc
     expect(claves[1]).toEqual(['', 'cuerpo', 'cuerpo+destinatario', 'destinatario']);
   });
 
-  it('aprobada, la ejecuta con los datos que el modelo resolvio', async () => {
-    const base = conInterprete(DATOS_DEL_MODELO);
-    const deps = yaDecidido(base, APROBACION_SIN_ASUNTO()) as TareaWebDeps;
+  it('la ejecuta con los datos que el modelo resolvio', async () => {
+    const deps = conInterprete(DATOS_DEL_MODELO);
     const plantillas = deps.plantillas as unknown as {
       repo: { registrarEjecucion: ReturnType<typeof vi.fn> };
     };
 
     expect(await procesarTareaWeb(deps, makeJob(PEDIDO_SIN_FORMATO))).toBe('completada');
-    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-simple', true);
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith(
+      'plantilla-simple',
+      true,
+      undefined,
+      HASH_CONSUMIDOR,
+    );
     expect(deps.motor.ejecutar).not.toHaveBeenCalled();
   });
 
@@ -1734,7 +1876,7 @@ describe('el segundo escalon: interpretar el objetivo cuando el extractor no alc
     });
     // El objetivo de siempre, con sus rotulos y comillas: el extractor saca los tres datos y la
     // plantilla (que pide dos) se encuentra en la PRIMERA busqueda, por contencion.
-    expect(await procesarTareaWeb(deps, makeJob())).toBe('pausada');
+    expect(await procesarTareaWeb(deps, makeJob())).toBe('completada');
     expect(deps.elector.consultar).not.toHaveBeenCalled();
   });
 
@@ -1760,10 +1902,9 @@ describe('el segundo escalon: interpretar el objetivo cuando el extractor no alc
       { contexto: 'destinatarios en para', valor: 'martin@ejemplo.com' },
       { contexto: 'cuerpo del mensaje', valor: 'te transfiero el pago' },
     ];
-    const base = conInterprete(DATOS_DEL_MODELO, {
+    const deps = conInterprete(DATOS_DEL_MODELO, {
       navegador: makeNavegador(false, otroCuerpo),
     });
-    const deps = yaDecidido(base, APROBACION_SIN_ASUNTO()) as TareaWebDeps;
 
     await expect(procesarTareaWeb(deps, makeJob(PEDIDO_SIN_FORMATO))).rejects.toThrow();
 

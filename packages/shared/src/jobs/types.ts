@@ -85,6 +85,15 @@ export interface JobSummary {
   conLoAprendido: boolean;
   /** Ademas, el sitio habia cambiado y la tarea se ajusto sola durante esa ejecucion. */
   ajustadaSola: boolean;
+  /**
+   * La tarea web se ejecuto con un PROCEDIMIENTO APRENDIDO POR OTRA CUENTA (plantilla compartida,
+   * V041). Es la ETIQUETA DE TRANSPARENCIA del consumo sin aprobacion: el usuario no aprueba, pero
+   * siempre puede ver que la tarea uso un procedimiento ajeno. Escalar derivado de jobs.resultado
+   * (`via = 'plantilla_compartida'`), nunca el resultado entero. false en todo lo demas.
+   */
+  conProcedimientoAjeno: boolean;
+  /** Ademas, ese procedimiento ya estaba CORROBORADO por origenes y consumidores distintos. */
+  procedimientoCorroborado: boolean;
 }
 
 /**

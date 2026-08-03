@@ -124,10 +124,18 @@ interface JobSummaryRow {
   created_at: Date | string;
   started_at: Date | string | null;
   finished_at: Date | string | null;
-  /** `resultado->>'via'`: por donde corrio una tarea web ('receta' | 'modelo'). Ver rowToSummary. */
+  /**
+   * `resultado->>'via'`: por donde corrio una tarea web ('receta' | 'modelo' |
+   * 'plantilla_compartida'). Ver rowToSummary.
+   */
   resultado_via: string | null;
   /** `resultado->>'reparada'`: la ejecucion por receta tuvo que ajustar algun paso. */
   resultado_reparada: string | null;
+  /**
+   * `resultado->'plantillaAjena'->>'estado'`: estado de la plantilla compartida consumida
+   * ('candidata' | 'corroborada') cuando la via fue 'plantilla_compartida'. Solo el escalar.
+   */
+  resultado_plantilla_estado: string | null;
 }
 
 function rowToSummary(row: JobSummaryRow): JobSummary {
@@ -155,6 +163,12 @@ function rowToSummary(row: JobSummaryRow): JobSummary {
     // listado no debe traer a memoria ni exponer lo que el worker guardo de la tarea.
     conLoAprendido: row.resultado_via === 'receta',
     ajustadaSola: row.resultado_via === 'receta' && row.resultado_reparada === 'true',
+    // LA ETIQUETA DE TRANSPARENCIA del consumo sin aprobacion (V041): la tarea corrio con un
+    // procedimiento que descubrio otra cuenta, y si esa plantilla ya estaba corroborada.
+    conProcedimientoAjeno: row.resultado_via === 'plantilla_compartida',
+    procedimientoCorroborado:
+      row.resultado_via === 'plantilla_compartida' &&
+      row.resultado_plantilla_estado === 'corroborada',
   };
 }
 
@@ -288,7 +302,8 @@ export class JobsRepository {
         ? await this.sql<JobSummaryRow[]>`
             select id, agent_id, status, payload->>'kind' as payload_kind, attempts, last_error,
               scheduled_for, created_at, started_at, finished_at,
-              resultado->>'via' as resultado_via, resultado->>'reparada' as resultado_reparada
+              resultado->>'via' as resultado_via, resultado->>'reparada' as resultado_reparada,
+              resultado->'plantillaAjena'->>'estado' as resultado_plantilla_estado
             from jobs
             where owner_id = ${ownerId}
               and (payload->>'kind' is distinct from ${PROMOVER_TRAYECTORIA_JOB_KIND})
@@ -298,7 +313,8 @@ export class JobsRepository {
         : await this.sql<JobSummaryRow[]>`
             select id, agent_id, status, payload->>'kind' as payload_kind, attempts, last_error,
               scheduled_for, created_at, started_at, finished_at,
-              resultado->>'via' as resultado_via, resultado->>'reparada' as resultado_reparada
+              resultado->>'via' as resultado_via, resultado->>'reparada' as resultado_reparada,
+              resultado->'plantillaAjena'->>'estado' as resultado_plantilla_estado
             from jobs
             where owner_id = ${ownerId} and status = ${status}
               and (payload->>'kind' is distinct from ${PROMOVER_TRAYECTORIA_JOB_KIND})
@@ -318,7 +334,8 @@ export class JobsRepository {
     const rows = await this.sql<JobSummaryRow[]>`
       select id, agent_id, status, payload->>'kind' as payload_kind, attempts, last_error,
         scheduled_for, created_at, started_at, finished_at,
-        resultado->>'via' as resultado_via, resultado->>'reparada' as resultado_reparada
+        resultado->>'via' as resultado_via, resultado->>'reparada' as resultado_reparada,
+              resultado->'plantillaAjena'->>'estado' as resultado_plantilla_estado
       from jobs
       where id = ${id} and owner_id = ${ownerId}
     `;

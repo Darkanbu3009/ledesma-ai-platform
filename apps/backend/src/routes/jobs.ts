@@ -69,6 +69,10 @@ function toJobActivity(
     // expone (puede llevar el resumen de la tarea, que es dato del usuario): solo estos escalares.
     conLoAprendido: job.conLoAprendido,
     ajustadaSola: job.ajustadaSola,
+    // ETIQUETA DE TRANSPARENCIA del consumo sin aprobacion (V041): la tarea uso un procedimiento
+    // aprendido por otra cuenta, y si ese procedimiento ya estaba corroborado. Solo escalares.
+    conProcedimientoAjeno: job.conProcedimientoAjeno,
+    procedimientoCorroborado: job.procedimientoCorroborado,
     ...(guardado !== undefined && esExitoDelMotor
       ? {
           guardableComoTarea: guardado.tieneExitosa && !guardado.guardada,
