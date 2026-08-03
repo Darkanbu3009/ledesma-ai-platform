@@ -172,8 +172,14 @@ export type DesenlaceDeReceta =
   | { tipo: 'completada' }
   /** La verificacion determinista detuvo la tarea antes de la accion irreversible (D7). */
   | { tipo: 'detenida'; mensaje: string }
-  /** La receta ya no describe el sitio (D6) o un paso fallo: el llamador sigue con el motor. */
-  | { tipo: 'abandonada'; motivo: string; obsoleta: boolean };
+  /**
+   * La receta ya no describe el sitio (D6) o un paso fallo: el llamador sigue con el motor.
+   * `causa` es la CLASIFICACION ESTRUCTURADA del abandono, para quien necesita distinguir sin
+   * parsear el texto del motivo (el motivo de falla de una plantilla, V042): 'barrera' cuando la
+   * barrera de identidad bloqueo el paso, 'navegador' cuando el navegador LANZO al ejecutarlo (una
+   * sesion caida o un timeout de CDP, no un elemento que no aparece). Ausente en el resto.
+   */
+  | { tipo: 'abandonada'; motivo: string; obsoleta: boolean; causa?: 'barrera' | 'navegador' };
 
 export interface ResultadoDeEjecucionPorReceta {
   desenlace: DesenlaceDeReceta;
@@ -383,6 +389,14 @@ async function evaluarIdentidadBestEffort(
   const barrera = deps.barreraIdentidad;
   if (barrera === undefined || barrera.modo === 'apagada') return null;
   if (instruccion.accion === 'navegar' || instruccion.accion === 'esperar') return null;
+  // Un paso 'teclas' NO localiza un elemento propio: pulsa sobre el foco, y su clase es null POR
+  // CONTRATO (claseDeElemento solo clasifica click y escribir; PasoPublicable exige clase NULA en
+  // teclas). Evaluarle la clase aqui bloqueaba SIEMPRE con 'clase_no_corroborada' toda receta o
+  // plantilla con una pulsacion intermedia (caso real de produccion del 3 ago 2026: el Tab entre el
+  // destinatario y el asunto abandono la primera plantilla compartida consumida). No es relajar la
+  // barrera: no hay elemento cuya identidad comparar. El paso IRREVERSIBLE si se evalua igual que
+  // hoy, y sigue fallando cerrado (sin clase y sin nombre accesible no se consuma nada a ciegas).
+  if (instruccion.accion === 'teclas' && !esPasoIrreversible) return null;
   try {
     // El nombre accesible se lee SOLO cuando hace falta (el paso irreversible) y solo cuando el paso
     // resuelve un elemento propio: una pulsacion sobre el foco no tiene elemento que identificar, y
@@ -665,6 +679,7 @@ export async function ejecutarReceta(
             tipo: 'abandonada',
             motivo: `la identidad del elemento del paso ${sustituido.paso.idx} no se pudo confirmar (${identidad.motivo})`,
             obsoleta: false,
+            causa: 'barrera',
           },
         };
       }
@@ -674,15 +689,19 @@ export async function ejecutarReceta(
     // pagina enorme) se trata como "no localizado", no como una excepcion: la corrida escala ese paso
     // y, si tampoco sale, abandona la receta y la termina el motor. Dejar propagar aqui convertiria
     // un blip de CDP en una tarea fallida cuando el camino de siempre habria funcionado.
+    // `navegadorLanzo` conserva la distincion para la `causa` del abandono: una excepcion del
+    // navegador es un problema de la SESION, no un elemento que no aparece.
+    let navegadorLanzo = false;
     const resultado = await deps.navegador
       .ejecutarPasoDeterminista(sitio.sesionExternaId, instruccion)
-      .catch(
-        (): ResultadoPasoDeterminista => ({
+      .catch((): ResultadoPasoDeterminista => {
+        navegadorLanzo = true;
+        return {
           estado: 'fallo',
           estrategias: [],
           detalle: 'el navegador no pudo ejecutar el paso',
-        }),
-      );
+        };
+      });
 
     pasosEjecutados++;
     if (resultado.estado === 'ok') {
@@ -776,6 +795,7 @@ export async function ejecutarReceta(
           tipo: 'abandonada',
           motivo: `el paso ${sustituido.paso.idx} no se pudo ejecutar ni escalando al motor`,
           obsoleta: superaElLimiteDeEscaladas(escalados, pasos.length),
+          ...(navegadorLanzo ? { causa: 'navegador' as const } : {}),
         },
       };
     }

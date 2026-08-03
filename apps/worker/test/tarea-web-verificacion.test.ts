@@ -835,8 +835,9 @@ describe('lectura del DOM', () => {
     const deps = makeDeps({ navegador, motor });
     const detencion = await detencionDe(deps, makeJob('envia el resumen a juan@ejemplo.com'));
     // CAMBIO 2: no poder leer NO es "en el sitio aparecia nada"; el motivo dice que no se pudo leer.
+    // FIX C: y SIN campo, porque lo ilegible fue la pagina (sesion degradada), no un dato del usuario.
     expect(detencion?.motivo).toBe('noLeible');
-    expect(detencion?.campo).toBe('destinatario');
+    expect(detencion?.campo).toBeUndefined();
     expect(motor.ejecutadas).toEqual(['escribe el destinatario']);
   });
 

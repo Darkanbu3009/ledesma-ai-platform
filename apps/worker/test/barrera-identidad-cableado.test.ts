@@ -284,8 +284,8 @@ describe("modo activa: el bloqueo abandona la receta y la tarea la termina el mo
 
     expect(resultado.desenlace.tipo).toBe('abandonada');
     // La receta NO se declara obsoleta: no es que ya no describa el sitio, es que no se pudo
-    // confirmar la identidad del elemento de ese paso.
-    expect(resultado.desenlace).toMatchObject({ obsoleta: false });
+    // confirmar la identidad del elemento de ese paso. La causa estructurada dice quien abandono.
+    expect(resultado.desenlace).toMatchObject({ obsoleta: false, causa: 'barrera' });
     // La escritura si corrio; el paso irreversible NO llego al navegador.
     expect(ejecutados).toHaveLength(1);
     expect(resultado.pasos.at(-1)?.accion.tipo).toBe('identidad:bloqueada');
@@ -302,5 +302,66 @@ describe("modo activa: el bloqueo abandona la receta y la tarea la termina el mo
 
     expect(resultado.desenlace).toEqual({ tipo: 'completada' });
     expect(ejecutados).toHaveLength(2);
+  });
+});
+
+describe('pasos sin elemento propio: la pulsacion sobre el foco no tiene identidad que comparar', () => {
+  /** La receta del caso real del 3 ago 2026: escritura, Tab intermedio, verificar y click final. */
+  function recetaConPulsacionIntermedia(): PasoDeReceta[] {
+    return [
+      pasoReceta({
+        idx: 0,
+        accion: 'escribir',
+        estrategias: [ROL_PARA, XPATH],
+        valor: { tipo: 'parametro', parametro: 'destinatario' },
+      }),
+      pasoReceta({ idx: 1, accion: 'teclas', estrategias: [], teclas: 'Tab' }),
+      pasoReceta({ idx: 2, accion: 'verificar', estrategias: [] }),
+      pasoReceta({ idx: 3 }),
+    ];
+  }
+
+  it('en modo activa, un paso `teclas` intermedio NO bloquea la corrida (clase null por contrato)', async () => {
+    const { navegador, ejecutados } = makeNavegador('Enviar (Ctrl-Enter)');
+
+    const resultado = await ejecutarReceta(
+      recetaConPulsacionIntermedia(),
+      { destinatario: 'ana@otra.com' },
+      makeDeps({ navegador, barreraIdentidad: barrera({ modo: 'activa' }) }),
+    );
+
+    expect(resultado.desenlace).toEqual({ tipo: 'completada' });
+    expect(ejecutados.map((instruccion) => instruccion.accion)).toEqual(['escribir', 'teclas', 'click']);
+    // La barrera no dejo veredicto sobre la pulsacion: no habia elemento que identificar.
+    const sobreTeclas = resultado.pasos.filter(
+      (p) => p.accion.tipo.startsWith('identidad:') && p.accion.metodo === 'teclas',
+    );
+    expect(sobreTeclas).toHaveLength(0);
+  });
+
+  it('el paso IRREVERSIBLE de teclas sigue fallando cerrado (la barrera no se relaja)', async () => {
+    // La accion que consuma es una pulsacion (Control+Enter). Sin elemento localizable no hay clase
+    // ni nombre accesible: la barrera bloquea igual que hoy.
+    const pasos: PasoDeReceta[] = [
+      pasoReceta({
+        idx: 0,
+        accion: 'escribir',
+        estrategias: [ROL_PARA, XPATH],
+        valor: { tipo: 'parametro', parametro: 'destinatario' },
+      }),
+      pasoReceta({ idx: 1, accion: 'verificar', estrategias: [] }),
+      pasoReceta({ idx: 2, accion: 'teclas', estrategias: [], teclas: 'Control+Enter' }),
+    ];
+    const { navegador, ejecutados } = makeNavegador('Enviar (Ctrl-Enter)');
+
+    const resultado = await ejecutarReceta(
+      pasos,
+      { destinatario: 'ana@otra.com' },
+      makeDeps({ navegador, barreraIdentidad: barrera({ modo: 'activa' }) }),
+    );
+
+    expect(resultado.desenlace.tipo).toBe('abandonada');
+    expect(ejecutados.map((instruccion) => instruccion.accion)).toEqual(['escribir']);
+    expect(resultado.pasos.at(-1)?.accion.tipo).toBe('identidad:bloqueada');
   });
 });

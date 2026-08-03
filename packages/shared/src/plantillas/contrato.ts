@@ -528,6 +528,34 @@ export function marcadoresClave(marcadores: readonly MarcadorParametro[]): strin
 }
 
 /**
+ * MOTIVO del ULTIMO FALLO de una plantilla (columna `ultima_falla_motivo`, V042). Vocabulario
+ * CERRADO, compartido entre el worker (que lo deriva del desenlace de la ejecucion) y el repositorio
+ * del backend (que lo valida antes del update, ademas del CHECK de la columna):
+ *  - barrera_bloqueada: la barrera de identidad bloqueo un paso y la plantilla se abandono;
+ *  - sin_efecto: corrio entera y el sitio no mostro que la accion surtiera efecto;
+ *  - abandonada: un paso no se pudo ejecutar de forma determinista (sin escalada por este camino);
+ *  - sesion: la sesion de navegador dejo de responder a mitad de la ejecucion.
+ * Los contadores de V041 no cambian de semantica: esto solo dice POR QUE fue el ultimo fallo, que es
+ * el insumo del retiro. Un exito lo limpia, igual que limpia `fallos_consecutivos`.
+ */
+export const MOTIVOS_DE_FALLA_DE_PLANTILLA = [
+  'barrera_bloqueada',
+  'sin_efecto',
+  'abandonada',
+  'sesion',
+] as const;
+
+export type MotivoDeFallaDePlantilla = (typeof MOTIVOS_DE_FALLA_DE_PLANTILLA)[number];
+
+/** ¿Es `valor` uno de los cuatro motivos de falla? Falla cerrada: lo demas no se persiste. */
+export function esMotivoDeFallaDePlantilla(valor: unknown): valor is MotivoDeFallaDePlantilla {
+  return (
+    typeof valor === 'string' &&
+    MOTIVOS_DE_FALLA_DE_PLANTILLA.includes(valor as MotivoDeFallaDePlantilla)
+  );
+}
+
+/**
  * POR QUE una plantilla NO se puede publicar. Los siete motivos son un conjunto CERRADO y cada uno
  * rechaza la plantilla COMPLETA. Se devuelven para el log del worker; no se le muestran al usuario ni
  * viajan a la base.

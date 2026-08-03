@@ -1,7 +1,8 @@
-import type { PasoPublicable, Sql } from '@ledesma-platform/shared';
+import type { MotivoDeFallaDePlantilla, PasoPublicable, Sql } from '@ledesma-platform/shared';
 import {
   dominiosDePasosPublicables,
   esCodigoDeIntencion,
+  esMotivoDeFallaDePlantilla,
   esPublicable,
   marcadoresClave,
   marcadoresDePasosPublicables,
@@ -365,9 +366,19 @@ export class PlantillasCompartidasRepository {
    * NO TOCA `estado`: la promocion a 'corroborada' y el retiro son decisiones aparte. Aqui solo se
    * acumula la materia prima.
    *
+   * `motivo` (V042) dice POR QUE fallo el ULTIMO intento, con el vocabulario cerrado de
+   * MOTIVOS_DE_FALLA_DE_PLANTILLA. Se valida aqui ADEMAS del CHECK de la columna (falla cerrada: un
+   * valor fuera del vocabulario se persiste como NULL, no revienta el update best-effort), y un
+   * EXITO lo limpia igual que limpia `fallos_consecutivos`.
+   *
    * El llamador lo trata como BEST-EFFORT: el desenlace del job ya esta decidido cuando esto corre.
    */
-  async registrarEjecucion(id: string, exitosa: boolean): Promise<void> {
+  async registrarEjecucion(
+    id: string,
+    exitosa: boolean,
+    motivo?: MotivoDeFallaDePlantilla,
+  ): Promise<void> {
+    const motivoValidado = !exitosa && esMotivoDeFallaDePlantilla(motivo) ? motivo : null;
     await this.sql`
       update plantillas_compartidas set
         ejecuciones_exitosas = ejecuciones_exitosas + ${exitosa ? 1 : 0},
@@ -376,6 +387,7 @@ export class PlantillasCompartidasRepository {
         -- un booleano ligado) con el mismo criterio que los dos contadores de arriba, que es el patron
         -- que ya usa RecetasWebRepository.registrarEjecucion.
         fallos_consecutivos = case when ${exitosa ? 1 : 0} = 1 then 0 else fallos_consecutivos + 1 end,
+        ultima_falla_motivo = ${motivoValidado},
         ultima_ejecucion_en = now(),
         actualizada_en = now()
       where id = ${id}

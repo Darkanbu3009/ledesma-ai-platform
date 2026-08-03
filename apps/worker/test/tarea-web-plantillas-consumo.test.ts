@@ -426,6 +426,19 @@ function pasoClick(idx: number, clase: string, nombre: string): unknown {
   };
 }
 
+function pasoTeclas(idx: number, teclas: string): unknown {
+  return {
+    idx,
+    accion: 'teclas',
+    dominio: DOMINIO,
+    claseDeElemento: null,
+    estrategias: [],
+    valor: null,
+    teclas,
+    esperaMs: null,
+  };
+}
+
 function pasoVerificar(idx: number): unknown {
   return {
     idx,
@@ -1084,7 +1097,46 @@ describe('ejecucion de la plantilla aprobada', () => {
     });
 
     expect(recetas.promover).not.toHaveBeenCalled();
-    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-1', false);
+    // V042: el fallo viaja con su motivo del vocabulario cerrado.
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-1', false, 'sin_efecto');
+  });
+
+  it('FIXTURE REAL (3 ago 2026): una pulsacion intermedia NO bloquea la barrera y la plantilla corre entera', async () => {
+    // La primera plantilla compartida consumida en produccion: click en Redactar, escritura del
+    // destinatario y el Tab que pasa al asunto. La barrera activa bloqueaba esa pulsacion con
+    // 'clase_no_corroborada' porque un paso 'teclas' tiene clase null POR CONTRATO, y la corrida
+    // entera caia al motor libre. Un paso sin elemento propio no tiene identidad que comparar.
+    const pasos = [
+      pasoClick(0, CLASE_REDACTAR, 'Redactar'),
+      pasoEscribir(1, CLASE_DESTINATARIO, 'Destinatarios en Para', {
+        tipo: 'parametro',
+        parametro: 'destinatario',
+      }),
+      pasoTeclas(2, 'Tab'),
+      pasoEscribir(3, CLASE_ASUNTO, 'Asunto', { tipo: 'parametro', parametro: 'asunto' }),
+      pasoEscribir(4, CLASE_CUERPO, 'Cuerpo del mensaje', { tipo: 'parametro', parametro: 'cuerpo' }),
+      pasoVerificar(5),
+      pasoClick(6, CLASE_ENVIAR, 'Enviar'),
+    ];
+    const base = conPlantilla(pasos, [CLASE_REDACTAR, ...CLASES_DEL_PROCEDIMIENTO]);
+    const deps = yaDecidido(base, aprobacionDelOfrecimiento());
+    const plantillas = deps.plantillas as unknown as {
+      repo: { registrarEjecucion: ReturnType<typeof vi.fn> };
+    };
+
+    const resultado = await procesarTareaWeb(deps, makeJob());
+
+    expect(resultado).toBe('completada');
+    // Seis primitivas: dos clicks, tres escrituras y la pulsacion. El motor libre no corrio.
+    const determinista = deps.determinista as unknown as {
+      ejecutarPasoDeterminista: ReturnType<typeof vi.fn>;
+    };
+    const acciones = determinista.ejecutarPasoDeterminista.mock.calls.map(
+      (llamada) => (llamada[1] as InstruccionDePaso).accion,
+    );
+    expect(acciones).toEqual(['click', 'escribir', 'teclas', 'escribir', 'escribir', 'click']);
+    expect(deps.motor.ejecutar).not.toHaveBeenCalled();
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-1', true);
   });
 
   it('un paso que no resuelve ABANDONA la plantilla y NO escala al modelo', async () => {
@@ -1106,7 +1158,29 @@ describe('ejecucion de la plantilla aprobada', () => {
     // LA ASERCION CENTRAL: la escalada al modelo no ocurre por este camino.
     expect(escalador.ejecutarPasoConModelo).not.toHaveBeenCalled();
     expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
-    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-1', false);
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-1', false, 'abandonada');
+  });
+
+  it('una sesion que LANZA a mitad de la ejecucion se contabiliza como falla de sesion (V042)', async () => {
+    const determinista = {
+      ejecutarPasoDeterminista: vi.fn(async () => {
+        throw new Error('timeout esperando la respuesta CDP de Input.insertText');
+      }),
+      leerEstrategiasDeElemento: vi.fn(async () => []),
+      localizarBotonPorAriaLabel: vi.fn(async () => null),
+    };
+    const base = conPlantilla(pasosDeLaPlantilla(), CLASES_DEL_PROCEDIMIENTO, {
+      determinista,
+      navegador: makeNavegador(false),
+    });
+    const deps = yaDecidido(base, aprobacionDelOfrecimiento());
+    const plantillas = deps.plantillas as unknown as {
+      repo: { registrarEjecucion: ReturnType<typeof vi.fn> };
+    };
+
+    await correr(deps);
+
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-1', false, 'sesion');
   });
 
   it('FIXTURE HOSTIL: el paso final apunta a otro control y la barrera lo bloquea antes de accionar', async () => {
@@ -1144,9 +1218,117 @@ describe('ejecucion de la plantilla aprobada', () => {
     expect(deps.barreraIdentidad).toBeUndefined();
     // La tarea la termina el motor libre, que era la linea base.
     expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+    // V042: el fallo queda contabilizado CON su motivo, el que alimenta el retiro.
+    const plantillas = deps.plantillas as unknown as {
+      repo: { registrarEjecucion: ReturnType<typeof vi.fn> };
+    };
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith(
+      'plantilla-1',
+      false,
+      'barrera_bloqueada',
+    );
   });
 });
 
+
+describe('fallback limpio tras una plantilla fallida o bloqueada (FIX B)', () => {
+  /** La plantilla cuyo paso final bloquea la barrera por el verbo: toca el DOM y se abandona. */
+  function pasosBloqueadosAlFinal(): unknown[] {
+    return [
+      pasoEscribir(0, CLASE_DESTINATARIO, 'Destinatarios en Para', {
+        tipo: 'parametro',
+        parametro: 'destinatario',
+      }),
+      pasoEscribir(1, CLASE_ASUNTO, 'Asunto', { tipo: 'parametro', parametro: 'asunto' }),
+      pasoEscribir(2, CLASE_CUERPO, 'Cuerpo del mensaje', { tipo: 'parametro', parametro: 'cuerpo' }),
+      pasoVerificar(3),
+      pasoClick(4, CLASE_ELIMINAR, 'Eliminar definitivamente'),
+    ];
+  }
+  const CLASES_CON_ELIMINAR = [CLASE_DESTINATARIO, CLASE_ASUNTO, CLASE_CUERPO, CLASE_ELIMINAR];
+
+  /** Un determinista cuyo `navegar` SIEMPRE falla: la sesion degradada del caso resumedOk false. */
+  function deterministaSinNavegacion(ariaLabel: string): NavegadorDeterminista & {
+    ejecutarPasoDeterminista: ReturnType<typeof vi.fn>;
+  } {
+    return {
+      ejecutarPasoDeterminista: vi.fn(async (_sesion: string, instruccion: InstruccionDePaso) =>
+        instruccion.accion === 'navegar'
+          ? {
+              estado: 'fallo' as const,
+              estrategias: [],
+              detalle: 'timeout esperando la respuesta CDP de Page.navigate',
+            }
+          : { estado: 'ok' as const, estrategias: [], detalle: null },
+      ),
+      leerEstrategiasDeElemento: vi.fn(async () => []),
+      localizarBotonPorAriaLabel: vi.fn(async () => ({ ariaLabel, rol: 'button', candidatos: 1 })),
+    };
+  }
+
+  /** Un navegador que numera las sesiones que abre, para distinguir la nueva de la degradada. */
+  function navegadorConSesionesNumeradas(): NavegadorParaTarea {
+    const base = makeNavegador(false) as unknown as Record<string, unknown>;
+    let sesiones = 0;
+    return {
+      ...base,
+      abrirSesionParaTarea: vi.fn(async () => ({
+        sesionExternaId: `ses-${(sesiones += 1)}`,
+        egressIp: '203.0.113.7',
+        egressCountry: 'MX',
+      })),
+    } as unknown as NavegadorParaTarea;
+  }
+
+  it('el reset previo al motor es OBLIGATORIO: descarte generico y goto antes de arrancar el motor', async () => {
+    const determinista = makeDeterminista([], 'Eliminar definitivamente');
+    const base = conPlantilla(pasosBloqueadosAlFinal(), CLASES_CON_ELIMINAR, {
+      determinista,
+      navegador: makeNavegador(false),
+    });
+    const deps = yaDecidido(base, aprobacionDelOfrecimiento());
+
+    await correr(deps);
+
+    const instrucciones = determinista.ejecutarPasoDeterminista.mock.calls.map(
+      (llamada) => llamada[1] as InstruccionDePaso,
+    );
+    expect(instrucciones.map((instruccion) => instruccion.accion)).toEqual([
+      'escribir',
+      'escribir',
+      'escribir',
+      'teclas',
+      'navegar',
+    ]);
+    // El descarte es GENERICO: una pulsacion de Escape sobre el foco, sin un selector del sitio.
+    expect(instrucciones[3]).toMatchObject({ teclas: 'Escape', sobreElFoco: true, estrategias: [] });
+    expect(instrucciones[4]?.url).toBe(`https://${DOMINIO}/`);
+    // Y el motor libre arranco DESPUES, sobre la pagina devuelta a su inicio.
+    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+  });
+
+  it('si la sesion no responde al reset, se abre una sesion NUEVA en vez de continuar sobre la degradada', async () => {
+    const determinista = deterministaSinNavegacion('Eliminar definitivamente');
+    const navegador = navegadorConSesionesNumeradas();
+    const base = conPlantilla(pasosBloqueadosAlFinal(), CLASES_CON_ELIMINAR, {
+      determinista,
+      navegador,
+    });
+    const deps = yaDecidido(base, aprobacionDelOfrecimiento());
+
+    await correr(deps);
+
+    // La degradada se cerro y la nueva se abrio por la MISMA puerta que la primera: mismo contexto
+    // externo, mismo proxy y mismo pais pineado, con el pais observado verificado.
+    const abrir = navegador.abrirSesionParaTarea as unknown as ReturnType<typeof vi.fn>;
+    expect(abrir).toHaveBeenCalledTimes(2);
+    expect(abrir.mock.calls[1]?.[0]).toEqual(abrir.mock.calls[0]?.[0]);
+    expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
+    // El motor libre corrio sobre la sesion NUEVA, no sobre la degradada.
+    const motor = deps.motor.ejecutar as unknown as ReturnType<typeof vi.fn>;
+    expect((motor.mock.calls[0]?.[0] as { sesionExternaId: string }).sesionExternaId).toBe('ses-2');
+  });
+});
 
 // --- SIMETRIA ENTRE LA PUBLICACION Y EL CONSUMO ---------------------------------------------------
 
