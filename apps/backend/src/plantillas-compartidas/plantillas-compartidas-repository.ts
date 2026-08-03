@@ -42,6 +42,31 @@ import {
 /** ORIGENES DISTINTOS que hacen falta para que una clase del atlas avale una publicacion. */
 export const ORIGENES_PARA_PUBLICAR = 2;
 
+/**
+ * UMBRAL DE CORROBORACION (D3): con al menos estos ORIGENES distintos y estos CONSUMIDORES distintos
+ * con exito, una 'candidata' pasa a 'corroborada'. Sin checkpoint humano, corroborada es una senal de
+ * CALIDAD (desempate y badge), no una autorizacion: el flujo de ejecucion no cambia.
+ */
+export const UMBRAL_DE_CORROBORACION = 2;
+
+/**
+ * FALLOS IMPUTABLES CONSECUTIVOS que retiran una plantilla (D4). Sin humano en el circuito, el retiro
+ * es la UNICA defensa contra plantillas rotas: al tercero seguido, la fila pasa a 'retirada' y deja
+ * de servirse sola ('retirada' esta fuera de ESTADOS_SERVIBLES). Aplica igual a 'corroborada'.
+ */
+export const FALLOS_PARA_RETIRO = 3;
+
+/**
+ * LOS MOTIVOS IMPUTABLES A LA PLANTILLA (D4): la barrera bloqueo un paso (la fila apunta a otro
+ * control) o corrio entera sin efecto (el procedimiento ya no funciona). 'abandonada' y 'sesion'
+ * suman `ejecuciones_fallidas` pero NO `fallos_consecutivos`: cortan la racha de retiro, porque hablan
+ * del sitio o de la sesion de ese consumidor, no del procedimiento.
+ */
+const MOTIVOS_IMPUTABLES: ReadonlySet<MotivoDeFallaDePlantilla> = new Set<MotivoDeFallaDePlantilla>([
+  'barrera_bloqueada',
+  'sin_efecto',
+]);
+
 /** Tope de clases que la comprobacion trae por dominio. Un dominio real no tiene mil controles. */
 export const MAX_CLASES_POR_DOMINIO = 500;
 
@@ -69,10 +94,9 @@ export type ResultadoDePublicacion =
   | {
       publicada: true;
       /**
-       * ORIGENES DISTINTOS que la plantilla acumula DESPUES de este upsert. Es la unica cosa que la
-       * publicacion devuelve, y es un CONTEO: 1 significa "solo la produjo este origen", que es
-       * exactamente lo que el consumo va a tener que mirar. No devuelve la fila ni sus pasos: nada
-       * lee esta tabla todavia.
+       * ORIGENES DISTINTOS que la plantilla acumula DESPUES de este upsert. Es un CONTEO: 1 significa
+       * "solo la produjo este origen", que es exactamente lo que el consumo va a tener que mirar. No
+       * devuelve la fila ni sus pasos.
        */
       origenes: number;
     }
@@ -83,9 +107,30 @@ interface FilaDeConteo {
 }
 
 /**
- * ESTADOS que se pueden servir: 'retirada' no sale nunca de la base. NO decide si hace falta el
- * checkpoint de aprobacion humana -- eso lo resuelve el worker, y hoy es incondicional para toda
- * plantilla ajena, sea 'candidata' o 'corroborada'.
+ * LO QUE DEVUELVE `registrarEjecucion`: el estado ANTES y DESPUES del update (para que el worker
+ * loguee las transiciones) y la IDENTIDAD de la fila (dominios, intencion, marcadores), que es lo
+ * unico con lo que se permite loguear: jamas un hash. null cuando la fila no existe.
+ */
+export interface RegistroDeEjecucion {
+  estado: string;
+  estadoPrevio: string;
+  dominiosClave: string;
+  codigoDeIntencion: string;
+  marcadoresClave: string;
+}
+
+interface FilaDeRegistro {
+  estado: string;
+  estado_previo: string | null;
+  dominios_clave: string;
+  codigo_de_intencion: string;
+  marcadores_clave: string;
+}
+
+/**
+ * ESTADOS que se pueden servir: 'retirada' no sale nunca de la base, y sin checkpoint humano ese es
+ * el UNICO freno automatico contra plantillas rotas (D4). 'corroborada' no cambia el flujo: es senal
+ * de calidad, gana el desempate y se muestra como badge.
  */
 const ESTADOS_SERVIBLES: readonly string[] = ['candidata', 'corroborada'];
 
@@ -159,13 +204,16 @@ function marcadoresDeLaClave(clave: string): number {
 }
 
 /**
- * EL MISMO DESEMPATE del `order by` de `buscarServible`, en TypeScript: la mas especifica primero y
- * despues la mas corroborada. Existe para que "la fila que si matcheo la clave" del diagnostico sea la
- * MISMA que la consulta habria elegido, y no otra cualquiera.
+ * EL MISMO DESEMPATE del `order by` de `buscarServible`, en TypeScript: la mas especifica primero,
+ * despues 'corroborada' sobre 'candidata' (D3: a igualdad de marcadores gana la que ya demostro
+ * calidad) y despues la mas corroborada por origenes. Existe para que "la fila que si matcheo la
+ * clave" del diagnostico sea la MISMA que la consulta habria elegido, y no otra cualquiera.
  */
 function porElDesempate(a: FilaDeDiagnostico, b: FilaDeDiagnostico): number {
+  const rango = (fila: FilaDeDiagnostico): number => (fila.estado === 'corroborada' ? 1 : 0);
   return (
     marcadoresDeLaClave(b.marcadores_clave) - marcadoresDeLaClave(a.marcadores_clave) ||
+    rango(b) - rango(a) ||
     Number(b.origenes ?? 0) - Number(a.origenes ?? 0)
   );
 }
@@ -303,6 +351,11 @@ export class PlantillasCompartidasRepository {
           when marcadores_clave = '' then 0
           else length(marcadores_clave) - length(replace(marcadores_clave, '+', '')) + 1
         end desc,
+        -- D3: a igualdad de marcadores, 'corroborada' gana a 'candidata'. Va por ENCIMA de los
+        -- desempates de corroboracion cruda porque el estado ya resume esa evidencia (origenes Y
+        -- consumidores distintos), y por debajo de la especificidad: la plantilla que mas se parece
+        -- a lo pedido sigue mandando.
+        case when estado = 'corroborada' then 1 else 0 end desc,
         origenes desc,
         ejecuciones_exitosas desc,
         id asc
@@ -359,39 +412,116 @@ export class PlantillasCompartidasRepository {
   }
 
   /**
-   * COMO LE FUE a una plantilla en una ejecucion, en AGREGADO y sin decir a quien: los tres contadores
-   * que V041 dejo inicializados. `fallos_consecutivos` se pone en 0 con cada exito y sube con cada
-   * fallo, que es lo que distingue una plantilla que envejecio mal de una con mala suerte suelta.
+   * COMO LE FUE a una plantilla en una ejecucion, en AGREGADO y sin decir a quien, MAS las
+   * transiciones de `estado` que esa ejecucion dispara. TODO ocurre en UN SOLO statement de update
+   * (el CTE `antes` solo lee el estado previo para el log): contadores, evidencia de consumo y
+   * transicion son ATOMICOS, y dos corridas simultaneas no pueden dejar la fila a medias.
    *
-   * NO TOCA `estado`: la promocion a 'corroborada' y el retiro son decisiones aparte. Aqui solo se
-   * acumula la materia prima.
+   * EXITO (D2 y D3):
+   *  - suma `ejecuciones_exitosas`, pone `fallos_consecutivos` en 0 y limpia `ultima_falla_motivo`;
+   *  - agrega `consumidorHash` a `consumidores_hash` SOLO si es nuevo (misma tecnica `@>` del
+   *    on conflict de `origenes_hash`): el mismo consumidor dos veces cuenta UNA;
+   *  - si la fila es 'candidata' y queda con origenes >= UMBRAL y consumidores >= UMBRAL (contando el
+   *    actual), pasa a 'corroborada'. Es senal de CALIDAD (desempate y badge), no un cambio de flujo.
    *
-   * `motivo` (V042) dice POR QUE fallo el ULTIMO intento, con el vocabulario cerrado de
-   * MOTIVOS_DE_FALLA_DE_PLANTILLA. Se valida aqui ADEMAS del CHECK de la columna (falla cerrada: un
-   * valor fuera del vocabulario se persiste como NULL, no revienta el update best-effort), y un
-   * EXITO lo limpia igual que limpia `fallos_consecutivos`.
+   * FALLO (D4):
+   *  - suma `ejecuciones_fallidas` y persiste el motivo (V042, validado ademas del CHECK);
+   *  - `fallos_consecutivos` solo sube con un motivo IMPUTABLE a la plantilla (barrera_bloqueada o
+   *    sin_efecto); 'abandonada' y 'sesion' CORTAN la racha (0) sin dejar de contar como fallidas;
+   *  - al FALLOS_PARA_RETIRO imputable seguido, la fila pasa a 'retirada' (tambien desde
+   *    'corroborada') y deja de servirse sola: 'retirada' esta fuera de ESTADOS_SERVIBLES.
+   *  - los fallos NO escriben `consumidores_hash`.
    *
-   * El llamador lo trata como BEST-EFFORT: el desenlace del job ya esta decidido cuando esto corre.
+   * Devuelve estado previo y nuevo con la IDENTIDAD de la fila para que el worker loguee las
+   * transiciones (dominios, intencion, marcadores: jamas un hash). El llamador lo trata como
+   * BEST-EFFORT: el desenlace del job ya esta decidido cuando esto corre.
    */
   async registrarEjecucion(
     id: string,
     exitosa: boolean,
     motivo?: MotivoDeFallaDePlantilla,
-  ): Promise<void> {
-    const motivoValidado = !exitosa && esMotivoDeFallaDePlantilla(motivo) ? motivo : null;
-    await this.sql`
+    consumidorHash?: string,
+  ): Promise<RegistroDeEjecucion | null> {
+    if (exitosa) {
+      // El hash del consumidor viaja como lista de 0 o 1 elementos: con lista vacia, el `||` y el
+      // `@>` son no-ops y el conteo de consumidores queda como estaba (llamador legado sin hash).
+      const consumidor = this.sql.json(
+        (consumidorHash === undefined ? [] : [consumidorHash]) as unknown as Parameters<
+          Sql['json']
+        >[0],
+      );
+      const filas = await this.sql<FilaDeRegistro[]>`
+        with antes as (select estado from plantillas_compartidas where id = ${id})
+        update plantillas_compartidas set
+          ejecuciones_exitosas = ejecuciones_exitosas + 1,
+          fallos_consecutivos = 0,
+          ultima_falla_motivo = null,
+          -- D2: el consumidor se agrega SOLO si es nuevo, con la misma tecnica del on conflict de
+          -- origenes_hash. La deduplicacion y el conteo ocurren DENTRO del statement.
+          consumidores_hash = case
+            when consumidores_hash @> ${consumidor} then consumidores_hash
+            else consumidores_hash || ${consumidor}
+          end,
+          -- D3: candidata -> corroborada cuando las DOS mitades del ciclo tienen evidencia doble:
+          -- origenes distintos que la produjeron y consumidores distintos que la ejecutaron con
+          -- exito (contando el actual, ya deduplicado por la misma expresion de arriba).
+          estado = case
+            when estado = 'candidata'
+              and jsonb_array_length(origenes_hash) >= ${UMBRAL_DE_CORROBORACION}
+              and jsonb_array_length(
+                case
+                  when consumidores_hash @> ${consumidor} then consumidores_hash
+                  else consumidores_hash || ${consumidor}
+                end
+              ) >= ${UMBRAL_DE_CORROBORACION}
+              then 'corroborada'
+            else estado
+          end,
+          ultima_ejecucion_en = now(),
+          actualizada_en = now()
+        where id = ${id}
+        returning estado, (select estado from antes) as estado_previo,
+          dominios_clave, codigo_de_intencion, marcadores_clave
+      `;
+      return this.comoRegistro(filas[0]);
+    }
+
+    const motivoValidado = esMotivoDeFallaDePlantilla(motivo) ? motivo : null;
+    // D4: solo los motivos imputables a la plantilla mueven la racha de retiro. Un motivo fuera del
+    // vocabulario cae en "no imputable" (falla cerrada: no se retira por un motivo que no se entiende).
+    const imputable = motivoValidado !== null && MOTIVOS_IMPUTABLES.has(motivoValidado);
+    const filas = await this.sql<FilaDeRegistro[]>`
+      with antes as (select estado from plantillas_compartidas where id = ${id})
       update plantillas_compartidas set
-        ejecuciones_exitosas = ejecuciones_exitosas + ${exitosa ? 1 : 0},
-        ejecuciones_fallidas = ejecuciones_fallidas + ${exitosa ? 0 : 1},
-        -- Los fallos SEGUIDOS se reinician con cada exito. La comparacion es contra un entero (y no
-        -- un booleano ligado) con el mismo criterio que los dos contadores de arriba, que es el patron
-        -- que ya usa RecetasWebRepository.registrarEjecucion.
-        fallos_consecutivos = case when ${exitosa ? 1 : 0} = 1 then 0 else fallos_consecutivos + 1 end,
+        ejecuciones_fallidas = ejecuciones_fallidas + 1,
+        -- Los fallos SEGUIDOS solo los mueve un motivo imputable; los demas cortan la racha.
+        fallos_consecutivos = case when ${imputable} then fallos_consecutivos + 1 else 0 end,
         ultima_falla_motivo = ${motivoValidado},
+        -- D4: el retiro, en el MISMO statement que el contador que lo dispara. Aplica igual a
+        -- 'corroborada': sin humano en el circuito, una plantilla que falla seguido se retira sola.
+        estado = case
+          when ${imputable} and fallos_consecutivos + 1 >= ${FALLOS_PARA_RETIRO} then 'retirada'
+          else estado
+        end,
         ultima_ejecucion_en = now(),
         actualizada_en = now()
       where id = ${id}
+      returning estado, (select estado from antes) as estado_previo,
+        dominios_clave, codigo_de_intencion, marcadores_clave
     `;
+    return this.comoRegistro(filas[0]);
+  }
+
+  /** La fila del returning como registro para el log del worker. null si el update no toco nada. */
+  private comoRegistro(fila: FilaDeRegistro | undefined): RegistroDeEjecucion | null {
+    if (fila === undefined) return null;
+    return {
+      estado: fila.estado,
+      estadoPrevio: fila.estado_previo ?? fila.estado,
+      dominiosClave: fila.dominios_clave,
+      codigoDeIntencion: fila.codigo_de_intencion,
+      marcadoresClave: fila.marcadores_clave,
+    };
   }
 
   /**
@@ -440,4 +570,5 @@ export class PlantillasCompartidasRepository {
     `;
     return { publicada: true, origenes: Number(filas[0]?.origenes ?? 1) };
   }
+
 }

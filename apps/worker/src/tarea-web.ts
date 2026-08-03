@@ -614,10 +614,26 @@ export interface RepositorioPlantillasParaWorker {
     marcadoresPosibles: readonly string[];
   }): Promise<{ corte: string; origenes: number | null }>;
   /**
-   * Contadores agregados de como le fue. Best-effort: su fallo no cambia el desenlace del job.
+   * Contadores agregados de como le fue, MAS las transiciones de estado que la ejecucion dispara
+   * (corroborada con el exito doble, retirada al tercer fallo imputable seguido). Best-effort: su
+   * fallo no cambia el desenlace del job.
    * `motivo` (V042): por que fallo el ultimo intento, con el vocabulario cerrado del contrato.
+   * `consumidorHash` (V043): el hash del consumidor de ESTA corrida; solo se persiste en el exito.
+   * Devuelve estado previo y nuevo con la IDENTIDAD de la fila (dominios, intencion, marcadores)
+   * para el log de transiciones; void en fakes legados que no lo implementan.
    */
-  registrarEjecucion?(id: string, exitosa: boolean, motivo?: MotivoDeFallaDePlantilla): Promise<void>;
+  registrarEjecucion?(
+    id: string,
+    exitosa: boolean,
+    motivo?: MotivoDeFallaDePlantilla,
+    consumidorHash?: string,
+  ): Promise<{
+    estado: string;
+    estadoPrevio: string;
+    dominiosClave: string;
+    codigoDeIntencion: string;
+    marcadoresClave: string;
+  } | null | void>;
 }
 
 /** Dependencias del job de tarea web. index.ts cablea las reales; los tests pasan fakes. */
@@ -3110,9 +3126,14 @@ async function confirmarEfectoDeLaPlantilla(
 }
 
 /**
- * Contadores agregados de la plantilla. Best-effort: el desenlace del job ya esta decidido.
- * `motivo` (V042) dice por que fallo el ultimo intento, con el vocabulario cerrado del contrato;
- * solo viaja en los fallos, y un exito lo limpia en la fila.
+ * Contadores agregados de la plantilla y sus TRANSICIONES de estado. Best-effort: el desenlace del
+ * job ya esta decidido. `motivo` (V042) dice por que fallo el ultimo intento, con el vocabulario
+ * cerrado del contrato; solo viaja en los fallos, y un exito lo limpia en la fila.
+ *
+ * EN EL EXITO viaja ademas el hash del CONSUMIDOR de esta corrida (V043, la misma derivacion que el
+ * hash de origen: incomparable con el del atlas), que es la evidencia con la que 'candidata' pasa a
+ * 'corroborada'. Las transiciones (corroborada, retirada) se LOGUEAN aqui con la IDENTIDAD de la
+ * fila -- dominios, intencion, marcadores -- y jamas con un hash.
  */
 async function registrarEjecucionDePlantillaBestEffort(
   deps: TareaWebDeps,
@@ -3124,8 +3145,27 @@ async function registrarEjecucionDePlantillaBestEffort(
   const registrar = deps.plantillas?.repo.registrarEjecucion;
   if (registrar === undefined || deps.plantillas === undefined) return;
   try {
-    if (motivo === undefined) await registrar.call(deps.plantillas.repo, plantillaId, exitosa);
-    else await registrar.call(deps.plantillas.repo, plantillaId, exitosa, motivo);
+    const consumidorHash = exitosa
+      ? hashDeOrigenDePlantilla(job.ownerId, deps.plantillas.clave)
+      : undefined;
+    const registro = await registrar.call(
+      deps.plantillas.repo,
+      plantillaId,
+      exitosa,
+      motivo,
+      consumidorHash,
+    );
+    if (registro !== null && registro !== undefined && registro.estado !== registro.estadoPrevio) {
+      const nivel = registro.estado === 'retirada' ? 'warn' : 'info';
+      deps.logger[nivel]('tarea web: la plantilla compartida cambio de estado', {
+        jobId: job.id,
+        dominios: registro.dominiosClave,
+        intencion: registro.codigoDeIntencion,
+        marcadores: registro.marcadoresClave,
+        de: registro.estadoPrevio,
+        a: registro.estado,
+      });
+    }
   } catch (error) {
     deps.logger.warn('tarea web: no se pudo contabilizar la plantilla (se ignora, best-effort)', {
       jobId: job.id,
