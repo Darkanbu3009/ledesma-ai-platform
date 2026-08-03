@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import type { PasoPublicable, Sql } from '@ledesma-platform/shared';
 import {
+  FALLOS_PARA_RETIRO,
   MAX_CLASES_POR_DOMINIO,
   MAX_FILAS_DE_DIAGNOSTICO,
   ORIGENES_PARA_PUBLICAR,
   PlantillasCompartidasRepository,
+  UMBRAL_DE_CORROBORACION,
 } from '../src/plantillas-compartidas/plantillas-compartidas-repository.js';
 
 /**
@@ -102,11 +104,12 @@ async function publicar(
   entrada = plantilla(),
   clases = clasesDelAtlas(),
   origenes = 1,
+  estadoPrevio: string | null = null,
 ): Promise<{
   resultado: Awaited<ReturnType<PlantillasCompartidasRepository['publicar']>>;
   sql: ReturnType<typeof makeSql>;
 }> {
-  const sql = makeSql([clases, [{ origenes }]]);
+  const sql = makeSql([clases, [{ origenes, estado_previo: estadoPrevio }]]);
   const resultado = await new PlantillasCompartidasRepository(sql).publicar(entrada);
   return { resultado, sql };
 }
@@ -114,16 +117,16 @@ async function publicar(
 describe('publicar: lo que la query escribe y lo que NO puede nombrar', () => {
   it('inserta SOLO la identidad, los pasos y el hash de origen', async () => {
     const { resultado, sql } = await publicar();
-    expect(resultado).toEqual({ publicada: true, origenes: 1 });
+    expect(resultado).toEqual({ publicada: true, origenes: 1, rehabilitada: false });
     const [texto, valores] = sql.queries[1] ?? ['', []];
     expect(texto).toContain(
       'insert into plantillas_compartidas (dominios_clave, codigo_de_intencion, marcadores_clave, pasos, origenes_hash)',
     );
-    expect(valores[0]).toBe(DOMINIO);
-    expect(valores[1]).toBe('enviar');
-    // Los marcadores se DERIVAN de los pasos, no se reciben.
-    expect(valores[2]).toBe('destinatario');
-    expect(valores[4]).toEqual(['h1']);
+    // Los TRES primeros parametros son la identidad del CTE `antes` (el estado previo, para D5);
+    // despues la identidad del insert, los pasos y el origen.
+    expect(valores.slice(0, 3)).toEqual([DOMINIO, 'enviar', 'destinatario']);
+    expect(valores.slice(3, 6)).toEqual([DOMINIO, 'enviar', 'destinatario']);
+    expect(valores[7]).toEqual(['h1']);
   });
 
   it('NINGUNA query nombra owner_id, firma, descripcion ni un id rastreable', async () => {
@@ -176,12 +179,34 @@ describe('publicar: UNA fila por identidad, con los origenes sumados', () => {
     expect(asignaciones).toContain('actualizada_en = now()');
   });
 
-  it('los contadores de ejecucion NO los toca la publicacion', async () => {
+  it('los contadores de EXITOS y FALLIDAS no los toca la publicacion', async () => {
     const { sql } = await publicar();
     const [texto] = sql.queries[1] ?? [''];
     expect(texto).not.toContain('ejecuciones_exitosas');
     expect(texto).not.toContain('ejecuciones_fallidas');
-    expect(texto).not.toContain('fallos_consecutivos');
+    // `fallos_consecutivos` y `consumidores_hash` SOLO se tocan al rehabilitar una fila retirada
+    // (D5): en cualquier otro estado el case los deja exactamente como estaban.
+    expect(texto).toContain("when plantillas_compartidas.estado = 'retirada' then 0");
+    expect(texto).toContain("else plantillas_compartidas.fallos_consecutivos");
+  });
+});
+
+describe('publicar: la rehabilitacion de una fila retirada (D5)', () => {
+  it('una publicacion nueva regresa la retirada a candidata, con racha y consumidores en cero', async () => {
+    const { sql } = await publicar();
+    const [texto] = sql.queries[1] ?? [''];
+    const actualizacion = texto.slice(texto.indexOf('do update set'));
+    // estado: retirada -> candidata; cualquier otro estado se conserva.
+    expect(actualizacion).toContain("estado = case when plantillas_compartidas.estado = 'retirada' then 'candidata' else plantillas_compartidas.estado end");
+    // consumidores_hash: la evidencia de consumo era del procedimiento que fallaba.
+    expect(actualizacion).toContain("consumidores_hash = case when plantillas_compartidas.estado = 'retirada' then '[]'::jsonb else plantillas_compartidas.consumidores_hash end");
+    // origenes_hash SE CONSERVA: el case de arriba sigue sumando sobre el acumulado, nunca lo vacia.
+    expect(actualizacion).not.toContain("origenes_hash = '[]'");
+  });
+
+  it('el resultado dice si hubo rehabilitacion, leyendo el estado previo en el mismo statement', async () => {
+    const { resultado } = await publicar(plantilla(), clasesDelAtlas(), 3, 'retirada');
+    expect(resultado).toEqual({ publicada: true, origenes: 3, rehabilitada: true });
   });
 });
 
@@ -285,6 +310,7 @@ describe('publicar: la superficie del repositorio es CERRADA', () => {
     expect(metodos.sort()).toEqual([
       'buscarServible',
       'clasesCorroboradas',
+      'comoRegistro',
       'diagnosticarMiss',
       'publicar',
       'registrarEjecucion',
@@ -292,10 +318,18 @@ describe('publicar: la superficie del repositorio es CERRADA', () => {
     ]);
   });
 
-  it('la publicacion no hace ningun select sobre plantillas_compartidas', async () => {
+  it('la publicacion solo lee de plantillas_compartidas el ESTADO previo (D5), nada mas', async () => {
     const { sql } = await publicar();
+    // El unico select sobre la tabla es el CTE de una columna que decide la rehabilitacion: no se
+    // leen pasos, ni hashes, ni contadores.
     for (const [texto] of sql.queries) {
-      expect(texto).not.toContain('from plantillas_compartidas');
+      const lecturas = texto.split('from plantillas_compartidas').length - 1;
+      if (lecturas > 0) {
+        expect(lecturas).toBe(1);
+        expect(texto).toContain('with antes as ( select estado from plantillas_compartidas');
+        expect(texto).not.toContain('select pasos');
+        expect(texto).not.toContain('select origenes_hash');
+      }
     }
   });
 });
@@ -383,48 +417,161 @@ describe('buscarServible: la lectura del consumo', () => {
     // 1. LA MAS ESPECIFICA: cuantos marcadores exige la fila (la clave vacia son cero).
     expect(orden).toContain("when marcadores_clave = '' then 0");
     expect(orden).toContain("length(marcadores_clave) - length(replace(marcadores_clave, '+', '')) + 1");
-    // 2. LA MAS CORROBORADA. 3. El id, que es UNICO: es lo que hace TOTAL el orden, para que dos
-    //    corridas con los mismos datos elijan siempre la misma fila.
+    // 2. D3: corroborada gana a candidata, por encima de los desempates de corroboracion cruda y por
+    //    debajo de la especificidad. 3. LA MAS CORROBORADA. 4. El id, que es UNICO: es lo que hace
+    //    TOTAL el orden, para que dos corridas con los mismos datos elijan siempre la misma fila.
+    const rangoDeEstado = orden.indexOf("when estado = 'corroborada' then 1 else 0 end desc");
+    expect(rangoDeEstado).toBeGreaterThan(-1);
+    expect(orden.indexOf('marcadores_clave')).toBeLessThan(rangoDeEstado);
+    expect(rangoDeEstado).toBeLessThan(orden.indexOf('origenes desc'));
     expect(orden.indexOf('origenes desc')).toBeLessThan(orden.indexOf('ejecuciones_exitosas desc'));
     expect(orden.indexOf('ejecuciones_exitosas desc')).toBeLessThan(orden.indexOf('id asc'));
     expect(orden).toContain('limit 1');
   });
 });
 
-describe('registrarEjecucion: los contadores agregados', () => {
+describe('registrarEjecucion: contadores, evidencia de consumo y transiciones', () => {
+  /** La fila que devuelve el returning del update, con su identidad para el log. */
+  function filaDeRegistro(estado = 'candidata', estadoPrevio = 'candidata') {
+    return {
+      estado,
+      estado_previo: estadoPrevio,
+      dominios_clave: DOMINIO,
+      codigo_de_intencion: 'enviar',
+      marcadores_clave: 'destinatario',
+    };
+  }
+
   it('un EXITO suma a exitosas, pone los fallos seguidos en cero y LIMPIA el motivo (V042)', async () => {
-    const sql = makeSql([[]]);
-    await new PlantillasCompartidasRepository(sql).registrarEjecucion('p-1', true);
+    const sql = makeSql([[filaDeRegistro()]]);
+    await new PlantillasCompartidasRepository(sql).registrarEjecucion('p-1', true, undefined, 'c1');
+    const [texto] = sql.queries[0] as [string, unknown[]];
+    expect(texto).toContain('ejecuciones_exitosas = ejecuciones_exitosas + 1');
+    expect(texto).toContain('fallos_consecutivos = 0');
+    expect(texto).toContain('ultima_falla_motivo = null');
+    expect(texto).not.toContain('ejecuciones_fallidas');
+  });
+
+  it('D2: el exito agrega el hash del consumidor SOLO si es nuevo, dentro del statement', async () => {
+    const sql = makeSql([[filaDeRegistro()]]);
+    await new PlantillasCompartidasRepository(sql).registrarEjecucion('p-1', true, undefined, 'c1');
     const [texto, valores] = sql.queries[0] as [string, unknown[]];
-    expect(texto).toContain('ejecuciones_exitosas = ejecuciones_exitosas + ');
-    expect(texto).toContain('fallos_consecutivos = case when ');
-    expect(texto).toContain('ultima_falla_motivo = ');
-    // 1 al contador de exitos, 0 al de fallos, 1 al discriminante del case, el motivo limpio y el id.
-    expect(valores).toEqual([1, 0, 1, null, 'p-1']);
-    // NO toca el estado: la promocion y el retiro son decisiones aparte.
-    expect(texto).not.toContain('estado =');
+    // La misma tecnica del on conflict de origenes_hash: la pertenencia se decide con @> y el mismo
+    // consumidor dos veces no puede sumar dos.
+    expect(texto).toContain('consumidores_hash = case when consumidores_hash @> ');
+    expect(texto).toContain('else consumidores_hash || ');
+    expect(valores).toContain('p-1');
+    expect(JSON.stringify(valores)).toContain('c1');
   });
 
-  it('un FALLO suma a fallidas, acumula los fallos seguidos y persiste su motivo (V042)', async () => {
-    const sql = makeSql([[]]);
+  it('D3: candidata pasa a corroborada con origenes >= 2 y consumidores >= 2, atomico', async () => {
+    const sql = makeSql([[filaDeRegistro('corroborada')]]);
+    const registro = await new PlantillasCompartidasRepository(sql).registrarEjecucion(
+      'p-1',
+      true,
+      undefined,
+      'c1',
+    );
+    const [texto, valores] = sql.queries[0] as [string, unknown[]];
+    // La transicion vive en el MISMO update que los contadores (un solo statement).
+    expect(texto).toContain("when estado = 'candidata'");
+    expect(texto).toContain('and jsonb_array_length(origenes_hash) >= ');
+    // El conteo de consumidores se hace sobre la MISMA expresion deduplicada que se persiste.
+    expect(texto).toContain("then 'corroborada' else estado end");
+    expect(valores).toContain(UMBRAL_DE_CORROBORACION);
+    // Y el llamador recibe la transicion con la identidad de la fila, para el log.
+    expect(registro).toEqual({
+      estado: 'corroborada',
+      estadoPrevio: 'candidata',
+      dominiosClave: DOMINIO,
+      codigoDeIntencion: 'enviar',
+      marcadoresClave: 'destinatario',
+    });
+  });
+
+  it('un FALLO suma a fallidas y con motivo IMPUTABLE acumula la racha de retiro (V042/D4)', async () => {
+    const sql = makeSql([[filaDeRegistro()]]);
     await new PlantillasCompartidasRepository(sql).registrarEjecucion('p-1', false, 'barrera_bloqueada');
-    const [, valores] = sql.queries[0] as [string, unknown[]];
-    expect(valores).toEqual([0, 1, 0, 'barrera_bloqueada', 'p-1']);
+    const [texto, valores] = sql.queries[0] as [string, unknown[]];
+    expect(texto).toContain('ejecuciones_fallidas = ejecuciones_fallidas + 1');
+    expect(texto).toContain('fallos_consecutivos = case when ');
+    expect(texto).toContain('then fallos_consecutivos + 1 else 0 end');
+    // imputable=true viaja como discriminante, el motivo se persiste y el id cierra el where.
+    expect(valores).toContain(true);
+    expect(valores).toContain('barrera_bloqueada');
+    expect(valores).toContain('p-1');
+    // Los fallos NO escriben evidencia de consumo (D2).
+    expect(texto).not.toContain('consumidores_hash');
   });
 
-  it('un fallo SIN motivo (o con uno fuera del vocabulario) persiste NULL, no revienta', async () => {
-    const sql = makeSql([[], []]);
+  it('D4: al tercer fallo imputable seguido la fila pasa a retirada, en el mismo statement', async () => {
+    const sql = makeSql([[filaDeRegistro('retirada')]]);
+    const registro = await new PlantillasCompartidasRepository(sql).registrarEjecucion(
+      'p-1',
+      false,
+      'sin_efecto',
+    );
+    const [texto, valores] = sql.queries[0] as [string, unknown[]];
+    expect(texto).toContain("and fallos_consecutivos + 1 >= ");
+    expect(texto).toContain("then 'retirada' else estado end");
+    expect(valores).toContain(FALLOS_PARA_RETIRO);
+    // sin_efecto es imputable: mueve la racha.
+    expect(valores).toContain(true);
+    expect(registro?.estado).toBe('retirada');
+  });
+
+  it('D4: abandonada y sesion cortan la racha (0) sin dejar de contar como fallidas', async () => {
+    const sql = makeSql([[filaDeRegistro()], [filaDeRegistro()]]);
+    const repo = new PlantillasCompartidasRepository(sql);
+    await repo.registrarEjecucion('p-1', false, 'abandonada');
+    await repo.registrarEjecucion('p-1', false, 'sesion');
+    for (const llamada of sql.queries) {
+      const [texto, valores] = llamada;
+      // No imputable: el discriminante viaja en false, la racha cae a 0 y la fallida SI se cuenta.
+      expect(valores).toContain(false);
+      expect(valores).not.toContain(true);
+      expect(texto).toContain('ejecuciones_fallidas = ejecuciones_fallidas + 1');
+    }
+  });
+
+  it('un fallo SIN motivo (o con uno fuera del vocabulario) persiste NULL y NO es imputable', async () => {
+    const sql = makeSql([[filaDeRegistro()], [filaDeRegistro()]]);
     const repo = new PlantillasCompartidasRepository(sql);
     await repo.registrarEjecucion('p-1', false);
     await repo.registrarEjecucion('p-1', false, 'cualquier cosa' as never);
-    expect((sql.queries[0] as [string, unknown[]])[1]).toEqual([0, 1, 0, null, 'p-1']);
-    expect((sql.queries[1] as [string, unknown[]])[1]).toEqual([0, 1, 0, null, 'p-1']);
+    for (const llamada of sql.queries) {
+      const [, valores] = llamada;
+      expect(valores).toContain(null);
+      expect(valores).toContain(false);
+      expect(valores).not.toContain('cualquier cosa');
+    }
   });
 
   it('un motivo en un EXITO no se persiste: el exito siempre limpia', async () => {
+    const sql = makeSql([[filaDeRegistro()]]);
+    await new PlantillasCompartidasRepository(sql).registrarEjecucion('p-1', true, 'abandonada', 'c1');
+    const [texto, valores] = sql.queries[0] as [string, unknown[]];
+    expect(texto).toContain('ultima_falla_motivo = null');
+    expect(valores).not.toContain('abandonada');
+  });
+
+  it('el retiro y la corroboracion aplican tambien sobre corroborada y candidata segun el caso', async () => {
+    // corroborada que falla tres veces imputables: el case de retirada no exige candidata.
+    const sql = makeSql([[filaDeRegistro('retirada', 'corroborada')]]);
+    const registro = await new PlantillasCompartidasRepository(sql).registrarEjecucion(
+      'p-1',
+      false,
+      'barrera_bloqueada',
+    );
+    const [texto] = sql.queries[0] as [string, unknown[]];
+    expect(texto).not.toContain("estado = 'candidata' and fallos_consecutivos");
+    expect(registro).toMatchObject({ estado: 'retirada', estadoPrevio: 'corroborada' });
+  });
+
+  it('devuelve null cuando la fila no existe (el update no toco nada)', async () => {
     const sql = makeSql([[]]);
-    await new PlantillasCompartidasRepository(sql).registrarEjecucion('p-1', true, 'abandonada');
-    expect((sql.queries[0] as [string, unknown[]])[1]).toEqual([1, 0, 1, null, 'p-1']);
+    const registro = await new PlantillasCompartidasRepository(sql).registrarEjecucion('nope', true);
+    expect(registro).toBeNull();
   });
 });
 
@@ -480,6 +627,15 @@ describe('diagnosticarMiss: donde se corto la lectura del consumo', () => {
     ]);
     // La MAS ESPECIFICA gana aunque tenga menos origenes: el mismo orden que el `order by`.
     expect(diagnostico).toEqual({ corte: 'origen_propio', origenes: 3 });
+  });
+
+  it('D3: a igualdad de marcadores, la CORROBORADA gana a la candidata (mismo orden que la query)', async () => {
+    const { diagnostico } = await diagnosticar([
+      fila('destinatario', 'candidata', 9),
+      fila('asunto', 'corroborada', 2),
+    ]);
+    // Un marcador cada una: el estado decide antes que los origenes crudos.
+    expect(diagnostico).toEqual({ corte: 'origen_propio', origenes: 2 });
   });
 
   it('NO le pregunta nada al hash de origen: la consulta no lo nombra', async () => {
