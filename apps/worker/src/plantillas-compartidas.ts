@@ -9,6 +9,7 @@ import {
   marcadorDeRanura,
   marcadoresClave,
   marcadoresDePasosPublicables,
+  nombreDeLaClase,
   parsearPasosPublicables,
   tienePasoDeVerificacion,
   type CodigoDeIntencion,
@@ -320,7 +321,13 @@ export type MotivoDeNoAplicable =
   /** Un dato que la plantilla teclea no esta declarado en el objetivo del consumidor. */
   | 'dato_sin_declarar'
   /** El objetivo pide una accion irreversible y la plantilla no trae su paso `verificar`. */
-  | 'sin_verificacion';
+  | 'sin_verificacion'
+  /**
+   * BLINDAJE ESTRUCTURAL (sin checkpoint humano): la plantilla no tiene EXACTAMENTE un click de la
+   * familia del verbo como ULTIMO paso, con `verificar` inmediatamente antes. Un click de la familia
+   * de mas, un paso posterior al click final, o un `verificar` que no sea el paso previo, caen aqui.
+   */
+  | 'estructura_no_permitida';
 
 export type ResultadoDeAplicabilidad =
   | { aplica: true; pasos: PasoDeReceta[]; marcadores: MarcadorParametro[] }
@@ -330,6 +337,64 @@ export type ResultadoDeAplicabilidad =
 function marcadorDelPaso(valor: PasoPublicable['valor']): MarcadorParametro | null {
   if (valor === null) return null;
   return valor.tipo === 'parametro' ? valor.parametro : marcadorDeRanura(valor.clase);
+}
+
+/**
+ * ¿La clase de este paso pertenece a la FAMILIA del verbo del objetivo? Es la MISMA pregunta que la
+ * barrera de identidad le hace al nombre accesible del elemento (`correspondeALaFamilia`,
+ * barrera-identidad.ts), aplicada aqui al NOMBRE que la clase declara: los regex de
+ * VERBOS_ACCION_BLOQUEADA filtrados por familia, sobre un nombre que ya viene normalizado (minusculas,
+ * sin acentos) porque asi lo construye `claseDeElemento`.
+ *
+ * ES LO UNICO QUE EL CONTRATO PERMITE DISTINGUIR HOY: un paso `click` no lleva ninguna marca de "soy
+ * de foco" o "soy de accion", asi que el click IRREVERSIBLE se reconoce por su clase (la familia del
+ * verbo) y todo click cuya clase NO es de la familia se trata como click de preparacion. El LIMITE,
+ * documentado a proposito: un click de foco cuyo nombre accesible casara con la familia contaria como
+ * click de accion (falla cerrada: la plantilla se rechaza), y un click irreversible de OTRA familia
+ * ("crear filtro") no se distingue de uno de foco por estructura; a ese lo contienen la clase
+ * corroborada del atlas del consumidor y la barrera de identidad, igual que hasta hoy.
+ */
+function claseDeLaFamiliaDelVerbo(clase: string | null, verboBloqueado: string | null): boolean {
+  if (clase === null || verboBloqueado === null) return false;
+  const familia = VERBOS_ACCION_BLOQUEADA.find((v) => v.verbo === verboBloqueado)?.accion;
+  if (familia === undefined) return false;
+  const nombre = nombreDeLaClase(clase);
+  if (nombre === null) return false;
+  return VERBOS_ACCION_BLOQUEADA.some((v) => v.accion === familia && v.patron.test(nombre));
+}
+
+/**
+ * D1: EL BLINDAJE ESTRUCTURAL que sustituye al checkpoint humano. FALLA CERRADA, devuelve el `idx`
+ * del paso que viola la regla (o -1 cuando falta la estructura entera):
+ *
+ *  a) La plantilla contiene EXACTAMENTE UN click cuya clase pertenece a la familia del verbo de la
+ *     intencion (el click irreversible), y es el ULTIMO paso: cualquier click de la familia de mas, y
+ *     cualquier paso POSTERIOR al click final, invalidan la plantilla.
+ *  b) El paso `verificar` es el INMEDIATAMENTE ANTERIOR al click final (que exista lo exige ya
+ *     `sin_verificacion`; aqui se exige DONDE).
+ *
+ * Devuelve null cuando la estructura es la permitida.
+ */
+function violacionDeEstructura(
+  pasos: readonly PasoPublicable[],
+  verboBloqueado: string | null,
+): number | null {
+  const deFamilia = pasos.filter(
+    (paso) => paso.accion === 'click' && claseDeLaFamiliaDelVerbo(paso.claseDeElemento, verboBloqueado),
+  );
+  const final = deFamilia[0];
+  // Sin click de la familia no hay click irreversible reconocible: la estructura no es la permitida.
+  if (final === undefined) return -1;
+  // Un SEGUNDO click de la familia invalida, y se nombra a el.
+  if (deFamilia.length > 1) return deFamilia[1]?.idx ?? -1;
+  // El click irreversible tiene que ser el ULTIMO paso: se nombra al primer paso posterior.
+  const posterior = pasos[final.idx + 1];
+  if (posterior !== undefined) return posterior.idx;
+  // `verificar` inmediatamente antes del click final. Que exista en OTRO lugar no alcanza: entre la
+  // comparacion contra la pagina y el click no puede colarse ningun otro paso.
+  const previo = final.idx > 0 ? pasos[final.idx - 1] : undefined;
+  if (previo === undefined || previo.accion !== 'verificar') return final.idx;
+  return null;
 }
 
 /**
@@ -362,6 +427,10 @@ function marcadorDelPaso(valor: PasoPublicable['valor']): MarcadorParametro | nu
  *     no se completa ni se hereda: la plantilla no aplica.
  *  5. LA VERIFICACION. Misma exigencia que `recetaAplicable` (ejecutor-receta.ts) y por el mismo
  *     motivo: sin el paso `verificar`, ejecutar se saltaria la comparacion contra la pagina.
+ *  6. LA ESTRUCTURA (D1, sin checkpoint humano). Exactamente UN click de la familia del verbo (el
+ *     click irreversible), como ULTIMO paso y con `verificar` inmediatamente antes. Un click de la
+ *     familia de mas, o cualquier paso despues del click final, rechazan con
+ *     `estructura_no_permitida` (ver `violacionDeEstructura`).
  *
  * Lo que devuelve son PASOS DE RECETA, que es lo que el ejecutor determinista sabe correr: la ranura
  * se convierte en el marcador que la llena y la clase se queda fuera (la barrera la vuelve a derivar
@@ -433,6 +502,15 @@ export function plantillaAplicable(entrada: {
 
   if (entrada.verboBloqueado !== null && !tienePasoDeVerificacion(deReceta)) {
     return { aplica: false, motivo: 'sin_verificacion', idx: -1 };
+  }
+  // D1: EL BLINDAJE ESTRUCTURAL, la ultima puerta y la que sustituye al checkpoint humano: un solo
+  // click de la familia del verbo, ultimo paso, con `verificar` pegado antes. Corre sobre los pasos
+  // del CONTRATO (los parseados), que es donde vive la clase declarada.
+  if (entrada.verboBloqueado !== null) {
+    const violacion = violacionDeEstructura(pasos, entrada.verboBloqueado);
+    if (violacion !== null) {
+      return { aplica: false, motivo: 'estructura_no_permitida', idx: violacion };
+    }
   }
   return { aplica: true, pasos: deReceta, marcadores: [...marcadores].sort() };
 }
