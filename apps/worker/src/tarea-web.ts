@@ -589,7 +589,7 @@ export interface RepositorioPlantillasParaWorker {
     codigoDeIntencion: string;
     pasos: unknown;
     origenHash: string;
-  }): Promise<{ publicada: boolean; motivo?: string }>;
+  }): Promise<{ publicada: boolean; motivo?: string; rehabilitada?: boolean }>;
   /**
    * La plantilla de esta IDENTIDAD que se le puede servir a este origen. null = no hay ninguna.
    *
@@ -2711,6 +2711,16 @@ async function publicar(
     // El motivo del backend es texto libre y se queda en el log; lo que se registra en el resultado
     // del job es el vocabulario acotado del veredicto.
     return { publicada: false, motivo: 'rechazada_por_el_backend', submotivo: null, idx: null, clases };
+  }
+  if (resultado.rehabilitada === true) {
+    // D5: la publicacion cayo sobre una fila RETIRADA y la regreso a candidata (racha y consumidores
+    // en cero; los origenes se conservan). Identidad de la fila, jamas hashes.
+    deps.logger.info('tarea web: la plantilla retirada quedo rehabilitada como candidata', {
+      jobId: job.id,
+      dominios: plantilla.dominiosClave,
+      intencion: plantilla.codigoDeIntencion,
+      marcadores: plantilla.marcadoresClave,
+    });
   }
   deps.logger.info('tarea web: el procedimiento de la corrida quedo compartido como plantilla', {
     jobId: job.id,

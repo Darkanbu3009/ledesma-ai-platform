@@ -99,11 +99,18 @@ export type ResultadoDePublicacion =
        * devuelve la fila ni sus pasos.
        */
       origenes: number;
+      /**
+       * REHABILITACION (D5): la identidad ya existia como fila 'retirada' y esta publicacion nueva
+       * del motor libre la regreso a 'candidata' (con la racha de fallos y los consumidores en cero;
+       * los origenes se conservan). Para el log del worker, que nombra la identidad y nunca un hash.
+       */
+      rehabilitada: boolean;
     }
   | { publicada: false; motivo: string };
 
 interface FilaDeConteo {
   origenes: number | string | null;
+  estado_previo?: string | null;
 }
 
 /**
@@ -544,7 +551,16 @@ export class PlantillasCompartidasRepository {
     return new Set(filas.map((fila) => fila.clase_de_elemento));
   }
 
-  /** El insert con su `on conflict`. Separado para que `publicar` se lea como la lista de puertas. */
+  /**
+   * El insert con su `on conflict`. Separado para que `publicar` se lea como la lista de puertas.
+   *
+   * REHABILITACION (D5): una publicacion NUEVA del motor libre sobre la identidad de una fila
+   * 'retirada' la regresa a 'candidata' con la racha de fallos en 0 y los consumidores en '[]' (la
+   * evidencia de consumo era del procedimiento que fallaba; la corroboracion se vuelve a ganar).
+   * `origenes_hash` SE CONSERVA y se le suma el origen actual si es nuevo, igual que siempre. Todo en
+   * el MISMO statement del upsert: la transicion es atomica. El CTE `antes` solo lee el estado previo
+   * para que el llamador pueda loguear la rehabilitacion con la identidad de la fila.
+   */
   private async upsert(fila: {
     dominiosClave: string;
     codigoDeIntencion: string;
@@ -555,6 +571,12 @@ export class PlantillasCompartidasRepository {
     const pasos = this.sql.json(fila.pasos as unknown as Parameters<Sql['json']>[0]);
     const origen = this.sql.json([fila.origenHash] as unknown as Parameters<Sql['json']>[0]);
     const filas = await this.sql<FilaDeConteo[]>`
+      with antes as (
+        select estado from plantillas_compartidas
+        where dominios_clave = ${fila.dominiosClave}
+          and codigo_de_intencion = ${fila.codigoDeIntencion}
+          and marcadores_clave = ${fila.marcadoresClave}
+      )
       insert into plantillas_compartidas
         (dominios_clave, codigo_de_intencion, marcadores_clave, pasos, origenes_hash)
       values
@@ -565,10 +587,26 @@ export class PlantillasCompartidasRepository {
             then plantillas_compartidas.origenes_hash
           else plantillas_compartidas.origenes_hash || excluded.origenes_hash
         end,
+        estado = case
+          when plantillas_compartidas.estado = 'retirada' then 'candidata'
+          else plantillas_compartidas.estado
+        end,
+        fallos_consecutivos = case
+          when plantillas_compartidas.estado = 'retirada' then 0
+          else plantillas_compartidas.fallos_consecutivos
+        end,
+        consumidores_hash = case
+          when plantillas_compartidas.estado = 'retirada' then '[]'::jsonb
+          else plantillas_compartidas.consumidores_hash
+        end,
         actualizada_en = now()
-      returning jsonb_array_length(origenes_hash) as origenes
+      returning jsonb_array_length(origenes_hash) as origenes,
+        (select estado from antes) as estado_previo
     `;
-    return { publicada: true, origenes: Number(filas[0]?.origenes ?? 1) };
+    return {
+      publicada: true,
+      origenes: Number(filas[0]?.origenes ?? 1),
+      rehabilitada: filas[0]?.estado_previo === 'retirada',
+    };
   }
-
 }
