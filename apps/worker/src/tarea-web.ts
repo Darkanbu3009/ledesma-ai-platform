@@ -1992,6 +1992,86 @@ async function renavegarAInicio(
 }
 
 /**
+ * DESCARTE GENERICO del estado a medio llenar que un intento de plantilla dejo en la pagina: una
+ * pulsacion de Escape sobre el foco, que cierra el dialogo o el compose abierto en la mayoria de los
+ * sitios SIN un solo selector especifico. Best-effort a proposito: si no sale, el goto obligatorio
+ * que viene despues sigue siendo la limpieza minima y esto solo queda en el log.
+ */
+async function descartarEstadoAMedioLlenarBestEffort(
+  deps: TareaWebDeps,
+  job: Job,
+  abierto: SitioAbierto,
+): Promise<void> {
+  const determinista = deps.determinista;
+  if (!determinista) return;
+  try {
+    await conTiempoLimite(
+      determinista.ejecutarPasoDeterminista(abierto.sesionExternaId, {
+        accion: 'teclas',
+        estrategias: [],
+        texto: null,
+        teclas: 'Escape',
+        sobreElFoco: true,
+        url: null,
+        esperaMs: null,
+      }),
+      TIMEOUT_DEL_RESET_MS,
+      'el descarte del estado a medio llenar',
+    );
+  } catch (error) {
+    deps.logger.warn('tarea web: no se pudo descartar el estado a medio llenar (se sigue con el goto)', {
+      jobId: job.id,
+      connectionId: abierto.sitio.id,
+      dominio: abierto.sitio.dominio,
+      err: describir(error),
+    });
+  }
+}
+
+/**
+ * RESET OBLIGATORIO previo al motor libre tras un intento de plantilla ajena que TOCO el DOM (FIX B,
+ * caso real de produccion del 3 ago 2026: el motor arranco sobre el compose a medio llenar de la
+ * plantilla abandonada, abrio OTRO compose y la corrida termino atribuyendole al usuario un fallo de
+ * sesion). Tres pasos por sitio abierto, en este orden:
+ *
+ *  1. el DESCARTE GENERICO del estado a medio llenar (Escape sobre el foco, best-effort);
+ *  2. la RENAVEGACION al inicio de siempre (renavegarAInicio);
+ *  3. si la sesion NO respondio al reset -- el caso `resumedOk:false` de Browserbase: el target CDP
+ *     queda a medio inicializar y todo comando cuelga hasta su timeout -- se REABRE la sesion del
+ *     sitio en vez de continuar sobre la degradada. `reabrir` pasa por la misma puerta que `abrir`:
+ *     mismo contexto externo, mismo proxy, el pais pineado verificado y el contexto reinyectado.
+ *
+ * Devuelve el SitioAbierto VIGENTE del sitio activo (el mismo, o el reabierto): es lo que el motor
+ * libre tiene que usar de aqui en adelante.
+ */
+async function resetObligatorioTrasPlantilla(
+  deps: TareaWebDeps,
+  job: Job,
+  gestor: GestorDeSitios,
+  activo: SitioAbierto,
+): Promise<SitioAbierto> {
+  let vigente = activo;
+  for (const abierto of gestor.abiertos()) {
+    await descartarEstadoAMedioLlenarBestEffort(deps, job, abierto);
+    const volvio = await renavegarAInicio(
+      deps,
+      job,
+      abierto.sitio,
+      abierto.sesionExternaId,
+      abierto.urlInicial,
+    );
+    if (volvio) continue;
+    deps.logger.warn(
+      'tarea web: la sesion no respondio al reset; se abre una sesion nueva con el mismo pais pineado',
+      { jobId: job.id, connectionId: abierto.sitio.id, dominio: abierto.sitio.dominio },
+    );
+    const reabierto = await gestor.reabrir(abierto.sitio);
+    if (reabierto.sitio.id === vigente.sitio.id) vigente = reabierto;
+  }
+  return vigente;
+}
+
+/**
  * EJECUTA la tarea con la receta (CAMBIO 4). Registra su propia trayectoria, aplica la verificacion
  * determinista donde la receta la aprendio (D7), repara las estrategias que hayan cambiado (D5) y
  * jubila la receta si el sitio cambio demasiado (D6).
@@ -3765,6 +3845,14 @@ interface SitioAbierto {
 interface GestorDeSitios {
   /** Abre (o reutiliza) la sesion del sitio. Lanza igual que el camino de un solo sitio. */
   abrir(sitio: SitioConectado): Promise<SitioAbierto>;
+  /**
+   * CIERRA la sesion del sitio (best-effort) y abre UNA NUEVA por la misma puerta que `abrir`: mismo
+   * contexto externo, mismo proxy y mismo pais pineado, con el pais observado verificado y el
+   * contexto reinyectado. Es la salida del caso `resumedOk:false` de Browserbase (FIX B): una sesion
+   * cuyo target CDP quedo a medio inicializar no responde a ningun comando, y continuar sobre ella
+   * solo produce timeouts que despues se le atribuyen al usuario.
+   */
+  reabrir(sitio: SitioConectado): Promise<SitioAbierto>;
   /** El sitio autorizado con ese dominio, o undefined. */
   porDominio(dominio: string): SitioConectado | undefined;
   /** Los sitios cuya sesion llego a abrirse, en el orden en que se abrieron. */
@@ -3780,75 +3868,84 @@ function crearGestorDeSitios(
   control?: ControlDeTareaWeb,
 ): GestorDeSitios {
   const abiertos = new Map<string, SitioAbierto>();
+  const abrir = async (sitio: SitioConectado): Promise<SitioAbierto> => {
+    const yaAbierto = abiertos.get(sitio.id);
+    if (yaAbierto !== undefined) {
+      // REUTILIZACION: volver a un sitio ya visitado NO reabre su sesion (perderia el estado de la
+      // pagina y volveria a pagar la apertura). La sesion sigue viva desde la primera vez.
+      control?.alCambiarSesion?.(yaAbierto.sesionExternaId);
+      return yaAbierto;
+    }
+    if (!sitio.contextoExternoId || !sitio.proxyRef || !sitio.proxyCountry) {
+      throw new PermanentExecutionError(MENSAJE_RECONECTAR);
+    }
+    // El contexto se descifra RECIEN AQUI y solo el de este sitio: el claro vive en memoria entre
+    // el descifrado y la inyeccion, y no hay un momento en que convivan los de todos los sitios.
+    const contexto = await deps.repo.obtenerContextoDescifrado(sitio.id, job.ownerId, deps.vaultSecret);
+    if (contexto === null) {
+      throw new PermanentExecutionError(MENSAJE_RECONECTAR);
+    }
+    const sesion = await deps.navegador.abrirSesionParaTarea({
+      contextoExternoId: sitio.contextoExternoId,
+      proxyRef: sitio.proxyRef,
+      proxyCountry: sitio.proxyCountry,
+    });
+    const abierto: SitioAbierto = {
+      sitio,
+      contexto,
+      sesionExternaId: sesion.sesionExternaId,
+      urlInicial: `https://${sitio.dominio}/`,
+    };
+    // Se registra ANTES de verificar el pais: si la verificacion aborta, el finally del handler
+    // tiene que poder cerrar esta sesion igual.
+    abiertos.set(sitio.id, abierto);
+    control?.alCambiarSesion?.(sesion.sesionExternaId);
+    deps.logger.info('tarea web: sesion abierta con el pais pineado', {
+      jobId: job.id,
+      connectionId: sitio.id,
+      dominio: sitio.dominio,
+      sesionExternaId: sesion.sesionExternaId,
+      pais: sesion.egressCountry,
+      egressIp: sesion.egressIp,
+    });
+
+    // PAIS de salida ANTES de navegar: el pin es POR SITIO y se verifica POR SITIO. Un sitio con
+    // pais distinto al pineado aborta la tarea entera y queda marcado para reconectar.
+    if (sesion.egressCountry !== sitio.proxyCountry) {
+      await marcarSitioBestEffort(deps, sitio, job.ownerId, 'error');
+      throw new SalidaDeRedNoDisponibleError(
+        `no hay ruta de red disponible para tu region (pais pineado al dominio ${sitio.dominio}: ` +
+          `${sitio.proxyCountry}; pais observado: ${sesion.egressCountry ?? 'ninguno'}); la tarea NO ` +
+          'se ejecuto y no se degrada a otro pais. Reintenta mas tarde o reconecta el sitio.',
+      );
+    }
+
+    // Contexto (cookies) del sitio en SU sesion, y pre-chequeo de caducidad SIN modelo.
+    await deps.navegador.inyectarContexto(sesion.sesionExternaId, contexto);
+    const pantallaDeLogin = await deps.navegador.detectarPantallaDeLogin(
+      sesion.sesionExternaId,
+      abierto.urlInicial,
+    );
+    if (pantallaDeLogin) {
+      await marcarSitioBestEffort(deps, sitio, job.ownerId, 'caducado');
+      throw new PermanentExecutionError(
+        `la sesion del sitio ${sitio.dominio} caduco (el sitio pide login de nuevo); ` +
+          'vuelve a conectarlo desde la consola para reanudar las tareas',
+      );
+    }
+    return abierto;
+  };
   return {
     porDominio: (dominio) => autorizados.find((sitio) => sitio.dominio === dominio),
     abiertos: () => [...abiertos.values()],
-    abrir: async (sitio: SitioConectado): Promise<SitioAbierto> => {
-      const yaAbierto = abiertos.get(sitio.id);
-      if (yaAbierto !== undefined) {
-        // REUTILIZACION: volver a un sitio ya visitado NO reabre su sesion (perderia el estado de la
-        // pagina y volveria a pagar la apertura). La sesion sigue viva desde la primera vez.
-        control?.alCambiarSesion?.(yaAbierto.sesionExternaId);
-        return yaAbierto;
+    abrir,
+    reabrir: async (sitio: SitioConectado): Promise<SitioAbierto> => {
+      const abierto = abiertos.get(sitio.id);
+      if (abierto !== undefined) {
+        await cerrarSesionBestEffort(deps, abierto.sesionExternaId);
+        abiertos.delete(sitio.id);
       }
-      if (!sitio.contextoExternoId || !sitio.proxyRef || !sitio.proxyCountry) {
-        throw new PermanentExecutionError(MENSAJE_RECONECTAR);
-      }
-      // El contexto se descifra RECIEN AQUI y solo el de este sitio: el claro vive en memoria entre
-      // el descifrado y la inyeccion, y no hay un momento en que convivan los de todos los sitios.
-      const contexto = await deps.repo.obtenerContextoDescifrado(sitio.id, job.ownerId, deps.vaultSecret);
-      if (contexto === null) {
-        throw new PermanentExecutionError(MENSAJE_RECONECTAR);
-      }
-      const sesion = await deps.navegador.abrirSesionParaTarea({
-        contextoExternoId: sitio.contextoExternoId,
-        proxyRef: sitio.proxyRef,
-        proxyCountry: sitio.proxyCountry,
-      });
-      const abierto: SitioAbierto = {
-        sitio,
-        contexto,
-        sesionExternaId: sesion.sesionExternaId,
-        urlInicial: `https://${sitio.dominio}/`,
-      };
-      // Se registra ANTES de verificar el pais: si la verificacion aborta, el finally del handler
-      // tiene que poder cerrar esta sesion igual.
-      abiertos.set(sitio.id, abierto);
-      control?.alCambiarSesion?.(sesion.sesionExternaId);
-      deps.logger.info('tarea web: sesion abierta con el pais pineado', {
-        jobId: job.id,
-        connectionId: sitio.id,
-        dominio: sitio.dominio,
-        sesionExternaId: sesion.sesionExternaId,
-        pais: sesion.egressCountry,
-        egressIp: sesion.egressIp,
-      });
-
-      // PAIS de salida ANTES de navegar: el pin es POR SITIO y se verifica POR SITIO. Un sitio con
-      // pais distinto al pineado aborta la tarea entera y queda marcado para reconectar.
-      if (sesion.egressCountry !== sitio.proxyCountry) {
-        await marcarSitioBestEffort(deps, sitio, job.ownerId, 'error');
-        throw new SalidaDeRedNoDisponibleError(
-          `no hay ruta de red disponible para tu region (pais pineado al dominio ${sitio.dominio}: ` +
-            `${sitio.proxyCountry}; pais observado: ${sesion.egressCountry ?? 'ninguno'}); la tarea NO ` +
-            'se ejecuto y no se degrada a otro pais. Reintenta mas tarde o reconecta el sitio.',
-        );
-      }
-
-      // Contexto (cookies) del sitio en SU sesion, y pre-chequeo de caducidad SIN modelo.
-      await deps.navegador.inyectarContexto(sesion.sesionExternaId, contexto);
-      const pantallaDeLogin = await deps.navegador.detectarPantallaDeLogin(
-        sesion.sesionExternaId,
-        abierto.urlInicial,
-      );
-      if (pantallaDeLogin) {
-        await marcarSitioBestEffort(deps, sitio, job.ownerId, 'caducado');
-        throw new PermanentExecutionError(
-          `la sesion del sitio ${sitio.dominio} caduco (el sitio pide login de nuevo); ` +
-            'vuelve a conectarlo desde la consola para reanudar las tareas',
-        );
-      }
-      return abierto;
+      return abrir(sitio);
     },
     cerrarTodas: async (): Promise<void> => {
       for (const abierto of abiertos.values()) {
@@ -4243,16 +4340,10 @@ export async function procesarTareaWeb(
           }
           veredictoDeConsumo = { consumida: false, motivo: 'abandonada', idx: null };
           if (porPlantilla.paginaTocada) {
-            // Misma regla que el camino por receta: el motor jamas recibe una pagina a medio camino.
-            for (const abierto of gestor.abiertos()) {
-              await renavegarAInicio(
-                deps,
-                job,
-                abierto.sitio,
-                abierto.sesionExternaId,
-                abierto.urlInicial,
-              );
-            }
+            // FIX B: aqui el reset es OBLIGATORIO, no tolerante como en el camino por receta: se
+            // descarta el estado a medio llenar, se navega al inicio y, si la sesion no responde,
+            // se abre una nueva en vez de entregarle al motor una sesion degradada.
+            activo = await resetObligatorioTrasPlantilla(deps, job, gestor, activo);
           }
         }
       }

@@ -1199,6 +1199,105 @@ describe('ejecucion de la plantilla aprobada', () => {
 });
 
 
+describe('fallback limpio tras una plantilla fallida o bloqueada (FIX B)', () => {
+  /** La plantilla cuyo paso final bloquea la barrera por el verbo: toca el DOM y se abandona. */
+  function pasosBloqueadosAlFinal(): unknown[] {
+    return [
+      pasoEscribir(0, CLASE_DESTINATARIO, 'Destinatarios en Para', {
+        tipo: 'parametro',
+        parametro: 'destinatario',
+      }),
+      pasoEscribir(1, CLASE_ASUNTO, 'Asunto', { tipo: 'parametro', parametro: 'asunto' }),
+      pasoEscribir(2, CLASE_CUERPO, 'Cuerpo del mensaje', { tipo: 'parametro', parametro: 'cuerpo' }),
+      pasoVerificar(3),
+      pasoClick(4, CLASE_ELIMINAR, 'Eliminar definitivamente'),
+    ];
+  }
+  const CLASES_CON_ELIMINAR = [CLASE_DESTINATARIO, CLASE_ASUNTO, CLASE_CUERPO, CLASE_ELIMINAR];
+
+  /** Un determinista cuyo `navegar` SIEMPRE falla: la sesion degradada del caso resumedOk false. */
+  function deterministaSinNavegacion(ariaLabel: string): NavegadorDeterminista & {
+    ejecutarPasoDeterminista: ReturnType<typeof vi.fn>;
+  } {
+    return {
+      ejecutarPasoDeterminista: vi.fn(async (_sesion: string, instruccion: InstruccionDePaso) =>
+        instruccion.accion === 'navegar'
+          ? {
+              estado: 'fallo' as const,
+              estrategias: [],
+              detalle: 'timeout esperando la respuesta CDP de Page.navigate',
+            }
+          : { estado: 'ok' as const, estrategias: [], detalle: null },
+      ),
+      leerEstrategiasDeElemento: vi.fn(async () => []),
+      localizarBotonPorAriaLabel: vi.fn(async () => ({ ariaLabel, rol: 'button', candidatos: 1 })),
+    };
+  }
+
+  /** Un navegador que numera las sesiones que abre, para distinguir la nueva de la degradada. */
+  function navegadorConSesionesNumeradas(): NavegadorParaTarea {
+    const base = makeNavegador(false) as unknown as Record<string, unknown>;
+    let sesiones = 0;
+    return {
+      ...base,
+      abrirSesionParaTarea: vi.fn(async () => ({
+        sesionExternaId: `ses-${(sesiones += 1)}`,
+        egressIp: '203.0.113.7',
+        egressCountry: 'MX',
+      })),
+    } as unknown as NavegadorParaTarea;
+  }
+
+  it('el reset previo al motor es OBLIGATORIO: descarte generico y goto antes de arrancar el motor', async () => {
+    const determinista = makeDeterminista([], 'Eliminar definitivamente');
+    const base = conPlantilla(pasosBloqueadosAlFinal(), CLASES_CON_ELIMINAR, {
+      determinista,
+      navegador: makeNavegador(false),
+    });
+    const deps = yaDecidido(base, aprobacionDelOfrecimiento());
+
+    await correr(deps);
+
+    const instrucciones = determinista.ejecutarPasoDeterminista.mock.calls.map(
+      (llamada) => llamada[1] as InstruccionDePaso,
+    );
+    expect(instrucciones.map((instruccion) => instruccion.accion)).toEqual([
+      'escribir',
+      'escribir',
+      'escribir',
+      'teclas',
+      'navegar',
+    ]);
+    // El descarte es GENERICO: una pulsacion de Escape sobre el foco, sin un selector del sitio.
+    expect(instrucciones[3]).toMatchObject({ teclas: 'Escape', sobreElFoco: true, estrategias: [] });
+    expect(instrucciones[4]?.url).toBe(`https://${DOMINIO}/`);
+    // Y el motor libre arranco DESPUES, sobre la pagina devuelta a su inicio.
+    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+  });
+
+  it('si la sesion no responde al reset, se abre una sesion NUEVA en vez de continuar sobre la degradada', async () => {
+    const determinista = deterministaSinNavegacion('Eliminar definitivamente');
+    const navegador = navegadorConSesionesNumeradas();
+    const base = conPlantilla(pasosBloqueadosAlFinal(), CLASES_CON_ELIMINAR, {
+      determinista,
+      navegador,
+    });
+    const deps = yaDecidido(base, aprobacionDelOfrecimiento());
+
+    await correr(deps);
+
+    // La degradada se cerro y la nueva se abrio por la MISMA puerta que la primera: mismo contexto
+    // externo, mismo proxy y mismo pais pineado, con el pais observado verificado.
+    const abrir = navegador.abrirSesionParaTarea as unknown as ReturnType<typeof vi.fn>;
+    expect(abrir).toHaveBeenCalledTimes(2);
+    expect(abrir.mock.calls[1]?.[0]).toEqual(abrir.mock.calls[0]?.[0]);
+    expect(navegador.cerrarSesion).toHaveBeenCalledWith('ses-1');
+    // El motor libre corrio sobre la sesion NUEVA, no sobre la degradada.
+    const motor = deps.motor.ejecutar as unknown as ReturnType<typeof vi.fn>;
+    expect((motor.mock.calls[0]?.[0] as { sesionExternaId: string }).sesionExternaId).toBe('ses-2');
+  });
+});
+
 // --- SIMETRIA ENTRE LA PUBLICACION Y EL CONSUMO ---------------------------------------------------
 
 /**
