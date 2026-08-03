@@ -2061,6 +2061,12 @@
     "detalle": "Esta tarea se ejecuto con lo aprendido de una vez anterior, sin volver a analizar el sitio.",
     "reparada": "El sitio cambio y la tarea se ajusto sola."
   },
+  "procedimientoAjeno": {
+    "etiqueta": "Procedimiento de otra cuenta",
+    "detalle": "Esta tarea uso un procedimiento que otra cuenta ya habia descubierto en este sitio. Ningun dato tuyo salio de tu cuenta y ningun dato de la otra cuenta viajo contigo: solo el orden de los pasos.",
+    "corroborado": "Corroborado",
+    "corroboradoDetalle": "Varias cuentas independientes descubrieron y ejecutaron con exito este mismo procedimiento."
+  },
   "avisoTareaLenta": {
     "titulo": "Esta tarea esta tardando mas de lo normal",
     "detalle": "Lleva {{minutos}} minutos en ejecucion. Puedes esperar o terminarla.",

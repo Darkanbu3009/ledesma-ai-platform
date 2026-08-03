@@ -2060,6 +2060,12 @@
     "detalle": "This task ran using what was learned from a previous time, without analyzing the site again.",
     "reparada": "The site changed and the task adjusted itself."
   },
+  "procedimientoAjeno": {
+    "etiqueta": "Procedure from another account",
+    "detalle": "This task used a procedure another account had already discovered on this site. None of your data left your account and no data from the other account traveled with you: only the order of the steps.",
+    "corroborado": "Corroborated",
+    "corroboradoDetalle": "Several independent accounts discovered and successfully ran this same procedure."
+  },
   "avisoTareaLenta": {
     "titulo": "This task is taking longer than usual",
     "detalle": "It has been running for {{minutos}} minutes. You can wait or end it.",

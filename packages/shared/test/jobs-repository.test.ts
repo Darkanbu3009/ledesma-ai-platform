@@ -610,12 +610,45 @@ describe('JobsRepository', () => {
         // corrio con lo aprendido de una vez anterior.
         conLoAprendido: false,
         ajustadaSola: false,
+        // Y los de la ETIQUETA DE TRANSPARENCIA del consumo sin aprobacion (V041): false salvo en
+        // una tarea web que corrio con un procedimiento aprendido por otra cuenta.
+        conProcedimientoAjeno: false,
+        procedimientoCorroborado: false,
       });
       // Explicito: el resumen no filtra datos sensibles ni redundantes. `resultado` entero jamas
-      // sale del repositorio: solo los dos booleanos derivados de arriba.
+      // sale del repositorio: solo los booleanos derivados de arriba.
       expect(job).not.toHaveProperty('payload');
       expect(job).not.toHaveProperty('ownerId');
       expect(job).not.toHaveProperty('resultado');
+    });
+
+    it('LA ETIQUETA DE TRANSPARENCIA (V041): via plantilla_compartida y el estado de la fila', async () => {
+      const sql = makeSqlReturning([
+        makeSummaryRow({
+          id: 'j-ajena',
+          payload_kind: 'tarea_web',
+          resultado_via: 'plantilla_compartida',
+          resultado_plantilla_estado: 'candidata',
+        }),
+        makeSummaryRow({
+          id: 'j-corroborada',
+          payload_kind: 'tarea_web',
+          resultado_via: 'plantilla_compartida',
+          resultado_plantilla_estado: 'corroborada',
+        }),
+        makeSummaryRow({ id: 'j-receta', payload_kind: 'tarea_web', resultado_via: 'receta' }),
+      ]);
+      const jobs = await new JobsRepository(sql).listByOwner('user-1', { limit: 10, offset: 0 });
+      expect(
+        jobs.map((j) => [j.id, j.conProcedimientoAjeno, j.procedimientoCorroborado]),
+      ).toEqual([
+        ['j-ajena', true, false],
+        ['j-corroborada', true, true],
+        ['j-receta', false, false],
+      ]);
+      // El estado viaja como ESCALAR del resultado, nunca el resultado entero.
+      const texto = sqlText(sql);
+      expect(texto).toContain("resultado->'plantillaAjena'->>'estado' as resultado_plantilla_estado");
     });
   });
 

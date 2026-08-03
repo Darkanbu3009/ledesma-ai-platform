@@ -212,11 +212,13 @@ export function plantillaDeLaCorrida(entrada: {
 // --- CONSUMO -------------------------------------------------------------------------------------
 
 /**
- * EL ESTADO NO DECIDE EL CHECKPOINT. Que estados son SERVIBLES lo resuelve la query
- * (`buscarServible`, apps/backend/src/plantillas-compartidas): 'retirada' no sale nunca. Lo que se
- * decide aqui es otra cosa: el checkpoint de aprobacion humana es INCONDICIONAL para toda plantilla
- * ajena, sea cual sea su estado. Hoy eso es equivalente (nadie escribe 'corroborada' todavia) y
- * ejecutar un procedimiento ajeno sin que su dueno lo vea seria decidir por el.
+ * SIN CHECKPOINT DE APROBACION HUMANA, por decision de producto: el consentimiento vive en los
+ * documentos legales que el usuario acepto al conectar sitios, y la proteccion en runtime es TECNICA
+ * (las puertas de `plantillaAplicable`, la barrera de identidad en modo activa, la verificacion
+ * determinista y el retiro automatico). Que estados son SERVIBLES lo resuelve la query
+ * (`buscarServible`, apps/backend/src/plantillas-compartidas): 'retirada' no sale nunca. Una
+ * plantilla servible que ademas pasa `plantillaAplicable` se ejecuta DIRECTO; la transparencia es
+ * obligatoria y viaja en el resultado del job y en la tarjeta de /actividad.
  */
 
 /** La CLAVE de tres columnas con la que un consumidor busca su plantilla. */
@@ -436,9 +438,12 @@ export function plantillaAplicable(entrada: {
 }
 
 /**
- * MOTIVO NUEVO de `aprobaciones_web` (V027): el checkpoint con el que se le OFRECE al usuario un
- * procedimiento que descubrio OTRA cuenta. Viaja como PREFIJO de `descripcion` porque `accion_tipo`
- * tiene un CHECK cerrado de dos valores y este cambio no trae migracion; el precedente exacto es
+ * MOTIVO LEGADO de `aprobaciones_web` (V027): el checkpoint con el que se le OFRECIA al usuario un
+ * procedimiento que descubrio OTRA cuenta. El checkpoint de plantillas YA NO SE CREA (el consumo
+ * ejecuta directo), pero el codigo de lectura se conserva para las filas que quedaron persistidas
+ * antes del cambio: la consola y el correo de aprobaciones las siguen mostrando, y el gate de
+ * reanudacion las detecta para NO tratarlas como un checkpoint clasico. Viaja como PREFIJO de
+ * `descripcion` porque `accion_tipo` tiene un CHECK cerrado de dos valores; el precedente exacto es
  * INSTRUCCION_CANCELADA_POR_USUARIO (aprobaciones-repository.ts), que ya usa una columna de texto como
  * marca de maquina.
  *

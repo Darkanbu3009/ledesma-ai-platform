@@ -44,6 +44,14 @@ export interface JobActivity {
   /** Ademas, el sitio habia cambiado y la tarea se ajusto sola. */
   ajustadaSola?: boolean;
   /**
+   * ETIQUETA DE TRANSPARENCIA: la tarea uso un procedimiento aprendido por OTRA cuenta (plantilla
+   * compartida). No hubo aprobacion previa, asi que la tarjeta SIEMPRE lo dice. Lo deriva el backend
+   * de jobs.resultado; aqui solo se pinta.
+   */
+  conProcedimientoAjeno?: boolean;
+  /** Ademas, ese procedimiento ya estaba corroborado por varias cuentas independientes. */
+  procedimientoCorroborado?: boolean;
+  /**
    * La tarea web termino con exito corriendo con el motor y su registro alcanza para GUARDARLA como
    * tarea aprendida (todavia sin guardar). Lo deriva el backend; ausente = no ofrecer el boton.
    */

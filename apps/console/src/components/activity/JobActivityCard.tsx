@@ -208,6 +208,26 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
                   {t('receta.etiqueta')}
                 </span>
               )}
+              {/* PROCEDIMIENTO DE OTRA CUENTA (etiqueta de transparencia): la tarea corrio con una
+                  plantilla compartida, sin aprobacion previa, asi que la tarjeta SIEMPRE lo dice.
+                  Si la plantilla ya estaba corroborada por varias cuentas, se dice tambien. */}
+              {job.conProcedimientoAjeno === true && (
+                <span
+                  title={t('procedimientoAjeno.detalle')}
+                  className="inline-flex flex-none items-center gap-1 rounded-full border border-brasa-line bg-brasa-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brasa"
+                >
+                  <Sparkles className="h-3 w-3" />
+                  {t('procedimientoAjeno.etiqueta')}
+                </span>
+              )}
+              {job.procedimientoCorroborado === true && (
+                <span
+                  title={t('procedimientoAjeno.corroboradoDetalle')}
+                  className="inline-flex flex-none items-center gap-1 rounded-full border border-ok/30 bg-ok/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ok"
+                >
+                  {t('procedimientoAjeno.corroborado')}
+                </span>
+              )}
             </div>
 
             {job.conLoAprendido === true && (
@@ -215,6 +235,10 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
                 {t('receta.detalle')}
                 {job.ajustadaSola === true ? ` ${t('receta.reparada')}` : ''}
               </p>
+            )}
+
+            {job.conProcedimientoAjeno === true && (
+              <p className="mt-1 text-[12px] text-muted">{t('procedimientoAjeno.detalle')}</p>
             )}
 
             <div className="mt-1.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[12.5px] text-muted">
