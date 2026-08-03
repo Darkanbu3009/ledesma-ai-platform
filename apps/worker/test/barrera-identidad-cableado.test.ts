@@ -284,8 +284,8 @@ describe("modo activa: el bloqueo abandona la receta y la tarea la termina el mo
 
     expect(resultado.desenlace.tipo).toBe('abandonada');
     // La receta NO se declara obsoleta: no es que ya no describa el sitio, es que no se pudo
-    // confirmar la identidad del elemento de ese paso.
-    expect(resultado.desenlace).toMatchObject({ obsoleta: false });
+    // confirmar la identidad del elemento de ese paso. La causa estructurada dice quien abandono.
+    expect(resultado.desenlace).toMatchObject({ obsoleta: false, causa: 'barrera' });
     // La escritura si corrio; el paso irreversible NO llego al navegador.
     expect(ejecutados).toHaveLength(1);
     expect(resultado.pasos.at(-1)?.accion.tipo).toBe('identidad:bloqueada');

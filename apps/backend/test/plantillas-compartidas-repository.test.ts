@@ -392,23 +392,39 @@ describe('buscarServible: la lectura del consumo', () => {
 });
 
 describe('registrarEjecucion: los contadores agregados', () => {
-  it('un EXITO suma a exitosas y pone los fallos seguidos en cero', async () => {
+  it('un EXITO suma a exitosas, pone los fallos seguidos en cero y LIMPIA el motivo (V042)', async () => {
     const sql = makeSql([[]]);
     await new PlantillasCompartidasRepository(sql).registrarEjecucion('p-1', true);
     const [texto, valores] = sql.queries[0] as [string, unknown[]];
     expect(texto).toContain('ejecuciones_exitosas = ejecuciones_exitosas + ');
     expect(texto).toContain('fallos_consecutivos = case when ');
-    // 1 al contador de exitos, 0 al de fallos, 1 al discriminante del case, y el id.
-    expect(valores).toEqual([1, 0, 1, 'p-1']);
+    expect(texto).toContain('ultima_falla_motivo = ');
+    // 1 al contador de exitos, 0 al de fallos, 1 al discriminante del case, el motivo limpio y el id.
+    expect(valores).toEqual([1, 0, 1, null, 'p-1']);
     // NO toca el estado: la promocion y el retiro son decisiones aparte.
     expect(texto).not.toContain('estado =');
   });
 
-  it('un FALLO suma a fallidas y acumula los fallos seguidos', async () => {
+  it('un FALLO suma a fallidas, acumula los fallos seguidos y persiste su motivo (V042)', async () => {
     const sql = makeSql([[]]);
-    await new PlantillasCompartidasRepository(sql).registrarEjecucion('p-1', false);
+    await new PlantillasCompartidasRepository(sql).registrarEjecucion('p-1', false, 'barrera_bloqueada');
     const [, valores] = sql.queries[0] as [string, unknown[]];
-    expect(valores).toEqual([0, 1, 0, 'p-1']);
+    expect(valores).toEqual([0, 1, 0, 'barrera_bloqueada', 'p-1']);
+  });
+
+  it('un fallo SIN motivo (o con uno fuera del vocabulario) persiste NULL, no revienta', async () => {
+    const sql = makeSql([[], []]);
+    const repo = new PlantillasCompartidasRepository(sql);
+    await repo.registrarEjecucion('p-1', false);
+    await repo.registrarEjecucion('p-1', false, 'cualquier cosa' as never);
+    expect((sql.queries[0] as [string, unknown[]])[1]).toEqual([0, 1, 0, null, 'p-1']);
+    expect((sql.queries[1] as [string, unknown[]])[1]).toEqual([0, 1, 0, null, 'p-1']);
+  });
+
+  it('un motivo en un EXITO no se persiste: el exito siempre limpia', async () => {
+    const sql = makeSql([[]]);
+    await new PlantillasCompartidasRepository(sql).registrarEjecucion('p-1', true, 'abandonada');
+    expect((sql.queries[0] as [string, unknown[]])[1]).toEqual([1, 0, 1, null, 'p-1']);
   });
 });
 

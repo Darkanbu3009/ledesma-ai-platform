@@ -1097,7 +1097,8 @@ describe('ejecucion de la plantilla aprobada', () => {
     });
 
     expect(recetas.promover).not.toHaveBeenCalled();
-    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-1', false);
+    // V042: el fallo viaja con su motivo del vocabulario cerrado.
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-1', false, 'sin_efecto');
   });
 
   it('FIXTURE REAL (3 ago 2026): una pulsacion intermedia NO bloquea la barrera y la plantilla corre entera', async () => {
@@ -1157,7 +1158,29 @@ describe('ejecucion de la plantilla aprobada', () => {
     // LA ASERCION CENTRAL: la escalada al modelo no ocurre por este camino.
     expect(escalador.ejecutarPasoConModelo).not.toHaveBeenCalled();
     expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
-    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-1', false);
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-1', false, 'abandonada');
+  });
+
+  it('una sesion que LANZA a mitad de la ejecucion se contabiliza como falla de sesion (V042)', async () => {
+    const determinista = {
+      ejecutarPasoDeterminista: vi.fn(async () => {
+        throw new Error('timeout esperando la respuesta CDP de Input.insertText');
+      }),
+      leerEstrategiasDeElemento: vi.fn(async () => []),
+      localizarBotonPorAriaLabel: vi.fn(async () => null),
+    };
+    const base = conPlantilla(pasosDeLaPlantilla(), CLASES_DEL_PROCEDIMIENTO, {
+      determinista,
+      navegador: makeNavegador(false),
+    });
+    const deps = yaDecidido(base, aprobacionDelOfrecimiento());
+    const plantillas = deps.plantillas as unknown as {
+      repo: { registrarEjecucion: ReturnType<typeof vi.fn> };
+    };
+
+    await correr(deps);
+
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith('plantilla-1', false, 'sesion');
   });
 
   it('FIXTURE HOSTIL: el paso final apunta a otro control y la barrera lo bloquea antes de accionar', async () => {
@@ -1195,6 +1218,15 @@ describe('ejecucion de la plantilla aprobada', () => {
     expect(deps.barreraIdentidad).toBeUndefined();
     // La tarea la termina el motor libre, que era la linea base.
     expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+    // V042: el fallo queda contabilizado CON su motivo, el que alimenta el retiro.
+    const plantillas = deps.plantillas as unknown as {
+      repo: { registrarEjecucion: ReturnType<typeof vi.fn> };
+    };
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith(
+      'plantilla-1',
+      false,
+      'barrera_bloqueada',
+    );
   });
 });
 

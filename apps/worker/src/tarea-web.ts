@@ -71,7 +71,12 @@ import {
   type TrayectoriaNueva,
 } from './trayectoria.js';
 import type { NuevaRecetaWeb, RecetaWeb } from '@ledesma-platform/backend/recetas-web';
-import type { EstrategiaLocalizacion, MarcadorParametro, PasoDeReceta } from '@ledesma-platform/shared';
+import type {
+  EstrategiaLocalizacion,
+  MarcadorParametro,
+  MotivoDeFallaDePlantilla,
+  PasoDeReceta,
+} from '@ledesma-platform/shared';
 import {
   ejecutarReceta,
   recetaAplicable,
@@ -611,8 +616,11 @@ export interface RepositorioPlantillasParaWorker {
     codigoDeIntencion: string;
     marcadoresPosibles: readonly string[];
   }): Promise<{ corte: string; origenes: number | null }>;
-  /** Contadores agregados de como le fue. Best-effort: su fallo no cambia el desenlace del job. */
-  registrarEjecucion?(id: string, exitosa: boolean): Promise<void>;
+  /**
+   * Contadores agregados de como le fue. Best-effort: su fallo no cambia el desenlace del job.
+   * `motivo` (V042): por que fallo el ultimo intento, con el vocabulario cerrado del contrato.
+   */
+  registrarEjecucion?(id: string, exitosa: boolean, motivo?: MotivoDeFallaDePlantilla): Promise<void>;
 }
 
 /** Dependencias del job de tarea web. index.ts cablea las reales; los tests pasan fakes. */
@@ -3226,17 +3234,23 @@ async function confirmarEfectoDeLaPlantilla(
   return false;
 }
 
-/** Contadores agregados de la plantilla. Best-effort: el desenlace del job ya esta decidido. */
+/**
+ * Contadores agregados de la plantilla. Best-effort: el desenlace del job ya esta decidido.
+ * `motivo` (V042) dice por que fallo el ultimo intento, con el vocabulario cerrado del contrato;
+ * solo viaja en los fallos, y un exito lo limpia en la fila.
+ */
 async function registrarEjecucionDePlantillaBestEffort(
   deps: TareaWebDeps,
   job: Job,
   plantillaId: string,
   exitosa: boolean,
+  motivo?: MotivoDeFallaDePlantilla,
 ): Promise<void> {
   const registrar = deps.plantillas?.repo.registrarEjecucion;
   if (registrar === undefined || deps.plantillas === undefined) return;
   try {
-    await registrar.call(deps.plantillas.repo, plantillaId, exitosa);
+    if (motivo === undefined) await registrar.call(deps.plantillas.repo, plantillaId, exitosa);
+    else await registrar.call(deps.plantillas.repo, plantillaId, exitosa, motivo);
   } catch (error) {
     deps.logger.warn('tarea web: no se pudo contabilizar la plantilla (se ignora, best-effort)', {
       jobId: job.id,
@@ -3441,7 +3455,20 @@ async function ejecutarPorPlantilla(
     return { tipo: 'completada' };
   }
 
-  await registrarEjecucionDePlantillaBestEffort(deps, job, plantilla.id, false);
+  // EL MOTIVO DEL FALLO (V042), derivado del desenlace con el vocabulario cerrado del contrato:
+  // corrio entera sin efecto confirmado -> 'sin_efecto'; la barrera bloqueo un paso ->
+  // 'barrera_bloqueada'; el navegador lanzo al ejecutar (sesion caida o CDP sin respuesta) ->
+  // 'sesion'; cualquier otro abandono determinista -> 'abandonada'. Es lo que alimenta el retiro.
+  const causa =
+    resultado.desenlace.tipo === 'abandonada' ? (resultado.desenlace.causa ?? null) : null;
+  const motivoDeFalla: MotivoDeFallaDePlantilla = completada
+    ? 'sin_efecto'
+    : causa === 'barrera'
+      ? 'barrera_bloqueada'
+      : causa === 'navegador'
+        ? 'sesion'
+        : 'abandonada';
+  await registrarEjecucionDePlantillaBestEffort(deps, job, plantilla.id, false, motivoDeFalla);
 
   if (completada) {
     // Corrio entera y el sitio NO muestra que la accion surtiera efecto. NO se copia como receta (el
