@@ -792,7 +792,18 @@
     },
     "heroShowcase": {
       "tusSistemas": "Your systems",
-      "logoAlt": "{{name}} logo"
+      "logoAlt": "{{name}} logo",
+      "diaADia": {
+        "titulo": "Your everyday apps",
+        "mensajes": "Messages",
+        "correo": "Email",
+        "compras": "Shopping",
+        "redesSociales": "Social media",
+        "vuelos": "Flights",
+        "aerolineas": "Airlines",
+        "masLinea": "X, e-commerce and more",
+        "voltearAria": "Two-sided card: your work systems and your everyday apps. Press to flip."
+      }
     },
     "brainSwap": {
       "cartaAria": "Interchangeable model: the AI model switches between Claude, ChatGPT, and open source models without rebuilding the agent. Active model: {{label}}.",

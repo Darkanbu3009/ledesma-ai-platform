@@ -1,7 +1,7 @@
 import { type CSSProperties, type JSX, useCallback, useEffect, useRef, useState } from 'react';
-import { useTranslation } from 'react-i18next';
 import { BrainSwap, type ModelProvider } from './brain-swap';
 import { PixelDataFlow } from './pixel-data-flow';
+import { SystemsFlipCard } from './systems-flip-card';
 
 /**
  * Proveedores de modelo (orden del mockup: Claude, ChatGPT y "Open source"). Cada uno
@@ -28,19 +28,6 @@ const CYCLE_MS = 2600;
  */
 const FLIP_OUT_MS = 240;
 const FLIP_IN_MS = 260;
-
-/**
- * Sistemas conectados de la tarjeta izquierda. Las rutas apuntan a los logos ya cargados
- * en `frontend/public/` y se respetan tal cual (mayusculas incluidas). "Power BI" lleva
- * un espacio en el nombre del archivo, por eso va codificado (%20).
- */
-const SYSTEMS = [
-  { src: '/Oracle.png', name: 'Oracle', sub: 'ERP' },
-  { src: '/SAP.png', name: 'SAP', sub: 'S/4HANA' },
-  { src: '/Salesforce.png', name: 'Salesforce', sub: 'CRM' },
-  { src: '/Microsoft.png', name: 'Microsoft 365', sub: 'Email & Docs' },
-  { src: '/Power%20BI.png', name: 'Power BI', sub: 'Analytics' }
-] as const;
 
 /**
  * Geometria de las lineas conectoras (SVG en el carril central, viewBox 0..100 con
@@ -72,51 +59,9 @@ const nodeStyle: CSSProperties = {
   transition: 'background-color 500ms, box-shadow 500ms'
 };
 
-/** Tarjeta "Tus sistemas": cinco filas (logo + nombre + subtitulo + estado). */
-function SystemsCard(): JSX.Element {
-  const { t } = useTranslation();
-
-  return (
-    <div className="flex w-full flex-col rounded-2xl border border-border bg-background-secondary p-3 shadow-md min-[1100px]:w-[180px] min-[1100px]:flex-shrink-0">
-      <div className="flex h-6 items-center px-1">
-        <span className="font-jetbrains text-[0.7rem] uppercase tracking-[0.18em] text-foreground-secondary">
-          {t('landing.heroShowcase.tusSistemas')}
-        </span>
-      </div>
-      <ul className="flex flex-1 flex-col" role="list">
-        {SYSTEMS.map((system) => (
-          <li key={system.name} className="flex flex-1 items-center gap-2.5 px-1 py-2">
-            {/* El recuadro del logo se mantiene OSCURO aunque la landing sea clara:
-                los PNG (Oracle, SAP, Salesforce, Copilot, Power BI) estan pensados
-                para fondo oscuro y algunos (Power BI amarillo, el centro claro de
-                Copilot) pierden contraste sobre crema. Un chip oscuro uniforme los
-                deja todos legibles y se ve intencional. */}
-            <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-[#26241F]">
-              <img
-                src={system.src}
-                alt={t('landing.heroShowcase.logoAlt', { name: system.name })}
-                className="h-[22px] w-[22px] object-contain"
-                loading="lazy"
-                decoding="async"
-              />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block font-display text-[0.8rem] font-semibold leading-tight text-foreground">
-                {system.name}
-              </span>
-              <span className="block text-[0.7rem] text-foreground-secondary">
-                {system.sub}
-              </span>
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 /**
- * HeroShowcase: lado derecho del hero. A la izquierda la tarjeta "Tus sistemas"; a la
+ * HeroShowcase: lado derecho del hero. A la izquierda la tarjeta "Tus sistemas" de dos
+ * caras (SystemsFlipCard, con su propio ciclo de giro independiente de este timer); a la
  * derecha la carta giratoria del modelo (`BrainSwap`); en medio, un carril con las lineas
  * conectoras que van de los sistemas hacia la carta y convergen en un nodo.
  *
@@ -218,7 +163,7 @@ export function HeroShowcase(): JSX.Element {
     >
       <style>{FLOW_KEYFRAME}</style>
 
-      <SystemsCard />
+      <SystemsFlipCard />
 
       {/* Carril central con las lineas conectoras (solo en escritorio, donde hay sitio). */}
       <div className="relative hidden w-20 flex-shrink-0 min-[1100px]:block" aria-hidden="true">

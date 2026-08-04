@@ -792,7 +792,18 @@
     },
     "heroShowcase": {
       "tusSistemas": "Tus sistemas",
-      "logoAlt": "Logo de {{name}}"
+      "logoAlt": "Logo de {{name}}",
+      "diaADia": {
+        "titulo": "Tu día a día",
+        "mensajes": "Mensajes",
+        "correo": "Correo",
+        "compras": "Compras",
+        "redesSociales": "Redes sociales",
+        "vuelos": "Vuelos",
+        "aerolineas": "Aerolíneas",
+        "masLinea": "X, comercio electrónico y más",
+        "voltearAria": "Tarjeta de dos caras: tus sistemas de trabajo y tus aplicaciones de todos los días. Pulsa para girar."
+      }
     },
     "brainSwap": {
       "cartaAria": "Modelo intercambiable: el modelo de IA cambia entre Claude, ChatGPT y modelos open source sin rehacer el agente. Modelo activo: {{label}}.",
