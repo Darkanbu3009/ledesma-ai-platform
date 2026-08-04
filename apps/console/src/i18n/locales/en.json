@@ -172,6 +172,11 @@
     "estadoError": {
       "revisaConexion": "Check your connection and try again."
     },
+    "scrollInfinito": {
+      "cargando": "Loading more results",
+      "finDeLista": "No more results",
+      "error": "We could not load more results"
+    },
     "copiar": {
       "copiar": "Copy",
       "copiado": "Copied",
@@ -1657,7 +1662,6 @@
     },
     "actualizando": "Refreshing",
     "errorCargar": "We couldn't load your activity",
-    "cargarMas": "Load more",
     "errorAmable": {
       "generico": "The task could not be completed.",
       "detalleTecnico": "Technical detail"

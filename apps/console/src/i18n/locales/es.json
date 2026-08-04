@@ -172,6 +172,11 @@
     "estadoError": {
       "revisaConexion": "Revisa tu conexión e intenta de nuevo."
     },
+    "scrollInfinito": {
+      "cargando": "Cargando mas resultados",
+      "finDeLista": "No hay mas resultados",
+      "error": "No pudimos cargar mas resultados"
+    },
     "copiar": {
       "copiar": "Copiar",
       "copiado": "Copiado",
@@ -1657,7 +1662,6 @@
     },
     "actualizando": "Actualizando",
     "errorCargar": "No pudimos cargar tu actividad",
-    "cargarMas": "Cargar mas",
     "errorAmable": {
       "generico": "La tarea no se pudo completar.",
       "detalleTecnico": "Detalle tecnico"
