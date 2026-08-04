@@ -1,16 +1,18 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Activity, Loader2, RefreshCw } from 'lucide-react';
+import { Activity, Loader2 } from 'lucide-react';
 import { useAgents, useAprobacionesPendientes, useJobs } from '../lib/queries';
 import { AprobacionDialog } from '../components/aprobaciones/AprobacionDialog';
 import { playgroundPath } from '../lib/agents';
 import { JOB_STATUS_FILTERS, type JobStatusFilter } from '../lib/jobs';
+import { unirPaginasPorId } from '../hooks/useInfiniteScroll';
 import { ActivityGhostTable } from '../components/activity/ActivityGhostTable';
 import { JobActivityCard } from '../components/activity/JobActivityCard';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SkeletonList } from '../components/ui/SkeletonList';
 import { ErrorState } from '../components/ui/ErrorState';
 import { EmptyState } from '../components/ui/EmptyState';
+import { InfiniteListFooter } from '../components/ui/InfiniteListFooter';
 
 /** Fila de chips para filtrar el historial por estado. */
 function StatusFilterBar({
@@ -72,7 +74,8 @@ function ActivityEmptyState({ filtered, ctaTo }: { filtered: boolean; ctaTo: str
 /**
  * Pagina ACTIVIDAD (/actividad): historial de ejecuciones autonomas (jobs) del usuario, SOLO LECTURA.
  * Muestra que agente corrio, el tipo (receta/mensaje), el estado, las fechas, los intentos y el error si
- * fallo. Filtrable por estado y paginada con "cargar mas". Auto-refresh prudente (lo maneja useJobs: solo
+ * fallo. Filtrable por estado y con SCROLL INFINITO (useInfiniteScroll + InfiniteListFooter: la pagina
+ * siguiente entra sola al acercarse el final de la lista). Auto-refresh prudente (lo maneja useJobs: solo
  * reconsulta si hay jobs en vuelo). SIN gate por tier: ver el historial propio es para todos los planes.
  */
 export function ActivityPage() {
@@ -103,7 +106,10 @@ export function ActivityPage() {
     [agents],
   );
 
-  const jobs = useMemo(() => data?.pages.flatMap((page) => page.jobs) ?? [], [data]);
+  // La paginacion del backend es por OFFSET sobre una lista que crece por arriba: si entra una
+  // corrida nueva mientras el usuario lee, la ventana se corre y un job puede repetirse entre dos
+  // paginas. Se deduplica por id al concatenar (ver unirPaginasPorId).
+  const jobs = useMemo(() => unirPaginasPorId(data?.pages.map((page) => page.jobs)), [data]);
   // Destino del CTA del estado vacio: el Playground pide un agente existente, asi que va al del
   // primer agente si ya hay alguno (useAgents ya esta cargado arriba) y a /agentes si no.
   const [firstAgent] = agents ?? [];
@@ -136,11 +142,16 @@ export function ActivityPage() {
 
       {listLoading ? (
         <SkeletonList cardClassName="h-[104px]" />
-      ) : isError ? (
-        <ErrorState title={t('actividad.errorCargar')} onRetry={() => void refetch()} />
       ) : !hasJobs ? (
-        <ActivityEmptyState filtered={status !== 'all'} ctaTo={emptyCtaTo} />
+        isError ? (
+          <ErrorState title={t('actividad.errorCargar')} onRetry={() => void refetch()} />
+        ) : (
+          <ActivityEmptyState filtered={status !== 'all'} ctaTo={emptyCtaTo} />
+        )
       ) : (
+        // Con tarjetas ya visibles, un fallo NO reemplaza la lista por el ErrorState: es el fallo de
+        // UNA pagina y se resuelve en el pie, con Reintentar. El ErrorState de arriba queda para el
+        // caso en que no se pudo cargar nada.
         <div className="mt-6 space-y-3">
           {jobs.map((job) => (
             <JobActivityCard
@@ -149,21 +160,12 @@ export function ActivityPage() {
               agentName={job.agentId !== null ? (agentsById.get(job.agentId) ?? null) : null}
             />
           ))}
-          {hasNextPage && (
-            <button
-              type="button"
-              onClick={() => void fetchNextPage()}
-              disabled={isFetchingNextPage}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl border-[1.5px] border-dashed border-line p-4 text-sm font-semibold text-muted transition hover:border-brasa-line hover:bg-brasa/[0.03] hover:text-brasa disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isFetchingNextPage ? (
-                <Loader2 className="h-[18px] w-[18px] animate-spin" />
-              ) : (
-                <RefreshCw className="h-[18px] w-[18px]" />
-              )}
-              {t('actividad.cargarMas')}
-            </button>
-          )}
+          <InfiniteListFooter
+            hasNextPage={hasNextPage}
+            isFetchingNextPage={isFetchingNextPage}
+            fetchNextPage={() => void fetchNextPage()}
+            hasError={isError}
+          />
         </div>
       )}
 
