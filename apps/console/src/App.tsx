@@ -32,6 +32,7 @@ import { ConsentGate } from './components/ConsentGate';
 import { AdminGate } from './components/AdminGate';
 import { AppLayout } from './components/layout/AppLayout';
 import { AdminUsersPage } from './pages/AdminUsersPage';
+import { useScrollAlTopeEnNavegacion } from './lib/scroll-al-tope';
 
 // El Panel carga Recharts (pesado). Se importa de forma diferida para que su codigo NO entre al bundle
 // inicial: solo se descarga al entrar a /dashboard, dejando el resto de la consola sin ese peso.
@@ -55,6 +56,10 @@ function DashboardChunkFallback() {
 }
 
 export function App() {
+  // Toda navegacion del router arranca en el tope (salvo atras/adelante y anclas): la landing y la
+  // consola son la misma SPA, asi que sin esto el scroll de una vista se hereda a la siguiente.
+  useScrollAlTopeEnNavegacion();
+
   return (
     <Routes>
       {/* Landing publica de marketing: unica vista sin sesion requerida. Si hay sesion activa,
