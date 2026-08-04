@@ -116,9 +116,11 @@ export function Sidebar({
         )}
       </div>
 
-      {/* overflow-hidden + nowrap: durante la transicion de ancho las etiquetas no se envuelven
-          ni se derraman fuera del rail (el popover del UserMenu vive fuera de este nav). */}
-      <nav className="mt-7 flex-1 space-y-1 overflow-hidden whitespace-nowrap">
+      {/* overflow-x-hidden + nowrap: durante la transicion de ancho las etiquetas no se envuelven
+          ni se derraman fuera del rail (el popover del UserMenu vive fuera de este nav).
+          overflow-y-auto + min-h-0: si la ventana es mas baja que la lista, el scroll ocurre AQUI
+          dentro y el bloque de usuario de abajo sigue anclado y visible. */}
+      <nav className="mt-7 min-h-0 flex-1 space-y-1 overflow-y-auto overflow-x-hidden whitespace-nowrap">
         {items.map((item) => (
           <NavLink
             key={item.to}

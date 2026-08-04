@@ -16,7 +16,11 @@ export function AppLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
   return (
-    <div className="flex min-h-screen">
+    // En escritorio el alto se clava al viewport y la raiz no scrollea: el unico contenedor con
+    // scroll vertical de pagina es el <main> de la derecha. Asi el sidebar (que estira a la altura
+    // de esta raiz) queda fijo en pantalla con su bloque de usuario anclado abajo. Bajo md todo
+    // sigue igual que antes (min-h-screen y scroll del documento): el patron movil es el drawer.
+    <div className="flex min-h-screen md:h-screen md:overflow-hidden">
       <div
         className={[
           'hidden md:block md:flex-shrink-0 transition-[width] duration-200 ease-in-out',
@@ -51,7 +55,10 @@ export function AppLayout() {
           </button>
           <span className="font-display font-semibold text-ink">Ledesma AI Labs</span>
         </header>
-        <main className="flex-1 px-6 py-8 sm:px-8 lg:px-10">
+        {/* min-h-0 deja que este flex item baje de su alto de contenido; sin el, overflow-y-auto no
+            scrollearia y el contenido volveria a empujar la pagina. Ambas clases con prefijo md
+            para no tocar el scroll del documento en movil. */}
+        <main className="flex-1 px-6 py-8 sm:px-8 md:min-h-0 md:overflow-y-auto lg:px-10">
           {/* Aviso global de checkpoints de aprobacion pendientes (7.1e); el modal vive en /actividad. */}
           <AprobacionBanner />
           <Outlet />
