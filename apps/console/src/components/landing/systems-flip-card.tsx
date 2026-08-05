@@ -9,7 +9,6 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plane } from 'lucide-react';
-import { siFacebook, siGmail, siWhatsapp } from 'simple-icons';
 import { cn } from '../../lib/utils';
 
 /** Cadencia del giro automatico entre las dos caras de la tarjeta. */
@@ -28,10 +27,9 @@ const SYSTEMS = [
   { src: '/Power%20BI.png', name: 'Power BI', sub: 'Analytics' }
 ] as const;
 
-/** Icono de una fila de la cara B: logo de marca empaquetado, inicial de marca o avion. */
+/** Icono de una fila de la cara B: logo oficial de marca (asset local) o avion generico. */
 type IconoDiaADia =
-  | { tipo: 'logo'; path: string; hex: string }
-  | { tipo: 'inicial'; letra: string; hex: string }
+  | { tipo: 'logo'; src: string; chipClaro?: boolean }
   | { tipo: 'avion' };
 
 interface AppDiaADia {
@@ -44,37 +42,37 @@ interface AppDiaADia {
 }
 
 /**
- * Apps de la cara B (la de personas). Los logos de marca salen de simple-icons, el mismo
- * paquete ya usado por el catalogo de sitios (lib/logos-catalogo.ts): WhatsApp, Gmail y
- * Facebook existen en la v16 instalada. Amazon fue retirado upstream de simple-icons
- * (ver lib/catalogo-sitios.ts), asi que usa la inicial sobre el mismo chip, tenida con el
- * naranja aproximado de marca que ya usa coloresFallback para amazon_mx. El avion es del
- * set generico del proyecto (lucide).
+ * Apps de la cara B (la de personas). Los logos son los oficiales de cada marca, como
+ * assets estaticos en `public/` por la misma via y convencion de nombres que los de la
+ * cara A (SVG en lugar de PNG porque las marcas los publican vectoriales). La "a" de
+ * Amazon es negra, asi que su chip es claro (chipClaro) en vez del oscuro estandar: al
+ * ser un color fijo no cambia con el tema y la "a" contrasta en light y dark. El avion
+ * es del set generico del proyecto (lucide) por decision de diseno.
  */
 const DIA_A_DIA: readonly AppDiaADia[] = [
   {
     id: 'whatsapp',
     nombre: 'WhatsApp',
     subKey: 'landing.heroShowcase.diaADia.mensajes',
-    icono: { tipo: 'logo', path: siWhatsapp.path, hex: siWhatsapp.hex }
+    icono: { tipo: 'logo', src: '/WhatsApp.svg' }
   },
   {
     id: 'gmail',
     nombre: 'Gmail',
     subKey: 'landing.heroShowcase.diaADia.correo',
-    icono: { tipo: 'logo', path: siGmail.path, hex: siGmail.hex }
+    icono: { tipo: 'logo', src: '/Gmail.svg' }
   },
   {
     id: 'amazon',
     nombre: 'Amazon',
     subKey: 'landing.heroShowcase.diaADia.compras',
-    icono: { tipo: 'inicial', letra: 'A', hex: 'FF9900' }
+    icono: { tipo: 'logo', src: '/Amazon.svg', chipClaro: true }
   },
   {
     id: 'facebook',
     nombre: 'Facebook',
     subKey: 'landing.heroShowcase.diaADia.redesSociales',
-    icono: { tipo: 'logo', path: siFacebook.path, hex: siFacebook.hex }
+    icono: { tipo: 'logo', src: '/Facebook.svg' }
   },
   {
     id: 'vuelos',
@@ -92,33 +90,20 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-/** Icono de la cara B sobre el mismo chip oscuro de la cara A. */
-function IconoApp({ icono }: { icono: IconoDiaADia }): JSX.Element {
+/** Icono de la cara B con el mismo tratamiento (tamano, ajuste) que los logos de la cara A. */
+function IconoApp({ icono, alt }: { icono: IconoDiaADia; alt: string }): JSX.Element {
   if (icono.tipo === 'avion') {
     // Icono generico: sin color de marca, va en el hueso claro para leerse sobre el chip.
     return <Plane className="h-[22px] w-[22px] text-[#ECEBE7]" aria-hidden="true" />;
   }
-  if (icono.tipo === 'inicial') {
-    return (
-      <span
-        aria-hidden="true"
-        className="font-display text-[0.8rem] font-semibold"
-        style={{ color: `#${icono.hex}` }}
-      >
-        {icono.letra}
-      </span>
-    );
-  }
   return (
-    <svg
-      viewBox="0 0 24 24"
-      width={22}
-      height={22}
-      aria-hidden="true"
-      fill={`#${icono.hex}`}
-    >
-      <path d={icono.path} />
-    </svg>
+    <img
+      src={icono.src}
+      alt={alt}
+      className="h-[22px] w-[22px] object-contain"
+      loading="lazy"
+      decoding="async"
+    />
   );
 }
 
@@ -159,9 +144,10 @@ function Cara({ visible, reduceMotion, reverso = false, children }: CaraProps): 
 /**
  * Tarjeta "Tus sistemas" de dos caras. La cara A es la tarjeta de sistemas de empresa de
  * siempre (sin cambios); la cara B, "Tu dia a dia", cuenta el lado de personas con apps
- * cotidianas. Gira sobre su eje Y con perspectiva (mismo lenguaje 3D que la carta del
- * modelo) alternando caras cada 7s; hover o foco pausan el ciclo y clic/tap (o
- * Enter/Espacio) voltea al momento y reinicia la cuenta.
+ * cotidianas y es la que se ve al cargar. Gira sobre su eje Y con perspectiva (mismo
+ * lenguaje 3D que la carta del modelo) alternando caras cada 7s (el primer giro revela
+ * "Tus sistemas"); hover o foco pausan el ciclo y clic/tap (o Enter/Espacio) voltea al
+ * momento y reinicia la cuenta.
  *
  * Las lineas punteadas del carril central NO viven aqui: son un SVG hermano con geometria
  * fija (ver HeroShowcase), asi que el transform 3D de esta tarjeta no las toca y quedan
@@ -177,7 +163,11 @@ export function SystemsFlipCard(): JSX.Element {
   const { t } = useTranslation();
   // Se calcula una vez al montar, como el resto de animaciones del hero.
   const [reduceMotion] = useState(prefersReducedMotion);
-  const [flipped, setFlipped] = useState(false);
+  // Arranca en true: la cara B ("Tu dia a dia") es la visible desde el primer render,
+  // sin flash de la cara A, porque el contenedor ya nace rotado 180 grados (no hay
+  // transicion inicial: el estilo se aplica en el primer pintado). El primer giro
+  // automatico revela "Tus sistemas" y de ahi alterna.
+  const [flipped, setFlipped] = useState(true);
 
   const hoverRef = useRef(false);
   const focusRef = useRef(false);
@@ -307,21 +297,37 @@ export function SystemsFlipCard(): JSX.Element {
             </span>
           </div>
           <ul className="flex min-h-0 flex-1 flex-col" role="list">
-            {DIA_A_DIA.map((app) => (
+            {DIA_A_DIA.map((app) => {
+              const nombre = app.nombreKey === undefined ? app.nombre : t(app.nombreKey);
+              return (
               <li key={app.id} className="flex min-h-0 flex-1 items-center gap-2.5 px-1 py-1.5">
-                <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-[#26241F]">
-                  <IconoApp icono={app.icono} />
+                {/* Mismo mosaico que la cara A (8x8, rounded-lg). El de Amazon es claro
+                    para que su "a" negra contraste; como es un color fijo (igual que el
+                    #26241F oscuro del resto), no se oscurece en dark mode. */}
+                <span
+                  className={cn(
+                    'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg',
+                    app.icono.tipo === 'logo' && app.icono.chipClaro === true
+                      ? 'bg-[#ECEBE7]'
+                      : 'bg-[#26241F]'
+                  )}
+                >
+                  <IconoApp
+                    icono={app.icono}
+                    alt={t('landing.heroShowcase.logoAlt', { name: nombre })}
+                  />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block font-display text-[0.8rem] font-semibold leading-tight text-foreground">
-                    {app.nombreKey === undefined ? app.nombre : t(app.nombreKey)}
+                    {nombre}
                   </span>
                   <span className="block text-[0.7rem] text-foreground-secondary">
                     {t(app.subKey)}
                   </span>
                 </span>
               </li>
-            ))}
+              );
+            })}
           </ul>
           <p className="px-1 pt-1 text-[0.65rem] leading-snug text-foreground-secondary">
             {t('landing.heroShowcase.diaADia.masLinea')}
