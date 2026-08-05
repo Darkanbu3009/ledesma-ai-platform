@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import i18n from '../src/i18n';
 import { SystemsFlipCard } from '../src/components/landing/systems-flip-card';
 
 /** Carpeta de assets estaticos de la consola, donde viven los logos de ambas caras. */
@@ -11,7 +12,6 @@ const PUBLIC_DIR = join(__dirname, '..', 'public');
 
 afterEach(() => {
   cleanup();
-  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -38,6 +38,19 @@ function cara(titulo: string): HTMLElement {
 const caraA = (): HTMLElement => cara('Tus sistemas');
 const caraB = (): HTMLElement => cara('Tu día a día');
 
+/**
+ * Renderiza la tarjeta controlando `ronda` como lo hace el hero: cada incremento simula
+ * una ronda completa del ciclo de modelos. Devuelve el avance de ronda y el spy de pausa.
+ */
+function renderTarjeta(): { avanzarRonda: (ronda: number) => void; onPauseChange: ReturnType<typeof vi.fn> } {
+  const onPauseChange = vi.fn();
+  const vista = render(<SystemsFlipCard ronda={0} onPauseChange={onPauseChange} />);
+  const avanzarRonda = (ronda: number): void => {
+    vista.rerender(<SystemsFlipCard ronda={ronda} onPauseChange={onPauseChange} />);
+  };
+  return { avanzarRonda, onPauseChange };
+}
+
 /** matchMedia falso: reporta prefers-reduced-motion: reduce activo. */
 function stubReducedMotion(): void {
   vi.stubGlobal('matchMedia', ((query: string) => ({
@@ -53,72 +66,56 @@ function stubReducedMotion(): void {
 }
 
 describe('SystemsFlipCard (tarjeta de dos caras del hero)', () => {
-  it('el primer render muestra "Tu dia a dia" y el ciclo alterna cada 7s; hover o foco detienen el timer', () => {
-    vi.useFakeTimers();
-    render(<SystemsFlipCard />);
+  it('el primer render muestra "Tu dia a dia" y cada ronda del ciclo de modelos voltea exactamente una vez', () => {
+    const { avanzarRonda } = renderTarjeta();
     // La cara B es la visible desde el primer render (sin flash de la cara A).
     expect(caraB()).toHaveAttribute('aria-hidden', 'false');
     expect(caraA()).toHaveAttribute('aria-hidden', 'true');
 
-    // El primer giro automatico revela "Tus sistemas".
+    // La primera ronda completa revela "Tus sistemas".
     act(() => {
-      vi.advanceTimersByTime(7000);
+      avanzarRonda(1);
     });
     expect(caraA()).toHaveAttribute('aria-hidden', 'false');
     expect(caraB()).toHaveAttribute('aria-hidden', 'true');
 
-    // Pausa por hover: con el puntero encima el timer queda parado.
-    fireEvent.mouseOver(tarjeta());
+    // La siguiente ronda vuelve a "Tu dia a dia": un giro por ronda, ni mas ni menos.
     act(() => {
-      vi.advanceTimersByTime(21000);
-    });
-    expect(caraA()).toHaveAttribute('aria-hidden', 'false');
-
-    // Al salir el puntero, la cuenta de 7s arranca de cero y vuelve a alternar.
-    fireEvent.mouseOut(tarjeta());
-    act(() => {
-      vi.advanceTimersByTime(7000);
+      avanzarRonda(2);
     });
     expect(caraB()).toHaveAttribute('aria-hidden', 'false');
+  });
+
+  it('hover y foco notifican la pausa al padre (que detiene el reloj compartido) y al salir la levantan', () => {
+    const { onPauseChange } = renderTarjeta();
+
+    fireEvent.mouseOver(tarjeta());
+    expect(onPauseChange).toHaveBeenLastCalledWith(true);
+    fireEvent.mouseOut(tarjeta());
+    expect(onPauseChange).toHaveBeenLastCalledWith(false);
 
     // Pausa por foco, mismo contrato que el hover.
     fireEvent.focus(tarjeta());
-    act(() => {
-      vi.advanceTimersByTime(21000);
-    });
-    expect(caraB()).toHaveAttribute('aria-hidden', 'false');
+    expect(onPauseChange).toHaveBeenLastCalledWith(true);
     fireEvent.blur(tarjeta());
-    act(() => {
-      vi.advanceTimersByTime(7000);
-    });
-    expect(caraA()).toHaveAttribute('aria-hidden', 'false');
+    expect(onPauseChange).toHaveBeenLastCalledWith(false);
   });
 
-  it('el clic voltea al momento y reinicia la cuenta del ciclo', () => {
-    vi.useFakeTimers();
-    render(<SystemsFlipCard />);
+  it('el clic voltea al momento y la siguiente ronda vuelve a girar normal (sin desincronizar)', () => {
+    const { avanzarRonda } = renderTarjeta();
 
-    act(() => {
-      vi.advanceTimersByTime(4000);
-    });
     fireEvent.click(tarjeta());
     expect(caraA()).toHaveAttribute('aria-hidden', 'false');
 
-    // La cuenta vieja (que vencia a los 3000ms restantes) quedo descartada: a los 6999ms
-    // del clic aun no gira y al cumplirse los 7000ms alterna de nuevo.
+    // El giro manual no toca el reloj: al cerrar la ronda en curso la tarjeta gira igual.
     act(() => {
-      vi.advanceTimersByTime(6999);
-    });
-    expect(caraA()).toHaveAttribute('aria-hidden', 'false');
-    act(() => {
-      vi.advanceTimersByTime(1);
+      avanzarRonda(1);
     });
     expect(caraB()).toHaveAttribute('aria-hidden', 'false');
   });
 
   it('la cara oculta va aria-hidden e inert (fuera del tab order) y la tarjeta es focusable', () => {
-    vi.useFakeTimers();
-    render(<SystemsFlipCard />);
+    renderTarjeta();
 
     expect(tarjeta()).toHaveAttribute('tabindex', '0');
     expect(caraA()).toHaveAttribute('aria-hidden', 'true');
@@ -133,15 +130,21 @@ describe('SystemsFlipCard (tarjeta de dos caras del hero)', () => {
     expect(caraA()).not.toHaveAttribute('inert');
   });
 
-  it('con prefers-reduced-motion no hay giro automatico y el cambio manual sigue funcionando', () => {
+  it('con prefers-reduced-motion no hay giro automatico (ignora las rondas) y el cambio manual sigue funcionando', () => {
     stubReducedMotion();
-    vi.useFakeTimers();
-    render(<SystemsFlipCard />);
+    const { avanzarRonda, onPauseChange } = renderTarjeta();
 
     act(() => {
-      vi.advanceTimersByTime(30000);
+      avanzarRonda(1);
+    });
+    act(() => {
+      avanzarRonda(2);
     });
     expect(caraB()).toHaveAttribute('aria-hidden', 'false');
+
+    // Sin giro que desalinear, el hover tampoco pausa la rotacion de modelos.
+    fireEvent.mouseOver(tarjeta());
+    expect(onPauseChange).not.toHaveBeenCalled();
 
     // El cambio manual queda disponible como crossfade (sin transform de rotacion).
     fireEvent.click(tarjeta());
@@ -150,8 +153,7 @@ describe('SystemsFlipCard (tarjeta de dos caras del hero)', () => {
   });
 
   it('la cara "Tu dia a dia" renderiza los logos oficiales como assets locales del repo', () => {
-    vi.useFakeTimers();
-    render(<SystemsFlipCard />);
+    renderTarjeta();
 
     // Cada marca aparece como <img> con su alt y apunta a un asset local (no CDN),
     // con la misma convencion de nombres que los logos de la cara A en public/.
@@ -167,5 +169,23 @@ describe('SystemsFlipCard (tarjeta de dos caras del hero)', () => {
       // El asset existe en el repo, junto a los PNG de la cara A.
       expect(existsSync(join(PUBLIC_DIR, src.slice(1)))).toBe(true);
     }
+  });
+
+  it('la cara "Tus sistemas" lleva su pie de cierre con la clave i18n en ES y EN', async () => {
+    renderTarjeta();
+
+    // ES (idioma por defecto de los tests): el pie vive dentro de la cara A.
+    const pieEs = screen.getByText('Plataformas, aplicaciones y más');
+    expect(caraA()).toContainElement(pieEs);
+
+    await act(async () => {
+      await i18n.changeLanguage('en');
+    });
+    expect(screen.getByText('Platforms, apps and more')).toBeInTheDocument();
+
+    // Se restaura el espanol para no contaminar otros archivos de tests.
+    await act(async () => {
+      await i18n.changeLanguage('es');
+    });
   });
 });

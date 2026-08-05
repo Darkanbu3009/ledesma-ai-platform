@@ -792,6 +792,7 @@
     },
     "heroShowcase": {
       "tusSistemas": "Tus sistemas",
+      "sistemasMasLinea": "Plataformas, aplicaciones y más",
       "logoAlt": "Logo de {{name}}",
       "diaADia": {
         "titulo": "Tu día a día",
