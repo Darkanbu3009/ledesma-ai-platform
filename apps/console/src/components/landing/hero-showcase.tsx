@@ -61,34 +61,46 @@ const nodeStyle: CSSProperties = {
 
 /**
  * HeroShowcase: lado derecho del hero. A la izquierda la tarjeta "Tus sistemas" de dos
- * caras (SystemsFlipCard, con su propio ciclo de giro independiente de este timer); a la
- * derecha la carta giratoria del modelo (`BrainSwap`); en medio, un carril con las lineas
- * conectoras que van de los sistemas hacia la carta y convergen en un nodo.
+ * caras (SystemsFlipCard); a la derecha la carta giratoria del modelo (`BrainSwap`); en
+ * medio, un carril con las lineas conectoras que van de los sistemas hacia la carta y
+ * convergen en un nodo.
  *
  * Este contenedor padre es el origen comun del acento: define `--panel-accent` en su raiz
  * y lo comparten la carta del modelo y el SVG de lineas/nodo. Tambien orquesta el cambio
  * de modelo (por timer cada ~2600ms y por clic en un chip), envolviendolo en el giro 3D de
  * la carta e intercambiando contenido/color en el punto medio (de perfil, invisible).
  *
+ * El timer del ciclo de modelos es ademas el RELOJ UNICO del hero: cada vez que el avance
+ * automatico cierra una ronda entera (vuelve al primer modelo) incrementa `ronda`, y la
+ * tarjeta de dos caras gira exactamente una vez por ronda. No hay un segundo timer que
+ * calibrar: si cambia la cadencia o la cantidad de modelos, el giro sigue alineado solo.
+ * El hover/foco sobre la tarjeta de dos caras pausa este mismo reloj (via `onPauseChange`),
+ * deteniendo ambas rotaciones a la vez para que nunca se desalineen.
+ *
  * Movimiento reducido: el cambio no gira (fundido simple, misma cadencia) y las lineas no
  * fluyen. En pantallas chicas (< 1100px) las dos tarjetas se apilan y las lineas se ocultan.
  */
 export function HeroShowcase(): JSX.Element {
   const [active, setActive] = useState(0);
+  // Rondas completas del ciclo de modelos; cada incremento voltea la tarjeta de dos caras.
+  const [ronda, setRonda] = useState(0);
 
   // Refs para orquestar el giro de forma imperativa, sin re-renderizar en cada fase.
   const cardRef = useRef<HTMLDivElement | null>(null);
   const activeRef = useRef(0); // espejo del indice activo, para leerlo desde el timer
   const flippingRef = useRef(false); // flag de "ocupado": evita que un giro se solape con otro
   const timersRef = useRef<number[]>([]); // timeouts del giro en curso, para limpiarlos al desmontar
+  const pausedRef = useRef(false); // pausa del reloj unico (hover/foco en la tarjeta de dos caras)
 
   /**
    * Unica via por la que cambia el modelo activo (timer y clic). Envuelve el cambio con el
    * giro 3D y hace el intercambio en el punto medio, con la tarjeta de perfil (invisible),
    * para ocultar el salto. Con `prefers-reduced-motion: reduce` no gira: cambio directo.
+   * Devuelve si el cambio ocurrio (false si se ignoro por un giro en curso), para que el
+   * timer solo cuente rondas realmente completadas.
    */
-  const swapTo = useCallback((next: number): void => {
-    if (flippingRef.current) return; // ya hay un giro en curso: se ignora hasta terminar
+  const swapTo = useCallback((next: number): boolean => {
+    if (flippingRef.current) return false; // ya hay un giro en curso: se ignora hasta terminar
 
     const card = cardRef.current;
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -97,7 +109,7 @@ export function HeroShowcase(): JSX.Element {
     if (!card || reduceMotion) {
       activeRef.current = next;
       setActive(next);
-      return;
+      return true;
     }
 
     flippingRef.current = true;
@@ -129,12 +141,19 @@ export function HeroShowcase(): JSX.Element {
       timersRef.current.push(inTimer);
     }, FLIP_OUT_MS);
     timersRef.current.push(outTimer);
+    return true;
   }, []);
 
   useEffect(() => {
-    // El ciclado conserva su cadencia y su orden; solo se envuelve con el giro.
+    // El ciclado conserva su cadencia y su orden; solo se envuelve con el giro. Con la
+    // pausa activa el tick no avanza nada: se detienen a la vez el cambio de modelo y,
+    // por consecuencia, el giro de la tarjeta de dos caras. Al volver al primer modelo
+    // por avance automatico se cierra una ronda y se cuenta (los clics manuales en los
+    // chips no cuentan rondas).
     const id = window.setInterval(() => {
-      swapTo((activeRef.current + 1) % PROVIDERS.length);
+      if (pausedRef.current) return;
+      const next = (activeRef.current + 1) % PROVIDERS.length;
+      if (swapTo(next) && next === 0) setRonda((prev) => prev + 1);
     }, CYCLE_MS);
 
     return () => {
@@ -153,6 +172,11 @@ export function HeroShowcase(): JSX.Element {
     [swapTo]
   );
 
+  // Pausa/reanuda el reloj unico segun el hover/foco de la tarjeta de dos caras.
+  const handlePauseChange = useCallback((paused: boolean): void => {
+    pausedRef.current = paused;
+  }, []);
+
   const activeProvider = PROVIDERS[active] ?? PROVIDERS[0];
   const activeAccent = activeProvider?.accent ?? PROVIDERS[0]?.accent;
 
@@ -163,7 +187,7 @@ export function HeroShowcase(): JSX.Element {
     >
       <style>{FLOW_KEYFRAME}</style>
 
-      <SystemsFlipCard />
+      <SystemsFlipCard ronda={ronda} onPauseChange={handlePauseChange} />
 
       {/* Carril central con las lineas conectoras (solo en escritorio, donde hay sitio). */}
       <div className="relative hidden w-20 flex-shrink-0 min-[1100px]:block" aria-hidden="true">

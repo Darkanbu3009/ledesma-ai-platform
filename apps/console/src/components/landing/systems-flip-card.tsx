@@ -3,16 +3,12 @@ import {
   type KeyboardEvent,
   type ReactNode,
   useCallback,
-  useEffect,
   useRef,
   useState
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plane } from 'lucide-react';
 import { cn } from '../../lib/utils';
-
-/** Cadencia del giro automatico entre las dos caras de la tarjeta. */
-const FLIP_CYCLE_MS = 7000;
 
 /**
  * Sistemas conectados de la cara A (la de empresa). Las rutas apuntan a los logos ya
@@ -141,13 +137,30 @@ function Cara({ visible, reduceMotion, reverso = false, children }: CaraProps): 
   );
 }
 
+interface SystemsFlipCardProps {
+  /**
+   * Contador de rondas completas del ciclo de modelos (Claude -> ChatGPT -> Open source ->
+   * vuelta a Claude), llevado por el padre. Cada incremento voltea la tarjeta exactamente
+   * una vez: no hay timer propio, el giro queda alineado con la rotacion de modelos aunque
+   * cambie su cadencia o su cantidad.
+   */
+  ronda: number;
+  /**
+   * Notifica al padre la pausa por hover/foco para que detenga el reloj compartido: se
+   * pausan las DOS rotaciones a la vez (modelos y giro) y nunca se desalinean.
+   */
+  onPauseChange: (paused: boolean) => void;
+}
+
 /**
  * Tarjeta "Tus sistemas" de dos caras. La cara A es la tarjeta de sistemas de empresa de
- * siempre (sin cambios); la cara B, "Tu dia a dia", cuenta el lado de personas con apps
- * cotidianas y es la que se ve al cargar. Gira sobre su eje Y con perspectiva (mismo
- * lenguaje 3D que la carta del modelo) alternando caras cada 7s (el primer giro revela
- * "Tus sistemas"); hover o foco pausan el ciclo y clic/tap (o Enter/Espacio) voltea al
- * momento y reinicia la cuenta.
+ * siempre (ahora con su linea de cierre al pie, como la cara B); la cara B, "Tu dia a
+ * dia", cuenta el lado de personas con apps cotidianas y es la que se ve al cargar. Gira
+ * sobre su eje Y con perspectiva (mismo lenguaje 3D que la carta del modelo) una vez por
+ * cada ronda completa del ciclo de modelos (el primer giro revela "Tus sistemas"); hover
+ * o foco pausan el reloj compartido (via `onPauseChange`) y clic/tap (o Enter/Espacio)
+ * voltea al momento sin romper la sincronizacion: la siguiente ronda vuelve a girar
+ * normal.
  *
  * Las lineas punteadas del carril central NO viven aqui: son un SVG hermano con geometria
  * fija (ver HeroShowcase), asi que el transform 3D de esta tarjeta no las toca y quedan
@@ -157,50 +170,35 @@ function Cara({ visible, reduceMotion, reverso = false, children }: CaraProps): 
  *
  * Accesibilidad: el contenedor es focusable (role=button) y una region aria-live anuncia
  * la cara visible; la cara oculta va aria-hidden e inert. Con prefers-reduced-motion no
- * hay ciclo automatico y el cambio manual es un crossfade sin rotacion.
+ * hay giro automatico (las rondas se ignoran) y el cambio manual es un crossfade sin
+ * rotacion.
  */
-export function SystemsFlipCard(): JSX.Element {
+export function SystemsFlipCard({ ronda, onPauseChange }: SystemsFlipCardProps): JSX.Element {
   const { t } = useTranslation();
   // Se calcula una vez al montar, como el resto de animaciones del hero.
   const [reduceMotion] = useState(prefersReducedMotion);
-  // Arranca en true: la cara B ("Tu dia a dia") es la visible desde el primer render,
-  // sin flash de la cara A, porque el contenedor ya nace rotado 180 grados (no hay
-  // transicion inicial: el estilo se aplica en el primer pintado). El primer giro
-  // automatico revela "Tus sistemas" y de ahi alterna.
-  const [flipped, setFlipped] = useState(true);
+  // Giros manuales acumulados (clic/tap o Enter/Espacio).
+  const [giros, setGiros] = useState(0);
 
   const hoverRef = useRef(false);
   const focusRef = useRef(false);
-  const intervalRef = useRef<number | null>(null);
 
-  const stopCycle = useCallback((): void => {
-    if (intervalRef.current !== null) {
-      window.clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-  }, []);
+  // La cara visible se DERIVA de la paridad de rondas + giros manuales (no hay estado
+  // espejo ni timer propio). Arranca en la cara B ("Tu dia a dia") desde el primer
+  // render, sin flash de la cara A, porque el contenedor ya nace rotado 180 grados (no
+  // hay transicion inicial: el estilo se aplica en el primer pintado). Cada ronda
+  // completa del ciclo de modelos suma un giro (la primera revela "Tus sistemas"); con
+  // movimiento reducido las rondas se ignoran, como antes. Un giro manual solo suma
+  // paridad, asi que la siguiente ronda voltea igual: la sincronizacion no se rompe.
+  const flipped = ((reduceMotion ? 0 : ronda) + giros) % 2 === 0;
 
-  /** (Re)arranca la cuenta de 7s desde cero, salvo pausa activa o movimiento reducido. */
-  const startCycle = useCallback((): void => {
-    stopCycle();
-    if (reduceMotion || hoverRef.current || focusRef.current) return;
-    intervalRef.current = window.setInterval(() => {
-      setFlipped((prev) => !prev);
-    }, FLIP_CYCLE_MS);
-  }, [reduceMotion, stopCycle]);
-
-  useEffect(() => {
-    startCycle();
-    return stopCycle;
-  }, [startCycle, stopCycle]);
-
-  // Voltea al momento y reinicia el ciclo; si hay pausa (hover/foco), el ciclo queda
-  // detenido y se retoma al salir. En movil el tap deja foco en la tarjeta, asi que la
-  // pausa por foco dura hasta tocar fuera: el ciclo sigue al soltar el foco.
+  // Voltea al momento; el reloj compartido del padre sigue su curso, de modo que la
+  // ronda en marcha cierra a su hora y vuelve a girar normal. Si hay pausa (hover/foco)
+  // el reloj queda detenido y se retoma al salir. En movil el tap deja foco en la
+  // tarjeta, asi que la pausa por foco dura hasta tocar fuera.
   const handleFlip = useCallback((): void => {
-    setFlipped((prev) => !prev);
-    startCycle();
-  }, [startCycle]);
+    setGiros((prev) => prev + 1);
+  }, []);
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -211,25 +209,32 @@ export function SystemsFlipCard(): JSX.Element {
     [handleFlip]
   );
 
+  // Con movimiento reducido no hay giro que desalinear, asi que la pausa no se propaga
+  // y la rotacion de modelos conserva su comportamiento de siempre.
+  const updatePause = useCallback((): void => {
+    if (reduceMotion) return;
+    onPauseChange(hoverRef.current || focusRef.current);
+  }, [onPauseChange, reduceMotion]);
+
   const pauseByHover = useCallback((): void => {
     hoverRef.current = true;
-    stopCycle();
-  }, [stopCycle]);
+    updatePause();
+  }, [updatePause]);
 
   const resumeFromHover = useCallback((): void => {
     hoverRef.current = false;
-    startCycle();
-  }, [startCycle]);
+    updatePause();
+  }, [updatePause]);
 
   const pauseByFocus = useCallback((): void => {
     focusRef.current = true;
-    stopCycle();
-  }, [stopCycle]);
+    updatePause();
+  }, [updatePause]);
 
   const resumeFromFocus = useCallback((): void => {
     focusRef.current = false;
-    startCycle();
-  }, [startCycle]);
+    updatePause();
+  }, [updatePause]);
 
   return (
     // Wrapper de perspectiva (mismo valor que la carta del modelo): toma el sitio en el
@@ -251,7 +256,7 @@ export function SystemsFlipCard(): JSX.Element {
         )}
         style={!reduceMotion ? { transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' } : undefined}
       >
-        {/* Cara A: los sistemas de empresa, exactamente la tarjeta de siempre. */}
+        {/* Cara A: los sistemas de empresa, la tarjeta de siempre mas su pie de cierre. */}
         <Cara visible={!flipped} reduceMotion={reduceMotion}>
           <div className="flex h-6 items-center px-1">
             <span className="font-jetbrains text-[0.7rem] uppercase tracking-[0.18em] text-foreground-secondary">
@@ -286,6 +291,12 @@ export function SystemsFlipCard(): JSX.Element {
               </li>
             ))}
           </ul>
+          {/* Linea de cierre al pie, gemela de la de la cara B (mismo estilo y medidas):
+              como la cara A define el tamano y la B es inset-0, ambas caras conservan
+              exactamente la misma altura con sus pies incluidos. */}
+          <p className="px-1 pt-1 text-[0.65rem] leading-snug text-foreground-secondary">
+            {t('landing.heroShowcase.sistemasMasLinea')}
+          </p>
         </Cara>
 
         {/* Cara B: el dia a dia de personas. Misma estructura de filas; el py baja a 1.5
