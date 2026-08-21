@@ -94,6 +94,13 @@ export interface JobSummary {
   conProcedimientoAjeno: boolean;
   /** Ademas, ese procedimiento ya estaba CORROBORADO por origenes y consumidores distintos. */
   procedimientoCorroborado: boolean;
+  /**
+   * El SITIO CAMBIO su interfaz y la corrida se adapto sola (D6 de resiliencia): la sonda
+   * pre-flight detecto el desajuste antes de ejecutar un solo paso, la tarea corrio por el motor
+   * libre y el cierre exitoso reaprendio el procedimiento. Escalar derivado de jobs.resultado
+   * (`desajusteDeInterfaz`), nunca el resultado entero. false en todo lo demas.
+   */
+  sitioCambio: boolean;
 }
 
 /**

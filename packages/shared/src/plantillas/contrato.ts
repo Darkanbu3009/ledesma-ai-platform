@@ -546,6 +546,10 @@ export function marcadoresClave(marcadores: readonly MarcadorParametro[]): strin
  *  - sin_efecto: corrio entera y el sitio no mostro que la accion surtiera efecto;
  *  - abandonada: un paso no se pudo ejecutar de forma determinista (sin escalada por este camino);
  *  - sesion: la sesion de navegador dejo de responder a mitad de la ejecucion.
+ *  - desajuste_de_interfaz (V044): la SONDA DE RECONOCIMIENTO previa detecto que la pagina ya no
+ *    tiene las clases de elemento observables que el procedimiento declara, y NO SE EJECUTO NI UN
+ *    PASO. Es evidencia ESTRUCTURAL, no un fallo de ejecucion: alimenta su propio contador
+ *    (`desajustes_hash`, distintos por consumidor) y no toca `fallos_consecutivos`.
  * Los contadores de V041 no cambian de semantica: esto solo dice POR QUE fue el ultimo fallo, que es
  * el insumo del retiro. Un exito lo limpia, igual que limpia `fallos_consecutivos`.
  */
@@ -554,11 +558,12 @@ export const MOTIVOS_DE_FALLA_DE_PLANTILLA = [
   'sin_efecto',
   'abandonada',
   'sesion',
+  'desajuste_de_interfaz',
 ] as const;
 
 export type MotivoDeFallaDePlantilla = (typeof MOTIVOS_DE_FALLA_DE_PLANTILLA)[number];
 
-/** ¿Es `valor` uno de los cuatro motivos de falla? Falla cerrada: lo demas no se persiste. */
+/** ¿Es `valor` uno de los motivos de falla del vocabulario? Falla cerrada: lo demas no se persiste. */
 export function esMotivoDeFallaDePlantilla(valor: unknown): valor is MotivoDeFallaDePlantilla {
   return (
     typeof valor === 'string' &&

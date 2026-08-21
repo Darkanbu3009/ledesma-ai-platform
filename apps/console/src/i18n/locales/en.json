@@ -2086,6 +2086,10 @@
     "corroborado": "Corroborated",
     "corroboradoDetalle": "Several independent accounts discovered and successfully ran this same procedure."
   },
+  "sitioCambio": {
+    "etiqueta": "The site changed",
+    "detalle": "The site changed its page and your agent noticed in time: it did the task on its own and relearned the procedure for next time."
+  },
   "avisoTareaLenta": {
     "titulo": "This task is taking longer than usual",
     "detalle": "It has been running for {{minutos}} minutes. You can wait or end it.",

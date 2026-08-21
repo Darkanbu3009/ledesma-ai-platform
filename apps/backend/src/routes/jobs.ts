@@ -73,6 +73,8 @@ function toJobActivity(
     // aprendido por otra cuenta, y si ese procedimiento ya estaba corroborado. Solo escalares.
     conProcedimientoAjeno: job.conProcedimientoAjeno,
     procedimientoCorroborado: job.procedimientoCorroborado,
+    // D6 (resiliencia): el sitio cambio su interfaz y el agente se adapto solo. Solo el escalar.
+    sitioCambio: job.sitioCambio,
     ...(guardado !== undefined && esExitoDelMotor
       ? {
           guardableComoTarea: guardado.tieneExitosa && !guardado.guardada,

@@ -12,6 +12,7 @@ import {
   type ResultadoDeLaBarrera,
 } from './barrera-identidad.js';
 import type { ReferenciaDeElemento } from './localizacion.js';
+import type { DescriptorDeSonda } from './sonda-interfaz.js';
 import { normalizarTexto } from './parametros-objetivo.js';
 import {
   repararEstrategias,
@@ -125,6 +126,18 @@ export interface NavegadorDeterminista {
     sesionExternaId: string,
     prefijos: string[],
   ): Promise<{ ariaLabel: string; rol: string; candidatos: number } | null>;
+  /**
+   * SONDA DE RECONOCIMIENTO PREVIA (sonda-interfaz.ts): para cada descriptor de clase, los
+   * CANDIDATOS crudos de su eje leidos de la pagina (solo lectura, mundo aislado, sin modelo). La
+   * comparacion la hace el worker con la misma normalizacion de la barrera de identidad.
+   *
+   * OPCIONAL en el puerto a proposito: el adaptador real la implementa, y un fake (o un despliegue)
+   * que no la traiga deja la sonda en no evaluable y la ejecucion corre exactamente como hoy.
+   */
+  leerCandidatosDeSonda?(
+    sesionExternaId: string,
+    descriptores: readonly DescriptorDeSonda[],
+  ): Promise<string[][] | null>;
 }
 
 /** Lo que devuelve escalar UN paso al motor de navegacion. */

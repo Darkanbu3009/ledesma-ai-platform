@@ -614,6 +614,9 @@ describe('JobsRepository', () => {
         // una tarea web que corrio con un procedimiento aprendido por otra cuenta.
         conProcedimientoAjeno: false,
         procedimientoCorroborado: false,
+        // D6 (resiliencia): false salvo cuando la sonda detecto que el sitio cambio y la corrida
+        // se adapto sola.
+        sitioCambio: false,
       });
       // Explicito: el resumen no filtra datos sensibles ni redundantes. `resultado` entero jamas
       // sale del repositorio: solo los booleanos derivados de arriba.
@@ -649,6 +652,20 @@ describe('JobsRepository', () => {
       // El estado viaja como ESCALAR del resultado, nunca el resultado entero.
       const texto = sqlText(sql);
       expect(texto).toContain("resultado->'plantillaAjena'->>'estado' as resultado_plantilla_estado");
+    });
+
+    it('D6 (resiliencia): el desajuste de interfaz viaja como escalar y se mapea a sitioCambio', async () => {
+      const sql = makeSqlReturning([
+        makeSummaryRow({ id: 'j-cambio', payload_kind: 'tarea_web', resultado_desajuste: 'true' }),
+        makeSummaryRow({ id: 'j-normal', payload_kind: 'tarea_web' }),
+      ]);
+      const jobs = await new JobsRepository(sql).listByOwner('user-1', { limit: 10, offset: 0 });
+      expect(jobs.map((j) => [j.id, j.sitioCambio])).toEqual([
+        ['j-cambio', true],
+        ['j-normal', false],
+      ]);
+      const texto = sqlText(sql);
+      expect(texto).toContain("resultado->>'desajusteDeInterfaz' as resultado_desajuste");
     });
   });
 

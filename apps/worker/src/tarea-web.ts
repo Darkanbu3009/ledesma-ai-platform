@@ -121,6 +121,13 @@ import {
   type PlantillaDeLaCorrida,
 } from './plantillas-compartidas.js';
 import {
+  clasesFaltantes,
+  clasesObservablesEnInicio,
+  descriptoresDeSonda,
+  ESPERA_ENTRE_LECTURAS_DE_SONDA_MS,
+  LECTURAS_DE_SONDA,
+} from './sonda-interfaz.js';
+import {
   construirPeticionDeDatos,
   datosConLoQueElModeloAgrego,
   parsearResolucionDelObjetivo,
@@ -606,6 +613,18 @@ export interface RepositorioPlantillasParaWorker {
     origenHash: string;
   }): Promise<{ id: string; estado: string; pasos: unknown; origenes: number } | null>;
   /**
+   * COEXISTENCIA DE VARIANTES (D5 de resiliencia): la misma lectura, con hasta
+   * MAX_CANDIDATAS_DE_CONSUMO filas EN EL ORDEN DEL DESEMPATE. La sonda pre-flight descarta las que
+   * no aplican a la pagina de enfrente y se ejecuta la primera que si. Opcional: un fake o un
+   * despliegue sin este metodo cae a `buscarServible` (una sola candidata), como hasta hoy.
+   */
+  buscarServibles?(clave: {
+    dominiosClave: string;
+    codigoDeIntencion: string;
+    marcadoresPosibles: readonly string[];
+    origenHash: string;
+  }): Promise<Array<{ id: string; estado: string; pasos: unknown; origenes: number }>>;
+  /**
    * DONDE SE CORTO la lectura de arriba cuando no devolvio nada. SOLO se llama despues de un miss:
    * es una consulta mas y el camino feliz no la paga. Best-effort: sin ella el veredicto sale igual,
    * solo que sin el corte.
@@ -629,6 +648,22 @@ export interface RepositorioPlantillasParaWorker {
     exitosa: boolean,
     motivo?: MotivoDeFallaDePlantilla,
     consumidorHash?: string,
+  ): Promise<{
+    estado: string;
+    estadoPrevio: string;
+    dominiosClave: string;
+    codigoDeIntencion: string;
+    marcadoresClave: string;
+  } | null | void>;
+  /**
+   * DESAJUSTE DE INTERFAZ detectado por la sonda pre-flight (V044, D4): evidencia estructural con su
+   * propio contador de consumidores distintos, separada del retiro por calidad. NO es una ejecucion
+   * (no se corrio un solo paso) y no toca los contadores de ejecucion. Best-effort: su fallo no
+   * cambia el desenlace del job. Opcional con el mismo criterio que el resto del consumo.
+   */
+  registrarDesajuste?(
+    id: string,
+    consumidorHash: string,
   ): Promise<{
     estado: string;
     estadoPrevio: string;
@@ -2052,10 +2087,13 @@ async function descartarEstadoAMedioLlenarBestEffort(
 }
 
 /**
- * RESET OBLIGATORIO previo al motor libre tras un intento de plantilla ajena que TOCO el DOM (FIX B,
- * caso real de produccion del 3 ago 2026: el motor arranco sobre el compose a medio llenar de la
- * plantilla abandonada, abrio OTRO compose y la corrida termino atribuyendole al usuario un fallo de
- * sesion). Tres pasos por sitio abierto, en este orden:
+ * RESET OBLIGATORIO previo al motor libre tras un procedimiento aprendido que TOCO el DOM y se
+ * rindio: plantilla ajena (FIX B, caso real de produccion del 3 ago 2026: el motor arranco sobre el
+ * compose a medio llenar de la plantilla abandonada, abrio OTRO compose y la corrida termino
+ * atribuyendole al usuario un fallo de sesion) Y TAMBIEN receta propia (D2 de resiliencia: toda
+ * caida al motor libre arranca desde un estado inicial conocido; hasta este cambio el camino por
+ * receta solo renavegaba de forma tolerante, sin descarte generico y sin reapertura de una sesion
+ * degradada). Tres pasos por sitio abierto, en este orden:
  *
  *  1. el DESCARTE GENERICO del estado a medio llenar (Escape sobre el foco, best-effort);
  *  2. la RENAVEGACION al inicio de siempre (renavegarAInicio);
@@ -2067,7 +2105,7 @@ async function descartarEstadoAMedioLlenarBestEffort(
  * Devuelve el SitioAbierto VIGENTE del sitio activo (el mismo, o el reabierto): es lo que el motor
  * libre tiene que usar de aqui en adelante.
  */
-async function resetObligatorioTrasPlantilla(
+async function resetObligatorioPrevioAlMotor(
   deps: TareaWebDeps,
   job: Job,
   gestor: GestorDeSitios,
@@ -2092,6 +2130,71 @@ async function resetObligatorioTrasPlantilla(
     if (reabierto.sitio.id === vigente.sitio.id) vigente = reabierto;
   }
   return vigente;
+}
+
+/** Como termino la sonda de reconocimiento previa sobre un procedimiento aprendido. */
+type VeredictoDeSonda =
+  /** Todas las clases observables del procedimiento existen en la pagina: se ejecuta como hoy. */
+  | { tipo: 'coincide'; ms: number }
+  /** El procedimiento no tiene ninguna clase observable en la pagina inicial: no hay que sondear. */
+  | { tipo: 'sin_clases_observables' }
+  /** La sonda no se pudo evaluar (sin puerto, lectura rota o excepcion): se ejecuta como hoy. */
+  | { tipo: 'no_evaluable' }
+  /** Falta alguna clase observable en DOS lecturas: NO se ejecuta ningun paso. */
+  | { tipo: 'desajuste'; faltantes: string[]; ms: number };
+
+/**
+ * SONDA DE RECONOCIMIENTO PREVIA (pre-flight, sonda-interfaz.ts): antes de ejecutar un procedimiento
+ * aprendido, comprueba SIN MODELO Y SIN ACCIONES que las clases de elemento observables del
+ * procedimiento existan en la pagina de partida, con la misma derivacion canonica de clase que la
+ * barrera de identidad. Es una compuerta ADICIONAL: solo puede impedir que un procedimiento corra
+ * (y mandarlo al motor libre con la pagina limpia), jamas autorizar nada nuevo.
+ *
+ * ANTI FALSO POSITIVO: dos lecturas separadas por un intervalo corto antes de declarar desajuste
+ * (una pagina hidratando puede pintar sus controles despues del load), presencia aceptada con el
+ * elemento oculto y TODO en try/catch propio: cualquier fallo deja la sonda en 'no_evaluable' y la
+ * ejecucion corre exactamente como hoy. Declarar desajuste por una pagina a medio cargar seria peor
+ * que no tener sonda.
+ */
+async function sondearInterfazBestEffort(
+  deps: TareaWebDeps,
+  job: Job,
+  sesionExternaId: string,
+  dominio: string,
+  pasos: readonly PasoDeReceta[],
+): Promise<VeredictoDeSonda> {
+  const leer = deps.determinista?.leerCandidatosDeSonda;
+  if (deps.determinista === undefined || leer === undefined) return { tipo: 'no_evaluable' };
+  const descriptores = descriptoresDeSonda(clasesObservablesEnInicio(pasos, dominio));
+  if (descriptores.length === 0) return { tipo: 'sin_clases_observables' };
+  const esperar = deps.esperar ?? esperarMs;
+  const inicio = Date.now();
+  try {
+    let faltantes: string[] = [];
+    for (let lectura = 1; lectura <= LECTURAS_DE_SONDA; lectura++) {
+      if (lectura > 1) await esperar(ESPERA_ENTRE_LECTURAS_DE_SONDA_MS);
+      const candidatos = await leer.call(deps.determinista, sesionExternaId, descriptores);
+      // Una lectura rota no es evidencia de nada: jamas se declara desajuste sobre ella.
+      if (candidatos === null) return { tipo: 'no_evaluable' };
+      faltantes = clasesFaltantes(descriptores, candidatos);
+      if (faltantes.length === 0) return { tipo: 'coincide', ms: Date.now() - inicio };
+    }
+    deps.logger.warn('tarea web: desajuste_de_interfaz detectado en pre-flight; no se ejecuta ningun paso', {
+      jobId: job.id,
+      dominio,
+      clasesSondeadas: descriptores.length,
+      clasesFaltantes: faltantes.length,
+      ms: Date.now() - inicio,
+    });
+    return { tipo: 'desajuste', faltantes, ms: Date.now() - inicio };
+  } catch (error) {
+    deps.logger.warn('tarea web: la sonda de interfaz fallo; se ejecuta como siempre (no evaluable)', {
+      jobId: job.id,
+      dominio,
+      err: describir(error),
+    });
+    return { tipo: 'no_evaluable' };
+  }
 }
 
 /**
@@ -2792,7 +2895,9 @@ interface VeredictoDeConsumo {
    * Por que no. Son los siete motivos de `plantillaAplicable` mas los del cableado y del flujo:
    * `via_propia` (alguna via propia resolvio y ni se consulto), `no_cableado`, `sin_identidad` (la
    * tarea no pide una accion irreversible, o no hay dominios), `sin_plantilla`, `error_al_leer` y
-   * `abandonada` (se ejecuto y no resolvio; la termino el motor libre). null cuando si se consumio.
+   * `abandonada` (se ejecuto y no resolvio; la termino el motor libre) y `desajuste_de_interfaz`
+   * (la sonda pre-flight detecto que la pagina ya no tiene las clases observables del procedimiento
+   * y NO se ejecuto un solo paso). null cuando si se consumio.
    * Los motivos del checkpoint (`rechazada_por_el_usuario`, `checkpoint_no_persistido`,
    * `ofrecimiento_distinto`) ya no existen: el consumo ejecuta directo, sin aprobacion humana.
    */
@@ -3030,11 +3135,11 @@ async function buscarPlantillaAjena(
     verboBloqueado: string | null;
     valores: ValoresDeParametros;
   },
-): Promise<{ plantilla: PlantillaParaEstaTarea | null; veredicto: VeredictoDeConsumo }> {
+): Promise<{ plantillas: PlantillaParaEstaTarea[]; veredicto: VeredictoDeConsumo }> {
   const sin = (motivo: string, idx: number | null = null): {
-    plantilla: null;
+    plantillas: PlantillaParaEstaTarea[];
     veredicto: VeredictoDeConsumo;
-  } => ({ plantilla: null, veredicto: { consumida: false, motivo, idx } });
+  } => ({ plantillas: [], veredicto: { consumida: false, motivo, idx } });
 
   const plantillas = deps.plantillas;
   // Sin puerto de lectura, sin navegador determinista o sin recetas no hay camino que ofrecer: la
@@ -3051,16 +3156,24 @@ async function buscarPlantillaAjena(
   });
   if (identidad === null) return sin('sin_identidad');
 
-  let fila: { id: string; estado: string; pasos: unknown; origenes: number } | null;
+  let filas: Array<{ id: string; estado: string; pasos: unknown; origenes: number }>;
   try {
-    fila = await plantillas.repo.buscarServible({
+    const clave = {
       dominiosClave: identidad.dominiosClave,
       codigoDeIntencion: identidad.codigoDeIntencion,
       // CONTENCION, no igualdad: la plantilla aplica si sus marcadores estan CONTENIDOS en los que
       // este objetivo declara. `marcadoresClave` (el conjunto exacto) no viaja a la consulta.
       marcadoresPosibles: identidad.marcadoresPosibles,
       origenHash: hashDeOrigenDePlantilla(job.ownerId, plantillas.clave),
-    });
+    };
+    // D5 (coexistencia de variantes): con el metodo nuevo llegan hasta MAX_CANDIDATAS_DE_CONSUMO
+    // candidatas en el orden del desempate; con el viejo, una sola, exactamente como hasta hoy.
+    if (plantillas.repo.buscarServibles) {
+      filas = await plantillas.repo.buscarServibles(clave);
+    } else {
+      const fila = await plantillas.repo.buscarServible(clave);
+      filas = fila === null ? [] : [fila];
+    }
   } catch (error) {
     deps.logger.warn('tarea web: no se pudo consultar el procedimiento compartido; se ejecuta con el motor', {
       jobId: job.id,
@@ -3068,30 +3181,37 @@ async function buscarPlantillaAjena(
     });
     return sin('error_al_leer');
   }
-  if (fila === null) {
-    return { plantilla: null, veredicto: await veredictoDelMiss(deps, job, plantillas.repo, identidad) };
+  if (filas.length === 0) {
+    return { plantillas: [], veredicto: await veredictoDelMiss(deps, job, plantillas.repo, identidad) };
   }
 
-  const veredicto = plantillaAplicable({
-    pasos: fila.pasos,
-    dominio: sitio.dominio,
-    valores: opciones.valores,
-    verboBloqueado: opciones.verboBloqueado,
-    // LAS CLASES CORROBORADAS DE ESTE CONSUMIDOR, no las del que publico: lo que el atlas avala para
-    // este dominio y este origen. Vacio (y con eso nada aplica) cuando el atlas no esta cableado.
-    clasesCorroboradas: atlas?.clasesCorroboradas(sitio.dominio) ?? new Set<string>(),
-  });
-  if (!veredicto.aplica) {
-    deps.logger.info('tarea web: hay un procedimiento compartido para esta tarea pero no aplica aqui', {
-      jobId: job.id,
+  // La aplicabilidad se evalua candidata por candidata, EN EL ORDEN DEL DESEMPATE, y el orden se
+  // conserva: la sonda pre-flight del llamador descarta las que no describen la pagina de enfrente
+  // y se ejecuta la primera que si. Con cero aplicables, el motivo es el de la PRIMERA candidata,
+  // que es la fila que la consulta de una sola candidata habria devuelto.
+  const aplicables: PlantillaParaEstaTarea[] = [];
+  let primerRechazo: { motivo: string; idx: number | null } | null = null;
+  for (const fila of filas) {
+    const veredicto = plantillaAplicable({
+      pasos: fila.pasos,
       dominio: sitio.dominio,
-      motivo: veredicto.motivo,
-      paso: veredicto.idx,
+      valores: opciones.valores,
+      verboBloqueado: opciones.verboBloqueado,
+      // LAS CLASES CORROBORADAS DE ESTE CONSUMIDOR, no las del que publico: lo que el atlas avala
+      // para este dominio y este origen. Vacio (y con eso nada aplica) si el atlas no esta cableado.
+      clasesCorroboradas: atlas?.clasesCorroboradas(sitio.dominio) ?? new Set<string>(),
     });
-    return sin(veredicto.motivo, veredicto.idx < 0 ? null : veredicto.idx);
-  }
-  return {
-    plantilla: {
+    if (!veredicto.aplica) {
+      deps.logger.info('tarea web: hay un procedimiento compartido para esta tarea pero no aplica aqui', {
+        jobId: job.id,
+        dominio: sitio.dominio,
+        motivo: veredicto.motivo,
+        paso: veredicto.idx,
+      });
+      primerRechazo ??= { motivo: veredicto.motivo, idx: veredicto.idx < 0 ? null : veredicto.idx };
+      continue;
+    }
+    aplicables.push({
       id: fila.id,
       estado: fila.estado,
       origenes: fila.origenes,
@@ -3102,9 +3222,12 @@ async function buscarPlantillaAjena(
         marcadores: veredicto.marcadores,
         dominio: sitio.dominio,
       },
-    },
-    veredicto: { consumida: false, motivo: null, idx: null },
-  };
+    });
+  }
+  if (aplicables.length === 0) {
+    return sin(primerRechazo?.motivo ?? 'sin_plantilla', primerRechazo?.idx ?? null);
+  }
+  return { plantillas: aplicables, veredicto: { consumida: false, motivo: null, idx: null } };
 }
 
 /**
@@ -3252,6 +3375,43 @@ async function registrarEjecucionDePlantillaBestEffort(
     }
   } catch (error) {
     deps.logger.warn('tarea web: no se pudo contabilizar la plantilla (se ignora, best-effort)', {
+      jobId: job.id,
+      err: describir(error),
+    });
+  }
+}
+
+/**
+ * DESAJUSTE DE INTERFAZ de una plantilla (V044, D4), detectado por la sonda pre-flight ANTES de
+ * ejecutar un solo paso. Best-effort con el mismo criterio que registrarEjecucionDePlantillaBestEffort;
+ * las transiciones (retirada con dos consumidores distintos) se loguean con la IDENTIDAD de la fila,
+ * jamas con un hash.
+ */
+async function registrarDesajusteDePlantillaBestEffort(
+  deps: TareaWebDeps,
+  job: Job,
+  plantillaId: string,
+): Promise<void> {
+  const registrar = deps.plantillas?.repo.registrarDesajuste;
+  if (registrar === undefined || deps.plantillas === undefined) return;
+  try {
+    const registro = await registrar.call(
+      deps.plantillas.repo,
+      plantillaId,
+      hashDeOrigenDePlantilla(job.ownerId, deps.plantillas.clave),
+    );
+    if (registro !== null && registro !== undefined && registro.estado !== registro.estadoPrevio) {
+      deps.logger.warn('tarea web: la plantilla compartida quedo retirada por desajuste de interfaz', {
+        jobId: job.id,
+        dominios: registro.dominiosClave,
+        intencion: registro.codigoDeIntencion,
+        marcadores: registro.marcadoresClave,
+        de: registro.estadoPrevio,
+        a: registro.estado,
+      });
+    }
+  } catch (error) {
+    deps.logger.warn('tarea web: no se pudo registrar el desajuste de interfaz (se ignora, best-effort)', {
       jobId: job.id,
       err: describir(error),
     });
@@ -4238,12 +4398,38 @@ export async function procesarTareaWeb(
             control,
           );
     const receta = rapida ?? elegida?.receta ?? null;
+    // ¿ALGUNA sonda pre-flight de esta corrida detecto un desajuste de interfaz? Es lo que el cierre
+    // registra en el resultado (D6): el usuario debe poder ver que el sitio cambio y que su agente
+    // se adapto solo.
+    let huboDesajusteDeInterfaz = false;
     if (receta !== null) {
       // La tarea ensenada puede vivir en OTRO de los sitios autorizados: alli es donde hay que
       // ejecutarla, con su propia sesion. El sitio de arranque sigue siendo el del camino rapido.
       const sitioDeLaReceta = gestor.porDominio(receta.dominio) ?? sitio;
       const abierto =
         sitioDeLaReceta.id === activo.sitio.id ? activo : await gestor.abrir(sitioDeLaReceta);
+      // SONDA DE RECONOCIMIENTO PREVIA (D1): con la pagina de partida cargada y ANTES del primer
+      // paso, se comprueba que las clases observables de la receta existan en la pagina. Con
+      // desajuste NO se ejecuta ningun paso: la tarea pasa al motor libre con la pagina limpia (no
+      // se toco el DOM) y la siguiente corrida exitosa promueve la receta de la interfaz vigente,
+      // que reemplaza a esta (promover ya marca obsoleta la anterior).
+      const sondaDeReceta = await sondearInterfazBestEffort(
+        deps,
+        job,
+        abierto.sesionExternaId,
+        abierto.sitio.dominio,
+        receta.pasos,
+      );
+      if (sondaDeReceta.tipo === 'desajuste') {
+        huboDesajusteDeInterfaz = true;
+        deps.logger.warn('tarea web: la tarea aprendida no coincide con la interfaz actual; se sigue con el motor', {
+          jobId: job.id,
+          connectionId: abierto.sitio.id,
+          dominio: abierto.sitio.dominio,
+          recetaId: receta.id,
+          motivo: 'desajuste_de_interfaz',
+        });
+      } else {
       const porReceta = await ejecutarPorReceta(deps, job, abierto.sitio, objetivo, abierto.sesionExternaId, receta, {
         politica,
         verboBloqueado,
@@ -4262,19 +4448,16 @@ export async function procesarTareaWeb(
       });
       if (porReceta.tipo === 'completada') return 'completada';
       if (porReceta.paginaTocada) {
-        // Se devuelven a su inicio TODOS los sitios que la receta llego a tocar, no solo el de
-        // arranque: una receta multisitio pudo dejar a medio camino la pagina de otro sitio, y el
-        // motor terminaria razonando ahi sobre un estado que no pidio. El reset es TOLERANTE: si no
-        // sale, se omite y la tarea sigue con el motor (ver renavegarAInicio).
-        for (const abierto of gestor.abiertos()) {
-          await renavegarAInicio(
-            deps,
-            job,
-            abierto.sitio,
-            abierto.sesionExternaId,
-            abierto.urlInicial,
-          );
-        }
+        // D2 (resiliencia): el reset previo al motor es OBLIGATORIO tambien aqui, igual que tras
+        // una plantilla ajena, y sobre TODOS los sitios que la receta llego a tocar (una receta
+        // multisitio pudo dejar a medio camino la pagina de otro sitio): descarte generico del
+        // estado a medio llenar (Escape sobre el foco, sin un solo selector de ningun sitio),
+        // renavegacion al inicio y, si la sesion no responde, reapertura con el mismo pais pineado
+        // en vez de entregarle al motor una sesion degradada. Hasta este cambio el reset era solo
+        // la renavegacion tolerante, que ante dos timeouts se omitia y el motor arrancaba sobre la
+        // pagina a medio camino.
+        activo = await resetObligatorioPrevioAlMotor(deps, job, gestor, activo);
+      }
       }
     }
 
@@ -4341,7 +4524,7 @@ export async function procesarTareaWeb(
       let interpretacion: MotivoDeInterpretacion = 'no_intentada';
       let intencionInterpretada: CodigoDeIntencion | null = null;
       if (
-        consulta.plantilla === null &&
+        consulta.plantillas.length === 0 &&
         missQueLaInterpretacionArregla(consulta.veredicto.motivo, verboBloqueado)
       ) {
         const interpretada = await interpretarObjetivo(deps, job, {
@@ -4386,7 +4569,29 @@ export async function procesarTareaWeb(
                 ? { datosInterpretados: Object.keys(resolucionDeLaCorrida.valores).sort() }
                 : {}),
             };
-      const candidata = consulta.plantilla;
+      // SONDA DE RECONOCIMIENTO PREVIA (D1) sobre cada candidata aplicable, en el orden del
+      // desempate (D5, coexistencia de variantes): la primera cuyas clases observables SI estan en
+      // la pagina de enfrente se ejecuta; cada una desajustada queda registrada con su propio
+      // contador (D4) y se descarta SIN tocar el DOM. Si ninguna coincide, la tarea sigue por el
+      // motor libre con la pagina limpia: la sonda es de solo lectura.
+      let candidata: PlantillaParaEstaTarea | null = null;
+      for (const viable of consulta.plantillas) {
+        const sondaDePlantilla = await sondearInterfazBestEffort(
+          deps,
+          job,
+          activo.sesionExternaId,
+          activo.sitio.dominio,
+          viable.pasos,
+        );
+        if (sondaDePlantilla.tipo === 'desajuste') {
+          huboDesajusteDeInterfaz = true;
+          veredictoDeConsumo = { consumida: false, motivo: 'desajuste_de_interfaz', idx: null };
+          await registrarDesajusteDePlantillaBestEffort(deps, job, viable.id);
+          continue;
+        }
+        candidata = viable;
+        break;
+      }
       if (candidata !== null) {
         // EJECUCION DIRECTA, sin ofrecimiento y sin pausa: las puertas tecnicas ya pasaron todas.
         const porPlantilla = await ejecutarPorPlantilla(
@@ -4422,21 +4627,25 @@ export async function procesarTareaWeb(
             // /actividad pueda decir "procedimiento de otra cuenta" (y "corroborado" cuando lo es)
             // sin exponer nada mas de la tabla.
             plantillaAjena: { consumida: true, motivo: null, idx: null, estado: candidata.estado },
+            // D6 (resiliencia): una variante coexistente se descarto por desajuste antes de que
+            // esta se ejecutara. El sitio cambio para parte de sus usuarios y el agente lo noto.
+            ...(huboDesajusteDeInterfaz ? { desajusteDeInterfaz: true } : {}),
           });
           return 'completada';
         }
         veredictoDeConsumo = { consumida: false, motivo: 'abandonada', idx: null };
         if (porPlantilla.paginaTocada) {
-          // FIX B: aqui el reset es OBLIGATORIO, no tolerante como en el camino por receta: se
-          // descarta el estado a medio llenar, se navega al inicio y, si la sesion no responde,
-          // se abre una nueva en vez de entregarle al motor una sesion degradada.
-          activo = await resetObligatorioTrasPlantilla(deps, job, gestor, activo);
+          // FIX B, generalizado por D2: el reset OBLIGATORIO previo al motor, el mismo que corre
+          // tras una receta que toco la pagina: se descarta el estado a medio llenar, se navega al
+          // inicio y, si la sesion no responde, se abre una nueva en vez de una degradada.
+          activo = await resetObligatorioPrevioAlMotor(deps, job, gestor, activo);
         }
       }
     }
     deps.logger.info('tarea web: veredicto del procedimiento compartido', {
       jobId: job.id,
       dominio: activo.sitio.dominio,
+      desajusteDeInterfaz: huboDesajusteDeInterfaz,
       ...veredictoDeConsumo,
     });
 
@@ -4782,6 +4991,10 @@ export async function procesarTareaWeb(
       plantilla: veredictoDePlantilla,
       // Y el del CONSUMO: por que esta corrida no uso un procedimiento que otra cuenta ya descubrio.
       plantillaAjena: veredictoDeConsumo,
+      // D6 (resiliencia): la sonda pre-flight detecto que el sitio cambio y esta corrida se adapto
+      // sola (motor libre + reaprendizaje). Es el escalar del que la tarjeta de /actividad deriva su
+      // aviso en lenguaje llano; ausente cuando no hubo desajuste, para no tocar ningun resultado.
+      ...(huboDesajusteDeInterfaz ? { desajusteDeInterfaz: true } : {}),
     });
     deps.logger.info('tarea web completada dentro de la sesion del sitio', {
       jobId: job.id,

@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import type { PasoPublicable, Sql } from '@ledesma-platform/shared';
 import {
+  DESAJUSTES_PARA_RETIRO,
+  MAX_CANDIDATAS_DE_CONSUMO,
   FALLOS_PARA_RETIRO,
   MAX_CLASES_POR_DOMINIO,
   MAX_FILAS_DE_DIAGNOSTICO,
@@ -169,12 +171,15 @@ describe('publicar: UNA fila por identidad, con los origenes sumados', () => {
     expect(texto).toContain('else plantillas_compartidas.origenes_hash || excluded.origenes_hash');
   });
 
-  it('los PASOS no se reemplazan al actualizar, al contrario que las estrategias del atlas', async () => {
+  it('los PASOS de una fila SANA no se reemplazan: solo la retirada o la desajustada los adopta', async () => {
     const { sql } = await publicar();
     const [texto] = sql.queries[1] ?? [''];
     const actualizacion = texto.slice(texto.indexOf('do update set'));
     const asignaciones = actualizacion.slice(0, actualizacion.indexOf('returning'));
-    expect(asignaciones).not.toContain('pasos =');
+    // El case: excluded.pasos SOLO cuando la fila estaba retirada o con desajuste registrado; en
+    // cualquier otro estado se conserva el procedimiento con aval.
+    expect(asignaciones).toContain('pasos = case when plantillas_compartidas.estado = \'retirada\'');
+    expect(asignaciones).toContain('then excluded.pasos else plantillas_compartidas.pasos end');
     expect(asignaciones).not.toContain('primera_vez_en');
     expect(asignaciones).toContain('actualizada_en = now()');
   });
@@ -184,24 +189,41 @@ describe('publicar: UNA fila por identidad, con los origenes sumados', () => {
     const [texto] = sql.queries[1] ?? [''];
     expect(texto).not.toContain('ejecuciones_exitosas');
     expect(texto).not.toContain('ejecuciones_fallidas');
-    // `fallos_consecutivos` y `consumidores_hash` SOLO se tocan al rehabilitar una fila retirada
-    // (D5): en cualquier otro estado el case los deja exactamente como estaban.
-    expect(texto).toContain("when plantillas_compartidas.estado = 'retirada' then 0");
-    expect(texto).toContain("else plantillas_compartidas.fallos_consecutivos");
+    // `fallos_consecutivos` y `consumidores_hash` SOLO se tocan al rehabilitar una fila retirada o
+    // desajustada: en cualquier otro estado el case los deja exactamente como estaban.
+    expect(texto).toContain('then 0');
+    expect(texto).toContain('else plantillas_compartidas.fallos_consecutivos');
   });
 });
 
-describe('publicar: la rehabilitacion de una fila retirada (D5)', () => {
+describe('publicar: la rehabilitacion de una fila retirada o desajustada (D5 y D3 de resiliencia)', () => {
   it('una publicacion nueva regresa la retirada a candidata, con racha y consumidores en cero', async () => {
     const { sql } = await publicar();
     const [texto] = sql.queries[1] ?? [''];
     const actualizacion = texto.slice(texto.indexOf('do update set'));
-    // estado: retirada -> candidata; cualquier otro estado se conserva.
-    expect(actualizacion).toContain("estado = case when plantillas_compartidas.estado = 'retirada' then 'candidata' else plantillas_compartidas.estado end");
+    // estado: retirada (o con desajuste registrado) -> candidata; cualquier otro se conserva.
+    expect(actualizacion).toContain("estado = case when plantillas_compartidas.estado = 'retirada'");
+    expect(actualizacion).toContain("then 'candidata' else plantillas_compartidas.estado end");
     // consumidores_hash: la evidencia de consumo era del procedimiento que fallaba.
-    expect(actualizacion).toContain("consumidores_hash = case when plantillas_compartidas.estado = 'retirada' then '[]'::jsonb else plantillas_compartidas.consumidores_hash end");
+    expect(actualizacion).toContain(
+      "then '[]'::jsonb else plantillas_compartidas.consumidores_hash end",
+    );
     // origenes_hash SE CONSERVA: el case de arriba sigue sumando sobre el acumulado, nunca lo vacia.
     expect(actualizacion).not.toContain("origenes_hash = '[]'");
+  });
+
+  it('D3: la identidad desajustada adopta los pasos nuevos y limpia sus desajustes, atomico', async () => {
+    const { sql } = await publicar();
+    const [texto] = sql.queries[1] ?? [''];
+    const actualizacion = texto.slice(texto.indexOf('do update set'));
+    // La condicion del reemplazo es retirada O desajuste registrado, y vive en el MISMO statement.
+    expect(actualizacion).toContain(
+      "or plantillas_compartidas.desajustes_hash <> '[]'::jsonb then excluded.pasos",
+    );
+    expect(actualizacion).toContain(
+      "desajustes_hash = case when plantillas_compartidas.estado = 'retirada'",
+    );
+    expect(actualizacion).toContain("then '[]'::jsonb else plantillas_compartidas.desajustes_hash end");
   });
 
   it('el resultado dice si hubo rehabilitacion, leyendo el estado previo en el mismo statement', async () => {
@@ -300,19 +322,21 @@ describe('publicar: la SEGUNDA PUERTA (cinturon y tirantes)', () => {
 });
 
 describe('publicar: la superficie del repositorio es CERRADA', () => {
-  it('expone exactamente las tres operaciones del ciclo de vida y ni una mas', () => {
+  it('expone exactamente las operaciones del ciclo de vida y ni una mas', () => {
     const metodos = Object.getOwnPropertyNames(PlantillasCompartidasRepository.prototype).filter(
       (nombre) => nombre !== 'constructor',
     );
-    // `buscarServible`, `diagnosticarMiss` y `registrarEjecucion` son el CONSUMO; no hay ningun
-    // metodo que lea o escriba acotado por dueno, porque una plantilla no tiene dueno (ver la
-    // cabecera del repositorio).
+    // `buscarServible`, `diagnosticarMiss`, `registrarEjecucion` y `registrarDesajuste` son el
+    // CONSUMO; no hay ningun metodo que lea o escriba acotado por dueno, porque una plantilla no
+    // tiene dueno (ver la cabecera del repositorio).
     expect(metodos.sort()).toEqual([
       'buscarServible',
+      'buscarServibles',
       'clasesCorroboradas',
       'comoRegistro',
       'diagnosticarMiss',
       'publicar',
+      'registrarDesajuste',
       'registrarEjecucion',
       'upsert',
     ]);
@@ -426,7 +450,38 @@ describe('buscarServible: la lectura del consumo', () => {
     expect(rangoDeEstado).toBeLessThan(orden.indexOf('origenes desc'));
     expect(orden.indexOf('origenes desc')).toBeLessThan(orden.indexOf('ejecuciones_exitosas desc'));
     expect(orden.indexOf('ejecuciones_exitosas desc')).toBeLessThan(orden.indexOf('id asc'));
-    expect(orden).toContain('limit 1');
+    // D5 (coexistencia): el tope viaja parametrizado; buscarServible sigue tomando la primera.
+    expect(orden).toContain('limit ');
+  });
+
+  it('D5: buscarServibles devuelve las candidatas EN EL ORDEN del desempate, acotadas al tope', async () => {
+    const filas = [
+      { id: 'p-1', estado: 'corroborada', pasos: pasos(), origenes: 4 },
+      { id: 'p-2', estado: 'candidata', pasos: pasos(), origenes: 2 },
+    ];
+    const sql = makeSql([[...filas]]);
+    const servibles = await new PlantillasCompartidasRepository(sql).buscarServibles({
+      dominiosClave: DOMINIO,
+      codigoDeIntencion: 'enviar',
+      marcadoresPosibles: ['', 'asunto', 'asunto+destinatario', 'destinatario'],
+      origenHash: 'hash-del-consumidor',
+    });
+    // El orden es el del `order by` de la base: aqui solo se fija que no se reordena ni se recorta.
+    expect(servibles.map((fila) => fila.id)).toEqual(['p-1', 'p-2']);
+    const [, valores] = sql.queries[0] as [string, unknown[]];
+    expect(valores).toContain(MAX_CANDIDATAS_DE_CONSUMO);
+  });
+
+  it('D5: buscarServible es exactamente la primera candidata de buscarServibles', async () => {
+    const sql = makeSql([[{ id: 'p-1', estado: 'candidata', pasos: pasos(), origenes: 2 }]]);
+    const fila = await new PlantillasCompartidasRepository(sql).buscarServible({
+      dominiosClave: DOMINIO,
+      codigoDeIntencion: 'enviar',
+      marcadoresPosibles: [''],
+      origenHash: 'hash-del-consumidor',
+    });
+    expect(fila).toMatchObject({ id: 'p-1' });
+    expect(sql.queries).toHaveLength(1);
   });
 });
 
@@ -571,6 +626,67 @@ describe('registrarEjecucion: contadores, evidencia de consumo y transiciones', 
   it('devuelve null cuando la fila no existe (el update no toco nada)', async () => {
     const sql = makeSql([[]]);
     const registro = await new PlantillasCompartidasRepository(sql).registrarEjecucion('nope', true);
+    expect(registro).toBeNull();
+  });
+});
+
+describe('registrarDesajuste: retiro acelerado por evidencia estructural (V044, D4)', () => {
+  function filaDeRegistro(estado = 'candidata', estadoPrevio = 'candidata') {
+    return {
+      estado,
+      estado_previo: estadoPrevio,
+      dominios_clave: DOMINIO,
+      codigo_de_intencion: 'enviar',
+      marcadores_clave: 'destinatario',
+    };
+  }
+
+  it('agrega el hash del consumidor SOLO si es nuevo y persiste el motivo, sin tocar contadores de ejecucion', async () => {
+    const sql = makeSql([[filaDeRegistro()]]);
+    await new PlantillasCompartidasRepository(sql).registrarDesajuste('p-1', 'c1');
+    const [texto, valores] = sql.queries[0] as [string, unknown[]];
+    expect(texto).toContain('desajustes_hash = case when desajustes_hash @> ');
+    expect(texto).toContain('else desajustes_hash || ');
+    expect(texto).toContain("ultima_falla_motivo = 'desajuste_de_interfaz'");
+    // NO es una ejecucion: ni fallidas, ni exitosas, ni la racha de retiro por calidad.
+    expect(texto).not.toContain('ejecuciones_fallidas');
+    expect(texto).not.toContain('ejecuciones_exitosas');
+    expect(texto).not.toContain('fallos_consecutivos');
+    expect(valores).toContain('p-1');
+    expect(JSON.stringify(valores)).toContain('c1');
+  });
+
+  it('D4: con DESAJUSTES_PARA_RETIRO consumidores distintos la fila pasa a retirada, en el mismo statement', async () => {
+    const sql = makeSql([[filaDeRegistro('retirada', 'candidata')]]);
+    const registro = await new PlantillasCompartidasRepository(sql).registrarDesajuste('p-1', 'c2');
+    const [texto, valores] = sql.queries[0] as [string, unknown[]];
+    // El conteo se hace sobre la MISMA expresion deduplicada que se persiste: dos desajustes del
+    // MISMO consumidor no pueden llegar al umbral.
+    expect(texto).toContain('when jsonb_array_length( case when desajustes_hash @> ');
+    expect(texto).toContain("then 'retirada' else estado end");
+    expect(valores).toContain(DESAJUSTES_PARA_RETIRO);
+    expect(registro).toMatchObject({ estado: 'retirada', estadoPrevio: 'candidata' });
+  });
+
+  it('el umbral es DOS consumidores distintos, no dos desajustes', () => {
+    expect(DESAJUSTES_PARA_RETIRO).toBe(2);
+  });
+
+  it('devuelve la identidad de la fila para el log, jamas un hash', async () => {
+    const sql = makeSql([[filaDeRegistro()]]);
+    const registro = await new PlantillasCompartidasRepository(sql).registrarDesajuste('p-1', 'c1');
+    expect(registro).toEqual({
+      estado: 'candidata',
+      estadoPrevio: 'candidata',
+      dominiosClave: DOMINIO,
+      codigoDeIntencion: 'enviar',
+      marcadoresClave: 'destinatario',
+    });
+  });
+
+  it('devuelve null cuando la fila no existe (el update no toco nada)', async () => {
+    const sql = makeSql([[]]);
+    const registro = await new PlantillasCompartidasRepository(sql).registrarDesajuste('nope', 'c1');
     expect(registro).toBeNull();
   });
 });

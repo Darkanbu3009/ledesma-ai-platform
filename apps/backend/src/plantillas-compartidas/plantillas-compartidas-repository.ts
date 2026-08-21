@@ -57,6 +57,16 @@ export const UMBRAL_DE_CORROBORACION = 2;
 export const FALLOS_PARA_RETIRO = 3;
 
 /**
+ * CONSUMIDORES DISTINTOS cuya sonda pre-flight tiene que detectar un DESAJUSTE DE INTERFAZ (V044)
+ * para retirar la fila de inmediato. Dos, y la asimetria con FALLOS_PARA_RETIRO es deliberada: la
+ * evidencia estructural (la pagina ya no tiene las clases que el procedimiento declara, sin haber
+ * ejecutado nada) es menos ambigua que un fallo de ejecucion, asi que el retiro llega antes; pero
+ * dos desajustes del MISMO consumidor no bastan, porque ese consumidor puede ser la cohorte
+ * minoritaria de un experimento del sitio y el procedimiento seguir siendo valido para el resto.
+ */
+export const DESAJUSTES_PARA_RETIRO = 2;
+
+/**
  * LOS MOTIVOS IMPUTABLES A LA PLANTILLA (D4): la barrera bloqueo un paso (la fila apunta a otro
  * control) o corrio entera sin efecto (el procedimiento ya no funciona). 'abandonada' y 'sesion'
  * suman `ejecuciones_fallidas` pero NO `fallos_consecutivos`: cortan la racha de retiro, porque hablan
@@ -69,6 +79,13 @@ const MOTIVOS_IMPUTABLES: ReadonlySet<MotivoDeFallaDePlantilla> = new Set<Motivo
 
 /** Tope de clases que la comprobacion trae por dominio. Un dominio real no tiene mil controles. */
 export const MAX_CLASES_POR_DOMINIO = 500;
+
+/**
+ * CANDIDATAS que la lectura del consumo devuelve para que la sonda pre-flight elija (D5 de
+ * resiliencia). Tres alcanzan: cada candidata de mas es una sonda de mas sobre la pagina del
+ * usuario, y con dos interfaces coexistiendo la variante de cada cohorte cae entre las primeras.
+ */
+export const MAX_CANDIDATAS_DE_CONSUMO = 3;
 
 /**
  * Lo que la publicacion manda. `pasos` viaja como `unknown` a proposito: lo primero que hace este
@@ -338,9 +355,29 @@ export class PlantillasCompartidasRepository {
     /** HMAC del origen del CONSUMIDOR, con la clave de plantillas del worker. */
     origenHash: string;
   }): Promise<PlantillaServible | null> {
+    const filas = await this.buscarServibles(clave);
+    return filas[0] ?? null;
+  }
+
+  /**
+   * COEXISTENCIA DE VARIANTES (D5 de resiliencia): la MISMA lectura del consumo, devolviendo hasta
+   * MAX_CANDIDATAS_DE_CONSUMO filas EN EL ORDEN DEL DESEMPATE en vez de solo la primera. Un sitio
+   * puede servir dos o mas interfaces a la vez (experimentos, despliegues graduales, region, idioma,
+   * plan), asi que varios procedimientos pueden coexistir como filas viables de la misma busqueda:
+   * la sonda pre-flight del worker descarta las que no aplican a la pagina que el usuario tiene
+   * enfrente y el desempate de siempre decide entre las que si (la mas especifica, despues
+   * 'corroborada' sobre 'candidata', despues mas origenes, mas exitos y el id, que vuelve el orden
+   * TOTAL y la eleccion determinista). La query es LA MISMA de `buscarServible`, con el mismo indice.
+   */
+  async buscarServibles(clave: {
+    dominiosClave: string;
+    codigoDeIntencion: string;
+    marcadoresPosibles: readonly string[];
+    origenHash: string;
+  }): Promise<PlantillaServible[]> {
     // Un consumidor siempre trae al menos la clave vacia (el subconjunto vacio). Sin ninguna no hay
     // nada que preguntar, y un `in ()` no seria una consulta valida.
-    if (clave.marcadoresPosibles.length === 0) return null;
+    if (clave.marcadoresPosibles.length === 0) return [];
     const filas = await this.sql<FilaServible[]>`
       select id, estado, pasos, jsonb_array_length(origenes_hash) as origenes
       from plantillas_compartidas
@@ -366,16 +403,14 @@ export class PlantillasCompartidasRepository {
         origenes desc,
         ejecuciones_exitosas desc,
         id asc
-      limit 1
+      limit ${MAX_CANDIDATAS_DE_CONSUMO}
     `;
-    const fila = filas[0];
-    if (fila === undefined) return null;
-    return {
+    return filas.map((fila) => ({
       id: fila.id,
       estado: fila.estado,
       pasos: fila.pasos,
       origenes: Number(fila.origenes ?? 0),
-    };
+    }));
   }
 
   /**
@@ -519,6 +554,52 @@ export class PlantillasCompartidasRepository {
     return this.comoRegistro(filas[0]);
   }
 
+  /**
+   * DESAJUSTE DE INTERFAZ detectado por la sonda pre-flight de un consumidor (V044, D4). NO es una
+   * ejecucion: no toca `ejecuciones_fallidas` ni `fallos_consecutivos` (no se ejecuto un solo paso).
+   * Lo que hace, en UN solo statement atomico:
+   *  - agrega el hash del consumidor a `desajustes_hash` SOLO si es nuevo (misma tecnica `@>` que
+   *    `origenes_hash` y `consumidores_hash`): el mismo consumidor dos veces cuenta UNA;
+   *  - persiste `ultima_falla_motivo = 'desajuste_de_interfaz'` (V044 extiende el CHECK);
+   *  - con DESAJUSTES_PARA_RETIRO consumidores distintos (contando el actual, ya deduplicado), la
+   *    fila pasa a 'retirada' de inmediato, tambien desde 'corroborada': el sitio cambio para todos.
+   *
+   * Devuelve estado previo y nuevo con la IDENTIDAD de la fila (jamas un hash), igual que
+   * `registrarEjecucion`. El llamador lo trata como best-effort.
+   */
+  async registrarDesajuste(
+    id: string,
+    consumidorHash: string,
+  ): Promise<RegistroDeEjecucion | null> {
+    const consumidor = this.sql.json([consumidorHash] as unknown as Parameters<Sql['json']>[0]);
+    const filas = await this.sql<FilaDeRegistro[]>`
+      with antes as (select estado from plantillas_compartidas where id = ${id})
+      update plantillas_compartidas set
+        desajustes_hash = case
+          when desajustes_hash @> ${consumidor} then desajustes_hash
+          else desajustes_hash || ${consumidor}
+        end,
+        ultima_falla_motivo = 'desajuste_de_interfaz',
+        -- D4: el retiro por evidencia estructural, en el MISMO statement que el contador que lo
+        -- dispara. El conteo es de consumidores DISTINTOS (la pertenencia jsonb deduplica).
+        estado = case
+          when jsonb_array_length(
+            case
+              when desajustes_hash @> ${consumidor} then desajustes_hash
+              else desajustes_hash || ${consumidor}
+            end
+          ) >= ${DESAJUSTES_PARA_RETIRO} then 'retirada'
+          else estado
+        end,
+        ultima_ejecucion_en = now(),
+        actualizada_en = now()
+      where id = ${id}
+      returning estado, (select estado from antes) as estado_previo,
+        dominios_clave, codigo_de_intencion, marcadores_clave
+    `;
+    return this.comoRegistro(filas[0]);
+  }
+
   /** La fila del returning como registro para el log del worker. null si el update no toco nada. */
   private comoRegistro(fila: FilaDeRegistro | undefined): RegistroDeEjecucion | null {
     if (fila === undefined) return null;
@@ -560,6 +641,17 @@ export class PlantillasCompartidasRepository {
    * `origenes_hash` SE CONSERVA y se le suma el origen actual si es nuevo, igual que siempre. Todo en
    * el MISMO statement del upsert: la transicion es atomica. El CTE `antes` solo lee el estado previo
    * para que el llamador pueda loguear la rehabilitacion con la identidad de la fila.
+   *
+   * REEMPLAZO POR DESAJUSTE (V044, D3 de resiliencia): cuando la fila esta 'retirada' O tiene algun
+   * desajuste de interfaz registrado (la sonda pre-flight comprobo que la pagina ya no tiene sus
+   * clases), los PASOS SI se reemplazan por los de esta publicacion y los desajustes se limpian: el
+   * procedimiento viejo describe una interfaz que ya no existe para al menos un consumidor, y la
+   * publicacion nueva sale de una corrida del motor libre que acaba de funcionar sobre la interfaz
+   * vigente. Una sola corrida convierte conocimiento obsoleto en conocimiento vigente. La fila
+   * vuelve a 'candidata' con la evidencia de consumo en cero: la que tenia era del procedimiento
+   * reemplazado. En una fila SANA (sin desajustes y no retirada) los pasos NO se reemplazan, como
+   * siempre: dejar que la ultima corrida sobreescriba el procedimiento de todos permitiria que una
+   * variante peor (o una manipulada) desplazara a la que ya tenia aval.
    */
   private async upsert(fila: {
     dominiosClave: string;
@@ -587,17 +679,37 @@ export class PlantillasCompartidasRepository {
             then plantillas_compartidas.origenes_hash
           else plantillas_compartidas.origenes_hash || excluded.origenes_hash
         end,
+        -- REEMPLAZO POR DESAJUSTE (D3): la fila retirada o con desajuste registrado adopta el
+        -- procedimiento de esta publicacion; la sana conserva el suyo.
+        pasos = case
+          when plantillas_compartidas.estado = 'retirada'
+            or plantillas_compartidas.desajustes_hash <> '[]'::jsonb
+            then excluded.pasos
+          else plantillas_compartidas.pasos
+        end,
         estado = case
-          when plantillas_compartidas.estado = 'retirada' then 'candidata'
+          when plantillas_compartidas.estado = 'retirada'
+            or plantillas_compartidas.desajustes_hash <> '[]'::jsonb
+            then 'candidata'
           else plantillas_compartidas.estado
         end,
         fallos_consecutivos = case
-          when plantillas_compartidas.estado = 'retirada' then 0
+          when plantillas_compartidas.estado = 'retirada'
+            or plantillas_compartidas.desajustes_hash <> '[]'::jsonb
+            then 0
           else plantillas_compartidas.fallos_consecutivos
         end,
         consumidores_hash = case
-          when plantillas_compartidas.estado = 'retirada' then '[]'::jsonb
+          when plantillas_compartidas.estado = 'retirada'
+            or plantillas_compartidas.desajustes_hash <> '[]'::jsonb
+            then '[]'::jsonb
           else plantillas_compartidas.consumidores_hash
+        end,
+        desajustes_hash = case
+          when plantillas_compartidas.estado = 'retirada'
+            or plantillas_compartidas.desajustes_hash <> '[]'::jsonb
+            then '[]'::jsonb
+          else plantillas_compartidas.desajustes_hash
         end,
         actualizada_en = now()
       returning jsonb_array_length(origenes_hash) as origenes,
