@@ -502,6 +502,79 @@ describe('fixture C: la pagina esta hidratando y el control aparece en la segund
   });
 });
 
+describe('D5: dos variantes de interfaz coexistiendo bajo la misma identidad', () => {
+  const CLASE_DESTINATARIO_B = 'escribir|rol:textbox|para los destinatarios';
+
+  /** La variante B del mismo procedimiento: el control de destinatario con su nombre nuevo. */
+  function pasosDeLaVarianteB(): unknown[] {
+    const pasos = pasosDeLaPlantilla();
+    pasos[0] = pasoEscribir(0, CLASE_DESTINATARIO_B, 'Para los destinatarios', 'destinatario');
+    return pasos;
+  }
+
+  function makePlantillasConVariantes(): RepositorioPlantillasParaWorker & {
+    buscarServibles: ReturnType<typeof vi.fn>;
+    registrarDesajuste: ReturnType<typeof vi.fn>;
+    registrarEjecucion: ReturnType<typeof vi.fn>;
+  } {
+    return {
+      publicar: vi.fn(async () => ({ publicada: true })),
+      // El ORDEN es el del desempate de la base: la variante A primero (mas corroborada).
+      buscarServibles: vi.fn(async () => [
+        { id: 'variante-a', estado: 'corroborada', pasos: pasosDeLaPlantilla(), origenes: 3 },
+        { id: 'variante-b', estado: 'candidata', pasos: pasosDeLaVarianteB(), origenes: 2 },
+      ]),
+      buscarServible: vi.fn(async () => null),
+      registrarEjecucion: vi.fn(async () => {}),
+      registrarDesajuste: vi.fn(async () => null),
+    };
+  }
+
+  it('la sonda descarta la variante que no describe la pagina y se ejecuta la otra, determinista', async () => {
+    // La pagina de ESTE usuario sirve la interfaz nueva: el control se llama como en la variante B.
+    const paginaConVarianteB: string[][] = [['Buscar', 'Para los destinatarios', 'Asunto']];
+    const repo = makePlantillasConVariantes();
+    const deps = makeDeps({
+      determinista: makeDeterminista([paginaConVarianteB, paginaConVarianteB, paginaConVarianteB]),
+      plantillas: { repo, clave: CLAVE_PLANTILLAS },
+      atlas: {
+        repo: makeAtlas([...CLASES_DEL_PROCEDIMIENTO, CLASE_DESTINATARIO_B]),
+        clave: 'clave-del-atlas',
+      },
+    });
+
+    const resultado = await procesarTareaWeb(deps, makeJob());
+
+    expect(resultado).toBe('completada');
+    // La variante A (primera del desempate) se descarto por desajuste y quedo registrada; la B se
+    // ejecuto entera. Ningun paso de la A toco la pagina.
+    expect(repo.registrarDesajuste).toHaveBeenCalledWith('variante-a', HASH_CONSUMIDOR);
+    expect(repo.registrarEjecucion).toHaveBeenCalledWith('variante-b', true, undefined, HASH_CONSUMIDOR);
+    expect(determinista(deps).ejecutarPasoDeterminista).toHaveBeenCalledTimes(4);
+    expect(deps.motor.ejecutar).not.toHaveBeenCalled();
+  });
+
+  it('con las dos variantes viables para la pagina, gana SIEMPRE la primera del desempate', async () => {
+    // La pagina tiene los dos controles (transicion a mitad de camino): la eleccion no es al azar.
+    const paginaConAmbas: string[][] = [['Destinatarios en Para', 'Para los destinatarios']];
+    const repo = makePlantillasConVariantes();
+    const deps = makeDeps({
+      determinista: makeDeterminista([paginaConAmbas]),
+      plantillas: { repo, clave: CLAVE_PLANTILLAS },
+      atlas: {
+        repo: makeAtlas([...CLASES_DEL_PROCEDIMIENTO, CLASE_DESTINATARIO_B]),
+        clave: 'clave-del-atlas',
+      },
+    });
+
+    const resultado = await procesarTareaWeb(deps, makeJob());
+
+    expect(resultado).toBe('completada');
+    expect(repo.registrarDesajuste).not.toHaveBeenCalled();
+    expect(repo.registrarEjecucion).toHaveBeenCalledWith('variante-a', true, undefined, HASH_CONSUMIDOR);
+  });
+});
+
 describe('D2: el reset previo al motor es OBLIGATORIO tambien tras una receta que toco la pagina', () => {
   /** Determinista que ejecuta escrituras y falla los clicks: la receta toca la pagina y se rinde. */
   function deterministaQueAbandonaElClick(navegarFalla = false): NavegadorDeterminista & {

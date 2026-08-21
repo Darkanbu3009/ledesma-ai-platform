@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { PasoPublicable, Sql } from '@ledesma-platform/shared';
 import {
   DESAJUSTES_PARA_RETIRO,
+  MAX_CANDIDATAS_DE_CONSUMO,
   FALLOS_PARA_RETIRO,
   MAX_CLASES_POR_DOMINIO,
   MAX_FILAS_DE_DIAGNOSTICO,
@@ -330,6 +331,7 @@ describe('publicar: la superficie del repositorio es CERRADA', () => {
     // tiene dueno (ver la cabecera del repositorio).
     expect(metodos.sort()).toEqual([
       'buscarServible',
+      'buscarServibles',
       'clasesCorroboradas',
       'comoRegistro',
       'diagnosticarMiss',
@@ -448,7 +450,38 @@ describe('buscarServible: la lectura del consumo', () => {
     expect(rangoDeEstado).toBeLessThan(orden.indexOf('origenes desc'));
     expect(orden.indexOf('origenes desc')).toBeLessThan(orden.indexOf('ejecuciones_exitosas desc'));
     expect(orden.indexOf('ejecuciones_exitosas desc')).toBeLessThan(orden.indexOf('id asc'));
-    expect(orden).toContain('limit 1');
+    // D5 (coexistencia): el tope viaja parametrizado; buscarServible sigue tomando la primera.
+    expect(orden).toContain('limit ');
+  });
+
+  it('D5: buscarServibles devuelve las candidatas EN EL ORDEN del desempate, acotadas al tope', async () => {
+    const filas = [
+      { id: 'p-1', estado: 'corroborada', pasos: pasos(), origenes: 4 },
+      { id: 'p-2', estado: 'candidata', pasos: pasos(), origenes: 2 },
+    ];
+    const sql = makeSql([[...filas]]);
+    const servibles = await new PlantillasCompartidasRepository(sql).buscarServibles({
+      dominiosClave: DOMINIO,
+      codigoDeIntencion: 'enviar',
+      marcadoresPosibles: ['', 'asunto', 'asunto+destinatario', 'destinatario'],
+      origenHash: 'hash-del-consumidor',
+    });
+    // El orden es el del `order by` de la base: aqui solo se fija que no se reordena ni se recorta.
+    expect(servibles.map((fila) => fila.id)).toEqual(['p-1', 'p-2']);
+    const [, valores] = sql.queries[0] as [string, unknown[]];
+    expect(valores).toContain(MAX_CANDIDATAS_DE_CONSUMO);
+  });
+
+  it('D5: buscarServible es exactamente la primera candidata de buscarServibles', async () => {
+    const sql = makeSql([[{ id: 'p-1', estado: 'candidata', pasos: pasos(), origenes: 2 }]]);
+    const fila = await new PlantillasCompartidasRepository(sql).buscarServible({
+      dominiosClave: DOMINIO,
+      codigoDeIntencion: 'enviar',
+      marcadoresPosibles: [''],
+      origenHash: 'hash-del-consumidor',
+    });
+    expect(fila).toMatchObject({ id: 'p-1' });
+    expect(sql.queries).toHaveLength(1);
   });
 });
 

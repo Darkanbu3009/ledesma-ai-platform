@@ -613,6 +613,18 @@ export interface RepositorioPlantillasParaWorker {
     origenHash: string;
   }): Promise<{ id: string; estado: string; pasos: unknown; origenes: number } | null>;
   /**
+   * COEXISTENCIA DE VARIANTES (D5 de resiliencia): la misma lectura, con hasta
+   * MAX_CANDIDATAS_DE_CONSUMO filas EN EL ORDEN DEL DESEMPATE. La sonda pre-flight descarta las que
+   * no aplican a la pagina de enfrente y se ejecuta la primera que si. Opcional: un fake o un
+   * despliegue sin este metodo cae a `buscarServible` (una sola candidata), como hasta hoy.
+   */
+  buscarServibles?(clave: {
+    dominiosClave: string;
+    codigoDeIntencion: string;
+    marcadoresPosibles: readonly string[];
+    origenHash: string;
+  }): Promise<Array<{ id: string; estado: string; pasos: unknown; origenes: number }>>;
+  /**
    * DONDE SE CORTO la lectura de arriba cuando no devolvio nada. SOLO se llama despues de un miss:
    * es una consulta mas y el camino feliz no la paga. Best-effort: sin ella el veredicto sale igual,
    * solo que sin el corte.
@@ -3123,11 +3135,11 @@ async function buscarPlantillaAjena(
     verboBloqueado: string | null;
     valores: ValoresDeParametros;
   },
-): Promise<{ plantilla: PlantillaParaEstaTarea | null; veredicto: VeredictoDeConsumo }> {
+): Promise<{ plantillas: PlantillaParaEstaTarea[]; veredicto: VeredictoDeConsumo }> {
   const sin = (motivo: string, idx: number | null = null): {
-    plantilla: null;
+    plantillas: PlantillaParaEstaTarea[];
     veredicto: VeredictoDeConsumo;
-  } => ({ plantilla: null, veredicto: { consumida: false, motivo, idx } });
+  } => ({ plantillas: [], veredicto: { consumida: false, motivo, idx } });
 
   const plantillas = deps.plantillas;
   // Sin puerto de lectura, sin navegador determinista o sin recetas no hay camino que ofrecer: la
@@ -3144,16 +3156,24 @@ async function buscarPlantillaAjena(
   });
   if (identidad === null) return sin('sin_identidad');
 
-  let fila: { id: string; estado: string; pasos: unknown; origenes: number } | null;
+  let filas: Array<{ id: string; estado: string; pasos: unknown; origenes: number }>;
   try {
-    fila = await plantillas.repo.buscarServible({
+    const clave = {
       dominiosClave: identidad.dominiosClave,
       codigoDeIntencion: identidad.codigoDeIntencion,
       // CONTENCION, no igualdad: la plantilla aplica si sus marcadores estan CONTENIDOS en los que
       // este objetivo declara. `marcadoresClave` (el conjunto exacto) no viaja a la consulta.
       marcadoresPosibles: identidad.marcadoresPosibles,
       origenHash: hashDeOrigenDePlantilla(job.ownerId, plantillas.clave),
-    });
+    };
+    // D5 (coexistencia de variantes): con el metodo nuevo llegan hasta MAX_CANDIDATAS_DE_CONSUMO
+    // candidatas en el orden del desempate; con el viejo, una sola, exactamente como hasta hoy.
+    if (plantillas.repo.buscarServibles) {
+      filas = await plantillas.repo.buscarServibles(clave);
+    } else {
+      const fila = await plantillas.repo.buscarServible(clave);
+      filas = fila === null ? [] : [fila];
+    }
   } catch (error) {
     deps.logger.warn('tarea web: no se pudo consultar el procedimiento compartido; se ejecuta con el motor', {
       jobId: job.id,
@@ -3161,30 +3181,37 @@ async function buscarPlantillaAjena(
     });
     return sin('error_al_leer');
   }
-  if (fila === null) {
-    return { plantilla: null, veredicto: await veredictoDelMiss(deps, job, plantillas.repo, identidad) };
+  if (filas.length === 0) {
+    return { plantillas: [], veredicto: await veredictoDelMiss(deps, job, plantillas.repo, identidad) };
   }
 
-  const veredicto = plantillaAplicable({
-    pasos: fila.pasos,
-    dominio: sitio.dominio,
-    valores: opciones.valores,
-    verboBloqueado: opciones.verboBloqueado,
-    // LAS CLASES CORROBORADAS DE ESTE CONSUMIDOR, no las del que publico: lo que el atlas avala para
-    // este dominio y este origen. Vacio (y con eso nada aplica) cuando el atlas no esta cableado.
-    clasesCorroboradas: atlas?.clasesCorroboradas(sitio.dominio) ?? new Set<string>(),
-  });
-  if (!veredicto.aplica) {
-    deps.logger.info('tarea web: hay un procedimiento compartido para esta tarea pero no aplica aqui', {
-      jobId: job.id,
+  // La aplicabilidad se evalua candidata por candidata, EN EL ORDEN DEL DESEMPATE, y el orden se
+  // conserva: la sonda pre-flight del llamador descarta las que no describen la pagina de enfrente
+  // y se ejecuta la primera que si. Con cero aplicables, el motivo es el de la PRIMERA candidata,
+  // que es la fila que la consulta de una sola candidata habria devuelto.
+  const aplicables: PlantillaParaEstaTarea[] = [];
+  let primerRechazo: { motivo: string; idx: number | null } | null = null;
+  for (const fila of filas) {
+    const veredicto = plantillaAplicable({
+      pasos: fila.pasos,
       dominio: sitio.dominio,
-      motivo: veredicto.motivo,
-      paso: veredicto.idx,
+      valores: opciones.valores,
+      verboBloqueado: opciones.verboBloqueado,
+      // LAS CLASES CORROBORADAS DE ESTE CONSUMIDOR, no las del que publico: lo que el atlas avala
+      // para este dominio y este origen. Vacio (y con eso nada aplica) si el atlas no esta cableado.
+      clasesCorroboradas: atlas?.clasesCorroboradas(sitio.dominio) ?? new Set<string>(),
     });
-    return sin(veredicto.motivo, veredicto.idx < 0 ? null : veredicto.idx);
-  }
-  return {
-    plantilla: {
+    if (!veredicto.aplica) {
+      deps.logger.info('tarea web: hay un procedimiento compartido para esta tarea pero no aplica aqui', {
+        jobId: job.id,
+        dominio: sitio.dominio,
+        motivo: veredicto.motivo,
+        paso: veredicto.idx,
+      });
+      primerRechazo ??= { motivo: veredicto.motivo, idx: veredicto.idx < 0 ? null : veredicto.idx };
+      continue;
+    }
+    aplicables.push({
       id: fila.id,
       estado: fila.estado,
       origenes: fila.origenes,
@@ -3195,9 +3222,12 @@ async function buscarPlantillaAjena(
         marcadores: veredicto.marcadores,
         dominio: sitio.dominio,
       },
-    },
-    veredicto: { consumida: false, motivo: null, idx: null },
-  };
+    });
+  }
+  if (aplicables.length === 0) {
+    return sin(primerRechazo?.motivo ?? 'sin_plantilla', primerRechazo?.idx ?? null);
+  }
+  return { plantillas: aplicables, veredicto: { consumida: false, motivo: null, idx: null } };
 }
 
 /**
@@ -4494,7 +4524,7 @@ export async function procesarTareaWeb(
       let interpretacion: MotivoDeInterpretacion = 'no_intentada';
       let intencionInterpretada: CodigoDeIntencion | null = null;
       if (
-        consulta.plantilla === null &&
+        consulta.plantillas.length === 0 &&
         missQueLaInterpretacionArregla(consulta.veredicto.motivo, verboBloqueado)
       ) {
         const interpretada = await interpretarObjetivo(deps, job, {
@@ -4539,25 +4569,28 @@ export async function procesarTareaWeb(
                 ? { datosInterpretados: Object.keys(resolucionDeLaCorrida.valores).sort() }
                 : {}),
             };
-      // SONDA DE RECONOCIMIENTO PREVIA (D1) sobre la candidata: si sus clases observables no estan
-      // en la pagina que el usuario tiene enfrente, NO se ejecuta ningun paso, el desajuste queda
-      // registrado con su propio contador (D4) y la tarea sigue por el motor libre con la pagina
-      // limpia: la sonda no toco el DOM.
-      let candidata = consulta.plantilla;
-      if (candidata !== null) {
+      // SONDA DE RECONOCIMIENTO PREVIA (D1) sobre cada candidata aplicable, en el orden del
+      // desempate (D5, coexistencia de variantes): la primera cuyas clases observables SI estan en
+      // la pagina de enfrente se ejecuta; cada una desajustada queda registrada con su propio
+      // contador (D4) y se descarta SIN tocar el DOM. Si ninguna coincide, la tarea sigue por el
+      // motor libre con la pagina limpia: la sonda es de solo lectura.
+      let candidata: PlantillaParaEstaTarea | null = null;
+      for (const viable of consulta.plantillas) {
         const sondaDePlantilla = await sondearInterfazBestEffort(
           deps,
           job,
           activo.sesionExternaId,
           activo.sitio.dominio,
-          candidata.pasos,
+          viable.pasos,
         );
         if (sondaDePlantilla.tipo === 'desajuste') {
           huboDesajusteDeInterfaz = true;
           veredictoDeConsumo = { consumida: false, motivo: 'desajuste_de_interfaz', idx: null };
-          await registrarDesajusteDePlantillaBestEffort(deps, job, candidata.id);
-          candidata = null;
+          await registrarDesajusteDePlantillaBestEffort(deps, job, viable.id);
+          continue;
         }
+        candidata = viable;
+        break;
       }
       if (candidata !== null) {
         // EJECUCION DIRECTA, sin ofrecimiento y sin pausa: las puertas tecnicas ya pasaron todas.

@@ -81,6 +81,13 @@ const MOTIVOS_IMPUTABLES: ReadonlySet<MotivoDeFallaDePlantilla> = new Set<Motivo
 export const MAX_CLASES_POR_DOMINIO = 500;
 
 /**
+ * CANDIDATAS que la lectura del consumo devuelve para que la sonda pre-flight elija (D5 de
+ * resiliencia). Tres alcanzan: cada candidata de mas es una sonda de mas sobre la pagina del
+ * usuario, y con dos interfaces coexistiendo la variante de cada cohorte cae entre las primeras.
+ */
+export const MAX_CANDIDATAS_DE_CONSUMO = 3;
+
+/**
  * Lo que la publicacion manda. `pasos` viaja como `unknown` a proposito: lo primero que hace este
  * repositorio es parsearlo contra el contrato, y tipar la entrada como ya valida seria fingir que la
  * puerta no hace falta.
@@ -348,9 +355,29 @@ export class PlantillasCompartidasRepository {
     /** HMAC del origen del CONSUMIDOR, con la clave de plantillas del worker. */
     origenHash: string;
   }): Promise<PlantillaServible | null> {
+    const filas = await this.buscarServibles(clave);
+    return filas[0] ?? null;
+  }
+
+  /**
+   * COEXISTENCIA DE VARIANTES (D5 de resiliencia): la MISMA lectura del consumo, devolviendo hasta
+   * MAX_CANDIDATAS_DE_CONSUMO filas EN EL ORDEN DEL DESEMPATE en vez de solo la primera. Un sitio
+   * puede servir dos o mas interfaces a la vez (experimentos, despliegues graduales, region, idioma,
+   * plan), asi que varios procedimientos pueden coexistir como filas viables de la misma busqueda:
+   * la sonda pre-flight del worker descarta las que no aplican a la pagina que el usuario tiene
+   * enfrente y el desempate de siempre decide entre las que si (la mas especifica, despues
+   * 'corroborada' sobre 'candidata', despues mas origenes, mas exitos y el id, que vuelve el orden
+   * TOTAL y la eleccion determinista). La query es LA MISMA de `buscarServible`, con el mismo indice.
+   */
+  async buscarServibles(clave: {
+    dominiosClave: string;
+    codigoDeIntencion: string;
+    marcadoresPosibles: readonly string[];
+    origenHash: string;
+  }): Promise<PlantillaServible[]> {
     // Un consumidor siempre trae al menos la clave vacia (el subconjunto vacio). Sin ninguna no hay
     // nada que preguntar, y un `in ()` no seria una consulta valida.
-    if (clave.marcadoresPosibles.length === 0) return null;
+    if (clave.marcadoresPosibles.length === 0) return [];
     const filas = await this.sql<FilaServible[]>`
       select id, estado, pasos, jsonb_array_length(origenes_hash) as origenes
       from plantillas_compartidas
@@ -376,16 +403,14 @@ export class PlantillasCompartidasRepository {
         origenes desc,
         ejecuciones_exitosas desc,
         id asc
-      limit 1
+      limit ${MAX_CANDIDATAS_DE_CONSUMO}
     `;
-    const fila = filas[0];
-    if (fila === undefined) return null;
-    return {
+    return filas.map((fila) => ({
       id: fila.id,
       estado: fila.estado,
       pasos: fila.pasos,
       origenes: Number(fila.origenes ?? 0),
-    };
+    }));
   }
 
   /**
