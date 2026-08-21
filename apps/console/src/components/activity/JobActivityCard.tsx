@@ -228,6 +228,19 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
                   {t('procedimientoAjeno.corroborado')}
                 </span>
               )}
+              {/* EL SITIO CAMBIO (D6, resiliencia): el agente detecto el cambio de interfaz antes
+                  de ejecutar nada, hizo la tarea por su cuenta y reaprendio el procedimiento. En
+                  lenguaje llano y sin mecanica interna: el usuario entiende que el sitio cambio y
+                  que su agente se adapto solo. */}
+              {job.sitioCambio === true && (
+                <span
+                  title={t('sitioCambio.detalle')}
+                  className="inline-flex flex-none items-center gap-1 rounded-full border border-line bg-line-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted"
+                >
+                  <Sparkles className="h-3 w-3" />
+                  {t('sitioCambio.etiqueta')}
+                </span>
+              )}
             </div>
 
             {job.conLoAprendido === true && (
@@ -239,6 +252,10 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
 
             {job.conProcedimientoAjeno === true && (
               <p className="mt-1 text-[12px] text-muted">{t('procedimientoAjeno.detalle')}</p>
+            )}
+
+            {job.sitioCambio === true && (
+              <p className="mt-1 text-[12px] text-muted">{t('sitioCambio.detalle')}</p>
             )}
 
             <div className="mt-1.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[12.5px] text-muted">

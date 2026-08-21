@@ -136,6 +136,11 @@ interface JobSummaryRow {
    * ('candidata' | 'corroborada') cuando la via fue 'plantilla_compartida'. Solo el escalar.
    */
   resultado_plantilla_estado: string | null;
+  /**
+   * `resultado->>'desajusteDeInterfaz'`: la sonda pre-flight detecto que el sitio cambio y la
+   * corrida se adapto sola (D6 de resiliencia). Solo el escalar.
+   */
+  resultado_desajuste: string | null;
 }
 
 function rowToSummary(row: JobSummaryRow): JobSummary {
@@ -169,6 +174,9 @@ function rowToSummary(row: JobSummaryRow): JobSummary {
     procedimientoCorroborado:
       row.resultado_via === 'plantilla_compartida' &&
       row.resultado_plantilla_estado === 'corroborada',
+    // D6 (resiliencia): el sitio cambio su interfaz, la sonda lo detecto a tiempo y la corrida se
+    // adapto sola. Es de lo que la consola deriva su aviso en lenguaje llano.
+    sitioCambio: row.resultado_desajuste === 'true',
   };
 }
 
@@ -303,7 +311,8 @@ export class JobsRepository {
             select id, agent_id, status, payload->>'kind' as payload_kind, attempts, last_error,
               scheduled_for, created_at, started_at, finished_at,
               resultado->>'via' as resultado_via, resultado->>'reparada' as resultado_reparada,
-              resultado->'plantillaAjena'->>'estado' as resultado_plantilla_estado
+              resultado->'plantillaAjena'->>'estado' as resultado_plantilla_estado,
+              resultado->>'desajusteDeInterfaz' as resultado_desajuste
             from jobs
             where owner_id = ${ownerId}
               and (payload->>'kind' is distinct from ${PROMOVER_TRAYECTORIA_JOB_KIND})
@@ -314,7 +323,8 @@ export class JobsRepository {
             select id, agent_id, status, payload->>'kind' as payload_kind, attempts, last_error,
               scheduled_for, created_at, started_at, finished_at,
               resultado->>'via' as resultado_via, resultado->>'reparada' as resultado_reparada,
-              resultado->'plantillaAjena'->>'estado' as resultado_plantilla_estado
+              resultado->'plantillaAjena'->>'estado' as resultado_plantilla_estado,
+              resultado->>'desajusteDeInterfaz' as resultado_desajuste
             from jobs
             where owner_id = ${ownerId} and status = ${status}
               and (payload->>'kind' is distinct from ${PROMOVER_TRAYECTORIA_JOB_KIND})
@@ -335,7 +345,8 @@ export class JobsRepository {
       select id, agent_id, status, payload->>'kind' as payload_kind, attempts, last_error,
         scheduled_for, created_at, started_at, finished_at,
         resultado->>'via' as resultado_via, resultado->>'reparada' as resultado_reparada,
-              resultado->'plantillaAjena'->>'estado' as resultado_plantilla_estado
+              resultado->'plantillaAjena'->>'estado' as resultado_plantilla_estado,
+              resultado->>'desajusteDeInterfaz' as resultado_desajuste
       from jobs
       where id = ${id} and owner_id = ${ownerId}
     `;

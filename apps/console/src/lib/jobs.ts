@@ -52,6 +52,11 @@ export interface JobActivity {
   /** Ademas, ese procedimiento ya estaba corroborado por varias cuentas independientes. */
   procedimientoCorroborado?: boolean;
   /**
+   * El sitio cambio su interfaz y el agente lo detecto a tiempo, hizo la tarea por su cuenta y
+   * reaprendio el procedimiento. Lo deriva el backend de jobs.resultado; aqui solo se pinta.
+   */
+  sitioCambio?: boolean;
+  /**
    * La tarea web termino con exito corriendo con el motor y su registro alcanza para GUARDARLA como
    * tarea aprendida (todavia sin guardar). Lo deriva el backend; ausente = no ofrecer el boton.
    */

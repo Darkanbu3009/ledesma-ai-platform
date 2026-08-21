@@ -2087,6 +2087,10 @@
     "corroborado": "Corroborado",
     "corroboradoDetalle": "Varias cuentas independientes descubrieron y ejecutaron con exito este mismo procedimiento."
   },
+  "sitioCambio": {
+    "etiqueta": "El sitio cambio",
+    "detalle": "El sitio cambio su pagina y tu agente lo noto a tiempo: hizo la tarea por su cuenta y volvio a aprender el procedimiento para la proxima vez."
+  },
   "avisoTareaLenta": {
     "titulo": "Esta tarea esta tardando mas de lo normal",
     "detalle": "Lleva {{minutos}} minutos en ejecucion. Puedes esperar o terminarla.",

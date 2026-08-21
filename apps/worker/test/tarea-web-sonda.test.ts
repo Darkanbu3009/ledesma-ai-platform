@@ -554,6 +554,25 @@ describe('D5: dos variantes de interfaz coexistiendo bajo la misma identidad', (
     expect(deps.motor.ejecutar).not.toHaveBeenCalled();
   });
 
+  it('D6: el desajuste queda en el resultado del job como escalar, para la tarjeta de /actividad', async () => {
+    const paginaConVarianteB: string[][] = [['Buscar', 'Para los destinatarios', 'Asunto']];
+    const repo = makePlantillasConVariantes();
+    const deps = makeDeps({
+      determinista: makeDeterminista([paginaConVarianteB, paginaConVarianteB, paginaConVarianteB]),
+      plantillas: { repo, clave: CLAVE_PLANTILLAS },
+      atlas: {
+        repo: makeAtlas([...CLASES_DEL_PROCEDIMIENTO, CLASE_DESTINATARIO_B]),
+        clave: 'clave-del-atlas',
+      },
+    });
+
+    expect(await procesarTareaWeb(deps, makeJob())).toBe('completada');
+
+    const guardar = deps.guardarResultado as unknown as ReturnType<typeof vi.fn>;
+    const resultado = guardar.mock.calls.at(-1)?.[1] as Record<string, unknown>;
+    expect(resultado.desajusteDeInterfaz).toBe(true);
+  });
+
   it('con las dos variantes viables para la pagina, gana SIEMPRE la primera del desempate', async () => {
     // La pagina tiene los dos controles (transicion a mitad de camino): la eleccion no es al azar.
     const paginaConAmbas: string[][] = [['Destinatarios en Para', 'Para los destinatarios']];

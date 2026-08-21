@@ -4627,14 +4627,17 @@ export async function procesarTareaWeb(
             // /actividad pueda decir "procedimiento de otra cuenta" (y "corroborado" cuando lo es)
             // sin exponer nada mas de la tabla.
             plantillaAjena: { consumida: true, motivo: null, idx: null, estado: candidata.estado },
+            // D6 (resiliencia): una variante coexistente se descarto por desajuste antes de que
+            // esta se ejecutara. El sitio cambio para parte de sus usuarios y el agente lo noto.
+            ...(huboDesajusteDeInterfaz ? { desajusteDeInterfaz: true } : {}),
           });
           return 'completada';
         }
         veredictoDeConsumo = { consumida: false, motivo: 'abandonada', idx: null };
         if (porPlantilla.paginaTocada) {
-          // FIX B: aqui el reset es OBLIGATORIO, no tolerante como en el camino por receta: se
-          // descarta el estado a medio llenar, se navega al inicio y, si la sesion no responde,
-          // se abre una nueva en vez de entregarle al motor una sesion degradada.
+          // FIX B, generalizado por D2: el reset OBLIGATORIO previo al motor, el mismo que corre
+          // tras una receta que toco la pagina: se descarta el estado a medio llenar, se navega al
+          // inicio y, si la sesion no responde, se abre una nueva en vez de una degradada.
           activo = await resetObligatorioPrevioAlMotor(deps, job, gestor, activo);
         }
       }
@@ -4988,6 +4991,10 @@ export async function procesarTareaWeb(
       plantilla: veredictoDePlantilla,
       // Y el del CONSUMO: por que esta corrida no uso un procedimiento que otra cuenta ya descubrio.
       plantillaAjena: veredictoDeConsumo,
+      // D6 (resiliencia): la sonda pre-flight detecto que el sitio cambio y esta corrida se adapto
+      // sola (motor libre + reaprendizaje). Es el escalar del que la tarjeta de /actividad deriva su
+      // aviso en lenguaje llano; ausente cuando no hubo desajuste, para no tocar ningun resultado.
+      ...(huboDesajusteDeInterfaz ? { desajusteDeInterfaz: true } : {}),
     });
     deps.logger.info('tarea web completada dentro de la sesion del sitio', {
       jobId: job.id,
