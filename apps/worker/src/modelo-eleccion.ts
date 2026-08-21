@@ -73,7 +73,16 @@ export function crearElectorDeTareaEnsenada(opciones: {
         });
         for await (const evento of eventos) {
           if (evento.type === 'text_delta') texto += evento.text;
-          if (evento.type === 'stop') break;
+          if (evento.type === 'stop') {
+            // EL COSTO de la consulta puntual (D5/D6): la unica llamada al modelo fuera del motor se
+            // loguea con sus tokens, para que "cuanto costo interpretar" se responda desde el log.
+            // Nunca el contenido: la peticion lleva el texto del usuario.
+            opciones.logger.info('tarea web: consulta puntual al modelo completada', {
+              tokensIn: evento.usage?.inputTokens ?? null,
+              tokensOut: evento.usage?.outputTokens ?? null,
+            });
+            break;
+          }
         }
       } catch (error) {
         // Sin respuesta no hay eleccion: el llamador cae al motor. Se loguea el tipo de error, nunca

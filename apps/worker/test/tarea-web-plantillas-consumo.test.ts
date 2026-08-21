@@ -2323,3 +2323,32 @@ describe('simetria D4: la misma frase natural publica y encuentra bajo la misma 
     expect(consumidor.motor.ejecutar).not.toHaveBeenCalled();
   });
 });
+
+// --- DIAGNOSTICO DE LA INTERPRETACION (D5) --------------------------------------------------------
+
+describe('el veredicto lleva el detalle de la interpretacion en vocabulario cerrado', () => {
+  it('intencion resuelta y nombres de los datos viajan al veredicto; los valores jamas', async () => {
+    const respuesta = JSON.stringify({
+      intencion: 'enviar',
+      datos: { destinatario: 'martin@ejemplo.com', cuerpo: 'su pedido esta listo' },
+    });
+    // Tabla vacia: la interpretacion resuelve, la re-busqueda tampoco encuentra y el detalle queda
+    // en el veredicto del miss.
+    const deps = conPlantillas([], CLASES_DEL_PROCEDIMIENTO, {
+      elector: makeElector(respuesta),
+    });
+
+    await correr(deps, makeJob('avisale a martin@ejemplo.com que su pedido esta listo'));
+
+    const veredictos = (deps.logger.info as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (llamada) => llamada[0] === 'tarea web: veredicto del procedimiento compartido',
+    );
+    const veredicto = veredictos.at(-1)?.[1] as Record<string, unknown>;
+    expect(veredicto).toMatchObject({
+      interpretacion: 'resuelta',
+      intencionInterpretada: 'enviar',
+      datosInterpretados: ['cuerpo', 'destinatario'],
+    });
+    expect(JSON.stringify(veredicto)).not.toContain('su pedido esta listo');
+  });
+});
