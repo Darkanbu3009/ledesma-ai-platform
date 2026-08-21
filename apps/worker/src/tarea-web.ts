@@ -2075,10 +2075,13 @@ async function descartarEstadoAMedioLlenarBestEffort(
 }
 
 /**
- * RESET OBLIGATORIO previo al motor libre tras un intento de plantilla ajena que TOCO el DOM (FIX B,
- * caso real de produccion del 3 ago 2026: el motor arranco sobre el compose a medio llenar de la
- * plantilla abandonada, abrio OTRO compose y la corrida termino atribuyendole al usuario un fallo de
- * sesion). Tres pasos por sitio abierto, en este orden:
+ * RESET OBLIGATORIO previo al motor libre tras un procedimiento aprendido que TOCO el DOM y se
+ * rindio: plantilla ajena (FIX B, caso real de produccion del 3 ago 2026: el motor arranco sobre el
+ * compose a medio llenar de la plantilla abandonada, abrio OTRO compose y la corrida termino
+ * atribuyendole al usuario un fallo de sesion) Y TAMBIEN receta propia (D2 de resiliencia: toda
+ * caida al motor libre arranca desde un estado inicial conocido; hasta este cambio el camino por
+ * receta solo renavegaba de forma tolerante, sin descarte generico y sin reapertura de una sesion
+ * degradada). Tres pasos por sitio abierto, en este orden:
  *
  *  1. el DESCARTE GENERICO del estado a medio llenar (Escape sobre el foco, best-effort);
  *  2. la RENAVEGACION al inicio de siempre (renavegarAInicio);
@@ -2090,7 +2093,7 @@ async function descartarEstadoAMedioLlenarBestEffort(
  * Devuelve el SitioAbierto VIGENTE del sitio activo (el mismo, o el reabierto): es lo que el motor
  * libre tiene que usar de aqui en adelante.
  */
-async function resetObligatorioTrasPlantilla(
+async function resetObligatorioPrevioAlMotor(
   deps: TareaWebDeps,
   job: Job,
   gestor: GestorDeSitios,
@@ -4415,19 +4418,15 @@ export async function procesarTareaWeb(
       });
       if (porReceta.tipo === 'completada') return 'completada';
       if (porReceta.paginaTocada) {
-        // Se devuelven a su inicio TODOS los sitios que la receta llego a tocar, no solo el de
-        // arranque: una receta multisitio pudo dejar a medio camino la pagina de otro sitio, y el
-        // motor terminaria razonando ahi sobre un estado que no pidio. El reset es TOLERANTE: si no
-        // sale, se omite y la tarea sigue con el motor (ver renavegarAInicio).
-        for (const abierto of gestor.abiertos()) {
-          await renavegarAInicio(
-            deps,
-            job,
-            abierto.sitio,
-            abierto.sesionExternaId,
-            abierto.urlInicial,
-          );
-        }
+        // D2 (resiliencia): el reset previo al motor es OBLIGATORIO tambien aqui, igual que tras
+        // una plantilla ajena, y sobre TODOS los sitios que la receta llego a tocar (una receta
+        // multisitio pudo dejar a medio camino la pagina de otro sitio): descarte generico del
+        // estado a medio llenar (Escape sobre el foco, sin un solo selector de ningun sitio),
+        // renavegacion al inicio y, si la sesion no responde, reapertura con el mismo pais pineado
+        // en vez de entregarle al motor una sesion degradada. Hasta este cambio el reset era solo
+        // la renavegacion tolerante, que ante dos timeouts se omitia y el motor arrancaba sobre la
+        // pagina a medio camino.
+        activo = await resetObligatorioPrevioAlMotor(deps, job, gestor, activo);
       }
       }
     }
@@ -4603,7 +4602,7 @@ export async function procesarTareaWeb(
           // FIX B: aqui el reset es OBLIGATORIO, no tolerante como en el camino por receta: se
           // descarta el estado a medio llenar, se navega al inicio y, si la sesion no responde,
           // se abre una nueva en vez de entregarle al motor una sesion degradada.
-          activo = await resetObligatorioTrasPlantilla(deps, job, gestor, activo);
+          activo = await resetObligatorioPrevioAlMotor(deps, job, gestor, activo);
         }
       }
     }

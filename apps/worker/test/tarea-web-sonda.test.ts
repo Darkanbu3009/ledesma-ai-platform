@@ -502,6 +502,101 @@ describe('fixture C: la pagina esta hidratando y el control aparece en la segund
   });
 });
 
+describe('D2: el reset previo al motor es OBLIGATORIO tambien tras una receta que toco la pagina', () => {
+  /** Determinista que ejecuta escrituras y falla los clicks: la receta toca la pagina y se rinde. */
+  function deterministaQueAbandonaElClick(navegarFalla = false): NavegadorDeterminista & {
+    ejecutarPasoDeterminista: ReturnType<typeof vi.fn>;
+  } {
+    return {
+      ejecutarPasoDeterminista: vi.fn(async (_sesion: string, instruccion: InstruccionDePaso) => {
+        if (instruccion.accion === 'click') {
+          return { estado: 'no_localizado' as const, estrategias: [], detalle: null };
+        }
+        if (instruccion.accion === 'navegar' && navegarFalla) {
+          return {
+            estado: 'fallo' as const,
+            estrategias: [],
+            detalle: 'timeout esperando la respuesta CDP de Page.navigate',
+          };
+        }
+        return { estado: 'ok' as const, estrategias: [], detalle: null };
+      }),
+      leerEstrategiasDeElemento: vi.fn(async () => []),
+      localizarBotonPorAriaLabel: vi.fn(async () => ({
+        ariaLabel: 'Enviar (Ctrl-Enter)',
+        rol: 'button',
+        candidatos: 1,
+      })),
+      leerCandidatosDeSonda: vi.fn(async () => LECTURA_QUE_COINCIDE),
+    };
+  }
+
+  function escaladorQueFalla(): EscaladorDePaso {
+    return {
+      ejecutarPasoConModelo: vi.fn(async () => ({
+        ok: false,
+        selector: null,
+        tokensIn: 10,
+        tokensOut: 5,
+      })),
+    };
+  }
+
+  it('descarte generico (Escape sobre el foco) y goto al inicio antes de arrancar el motor', async () => {
+    const fake = deterministaQueAbandonaElClick();
+    const deps = makeDeps({
+      recetas: makeRecetas(makeReceta()),
+      determinista: fake,
+      escalador: escaladorQueFalla(),
+    });
+
+    await correr(deps);
+
+    const instrucciones = fake.ejecutarPasoDeterminista.mock.calls.map(
+      (llamada) => llamada[1] as InstruccionDePaso,
+    );
+    // La escritura toca la pagina, el click no localiza (ni con la pista del atlas), la escalada
+    // falla y la receta se abandona: el reset obligatorio pulsa Escape y renavega ANTES del motor.
+    expect(instrucciones.map((instruccion) => instruccion.accion)).toEqual([
+      'escribir',
+      'click',
+      'click',
+      'teclas',
+      'navegar',
+    ]);
+    expect(instrucciones[3]).toMatchObject({ teclas: 'Escape', sobreElFoco: true, estrategias: [] });
+    expect(instrucciones[4]?.url).toBe(`https://${DOMINIO}/`);
+    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+  });
+
+  it('si la sesion no responde al reset, se abre una sesion NUEVA con el mismo pais pineado', async () => {
+    const fake = deterministaQueAbandonaElClick(true);
+    let sesiones = 0;
+    const navegador = {
+      ...(makeNavegador() as unknown as Record<string, unknown>),
+      abrirSesionParaTarea: vi.fn(async () => ({
+        sesionExternaId: `ses-${(sesiones += 1)}`,
+        egressIp: '203.0.113.7',
+        egressCountry: 'MX',
+      })),
+    } as unknown as NavegadorParaTarea;
+    const deps = makeDeps({
+      recetas: makeRecetas(makeReceta()),
+      determinista: fake,
+      escalador: escaladorQueFalla(),
+      navegador,
+    });
+
+    await correr(deps);
+
+    const abrir = navegador.abrirSesionParaTarea as unknown as ReturnType<typeof vi.fn>;
+    expect(abrir).toHaveBeenCalledTimes(2);
+    expect(abrir.mock.calls[1]?.[0]).toEqual(abrir.mock.calls[0]?.[0]);
+    const motor = deps.motor.ejecutar as unknown as ReturnType<typeof vi.fn>;
+    expect((motor.mock.calls[0]?.[0] as { sesionExternaId: string }).sesionExternaId).toBe('ses-2');
+  });
+});
+
 describe('el mismo pre-flight cubre la RECETA PROPIA', () => {
   it('con desajuste, la receta NO ejecuta un solo paso y la tarea sigue con el motor', async () => {
     const deps = makeDeps({

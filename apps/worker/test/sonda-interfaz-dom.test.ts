@@ -93,11 +93,11 @@ describe('la sonda sobre un DOM real', () => {
       runScripts: 'outside-only',
     });
     try {
-      const antes = dom.window.document.body.innerHTML;
+      const antes = dom.window.eval('document.body.innerHTML');
       dom.window.eval(
         expresionSondaDeClases(descriptoresDeSonda(['click|rol:button|redactar mensaje nuevo'])),
       );
-      expect(dom.window.document.body.innerHTML).toBe(antes);
+      expect(dom.window.eval('document.body.innerHTML')).toBe(antes);
     } finally {
       dom.window.close();
     }
