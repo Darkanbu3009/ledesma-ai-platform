@@ -935,14 +935,16 @@ describe('aplicabilidad: falla cerrada y la tarea sigue por el motor libre', () 
     expect(determinista.ejecutarPasoDeterminista).not.toHaveBeenCalled();
   });
 
-  it('un dato que el objetivo del consumidor no declara (ranura) hace que no aplique', async () => {
-    // La plantilla llena el asunto con una RANURA; el objetivo de este consumidor no declara asunto.
+  it('un dato NO OMITIBLE que el objetivo no declara (ranura) hace que no aplique', async () => {
+    // La plantilla llena el cuerpo con una RANURA; el objetivo de este consumidor no declara cuerpo
+    // y el cuerpo NO es omitible: la plantilla no aplica y la tarea la hace el motor libre. (El
+    // asunto, en cambio, es omitible desde D3: su caso vive en los tests de omision.)
     const pasos = [
       pasoEscribir(0, CLASE_DESTINATARIO, 'Destinatarios en Para', {
         tipo: 'parametro',
         parametro: 'destinatario',
       }),
-      pasoEscribir(1, CLASE_ASUNTO, 'Asunto', { tipo: 'ranura', clase: CLASE_ASUNTO }),
+      pasoEscribir(1, CLASE_CUERPO, 'Cuerpo del mensaje', { tipo: 'ranura', clase: CLASE_CUERPO }),
       pasoVerificar(2),
       pasoClick(3, CLASE_ENVIAR, 'Enviar'),
     ];
@@ -1837,8 +1839,18 @@ describe('el segundo escalon: interpretar el objetivo cuando el extractor no alc
     const claves = plantillas.repo.buscarServible.mock.calls.map(
       (llamada) => (llamada[0] as { marcadoresPosibles: string[] }).marcadoresPosibles,
     );
-    expect(claves[0]).toEqual(['', 'destinatario']);
-    expect(claves[1]).toEqual(['', 'cuerpo', 'cuerpo+destinatario', 'destinatario']);
+    // Desde D3 los candidatos incluyen ademas el omitible 'asunto', declarado o no.
+    expect(claves[0]).toEqual(['', 'asunto', 'asunto+destinatario', 'destinatario']);
+    expect(claves[1]).toEqual([
+      '',
+      'asunto',
+      'asunto+cuerpo',
+      'asunto+cuerpo+destinatario',
+      'asunto+destinatario',
+      'cuerpo',
+      'cuerpo+destinatario',
+      'destinatario',
+    ]);
   });
 
   it('la ejecuta con los datos que el modelo resolvio', async () => {
@@ -1932,5 +1944,411 @@ describe('el segundo escalon: interpretar el objetivo cuando el extractor no alc
       motivo: 'sin_plantilla',
       interpretacion: 'sin_respuesta',
     });
+  });
+});
+
+// --- INTERPRETACION NATURAL UNIVERSAL (D1/D2) -----------------------------------------------------
+
+/**
+ * CUALQUIER fraseo natural tiene que funcionar: errores de dedo, coloquialismos y desviaciones, sin
+ * que el usuario aprenda ningun formato. La resolucion del objetivo es interpretacion-first con el
+ * extractor como atajo de costo cero, y la intencion tambien se resuelve por interpretacion cuando la
+ * regex de verbos no la ve.
+ *
+ * LO QUE ESTOS TESTS FIJAN:
+ *  - el fraseo con errores de dedo resuelve intencion y datos anclados y encuentra la plantilla;
+ *  - la intencion PURA (sin verbo de la regex) alimenta la clave de busqueda y la corrida entera se
+ *    trata como irreversible (guardia y verificacion incluidas);
+ *  - el piso de la guardia es la deteccion determinista: la interpretacion agrega, jamas suprime.
+ */
+describe('interpretacion natural universal: intencion y datos en una sola llamada', () => {
+  /** Error de dedo incluido ("corre", "q ya"): asi escribe una persona en el telefono. */
+  const PEDIDO_CON_TYPO = 'mandale un corre a martin@ejemplo.com diciendole q ya llego el paquete';
+
+  /** Fraseo que la regex de verbos NO detecta: "avisale" no esta en VERBOS_ACCION_BLOQUEADA. */
+  const PEDIDO_SIN_VERBO_DE_REGEX = 'avisale a martin@ejemplo.com que su pedido esta listo';
+
+  function pasosDeCorreoSimple(): unknown[] {
+    return [
+      pasoEscribir(0, CLASE_DESTINATARIO, 'Destinatarios en Para', {
+        tipo: 'parametro',
+        parametro: 'destinatario',
+      }),
+      pasoEscribir(1, CLASE_CUERPO, 'Cuerpo del mensaje', { tipo: 'parametro', parametro: 'cuerpo' }),
+      pasoVerificar(2),
+      pasoClick(3, CLASE_ENVIAR, 'Enviar'),
+    ];
+  }
+
+  it('el fraseo con error de dedo resuelve intencion y datos y encuentra la plantilla', async () => {
+    const respuesta = JSON.stringify({
+      intencion: 'enviar',
+      datos: { destinatario: 'martin@ejemplo.com', cuerpo: 'ya llego el paquete' },
+    });
+    const elector = makeElector(respuesta);
+    const campos: CampoDeLaPagina[] = [
+      { contexto: 'destinatarios en para', valor: 'martin@ejemplo.com' },
+      { contexto: 'cuerpo del mensaje', valor: 'ya llego el paquete' },
+    ];
+    const deps = conPlantillas(
+      [{ id: 'plantilla-simple', estado: 'candidata', pasos: pasosDeCorreoSimple(), origenes: 2 }],
+      CLASES_DEL_PROCEDIMIENTO,
+      { elector, navegador: makeNavegador(true, campos) },
+    );
+
+    expect(await procesarTareaWeb(deps, makeJob(PEDIDO_CON_TYPO))).toBe('completada');
+    expect(elector.consultar).toHaveBeenCalledTimes(1);
+    expect(deps.motor.ejecutar).not.toHaveBeenCalled();
+  });
+
+  it('la intencion PURA (sin verbo de la regex) alimenta la clave y ejecuta con verificacion', async () => {
+    const respuesta = JSON.stringify({
+      intencion: 'enviar',
+      datos: { destinatario: 'martin@ejemplo.com', cuerpo: 'su pedido esta listo' },
+    });
+    const elector = makeElector(respuesta);
+    const campos: CampoDeLaPagina[] = [
+      { contexto: 'destinatarios en para', valor: 'martin@ejemplo.com' },
+      { contexto: 'cuerpo del mensaje', valor: 'su pedido esta listo' },
+    ];
+    const deps = conPlantillas(
+      [{ id: 'plantilla-simple', estado: 'candidata', pasos: pasosDeCorreoSimple(), origenes: 2 }],
+      CLASES_DEL_PROCEDIMIENTO,
+      { elector, navegador: makeNavegador(true, campos) },
+    );
+
+    expect(await procesarTareaWeb(deps, makeJob(PEDIDO_SIN_VERBO_DE_REGEX))).toBe('completada');
+    // La PRIMERA busqueda ni ocurre (sin verbo no hay identidad): la unica consulta va con la
+    // intencion que resolvio el modelo, sobre el vocabulario cerrado.
+    const plantillas = deps.plantillas as unknown as {
+      repo: { buscarServible: ReturnType<typeof vi.fn> };
+    };
+    expect(plantillas.repo.buscarServible).toHaveBeenCalledTimes(1);
+    expect(plantillas.repo.buscarServible.mock.calls[0]?.[0]).toMatchObject({
+      codigoDeIntencion: 'enviar',
+    });
+    // La VERIFICACION determinista corrio antes del click: la pagina se leyo para comparar.
+    expect(deps.navegador.leerCamposDeLaPagina).toHaveBeenCalled();
+    expect(deps.motor.ejecutar).not.toHaveBeenCalled();
+  });
+
+  it('un fraseo de compra resuelve intencion comprar con el producto anclado', async () => {
+    const CLASE_PRODUCTO = 'escribir|rol:textbox|producto';
+    const CLASE_COMPRAR = 'click|rol:button|comprar';
+    const pasosDeCompra: unknown[] = [
+      pasoEscribir(0, CLASE_PRODUCTO, 'Producto', { tipo: 'parametro', parametro: 'producto' }),
+      pasoVerificar(1),
+      pasoClick(2, CLASE_COMPRAR, 'Comprar'),
+    ];
+    const pedido = 'comprame eso que vi ayer en la tienda del sitio';
+    const respuesta = JSON.stringify({
+      intencion: 'comprar',
+      datos: { producto: 'eso que vi ayer en la tienda del sitio' },
+    });
+    const elector = makeElector(respuesta);
+    const campos: CampoDeLaPagina[] = [
+      { contexto: 'producto', valor: 'eso que vi ayer en la tienda del sitio' },
+    ];
+    const deps = conPlantillas(
+      [{ id: 'plantilla-compra', estado: 'candidata', pasos: pasosDeCompra, origenes: 2 }],
+      [CLASE_PRODUCTO, CLASE_COMPRAR],
+      {
+        elector,
+        navegador: makeNavegador(true, campos),
+        // El nombre accesible que la barrera lee del control final tiene que ser el de la familia
+        // del verbo (comprar), igual que 'Enviar' en los casos de correo.
+        determinista: makeDeterminista([], 'Comprar'),
+      },
+    );
+
+    expect(await procesarTareaWeb(deps, makeJob(pedido))).toBe('completada');
+    const plantillas = deps.plantillas as unknown as {
+      repo: { buscarServible: ReturnType<typeof vi.fn>; registrarEjecucion: ReturnType<typeof vi.fn> };
+    };
+    const claves = plantillas.repo.buscarServible.mock.calls.map(
+      (llamada) => llamada[0] as { codigoDeIntencion: string; marcadoresPosibles: string[] },
+    );
+    // La primera busqueda va sin producto (el extractor exige comillas); la segunda ya lo declara.
+    expect(claves.at(-1)?.codigoDeIntencion).toBe('comprar');
+    expect(claves.at(-1)?.marcadoresPosibles).toContain('producto');
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith(
+      'plantilla-compra',
+      true,
+      undefined,
+      HASH_CONSUMIDOR,
+    );
+  });
+
+  it('si el modelo no mapea ninguna intencion, la tarea sigue por el motor sin ruido', async () => {
+    const respuesta = JSON.stringify({ intencion: null, datos: { cuerpo: 'su pedido esta listo' } });
+    const elector = makeElector(respuesta);
+    const deps = conPlantillas(
+      [{ id: 'plantilla-simple', estado: 'candidata', pasos: pasosDeCorreoSimple(), origenes: 2 }],
+      CLASES_DEL_PROCEDIMIENTO,
+      { elector },
+    );
+
+    await correr(deps, makeJob(PEDIDO_SIN_VERBO_DE_REGEX));
+
+    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+    const veredictos = (deps.logger.info as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (llamada) => llamada[0] === 'tarea web: veredicto del procedimiento compartido',
+    );
+    expect(veredictos.at(-1)?.[1]).toMatchObject({ interpretacion: 'sin_intencion' });
+  });
+
+  it('FAIL-CLOSED: la guardia sigue exigiendo verificacion aunque la interpretacion falle', async () => {
+    // La regex SI detecta el verbo ("mandale"), la interpretacion devuelve basura, y la pagina
+    // muestra OTRO destinatario. Si la interpretacion pudiera suprimir la guardia, el envio saldria;
+    // con el piso intacto, la verificacion DETIENE la accion y la corrida no se cierra como exito.
+    const elector = makeElector('respuesta que no es JSON');
+    const camposConOtroDestinatario: CampoDeLaPagina[] = [
+      { contexto: 'destinatarios en para', valor: 'atacante@ejemplo.com' },
+    ];
+    const deps = makeDeps({
+      motor: makeMotorQueEnvia(),
+      elector,
+      navegador: makeNavegador(false, camposConOtroDestinatario),
+      plantillas: { repo: makePlantillas([]), clave: CLAVE_PLANTILLAS },
+    } as unknown as Partial<TareaWebDeps>);
+
+    await expect(
+      procesarTareaWeb(deps, makeJob('mandale un correo a martin@ejemplo.com diciendole que ya llego')),
+    ).rejects.toThrow();
+
+    // La verificacion corrio (leyo la pagina para comparar) y el elector fallido no la apago.
+    expect(elector.consultar).toHaveBeenCalledTimes(1);
+    expect(deps.navegador.leerCamposDeLaPagina).toHaveBeenCalled();
+  });
+});
+
+// --- OMISION DE MARCADORES OMITIBLES (D3) ---------------------------------------------------------
+
+/**
+ * El asunto es OBLIGATORIO en el contrato viejo aunque Gmail acepte correos sin asunto. Con D3 el
+ * asunto es OMITIBLE: una plantilla que lo pide se encuentra aunque el objetivo no lo declare, su
+ * paso se OMITE (jamas se inventa) y el procedimiento queda alineado; todo marcador NO omitible sigue
+ * cortando fail-closed con dato_sin_declarar.
+ */
+describe('omision de marcadores omitibles: el asunto no declarado se salta, no se inventa', () => {
+  const PEDIDO_CON_TYPO = 'mandale un corre a martin@ejemplo.com diciendole q ya llego el paquete';
+
+  /** El procedimiento COMPLETO de Gmail: pide los tres datos, asunto incluido. */
+  function pasosConAsunto(): unknown[] {
+    return [
+      pasoEscribir(0, CLASE_DESTINATARIO, 'Destinatarios en Para', {
+        tipo: 'parametro',
+        parametro: 'destinatario',
+      }),
+      pasoEscribir(1, CLASE_ASUNTO, 'Asunto', { tipo: 'parametro', parametro: 'asunto' }),
+      pasoEscribir(2, CLASE_CUERPO, 'Cuerpo del mensaje', { tipo: 'parametro', parametro: 'cuerpo' }),
+      pasoVerificar(3),
+      pasoClick(4, CLASE_ENVIAR, 'Enviar'),
+    ];
+  }
+
+  const RESPUESTA_DEL_MODELO = JSON.stringify({
+    intencion: 'enviar',
+    datos: { destinatario: 'martin@ejemplo.com', cuerpo: 'ya llego el paquete' },
+  });
+
+  /** La pagina sin asunto: es exactamente lo que el procedimiento omitido produce. */
+  const CAMPOS_SIN_ASUNTO: CampoDeLaPagina[] = [
+    { contexto: 'destinatarios en para', valor: 'martin@ejemplo.com' },
+    { contexto: 'cuerpo del mensaje', valor: 'ya llego el paquete' },
+  ];
+
+  it('encuentra la plantilla que pide asunto, omite su paso y el procedimiento queda alineado', async () => {
+    const guardar = vi.fn(async (trayectoria: unknown) => {
+      void trayectoria;
+    });
+    const elector = makeElector(RESPUESTA_DEL_MODELO);
+    const deps = conPlantillas(
+      [{ id: 'plantilla-gmail', estado: 'candidata', pasos: pasosConAsunto(), origenes: 2 }],
+      CLASES_DEL_PROCEDIMIENTO,
+      {
+        elector,
+        navegador: makeNavegador(true, CAMPOS_SIN_ASUNTO),
+        trayectorias: { guardar },
+      } as unknown as Partial<TareaWebDeps>,
+    );
+
+    expect(await procesarTareaWeb(deps, makeJob(PEDIDO_CON_TYPO))).toBe('completada');
+
+    // El paso del asunto NO corrio: dos escrituras y el click final, con la BARRERA en activa en
+    // todos (el conteo del ejecutor no se desalinea porque los pasos se renumeran al aplicar).
+    const determinista = deps.determinista as unknown as {
+      ejecutarPasoDeterminista: ReturnType<typeof vi.fn>;
+    };
+    const acciones = determinista.ejecutarPasoDeterminista.mock.calls.map(
+      (llamada) => (llamada[1] as InstruccionDePaso).accion,
+    );
+    expect(acciones).toEqual(['escribir', 'escribir', 'click']);
+
+    // La tarjeta de /actividad recibe el paso OMITIDO con su etiqueta propia y el NOMBRE del
+    // marcador (vocabulario cerrado), nunca un valor.
+    const trayectoria = guardar.mock.calls.at(-1)?.[0] as unknown as {
+      pasos: Array<{ accion: { tipo: string; argumentos: string[] } }>;
+    };
+    const omitidos = trayectoria.pasos.filter((paso) => paso.accion.tipo === 'plantilla:omitido');
+    expect(omitidos).toHaveLength(1);
+    expect(omitidos[0]?.accion.argumentos).toEqual(['asunto']);
+  });
+
+  it('plantillaAplicable omite el asunto no declarado y lo reporta en `omitidos`', () => {
+    const veredicto = plantillaAplicable({
+      pasos: pasosConAsunto(),
+      dominio: DOMINIO,
+      valores: { destinatario: 'martin@ejemplo.com', cuerpo: 'ya llego el paquete' },
+      verboBloqueado: 'enviar',
+      clasesCorroboradas: new Set(CLASES_DEL_PROCEDIMIENTO),
+    });
+    expect(veredicto.aplica).toBe(true);
+    if (!veredicto.aplica) return;
+    expect(veredicto.omitidos).toEqual(['asunto']);
+    // Los pasos quedan renumerados desde 0 y sin huecos: la barrera y la verificacion no se corren
+    // de lugar.
+    expect(veredicto.pasos.map((paso) => [paso.idx, paso.accion])).toEqual([
+      [0, 'escribir'],
+      [1, 'escribir'],
+      [2, 'verificar'],
+      [3, 'click'],
+    ]);
+  });
+
+  it('un marcador NO OMITIBLE faltante sigue cortando con dato_sin_declarar', () => {
+    const veredicto = plantillaAplicable({
+      pasos: pasosConAsunto(),
+      dominio: DOMINIO,
+      // Sin cuerpo: el cuerpo no es omitible y la plantilla NO aplica.
+      valores: { destinatario: 'martin@ejemplo.com', asunto: 'Hola' },
+      verboBloqueado: 'enviar',
+      clasesCorroboradas: new Set(CLASES_DEL_PROCEDIMIENTO),
+    });
+    expect(veredicto).toMatchObject({ aplica: false, motivo: 'dato_sin_declarar', idx: 2 });
+  });
+
+  it('las claves existentes no se mueven: con los tres datos declarados nada se omite', () => {
+    const veredicto = plantillaAplicable({
+      pasos: pasosConAsunto(),
+      dominio: DOMINIO,
+      valores: { destinatario: 'martin@ejemplo.com', asunto: 'Hola', cuerpo: 'llego el paquete' },
+      verboBloqueado: 'enviar',
+      clasesCorroboradas: new Set(CLASES_DEL_PROCEDIMIENTO),
+    });
+    expect(veredicto.aplica).toBe(true);
+    if (!veredicto.aplica) return;
+    expect(veredicto.omitidos).toEqual([]);
+    // La MISMA clave de marcadores que producia la fila corroborada real, antes y despues de D3.
+    expect(marcadoresClave(veredicto.marcadores)).toBe('asunto+cuerpo+destinatario');
+    expect(marcadoresDePasos(pasosConAsunto())).toBe('asunto+cuerpo+destinatario');
+  });
+});
+
+// --- SIMETRIA D4: LA RESOLUCION COMPARTIDA CONSUMO-PUBLICACION ------------------------------------
+
+/**
+ * La asimetria que fragmento las filas en produccion: el consumo buscaba con la resolucion completa
+ * (extractor + interpretacion) y la publicacion derivaba sus marcadores SOLO con el extractor, asi
+ * que el mismo fraseo natural publicaba bajo una clave y buscaba bajo otra. Con D4 la resolucion se
+ * calcula una vez por corrida y la publicacion del cierre exitoso la reutiliza.
+ */
+describe('simetria D4: la misma frase natural publica y encuentra bajo la misma clave', () => {
+  const FRASE_NATURAL = 'mandale un correo a martin@ejemplo.com diciendole que llego el paquete';
+
+  const RESOLUCION = JSON.stringify({
+    intencion: 'enviar',
+    datos: { destinatario: 'martin@ejemplo.com', cuerpo: 'llego el paquete' },
+  });
+
+  const CAMPOS_DE_LA_FRASE: CampoDeLaPagina[] = [
+    { contexto: 'destinatarios en para', valor: 'martin@ejemplo.com' },
+    { contexto: 'cuerpo del mensaje', valor: 'llego el paquete' },
+  ];
+
+  it('publica cuerpo+destinatario desde la frase natural y otra corrida con el mismo fraseo la consume', async () => {
+    // CORRIDA 1: no hay plantilla, el motor libre envia y el cierre exitoso PUBLICA reutilizando la
+    // resolucion de la interpretacion (el cuerpo sin comillas entra a la clave como parametro).
+    const publicadas: Array<{ pasos: unknown }> = [];
+    const electorDelPublicador = makeElector(RESOLUCION);
+    const publicador = makeDeps({
+      motor: makeMotorQueEnvia(),
+      elector: electorDelPublicador,
+      determinista: makeDeterminista([], 'Enviar'),
+      barreraIdentidad: 'observacion',
+      navegador: makeNavegador(true, CAMPOS_DE_LA_FRASE),
+      atlas: { repo: makeAtlas(CLASES_DE_LA_CORRIDA), clave: 'clave-del-atlas' },
+      plantillas: {
+        repo: {
+          buscarServible: vi.fn(async () => null),
+          publicar: vi.fn(async (plantilla: { pasos: unknown }) => {
+            publicadas.push(plantilla);
+            return { publicada: true };
+          }),
+          registrarEjecucion: vi.fn(async () => {}),
+        },
+        clave: CLAVE_PLANTILLAS,
+      },
+    } as unknown as Partial<TareaWebDeps>);
+
+    expect(await procesarTareaWeb(publicador, makeJob(FRASE_NATURAL))).toBe('completada');
+    expect(electorDelPublicador.consultar).toHaveBeenCalledTimes(1);
+    const publicada = publicadas[0];
+    expect(publicada, 'la corrida no publico ninguna plantilla').toBeDefined();
+    // La clave dice cuerpo+destinatario: el cuerpo que la interpretacion resolvio es PARAMETRO, no
+    // una ranura invisible para la clave; el asunto que el motor tecleo sin que nadie lo pidiera
+    // queda como ranura (omitible en el consumo).
+    expect(marcadoresDePasos((publicada as { pasos: unknown }).pasos)).toBe('cuerpo+destinatario');
+
+    // CORRIDA 2: OTRA cuenta pide LO MISMO con el mismo fraseo natural y ENCUENTRA la fila que la
+    // primera publico, extremo a extremo y sin motor libre.
+    const consumidor = conPlantillas(
+      [
+        {
+          id: 'plantilla-simetrica',
+          estado: 'candidata',
+          pasos: (publicada as { pasos: unknown }).pasos,
+          origenes: 2,
+        },
+      ],
+      CLASES_DE_LA_CORRIDA,
+      {
+        elector: makeElector(RESOLUCION),
+        navegador: makeNavegador(true, CAMPOS_DE_LA_FRASE),
+        determinista: makeDeterminista([], 'Enviar'),
+      },
+    );
+
+    expect(await procesarTareaWeb(consumidor, makeJob(FRASE_NATURAL))).toBe('completada');
+    expect(consumidor.motor.ejecutar).not.toHaveBeenCalled();
+  });
+});
+
+// --- DIAGNOSTICO DE LA INTERPRETACION (D5) --------------------------------------------------------
+
+describe('el veredicto lleva el detalle de la interpretacion en vocabulario cerrado', () => {
+  it('intencion resuelta y nombres de los datos viajan al veredicto; los valores jamas', async () => {
+    const respuesta = JSON.stringify({
+      intencion: 'enviar',
+      datos: { destinatario: 'martin@ejemplo.com', cuerpo: 'su pedido esta listo' },
+    });
+    // Tabla vacia: la interpretacion resuelve, la re-busqueda tampoco encuentra y el detalle queda
+    // en el veredicto del miss.
+    const deps = conPlantillas([], CLASES_DEL_PROCEDIMIENTO, {
+      elector: makeElector(respuesta),
+    });
+
+    await correr(deps, makeJob('avisale a martin@ejemplo.com que su pedido esta listo'));
+
+    const veredictos = (deps.logger.info as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (llamada) => llamada[0] === 'tarea web: veredicto del procedimiento compartido',
+    );
+    const veredicto = veredictos.at(-1)?.[1] as Record<string, unknown>;
+    expect(veredicto).toMatchObject({
+      interpretacion: 'resuelta',
+      intencionInterpretada: 'enviar',
+      datosInterpretados: ['cuerpo', 'destinatario'],
+    });
+    expect(JSON.stringify(veredicto)).not.toContain('su pedido esta listo');
   });
 });

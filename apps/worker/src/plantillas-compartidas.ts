@@ -107,6 +107,22 @@ export function codigoDeIntencion(verboBloqueado: string | null): CodigoDeIntenc
 }
 
 /**
+ * LA FORMA CANONICA del verbo de una INTENCION INTERPRETADA (D2): el primer verbo de la tabla cuya
+ * familia es el codigo, que es el canonico en espanol ("enviar", "comprar", "cancelar suscripcion").
+ * Es la vuelta exacta de `codigoDeIntencion`: `codigoDeIntencion(verboDeIntencion(codigo)) === codigo`
+ * para los ocho codigos, porque la busqueda es sobre LA MISMA tabla.
+ *
+ * PARA QUE EXISTE: cuando la interpretacion del modelo resuelve una intencion que la expresion regular
+ * de verbos no vio ("avisale a martin"), el resto de la corrida (la guardia, la barrera, la busqueda y
+ * la verificacion) habla en verbos canonicos, no en codigos. Este es el unico punto de conversion, y
+ * solo puede AGREGAR: la deteccion determinista sigue siendo el piso (restriccion 2) y en tarea-web.ts
+ * el verbo de la regex gana siempre que exista.
+ */
+export function verboDeIntencion(codigo: CodigoDeIntencion): string | null {
+  return VERBOS_ACCION_BLOQUEADA.find((verbo) => verbo.accion === codigo)?.verbo ?? null;
+}
+
+/**
  * CLAVE HMAC de las plantillas compartidas, DERIVADA del secreto de la boveda con una etiqueta
  * propia.
  *
@@ -233,12 +249,29 @@ export interface IdentidadDePlantilla {
 }
 
 /**
- * TOPE REAL de claves que un consumidor puede generar: los subconjuntos de un conjunto de SEIS, que
- * son los seis marcadores del contrato de recetas (`MARCADORES`, packages/shared). 2^6 = 64, y es una
+ * TOPE REAL de claves que un consumidor puede generar: los subconjuntos del conjunto de NUEVE, que
+ * son los marcadores del contrato de recetas (`MARCADORES`, packages/shared). 2^9 = 512, y es una
  * cota del VOCABULARIO CERRADO, no un limite configurable: no hay objetivo, por raro que sea, que
- * produzca una lista mas larga.
+ * produzca una lista mas larga. En la practica un objetivo declara pocos y la lista real es corta.
  */
-export const MAX_CLAVES_DE_MARCADORES = 64;
+export const MAX_CLAVES_DE_MARCADORES = 512;
+
+/**
+ * MARCADORES OMITIBLES (D3b): los datos que una plantilla puede pedir y el consumidor puede NO
+ * declarar sin que la plantilla deje de aplicar. El paso que teclea un marcador omitible no declarado
+ * se OMITE -- nunca se inventa su valor -- porque el sitio acepta la accion sin ese dato (Gmail
+ * acepta correos sin asunto).
+ *
+ * Conjunto CERRADO y deliberadamente minimo: todo lo demas sigue cortando con `dato_sin_declarar`.
+ * Un destinatario, un monto o un producto omitidos no serian "la misma tarea con un dato menos",
+ * serian otra tarea.
+ */
+export const MARCADORES_OMITIBLES: readonly MarcadorParametro[] = ['asunto'];
+
+/** ¿Puede omitirse el paso que teclea este marcador cuando el objetivo no lo declara? */
+export function esMarcadorOmitible(marcador: MarcadorParametro): boolean {
+  return MARCADORES_OMITIBLES.includes(marcador);
+}
 
 /**
  * LAS CLAVES DE MARCADORES que este consumidor puede consumir: la de su propio conjunto y la de
@@ -276,7 +309,7 @@ export function clavesDeMarcadoresContenidos(marcadores: readonly MarcadorParame
  * su propio texto y los datos que su propio objetivo declara.
  *
  * ES UN WHERE DE TRES COLUMNAS Y NADA MAS, y esa es la decision de diseno completa: no hay modelo,
- * no hay texto libre en ninguno de los tres componentes (ocho codigos cerrados, seis marcadores
+ * no hay texto libre en ninguno de los tres componentes (ocho codigos cerrados, los marcadores
  * cerrados y los hostnames que el propio usuario conecto) y el unico orden que existe es el desempate
  * determinista de la consulta. Por eso el consumo no toca el prompt del elector ni su catalogo: una
  * plantilla no compite con las tareas propias, se busca por igualdad -- contra el conjunto declarado y
@@ -299,7 +332,14 @@ export function identidadDeConsumo(entrada: {
     dominiosClave: clave,
     codigoDeIntencion: codigo,
     marcadoresClave: marcadoresClave(entrada.marcadores),
-    marcadoresPosibles: clavesDeMarcadoresContenidos(entrada.marcadores),
+    // D3b: los candidatos de CONTENCION se generan sobre declarados UNION omitibles. Una plantilla
+    // que ademas exige un marcador omitible ('asunto') tiene que poder encontrarse aunque el
+    // consumidor no lo declare: su paso se va a omitir, no a inventar. El corte fail-closed de los
+    // datos NO omitibles faltantes sigue integro en `plantillaAplicable` (dato_sin_declarar).
+    marcadoresPosibles: clavesDeMarcadoresContenidos([
+      ...entrada.marcadores,
+      ...MARCADORES_OMITIBLES,
+    ]),
   };
 }
 
@@ -330,7 +370,17 @@ export type MotivoDeNoAplicable =
   | 'estructura_no_permitida';
 
 export type ResultadoDeAplicabilidad =
-  | { aplica: true; pasos: PasoDeReceta[]; marcadores: MarcadorParametro[] }
+  | {
+      aplica: true;
+      pasos: PasoDeReceta[];
+      marcadores: MarcadorParametro[];
+      /**
+       * D3c: marcadores OMITIBLES que la plantilla pedia y el objetivo no declaro. Sus pasos de
+       * escritura NO estan en `pasos` (se omitieron, no se inventaron) y la tarjeta de /actividad
+       * los muestra como omitidos por dato no declarado.
+       */
+      omitidos: MarcadorParametro[];
+    }
   | { aplica: false; motivo: MotivoDeNoAplicable; idx: number };
 
 /** El marcador con el que se llena un paso de escritura de plantilla. null = el paso no dice cual. */
@@ -453,6 +503,7 @@ export function plantillaAplicable(entrada: {
 
   const dominio = entrada.dominio.trim().toLowerCase();
   const marcadores = new Set<MarcadorParametro>();
+  const omitidos = new Set<MarcadorParametro>();
   const deReceta: PasoDeReceta[] = [];
 
   for (const paso of pasos) {
@@ -480,6 +531,14 @@ export function plantillaAplicable(entrada: {
       if (marcador === null) return { aplica: false, motivo: 'contrato_invalido', idx: paso.idx };
       const texto = entrada.valores[marcador];
       if (texto === undefined || texto === '') {
+        // D3b: el paso de un marcador OMITIBLE no declarado se OMITE (no entra a `deReceta`, asi que
+        // su barrera de identidad tampoco corre: no hay paso). Nunca se inventa un valor. El conteo
+        // no se desalinea porque `deReceta` renumera desde 0 mas abajo, como siempre. Todo marcador
+        // NO omitible sigue cortando fail-closed aqui mismo.
+        if (esMarcadorOmitible(marcador)) {
+          omitidos.add(marcador);
+          continue;
+        }
         return { aplica: false, motivo: 'dato_sin_declarar', idx: paso.idx };
       }
       marcadores.add(marcador);
@@ -512,7 +571,12 @@ export function plantillaAplicable(entrada: {
       return { aplica: false, motivo: 'estructura_no_permitida', idx: violacion };
     }
   }
-  return { aplica: true, pasos: deReceta, marcadores: [...marcadores].sort() };
+  return {
+    aplica: true,
+    pasos: deReceta,
+    marcadores: [...marcadores].sort(),
+    omitidos: [...omitidos].sort(),
+  };
 }
 
 /**
@@ -533,7 +597,7 @@ export const MOTIVO_PLANTILLA_COMPARTIDA = 'plantilla_compartida';
 /**
  * LO QUE SE LE MUESTRA AL USUARIO, en forma de CODIGO y no de frase. Los tres componentes son
  * vocabulario CERRADO de la plataforma (uno de los ocho codigos de intencion, un subconjunto de los
- * seis marcadores y un hostname que el propio usuario conecto): NI UN CARACTER sale de
+ * marcadores cerrados y un hostname que el propio usuario conecto): NI UN CARACTER sale de
  * `plantillas_compartidas`. La frase la redacta quien muestra -- la consola en el idioma del usuario,
  * el correo en espanol -- desde este codigo.
  *
@@ -602,7 +666,7 @@ const ACCION_EN_ESPANOL: Readonly<Record<CodigoDeIntencion, string>> = {
   cancelarSuscripcion: 'cancelar una suscripcion',
 };
 
-/** Como se nombra en espanol cada dato. Tabla cerrada, los seis marcadores del contrato. */
+/** Como se nombra en espanol cada dato. Tabla cerrada, los marcadores del contrato. */
 const DATO_EN_ESPANOL: Readonly<Record<MarcadorParametro, string>> = {
   destinatario: 'destinatario',
   monto: 'monto',
@@ -610,6 +674,9 @@ const DATO_EN_ESPANOL: Readonly<Record<MarcadorParametro, string>> = {
   cantidad: 'cantidad',
   asunto: 'asunto',
   cuerpo: 'cuerpo',
+  fecha: 'fecha',
+  lugar: 'lugar',
+  nombre: 'nombre',
 };
 
 /**

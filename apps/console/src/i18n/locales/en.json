@@ -1740,6 +1740,7 @@
       "pasos_one": "{{count}} step",
       "pasos_other": "{{count}} steps",
       "pasos_many": "{{count}} steps",
+      "pasoOmitido": "Step skipped: the request does not declare this value and it is never made up",
       "selector": "Selector",
       "valor": "Value",
       "estado": {
@@ -2068,7 +2069,10 @@
       "cuerpo": "The message",
       "monto": "The amount",
       "producto": "The product",
-      "cantidad": "The quantity"
+      "cantidad": "The quantity",
+      "fecha": "The date",
+      "lugar": "The place",
+      "nombre": "The name"
     }
   },
   "receta": {

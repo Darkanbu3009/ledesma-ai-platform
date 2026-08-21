@@ -42,6 +42,10 @@ function EstadoTrayectoriaBadge({ estado, enCurso }: { estado: Trayectoria['esta
 /** Una fila de paso: numero, exito, instruccion y los datos tecnicos (selector, url, valor). */
 function PasoRow({ paso }: { paso: PasoDeTrayectoria }) {
   const { t } = useTranslation();
+  // PASO OMITIDO de una plantilla compartida (D3): el procedimiento pedia un dato omitible (p. ej. el
+  // asunto) que el pedido no declaro, asi que el paso que lo tecleaba se salto y no se invento nada.
+  // El worker manda solo el codigo del marcador; la frase se redacta aqui, en el idioma del usuario.
+  const omitido = paso.accion.tipo === 'plantilla:omitido';
   return (
     <li className="flex items-start gap-2.5 border-t border-line-soft px-3 py-2 first:border-t-0">
       <span className="mt-0.5 w-6 flex-none text-right text-[11px] font-semibold tabular-nums text-muted-soft">
@@ -57,7 +61,7 @@ function PasoRow({ paso }: { paso: PasoDeTrayectoria }) {
           <span className="mr-1.5 rounded border border-line bg-line-soft px-1 py-px font-mono text-[10px] uppercase text-muted">
             {paso.accion.tipo}
           </span>
-          {tituloDePaso(paso)}
+          {omitido ? t('actividad.trayectoria.pasoOmitido') : tituloDePaso(paso)}
         </p>
         {paso.selector && (
           <p className="mt-0.5 truncate font-mono text-[11px] text-muted" title={paso.selector}>

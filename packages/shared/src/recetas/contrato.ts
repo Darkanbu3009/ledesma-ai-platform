@@ -112,7 +112,16 @@ export type MarcadorParametro =
   | 'producto'
   | 'cantidad'
   | 'asunto'
-  | 'cuerpo';
+  | 'cuerpo'
+  // Los TRES de la interpretacion natural (D3a): entran SOLO por la interpretacion del objetivo y
+  // por el nombre de clase de una ranura (contrato de plantillas), NUNCA por el extractor
+  // determinista (parametros-objetivo.ts no cambia y `ParametrosDeclarados` tampoco: la verificacion
+  // determinista sigue comparando exactamente los seis de siempre). Van AL FINAL a proposito: el
+  // orden de `MARCADORES` es el orden en que `marcadoresDeParametros` lista los datos de una receta,
+  // y las listas existentes no deben moverse.
+  | 'fecha'
+  | 'lugar'
+  | 'nombre';
 
 const MARCADORES: readonly MarcadorParametro[] = [
   'destinatario',
@@ -121,6 +130,9 @@ const MARCADORES: readonly MarcadorParametro[] = [
   'cantidad',
   'asunto',
   'cuerpo',
+  'fecha',
+  'lugar',
+  'nombre',
 ];
 
 /** ¿Es `valor` uno de los marcadores de parametro? */
