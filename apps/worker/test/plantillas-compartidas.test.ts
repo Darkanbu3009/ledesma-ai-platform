@@ -316,7 +316,7 @@ describe('clavesDeMarcadoresContenidos (la CONTENCION del consumo)', () => {
     expect(claves).toHaveLength(16);
   });
 
-  it('el TOPE real es 2^6, y no depende de lo que el llamador mande', () => {
+  it('el TOPE real es 2^9, y no depende de lo que el llamador mande', () => {
     const todos = clavesDeMarcadoresContenidos([
       'asunto',
       'cantidad',
@@ -324,10 +324,13 @@ describe('clavesDeMarcadoresContenidos (la CONTENCION del consumo)', () => {
       'destinatario',
       'monto',
       'producto',
+      'fecha',
+      'lugar',
+      'nombre',
     ]);
     expect(todos).toHaveLength(MAX_CLAVES_DE_MARCADORES);
-    expect(MAX_CLAVES_DE_MARCADORES).toBe(64);
-    // Un nombre que no es uno de los seis no puede hacer crecer la lista: se descarta.
+    expect(MAX_CLAVES_DE_MARCADORES).toBe(512);
+    // Un nombre que no es uno de los marcadores no puede hacer crecer la lista: se descarta.
     const conBasura = clavesDeMarcadoresContenidos([
       'destinatario',
       'contrasena',
@@ -336,7 +339,7 @@ describe('clavesDeMarcadoresContenidos (la CONTENCION del consumo)', () => {
     expect(conBasura).toEqual(['', 'destinatario']);
   });
 
-  it('la identidad del consumo lleva la clave exacta Y las claves contenidas', () => {
+  it('la identidad del consumo lleva la clave exacta Y las claves contenidas mas los omitibles', () => {
     const identidad = identidadDeConsumo({
       dominios: [DOMINIO],
       verboBloqueado: 'enviar',
@@ -347,7 +350,18 @@ describe('clavesDeMarcadoresContenidos (la CONTENCION del consumo)', () => {
       codigoDeIntencion: 'enviar',
       // La clave exacta se conserva para el diagnostico: es lo que el objetivo declaro.
       marcadoresClave: 'cuerpo+destinatario',
-      marcadoresPosibles: ['', 'cuerpo', 'cuerpo+destinatario', 'destinatario'],
+      // D3b: los candidatos incluyen el marcador OMITIBLE 'asunto' aunque no este declarado: una
+      // plantilla que ademas pide asunto se encuentra y su paso se omite, no se inventa.
+      marcadoresPosibles: [
+        '',
+        'asunto',
+        'asunto+cuerpo',
+        'asunto+cuerpo+destinatario',
+        'asunto+destinatario',
+        'cuerpo',
+        'cuerpo+destinatario',
+        'destinatario',
+      ],
     });
   });
 });

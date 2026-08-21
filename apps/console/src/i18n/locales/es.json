@@ -1740,6 +1740,7 @@
       "pasos_one": "{{count}} paso",
       "pasos_other": "{{count}} pasos",
       "pasos_many": "{{count}} pasos",
+      "pasoOmitido": "Paso omitido: el pedido no declara este dato y no se inventa",
       "selector": "Selector",
       "valor": "Valor",
       "estado": {
@@ -2069,7 +2070,10 @@
       "cuerpo": "El mensaje",
       "monto": "El monto",
       "producto": "El producto",
-      "cantidad": "La cantidad"
+      "cantidad": "La cantidad",
+      "fecha": "La fecha",
+      "lugar": "El lugar",
+      "nombre": "El nombre"
     }
   },
   "receta": {

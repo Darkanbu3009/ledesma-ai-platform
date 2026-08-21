@@ -935,14 +935,16 @@ describe('aplicabilidad: falla cerrada y la tarea sigue por el motor libre', () 
     expect(determinista.ejecutarPasoDeterminista).not.toHaveBeenCalled();
   });
 
-  it('un dato que el objetivo del consumidor no declara (ranura) hace que no aplique', async () => {
-    // La plantilla llena el asunto con una RANURA; el objetivo de este consumidor no declara asunto.
+  it('un dato NO OMITIBLE que el objetivo no declara (ranura) hace que no aplique', async () => {
+    // La plantilla llena el cuerpo con una RANURA; el objetivo de este consumidor no declara cuerpo
+    // y el cuerpo NO es omitible: la plantilla no aplica y la tarea la hace el motor libre. (El
+    // asunto, en cambio, es omitible desde D3: su caso vive en los tests de omision.)
     const pasos = [
       pasoEscribir(0, CLASE_DESTINATARIO, 'Destinatarios en Para', {
         tipo: 'parametro',
         parametro: 'destinatario',
       }),
-      pasoEscribir(1, CLASE_ASUNTO, 'Asunto', { tipo: 'ranura', clase: CLASE_ASUNTO }),
+      pasoEscribir(1, CLASE_CUERPO, 'Cuerpo del mensaje', { tipo: 'ranura', clase: CLASE_CUERPO }),
       pasoVerificar(2),
       pasoClick(3, CLASE_ENVIAR, 'Enviar'),
     ];
@@ -1837,8 +1839,18 @@ describe('el segundo escalon: interpretar el objetivo cuando el extractor no alc
     const claves = plantillas.repo.buscarServible.mock.calls.map(
       (llamada) => (llamada[0] as { marcadoresPosibles: string[] }).marcadoresPosibles,
     );
-    expect(claves[0]).toEqual(['', 'destinatario']);
-    expect(claves[1]).toEqual(['', 'cuerpo', 'cuerpo+destinatario', 'destinatario']);
+    // Desde D3 los candidatos incluyen ademas el omitible 'asunto', declarado o no.
+    expect(claves[0]).toEqual(['', 'asunto', 'asunto+destinatario', 'destinatario']);
+    expect(claves[1]).toEqual([
+      '',
+      'asunto',
+      'asunto+cuerpo',
+      'asunto+cuerpo+destinatario',
+      'asunto+destinatario',
+      'cuerpo',
+      'cuerpo+destinatario',
+      'destinatario',
+    ]);
   });
 
   it('la ejecuta con los datos que el modelo resolvio', async () => {
@@ -2107,5 +2119,128 @@ describe('interpretacion natural universal: intencion y datos en una sola llamad
     // La verificacion corrio (leyo la pagina para comparar) y el elector fallido no la apago.
     expect(elector.consultar).toHaveBeenCalledTimes(1);
     expect(deps.navegador.leerCamposDeLaPagina).toHaveBeenCalled();
+  });
+});
+
+// --- OMISION DE MARCADORES OMITIBLES (D3) ---------------------------------------------------------
+
+/**
+ * El asunto es OBLIGATORIO en el contrato viejo aunque Gmail acepte correos sin asunto. Con D3 el
+ * asunto es OMITIBLE: una plantilla que lo pide se encuentra aunque el objetivo no lo declare, su
+ * paso se OMITE (jamas se inventa) y el procedimiento queda alineado; todo marcador NO omitible sigue
+ * cortando fail-closed con dato_sin_declarar.
+ */
+describe('omision de marcadores omitibles: el asunto no declarado se salta, no se inventa', () => {
+  const PEDIDO_CON_TYPO = 'mandale un corre a martin@ejemplo.com diciendole q ya llego el paquete';
+
+  /** El procedimiento COMPLETO de Gmail: pide los tres datos, asunto incluido. */
+  function pasosConAsunto(): unknown[] {
+    return [
+      pasoEscribir(0, CLASE_DESTINATARIO, 'Destinatarios en Para', {
+        tipo: 'parametro',
+        parametro: 'destinatario',
+      }),
+      pasoEscribir(1, CLASE_ASUNTO, 'Asunto', { tipo: 'parametro', parametro: 'asunto' }),
+      pasoEscribir(2, CLASE_CUERPO, 'Cuerpo del mensaje', { tipo: 'parametro', parametro: 'cuerpo' }),
+      pasoVerificar(3),
+      pasoClick(4, CLASE_ENVIAR, 'Enviar'),
+    ];
+  }
+
+  const RESPUESTA_DEL_MODELO = JSON.stringify({
+    intencion: 'enviar',
+    datos: { destinatario: 'martin@ejemplo.com', cuerpo: 'ya llego el paquete' },
+  });
+
+  /** La pagina sin asunto: es exactamente lo que el procedimiento omitido produce. */
+  const CAMPOS_SIN_ASUNTO: CampoDeLaPagina[] = [
+    { contexto: 'destinatarios en para', valor: 'martin@ejemplo.com' },
+    { contexto: 'cuerpo del mensaje', valor: 'ya llego el paquete' },
+  ];
+
+  it('encuentra la plantilla que pide asunto, omite su paso y el procedimiento queda alineado', async () => {
+    const guardar = vi.fn(async (trayectoria: unknown) => {
+      void trayectoria;
+    });
+    const elector = makeElector(RESPUESTA_DEL_MODELO);
+    const deps = conPlantillas(
+      [{ id: 'plantilla-gmail', estado: 'candidata', pasos: pasosConAsunto(), origenes: 2 }],
+      CLASES_DEL_PROCEDIMIENTO,
+      {
+        elector,
+        navegador: makeNavegador(true, CAMPOS_SIN_ASUNTO),
+        trayectorias: { guardar },
+      } as unknown as Partial<TareaWebDeps>,
+    );
+
+    expect(await procesarTareaWeb(deps, makeJob(PEDIDO_CON_TYPO))).toBe('completada');
+
+    // El paso del asunto NO corrio: dos escrituras y el click final, con la BARRERA en activa en
+    // todos (el conteo del ejecutor no se desalinea porque los pasos se renumeran al aplicar).
+    const determinista = deps.determinista as unknown as {
+      ejecutarPasoDeterminista: ReturnType<typeof vi.fn>;
+    };
+    const acciones = determinista.ejecutarPasoDeterminista.mock.calls.map(
+      (llamada) => (llamada[1] as InstruccionDePaso).accion,
+    );
+    expect(acciones).toEqual(['escribir', 'escribir', 'click']);
+
+    // La tarjeta de /actividad recibe el paso OMITIDO con su etiqueta propia y el NOMBRE del
+    // marcador (vocabulario cerrado), nunca un valor.
+    const trayectoria = guardar.mock.calls.at(-1)?.[0] as unknown as {
+      pasos: Array<{ accion: { tipo: string; argumentos: string[] } }>;
+    };
+    const omitidos = trayectoria.pasos.filter((paso) => paso.accion.tipo === 'plantilla:omitido');
+    expect(omitidos).toHaveLength(1);
+    expect(omitidos[0]?.accion.argumentos).toEqual(['asunto']);
+  });
+
+  it('plantillaAplicable omite el asunto no declarado y lo reporta en `omitidos`', () => {
+    const veredicto = plantillaAplicable({
+      pasos: pasosConAsunto(),
+      dominio: DOMINIO,
+      valores: { destinatario: 'martin@ejemplo.com', cuerpo: 'ya llego el paquete' },
+      verboBloqueado: 'enviar',
+      clasesCorroboradas: new Set(CLASES_DEL_PROCEDIMIENTO),
+    });
+    expect(veredicto.aplica).toBe(true);
+    if (!veredicto.aplica) return;
+    expect(veredicto.omitidos).toEqual(['asunto']);
+    // Los pasos quedan renumerados desde 0 y sin huecos: la barrera y la verificacion no se corren
+    // de lugar.
+    expect(veredicto.pasos.map((paso) => [paso.idx, paso.accion])).toEqual([
+      [0, 'escribir'],
+      [1, 'escribir'],
+      [2, 'verificar'],
+      [3, 'click'],
+    ]);
+  });
+
+  it('un marcador NO OMITIBLE faltante sigue cortando con dato_sin_declarar', () => {
+    const veredicto = plantillaAplicable({
+      pasos: pasosConAsunto(),
+      dominio: DOMINIO,
+      // Sin cuerpo: el cuerpo no es omitible y la plantilla NO aplica.
+      valores: { destinatario: 'martin@ejemplo.com', asunto: 'Hola' },
+      verboBloqueado: 'enviar',
+      clasesCorroboradas: new Set(CLASES_DEL_PROCEDIMIENTO),
+    });
+    expect(veredicto).toMatchObject({ aplica: false, motivo: 'dato_sin_declarar', idx: 2 });
+  });
+
+  it('las claves existentes no se mueven: con los tres datos declarados nada se omite', () => {
+    const veredicto = plantillaAplicable({
+      pasos: pasosConAsunto(),
+      dominio: DOMINIO,
+      valores: { destinatario: 'martin@ejemplo.com', asunto: 'Hola', cuerpo: 'llego el paquete' },
+      verboBloqueado: 'enviar',
+      clasesCorroboradas: new Set(CLASES_DEL_PROCEDIMIENTO),
+    });
+    expect(veredicto.aplica).toBe(true);
+    if (!veredicto.aplica) return;
+    expect(veredicto.omitidos).toEqual([]);
+    // La MISMA clave de marcadores que producia la fila corroborada real, antes y despues de D3.
+    expect(marcadoresClave(veredicto.marcadores)).toBe('asunto+cuerpo+destinatario');
+    expect(marcadoresDePasos(pasosConAsunto())).toBe('asunto+cuerpo+destinatario');
   });
 });

@@ -2757,6 +2757,8 @@ interface PlantillaParaEstaTarea {
   origenes: number;
   /** Los pasos ya convertidos a pasos de receta, todos en el dominio de la conexion. */
   pasos: PasoDeReceta[];
+  /** Marcadores OMITIBLES que la plantilla pedia y el objetivo no declaro (D3): pasos omitidos. */
+  omitidos: MarcadorParametro[];
   /** Lo que se le muestra al usuario, en codigo cerrado (ver descripcionDeOfrecimiento). */
   ofrecimiento: OfrecimientoDePlantilla;
 }
@@ -3082,6 +3084,7 @@ async function buscarPlantillaAjena(
       estado: fila.estado,
       origenes: fila.origenes,
       pasos: veredicto.pasos,
+      omitidos: veredicto.omitidos,
       ofrecimiento: {
         codigoDeIntencion: identidad.codigoDeIntencion,
         marcadores: veredicto.marcadores,
@@ -3396,7 +3399,26 @@ async function ejecutarPorPlantilla(
     completada ? 'exitosa' : 'fallida',
     iniciadaEn,
     { acciones: [], tokensIn: resultado.tokensIn, tokensOut: resultado.tokensOut },
-    conEtiquetaDePlantilla(resultado.pasos),
+    // D3c: los pasos ejecutados mas -- al final y con su propia etiqueta -- los OMITIDOS por dato no
+    // declarado, para que la tarjeta de /actividad diga que un dato omitible no se tecleo. Solo viaja
+    // el NOMBRE del marcador (vocabulario cerrado), jamas un valor.
+    [
+      ...conEtiquetaDePlantilla(resultado.pasos),
+      ...plantilla.omitidos.map((marcador, i) => ({
+        idx: resultado.pasos.length + i,
+        accion: {
+          tipo: 'plantilla:omitido',
+          instruccion: null,
+          metodo: null,
+          argumentos: [marcador],
+        },
+        selector: null,
+        valorCensurado: null,
+        url: null,
+        exito: true,
+        estrategias: [],
+      })),
+    ],
   );
 
   if (resultado.desenlace.tipo === 'detenida') {

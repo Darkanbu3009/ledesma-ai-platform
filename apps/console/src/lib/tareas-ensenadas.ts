@@ -14,8 +14,21 @@
 
 import { currentLanguage } from '../i18n';
 
-/** Los tipos de dato que una tarea puede necesitar. Los mismos seis de la grabacion. */
-export type TipoDeDato = 'destinatario' | 'asunto' | 'cuerpo' | 'monto' | 'producto' | 'cantidad';
+/**
+ * Los tipos de dato que una tarea puede necesitar: los seis de la grabacion mas los tres que entran
+ * por la interpretacion natural del worker (una receta copiada desde una plantilla compartida puede
+ * pedirlos). La grabacion sigue ofreciendo solo sus seis (lib/grabaciones.ts).
+ */
+export type TipoDeDato =
+  | 'destinatario'
+  | 'asunto'
+  | 'cuerpo'
+  | 'monto'
+  | 'producto'
+  | 'cantidad'
+  | 'fecha'
+  | 'lugar'
+  | 'nombre';
 
 /** Una tarea ya ensenada, tal como la devuelve GET /v1/tareas-ensenadas. */
 export interface TareaEnsenada {

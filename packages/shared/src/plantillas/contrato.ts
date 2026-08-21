@@ -267,6 +267,17 @@ const MARCADOR_POR_NOMBRE_DE_CLASE: ReadonlyArray<{
   { patron: /^producto\b/, marcador: 'producto' },
   { patron: /^product\b/, marcador: 'producto' },
   { patron: /^articulo\b/, marcador: 'producto' },
+  // Los TRES marcadores de la interpretacion natural (D3a). Entran por aqui (el nombre de clase de la
+  // ranura) y por la interpretacion del objetivo; el extractor determinista no los conoce y no debe
+  // conocerlos. Los nombres llegan normalizados (minusculas, sin acentos) porque asi los construye
+  // `claseDeElemento`.
+  { patron: /^fecha\b/, marcador: 'fecha' },
+  { patron: /^date\b/, marcador: 'fecha' },
+  { patron: /^lugar\b/, marcador: 'lugar' },
+  { patron: /^ubicacion\b/, marcador: 'lugar' },
+  { patron: /^location\b/, marcador: 'lugar' },
+  { patron: /^nombre\b/, marcador: 'nombre' },
+  { patron: /^name\b/, marcador: 'nombre' },
 ];
 
 /**
