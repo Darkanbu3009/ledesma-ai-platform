@@ -1186,6 +1186,15 @@ export function promoverTrayectoria(entrada: {
    * mejor no tenerla (la tarea corre por el camino normal, que si verifica).
    */
   exigeVerificacion: boolean;
+  /**
+   * LA RESOLUCION DE LA CORRIDA (D4), cuando existe: los datos con los que el peldano de consumo ya
+   * resolvio este mismo objetivo (extractor + interpretacion, anclados al texto). Publicar derivando
+   * SOLO con el extractor mientras el consumo busca con la resolucion completa fue exactamente la
+   * asimetria que fragmento las filas en produccion: el mismo fraseo publicaba bajo una clave y
+   * buscaba bajo otra. Ausente, se deriva del objetivo con el extractor, exactamente como siempre
+   * (la promocion de recetas propias y el handler de trayectorias no cambian).
+   */
+  valores?: ValoresDeParametros;
 }): ResultadoDePromocion {
   if (entrada.estado !== 'exitosa') {
     return {
@@ -1195,7 +1204,7 @@ export function promoverTrayectoria(entrada: {
       paso: null,
     };
   }
-  const valores = valoresDeParametros(extraerParametrosDeclarados(entrada.objetivo));
+  const valores = entrada.valores ?? valoresDeParametros(extraerParametrosDeclarados(entrada.objetivo));
   const pasos: PasoDeReceta[] = [];
   const clicksSinLocalizacion: Array<{ idx: number; descriptor: string }> = [];
   const escriturasPromovidas: number[] = [];

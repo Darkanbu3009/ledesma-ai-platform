@@ -2244,3 +2244,82 @@ describe('omision de marcadores omitibles: el asunto no declarado se salta, no s
     expect(marcadoresDePasos(pasosConAsunto())).toBe('asunto+cuerpo+destinatario');
   });
 });
+
+// --- SIMETRIA D4: LA RESOLUCION COMPARTIDA CONSUMO-PUBLICACION ------------------------------------
+
+/**
+ * La asimetria que fragmento las filas en produccion: el consumo buscaba con la resolucion completa
+ * (extractor + interpretacion) y la publicacion derivaba sus marcadores SOLO con el extractor, asi
+ * que el mismo fraseo natural publicaba bajo una clave y buscaba bajo otra. Con D4 la resolucion se
+ * calcula una vez por corrida y la publicacion del cierre exitoso la reutiliza.
+ */
+describe('simetria D4: la misma frase natural publica y encuentra bajo la misma clave', () => {
+  const FRASE_NATURAL = 'mandale un correo a martin@ejemplo.com diciendole que llego el paquete';
+
+  const RESOLUCION = JSON.stringify({
+    intencion: 'enviar',
+    datos: { destinatario: 'martin@ejemplo.com', cuerpo: 'llego el paquete' },
+  });
+
+  const CAMPOS_DE_LA_FRASE: CampoDeLaPagina[] = [
+    { contexto: 'destinatarios en para', valor: 'martin@ejemplo.com' },
+    { contexto: 'cuerpo del mensaje', valor: 'llego el paquete' },
+  ];
+
+  it('publica cuerpo+destinatario desde la frase natural y otra corrida con el mismo fraseo la consume', async () => {
+    // CORRIDA 1: no hay plantilla, el motor libre envia y el cierre exitoso PUBLICA reutilizando la
+    // resolucion de la interpretacion (el cuerpo sin comillas entra a la clave como parametro).
+    const publicadas: Array<{ pasos: unknown }> = [];
+    const electorDelPublicador = makeElector(RESOLUCION);
+    const publicador = makeDeps({
+      motor: makeMotorQueEnvia(),
+      elector: electorDelPublicador,
+      determinista: makeDeterminista([], 'Enviar'),
+      barreraIdentidad: 'observacion',
+      navegador: makeNavegador(true, CAMPOS_DE_LA_FRASE),
+      atlas: { repo: makeAtlas(CLASES_DE_LA_CORRIDA), clave: 'clave-del-atlas' },
+      plantillas: {
+        repo: {
+          buscarServible: vi.fn(async () => null),
+          publicar: vi.fn(async (plantilla: { pasos: unknown }) => {
+            publicadas.push(plantilla);
+            return { publicada: true };
+          }),
+          registrarEjecucion: vi.fn(async () => {}),
+        },
+        clave: CLAVE_PLANTILLAS,
+      },
+    } as unknown as Partial<TareaWebDeps>);
+
+    expect(await procesarTareaWeb(publicador, makeJob(FRASE_NATURAL))).toBe('completada');
+    expect(electorDelPublicador.consultar).toHaveBeenCalledTimes(1);
+    const publicada = publicadas[0];
+    expect(publicada, 'la corrida no publico ninguna plantilla').toBeDefined();
+    // La clave dice cuerpo+destinatario: el cuerpo que la interpretacion resolvio es PARAMETRO, no
+    // una ranura invisible para la clave; el asunto que el motor tecleo sin que nadie lo pidiera
+    // queda como ranura (omitible en el consumo).
+    expect(marcadoresDePasos((publicada as { pasos: unknown }).pasos)).toBe('cuerpo+destinatario');
+
+    // CORRIDA 2: OTRA cuenta pide LO MISMO con el mismo fraseo natural y ENCUENTRA la fila que la
+    // primera publico, extremo a extremo y sin motor libre.
+    const consumidor = conPlantillas(
+      [
+        {
+          id: 'plantilla-simetrica',
+          estado: 'candidata',
+          pasos: (publicada as { pasos: unknown }).pasos,
+          origenes: 2,
+        },
+      ],
+      CLASES_DE_LA_CORRIDA,
+      {
+        elector: makeElector(RESOLUCION),
+        navegador: makeNavegador(true, CAMPOS_DE_LA_FRASE),
+        determinista: makeDeterminista([], 'Enviar'),
+      },
+    );
+
+    expect(await procesarTareaWeb(consumidor, makeJob(FRASE_NATURAL))).toBe('completada');
+    expect(consumidor.motor.ejecutar).not.toHaveBeenCalled();
+  });
+});

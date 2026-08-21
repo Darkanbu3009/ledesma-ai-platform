@@ -2618,6 +2618,13 @@ async function publicarPlantillaBestEffort(
     dominio: string;
     dominios: readonly string[];
     verboBloqueado: string | null;
+    /**
+     * LA RESOLUCION DE LA CORRIDA (D4), cuando el peldano de consumo interpreto el objetivo: los
+     * MISMOS valores con los que se busco plantilla. La publicacion deriva sus marcadores de esta
+     * resolucion y no re-deriva solo con el extractor: es lo que cierra la asimetria entre lo que se
+     * publica y lo que el mismo fraseo encuentra. null = no hubo resolucion y manda el extractor.
+     */
+    resolucion: { valores: ValoresDeParametros } | null;
     clasesCorroboradas: ReadonlySet<string>;
   },
 ): Promise<VeredictoDePlantilla> {
@@ -2656,6 +2663,11 @@ async function publicarPlantillaBestEffort(
       objetivo: entrada.textoParametros,
       estado: 'exitosa',
       exigeVerificacion: entrada.verboBloqueado !== null,
+      // D4: la MISMA resolucion del consumo, cuando existe. Un valor que la interpretacion resolvio
+      // (el cuerpo sin comillas) se reconoce en lo tecleado y se publica como PARAMETRO, con lo que
+      // entra a la clave; sin esto quedaba como ranura y la clave publicada no coincidia con la que
+      // el mismo fraseo usa para buscar.
+      ...(entrada.resolucion !== null ? { valores: entrada.resolucion.valores } : {}),
     });
     // EL SUB-MOTIVO de la conversion: la regla que corto y el paso que la disparo, que es lo que
     // hasta hoy no quedaba en ningun lado. El `motivo` de la conversion NO viaja: lleva dentro la
@@ -4749,7 +4761,13 @@ export async function procesarTareaWeb(
       textoParametros,
       dominio: sitio.dominio,
       dominios: dominiosAutorizados,
-      verboBloqueado,
+      // El verbo EFECTIVO (D2/D4): una corrida cuya intencion la resolvio la interpretacion llego
+      // hasta aqui con guardia y efecto confirmado igual que una con verbo de la regex, y publica
+      // bajo el mismo codigo de intencion con el que el consumo busca.
+      verboBloqueado: verboEfectivo,
+      // D4: la resolucion compartida consumo-publicacion. null cuando la corrida no interpreto (la
+      // publicacion deriva con el extractor, como siempre).
+      resolucion: resolucionDeLaCorrida,
       clasesCorroboradas: atlas?.clasesParaPublicar(sitio.dominio) ?? new Set<string>(),
     });
     // `sesionExternaId` queda EN EL RESULTADO del job: es la unica forma de encontrar despues la
