@@ -10,6 +10,11 @@ import type {
   SesionDeGrabacionAbierta,
 } from './grabacion.js';
 import { EXPRESION_HAY_CAMPO_DE_CONTRASENA } from './contrasena.js';
+import {
+  expresionSondaDeClases,
+  parsearLecturaDeSonda,
+  type DescriptorDeSonda,
+} from './sonda-interfaz.js';
 import { ENLACE_DE_GRABACION, GUION_GRABADOR, MUNDO_DE_GRABACION } from './guion-grabador.js';
 import type { CampoDeLaPagina } from './verificacion.js';
 import type {
@@ -1039,6 +1044,24 @@ export class NavegadorBrowserbase
     } catch {
       return null;
     }
+  }
+
+  /**
+   * SONDA DE RECONOCIMIENTO PREVIA (pre-flight): los CANDIDATOS crudos de cada clase de elemento,
+   * leidos de la pagina en UNA evaluacion de solo lectura en el mundo aislado (misma primitiva que
+   * la percepcion y el localizador de la barrera). Cero modelo, cero acciones: la expresion la
+   * construye sonda-interfaz.ts con los mismos ayudantes de DOM que derivan la clase. null = la
+   * lectura no sirve y la sonda queda no evaluable (jamas se declara desajuste sobre eso).
+   */
+  async leerCandidatosDeSonda(
+    sesionExternaId: string,
+    descriptores: readonly DescriptorDeSonda[],
+  ): Promise<string[][] | null> {
+    const crudo = await this.evaluarEnLaPagina(
+      sesionExternaId,
+      expresionSondaDeClases(descriptores),
+    );
+    return parsearLecturaDeSonda(crudo, descriptores.length);
   }
 
   /**

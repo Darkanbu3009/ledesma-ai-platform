@@ -121,6 +121,13 @@ import {
   type PlantillaDeLaCorrida,
 } from './plantillas-compartidas.js';
 import {
+  clasesFaltantes,
+  clasesObservablesEnInicio,
+  descriptoresDeSonda,
+  ESPERA_ENTRE_LECTURAS_DE_SONDA_MS,
+  LECTURAS_DE_SONDA,
+} from './sonda-interfaz.js';
+import {
   construirPeticionDeDatos,
   datosConLoQueElModeloAgrego,
   parsearResolucionDelObjetivo,
@@ -629,6 +636,22 @@ export interface RepositorioPlantillasParaWorker {
     exitosa: boolean,
     motivo?: MotivoDeFallaDePlantilla,
     consumidorHash?: string,
+  ): Promise<{
+    estado: string;
+    estadoPrevio: string;
+    dominiosClave: string;
+    codigoDeIntencion: string;
+    marcadoresClave: string;
+  } | null | void>;
+  /**
+   * DESAJUSTE DE INTERFAZ detectado por la sonda pre-flight (V044, D4): evidencia estructural con su
+   * propio contador de consumidores distintos, separada del retiro por calidad. NO es una ejecucion
+   * (no se corrio un solo paso) y no toca los contadores de ejecucion. Best-effort: su fallo no
+   * cambia el desenlace del job. Opcional con el mismo criterio que el resto del consumo.
+   */
+  registrarDesajuste?(
+    id: string,
+    consumidorHash: string,
   ): Promise<{
     estado: string;
     estadoPrevio: string;
@@ -2094,6 +2117,71 @@ async function resetObligatorioTrasPlantilla(
   return vigente;
 }
 
+/** Como termino la sonda de reconocimiento previa sobre un procedimiento aprendido. */
+type VeredictoDeSonda =
+  /** Todas las clases observables del procedimiento existen en la pagina: se ejecuta como hoy. */
+  | { tipo: 'coincide'; ms: number }
+  /** El procedimiento no tiene ninguna clase observable en la pagina inicial: no hay que sondear. */
+  | { tipo: 'sin_clases_observables' }
+  /** La sonda no se pudo evaluar (sin puerto, lectura rota o excepcion): se ejecuta como hoy. */
+  | { tipo: 'no_evaluable' }
+  /** Falta alguna clase observable en DOS lecturas: NO se ejecuta ningun paso. */
+  | { tipo: 'desajuste'; faltantes: string[]; ms: number };
+
+/**
+ * SONDA DE RECONOCIMIENTO PREVIA (pre-flight, sonda-interfaz.ts): antes de ejecutar un procedimiento
+ * aprendido, comprueba SIN MODELO Y SIN ACCIONES que las clases de elemento observables del
+ * procedimiento existan en la pagina de partida, con la misma derivacion canonica de clase que la
+ * barrera de identidad. Es una compuerta ADICIONAL: solo puede impedir que un procedimiento corra
+ * (y mandarlo al motor libre con la pagina limpia), jamas autorizar nada nuevo.
+ *
+ * ANTI FALSO POSITIVO: dos lecturas separadas por un intervalo corto antes de declarar desajuste
+ * (una pagina hidratando puede pintar sus controles despues del load), presencia aceptada con el
+ * elemento oculto y TODO en try/catch propio: cualquier fallo deja la sonda en 'no_evaluable' y la
+ * ejecucion corre exactamente como hoy. Declarar desajuste por una pagina a medio cargar seria peor
+ * que no tener sonda.
+ */
+async function sondearInterfazBestEffort(
+  deps: TareaWebDeps,
+  job: Job,
+  sesionExternaId: string,
+  dominio: string,
+  pasos: readonly PasoDeReceta[],
+): Promise<VeredictoDeSonda> {
+  const leer = deps.determinista?.leerCandidatosDeSonda;
+  if (deps.determinista === undefined || leer === undefined) return { tipo: 'no_evaluable' };
+  const descriptores = descriptoresDeSonda(clasesObservablesEnInicio(pasos, dominio));
+  if (descriptores.length === 0) return { tipo: 'sin_clases_observables' };
+  const esperar = deps.esperar ?? esperarMs;
+  const inicio = Date.now();
+  try {
+    let faltantes: string[] = [];
+    for (let lectura = 1; lectura <= LECTURAS_DE_SONDA; lectura++) {
+      if (lectura > 1) await esperar(ESPERA_ENTRE_LECTURAS_DE_SONDA_MS);
+      const candidatos = await leer.call(deps.determinista, sesionExternaId, descriptores);
+      // Una lectura rota no es evidencia de nada: jamas se declara desajuste sobre ella.
+      if (candidatos === null) return { tipo: 'no_evaluable' };
+      faltantes = clasesFaltantes(descriptores, candidatos);
+      if (faltantes.length === 0) return { tipo: 'coincide', ms: Date.now() - inicio };
+    }
+    deps.logger.warn('tarea web: desajuste_de_interfaz detectado en pre-flight; no se ejecuta ningun paso', {
+      jobId: job.id,
+      dominio,
+      clasesSondeadas: descriptores.length,
+      clasesFaltantes: faltantes.length,
+      ms: Date.now() - inicio,
+    });
+    return { tipo: 'desajuste', faltantes, ms: Date.now() - inicio };
+  } catch (error) {
+    deps.logger.warn('tarea web: la sonda de interfaz fallo; se ejecuta como siempre (no evaluable)', {
+      jobId: job.id,
+      dominio,
+      err: describir(error),
+    });
+    return { tipo: 'no_evaluable' };
+  }
+}
+
 /**
  * EJECUTA la tarea con la receta (CAMBIO 4). Registra su propia trayectoria, aplica la verificacion
  * determinista donde la receta la aprendio (D7), repara las estrategias que hayan cambiado (D5) y
@@ -2792,7 +2880,9 @@ interface VeredictoDeConsumo {
    * Por que no. Son los siete motivos de `plantillaAplicable` mas los del cableado y del flujo:
    * `via_propia` (alguna via propia resolvio y ni se consulto), `no_cableado`, `sin_identidad` (la
    * tarea no pide una accion irreversible, o no hay dominios), `sin_plantilla`, `error_al_leer` y
-   * `abandonada` (se ejecuto y no resolvio; la termino el motor libre). null cuando si se consumio.
+   * `abandonada` (se ejecuto y no resolvio; la termino el motor libre) y `desajuste_de_interfaz`
+   * (la sonda pre-flight detecto que la pagina ya no tiene las clases observables del procedimiento
+   * y NO se ejecuto un solo paso). null cuando si se consumio.
    * Los motivos del checkpoint (`rechazada_por_el_usuario`, `checkpoint_no_persistido`,
    * `ofrecimiento_distinto`) ya no existen: el consumo ejecuta directo, sin aprobacion humana.
    */
@@ -3252,6 +3342,43 @@ async function registrarEjecucionDePlantillaBestEffort(
     }
   } catch (error) {
     deps.logger.warn('tarea web: no se pudo contabilizar la plantilla (se ignora, best-effort)', {
+      jobId: job.id,
+      err: describir(error),
+    });
+  }
+}
+
+/**
+ * DESAJUSTE DE INTERFAZ de una plantilla (V044, D4), detectado por la sonda pre-flight ANTES de
+ * ejecutar un solo paso. Best-effort con el mismo criterio que registrarEjecucionDePlantillaBestEffort;
+ * las transiciones (retirada con dos consumidores distintos) se loguean con la IDENTIDAD de la fila,
+ * jamas con un hash.
+ */
+async function registrarDesajusteDePlantillaBestEffort(
+  deps: TareaWebDeps,
+  job: Job,
+  plantillaId: string,
+): Promise<void> {
+  const registrar = deps.plantillas?.repo.registrarDesajuste;
+  if (registrar === undefined || deps.plantillas === undefined) return;
+  try {
+    const registro = await registrar.call(
+      deps.plantillas.repo,
+      plantillaId,
+      hashDeOrigenDePlantilla(job.ownerId, deps.plantillas.clave),
+    );
+    if (registro !== null && registro !== undefined && registro.estado !== registro.estadoPrevio) {
+      deps.logger.warn('tarea web: la plantilla compartida quedo retirada por desajuste de interfaz', {
+        jobId: job.id,
+        dominios: registro.dominiosClave,
+        intencion: registro.codigoDeIntencion,
+        marcadores: registro.marcadoresClave,
+        de: registro.estadoPrevio,
+        a: registro.estado,
+      });
+    }
+  } catch (error) {
+    deps.logger.warn('tarea web: no se pudo registrar el desajuste de interfaz (se ignora, best-effort)', {
       jobId: job.id,
       err: describir(error),
     });
@@ -4238,12 +4365,38 @@ export async function procesarTareaWeb(
             control,
           );
     const receta = rapida ?? elegida?.receta ?? null;
+    // ¿ALGUNA sonda pre-flight de esta corrida detecto un desajuste de interfaz? Es lo que el cierre
+    // registra en el resultado (D6): el usuario debe poder ver que el sitio cambio y que su agente
+    // se adapto solo.
+    let huboDesajusteDeInterfaz = false;
     if (receta !== null) {
       // La tarea ensenada puede vivir en OTRO de los sitios autorizados: alli es donde hay que
       // ejecutarla, con su propia sesion. El sitio de arranque sigue siendo el del camino rapido.
       const sitioDeLaReceta = gestor.porDominio(receta.dominio) ?? sitio;
       const abierto =
         sitioDeLaReceta.id === activo.sitio.id ? activo : await gestor.abrir(sitioDeLaReceta);
+      // SONDA DE RECONOCIMIENTO PREVIA (D1): con la pagina de partida cargada y ANTES del primer
+      // paso, se comprueba que las clases observables de la receta existan en la pagina. Con
+      // desajuste NO se ejecuta ningun paso: la tarea pasa al motor libre con la pagina limpia (no
+      // se toco el DOM) y la siguiente corrida exitosa promueve la receta de la interfaz vigente,
+      // que reemplaza a esta (promover ya marca obsoleta la anterior).
+      const sondaDeReceta = await sondearInterfazBestEffort(
+        deps,
+        job,
+        abierto.sesionExternaId,
+        abierto.sitio.dominio,
+        receta.pasos,
+      );
+      if (sondaDeReceta.tipo === 'desajuste') {
+        huboDesajusteDeInterfaz = true;
+        deps.logger.warn('tarea web: la tarea aprendida no coincide con la interfaz actual; se sigue con el motor', {
+          jobId: job.id,
+          connectionId: abierto.sitio.id,
+          dominio: abierto.sitio.dominio,
+          recetaId: receta.id,
+          motivo: 'desajuste_de_interfaz',
+        });
+      } else {
       const porReceta = await ejecutarPorReceta(deps, job, abierto.sitio, objetivo, abierto.sesionExternaId, receta, {
         politica,
         verboBloqueado,
@@ -4275,6 +4428,7 @@ export async function procesarTareaWeb(
             abierto.urlInicial,
           );
         }
+      }
       }
     }
 
@@ -4386,7 +4540,26 @@ export async function procesarTareaWeb(
                 ? { datosInterpretados: Object.keys(resolucionDeLaCorrida.valores).sort() }
                 : {}),
             };
-      const candidata = consulta.plantilla;
+      // SONDA DE RECONOCIMIENTO PREVIA (D1) sobre la candidata: si sus clases observables no estan
+      // en la pagina que el usuario tiene enfrente, NO se ejecuta ningun paso, el desajuste queda
+      // registrado con su propio contador (D4) y la tarea sigue por el motor libre con la pagina
+      // limpia: la sonda no toco el DOM.
+      let candidata = consulta.plantilla;
+      if (candidata !== null) {
+        const sondaDePlantilla = await sondearInterfazBestEffort(
+          deps,
+          job,
+          activo.sesionExternaId,
+          activo.sitio.dominio,
+          candidata.pasos,
+        );
+        if (sondaDePlantilla.tipo === 'desajuste') {
+          huboDesajusteDeInterfaz = true;
+          veredictoDeConsumo = { consumida: false, motivo: 'desajuste_de_interfaz', idx: null };
+          await registrarDesajusteDePlantillaBestEffort(deps, job, candidata.id);
+          candidata = null;
+        }
+      }
       if (candidata !== null) {
         // EJECUCION DIRECTA, sin ofrecimiento y sin pausa: las puertas tecnicas ya pasaron todas.
         const porPlantilla = await ejecutarPorPlantilla(
@@ -4437,6 +4610,7 @@ export async function procesarTareaWeb(
     deps.logger.info('tarea web: veredicto del procedimiento compartido', {
       jobId: job.id,
       dominio: activo.sitio.dominio,
+      desajusteDeInterfaz: huboDesajusteDeInterfaz,
       ...veredictoDeConsumo,
     });
 
