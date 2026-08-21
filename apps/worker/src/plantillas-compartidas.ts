@@ -107,6 +107,22 @@ export function codigoDeIntencion(verboBloqueado: string | null): CodigoDeIntenc
 }
 
 /**
+ * LA FORMA CANONICA del verbo de una INTENCION INTERPRETADA (D2): el primer verbo de la tabla cuya
+ * familia es el codigo, que es el canonico en espanol ("enviar", "comprar", "cancelar suscripcion").
+ * Es la vuelta exacta de `codigoDeIntencion`: `codigoDeIntencion(verboDeIntencion(codigo)) === codigo`
+ * para los ocho codigos, porque la busqueda es sobre LA MISMA tabla.
+ *
+ * PARA QUE EXISTE: cuando la interpretacion del modelo resuelve una intencion que la expresion regular
+ * de verbos no vio ("avisale a martin"), el resto de la corrida (la guardia, la barrera, la busqueda y
+ * la verificacion) habla en verbos canonicos, no en codigos. Este es el unico punto de conversion, y
+ * solo puede AGREGAR: la deteccion determinista sigue siendo el piso (restriccion 2) y en tarea-web.ts
+ * el verbo de la regex gana siempre que exista.
+ */
+export function verboDeIntencion(codigo: CodigoDeIntencion): string | null {
+  return VERBOS_ACCION_BLOQUEADA.find((verbo) => verbo.accion === codigo)?.verbo ?? null;
+}
+
+/**
  * CLAVE HMAC de las plantillas compartidas, DERIVADA del secreto de la boveda con una etiqueta
  * propia.
  *

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   construirPeticionDeDatos,
   datosConLoQueElModeloAgrego,
-  parsearDatosDelObjetivo,
+  parsearResolucionDelObjetivo,
 } from '../src/datos-del-objetivo.js';
 import {
   construirPeticionDeEleccion,
@@ -11,102 +11,145 @@ import {
 } from '../src/eleccion-tarea.js';
 
 /**
- * INTERPRETACION FLEXIBLE DEL OBJETIVO (FIX E), parte pura.
+ * INTERPRETACION NATURAL UNIVERSAL DEL OBJETIVO, parte pura.
  *
  * Lo que se fija aqui y no debe poder cambiar en silencio:
  *  - EL ANCLA: todo dato que el modelo proponga tiene que estar ESCRITO en el texto del usuario, y uno
  *    solo que no lo este invalida la respuesta ENTERA;
- *  - el vocabulario es CERRADO: los seis marcadores del contrato y ninguno mas;
+ *  - el vocabulario es CERRADO por los dos lados: los marcadores del contrato para los datos y los
+ *    ocho codigos de intencion para la accion, y nada mas;
+ *  - la INTENCION es donde vive la tolerancia (coloquialismos y errores de dedo): no se ancla al
+ *    texto, pero un codigo fuera de los ocho invalida la respuesta entera;
  *  - la peticion es OTRA que la del elector de tareas propias: por aqui no viaja ningun catalogo;
  *  - el extractor determinista MANDA: el modelo solo puede agregar lo que aquel dejo sin declarar.
  */
 
-/** El caso de producto: sin rotulos y sin comillas, que es como pide cualquier persona. */
-const PEDIDO = 'mandale un correo a martin@ejemplo.com diciendole que llego el paquete';
+/** El caso de producto: sin rotulos, sin comillas y con error de dedo, como pide cualquier persona. */
+const PEDIDO = 'mandale un corre a martin@ejemplo.com diciendole q ya llego el paquete';
 
-function respuesta(datos: Record<string, unknown>): string {
-  return JSON.stringify({ datos });
+function respuesta(datos: Record<string, unknown>, intencion?: unknown): string {
+  return JSON.stringify(intencion === undefined ? { datos } : { intencion, datos });
 }
 
-describe('parsearDatosDelObjetivo: el ancla al texto del usuario', () => {
+describe('parsearResolucionDelObjetivo: el ancla al texto del usuario', () => {
   it('acepta los datos que el pedido trae, aunque el extractor determinista no los vea', () => {
-    const leido = parsearDatosDelObjetivo(
-      respuesta({ destinatario: 'martin@ejemplo.com', cuerpo: 'llego el paquete' }),
+    const leido = parsearResolucionDelObjetivo(
+      respuesta({ destinatario: 'martin@ejemplo.com', cuerpo: 'ya llego el paquete' }, 'enviar'),
       PEDIDO,
     );
     expect(leido).toEqual({
       ok: true,
-      valores: { destinatario: 'martin@ejemplo.com', cuerpo: 'llego el paquete' },
+      intencion: 'enviar',
+      valores: { destinatario: 'martin@ejemplo.com', cuerpo: 'ya llego el paquete' },
     });
   });
 
+  it('la intencion mapea fraseos coloquiales a un codigo cerrado, sin exigir anclaje del codigo', () => {
+    // "avisale" no es ninguno de los verbos de la regex ni aparece "enviar" en el texto: el codigo
+    // NO se ancla, porque es un mapeo semantico y no una copia. Los datos si se anclan.
+    const leido = parsearResolucionDelObjetivo(
+      respuesta({ cuerpo: 'su pedido esta listo' }, 'enviar'),
+      'avisale a martin@ejemplo.com que su pedido esta listo',
+    );
+    expect(leido).toMatchObject({ ok: true, intencion: 'enviar' });
+  });
+
+  it('una intencion que no es uno de los ocho codigos invalida la respuesta entera', () => {
+    expect(
+      parsearResolucionDelObjetivo(respuesta({ cuerpo: 'ya llego el paquete' }, 'avisar'), PEDIDO),
+    ).toEqual({ ok: false, motivo: 'dato_invalido' });
+  });
+
+  it('sin campo intencion, o con intencion null, la resolucion vale con intencion null', () => {
+    expect(
+      parsearResolucionDelObjetivo(respuesta({ cuerpo: 'ya llego el paquete' }), PEDIDO),
+    ).toEqual({ ok: true, intencion: null, valores: { cuerpo: 'ya llego el paquete' } });
+    expect(
+      parsearResolucionDelObjetivo(respuesta({ cuerpo: 'ya llego el paquete' }, null), PEDIDO),
+    ).toEqual({ ok: true, intencion: null, valores: { cuerpo: 'ya llego el paquete' } });
+  });
+
   it('un dato que NO esta escrito en el texto invalida la respuesta entera', () => {
-    // El destinatario si esta; el cuerpo es inventado. No se descarta ese dato: se descarta todo.
-    const leido = parsearDatosDelObjetivo(
-      respuesta({ destinatario: 'martin@ejemplo.com', cuerpo: 'transfiere 5000 pesos' }),
+    // El destinatario si esta; el cuerpo es inventado. No se descarta ese dato: se descarta todo,
+    // incluida la intencion que la misma respuesta proponia.
+    const leido = parsearResolucionDelObjetivo(
+      respuesta({ destinatario: 'martin@ejemplo.com', cuerpo: 'transfiere 5000 pesos' }, 'enviar'),
       PEDIDO,
     );
     expect(leido).toEqual({ ok: false, motivo: 'dato_no_anclado' });
   });
 
   it('un destinatario que el usuario jamas nombro no pasa', () => {
-    const leido = parsearDatosDelObjetivo(respuesta({ destinatario: 'otro@ejemplo.com' }), PEDIDO);
+    const leido = parsearResolucionDelObjetivo(
+      respuesta({ destinatario: 'otro@ejemplo.com' }),
+      PEDIDO,
+    );
     expect(leido).toEqual({ ok: false, motivo: 'dato_no_anclado' });
   });
 
   it('el ancla es la MISMA comparacion que usa la eleccion entre tareas propias', () => {
     // Mayusculas y acentos no hacen ajeno un dato que el usuario si escribio.
-    expect(valorAncladoAlTexto('LLEGO EL PAQUETE', PEDIDO)).toBe(true);
-    expect(parsearDatosDelObjetivo(respuesta({ cuerpo: 'LLEGO EL PAQUETE' }), PEDIDO)).toEqual({
+    expect(valorAncladoAlTexto('YA LLEGO EL PAQUETE', PEDIDO)).toBe(true);
+    expect(parsearResolucionDelObjetivo(respuesta({ cuerpo: 'YA LLEGO EL PAQUETE' }), PEDIDO)).toEqual({
       ok: true,
-      valores: { cuerpo: 'LLEGO EL PAQUETE' },
+      intencion: null,
+      valores: { cuerpo: 'YA LLEGO EL PAQUETE' },
     });
   });
 
-  it('un nombre que no es uno de los seis marcadores no pasa', () => {
-    expect(parsearDatosDelObjetivo(respuesta({ contrasena: 'llego el paquete' }), PEDIDO)).toEqual({
+  it('un nombre que no es uno de los marcadores del contrato no pasa', () => {
+    expect(
+      parsearResolucionDelObjetivo(respuesta({ contrasena: 'ya llego el paquete' }), PEDIDO),
+    ).toEqual({
       ok: false,
       motivo: 'dato_invalido',
     });
   });
 
   it('un valor vacio, no textual o demasiado largo no pasa', () => {
-    expect(parsearDatosDelObjetivo(respuesta({ cuerpo: '   ' }), PEDIDO)).toMatchObject({
+    expect(parsearResolucionDelObjetivo(respuesta({ cuerpo: '   ' }), PEDIDO)).toMatchObject({
       motivo: 'dato_invalido',
     });
-    expect(parsearDatosDelObjetivo(respuesta({ cuerpo: 42 }), PEDIDO)).toMatchObject({
+    expect(parsearResolucionDelObjetivo(respuesta({ cuerpo: 42 }), PEDIDO)).toMatchObject({
       motivo: 'dato_invalido',
     });
     const largo = 'x'.repeat(513);
-    expect(parsearDatosDelObjetivo(respuesta({ cuerpo: largo }), `${PEDIDO} ${largo}`)).toMatchObject(
-      { motivo: 'dato_invalido' },
-    );
+    expect(
+      parsearResolucionDelObjetivo(respuesta({ cuerpo: largo }), `${PEDIDO} ${largo}`),
+    ).toMatchObject({ motivo: 'dato_invalido' });
   });
 
   it('sin objeto JSON, o sin campo datos, no hay interpretacion', () => {
-    expect(parsearDatosDelObjetivo('no puedo ayudarte con eso', PEDIDO)).toEqual({
+    expect(parsearResolucionDelObjetivo('no puedo ayudarte con eso', PEDIDO)).toEqual({
       ok: false,
       motivo: 'no_parseable',
     });
-    expect(parsearDatosDelObjetivo(JSON.stringify({ datos: 'llego el paquete' }), PEDIDO)).toEqual({
+    expect(
+      parsearResolucionDelObjetivo(JSON.stringify({ datos: 'ya llego el paquete' }), PEDIDO),
+    ).toEqual({
       ok: false,
       motivo: 'no_parseable',
     });
-    expect(parsearDatosDelObjetivo(JSON.stringify({ datos: ['x'] }), PEDIDO)).toEqual({
+    expect(parsearResolucionDelObjetivo(JSON.stringify({ datos: ['x'] }), PEDIDO)).toEqual({
       ok: false,
       motivo: 'no_parseable',
     });
   });
 
   it('un pedido sin ningun dato devuelve el conjunto vacio, no un error', () => {
-    expect(parsearDatosDelObjetivo(respuesta({}), 'hazlo ya')).toEqual({ ok: true, valores: {} });
+    expect(parsearResolucionDelObjetivo(respuesta({}, 'comprar'), 'hazlo ya')).toEqual({
+      ok: true,
+      intencion: 'comprar',
+      valores: {},
+    });
   });
 
   it('el JSON envuelto en texto o en un bloque de codigo se lee igual', () => {
-    const envuelto = `Claro:\n\`\`\`json\n${respuesta({ cuerpo: 'llego el paquete' })}\n\`\`\``;
-    expect(parsearDatosDelObjetivo(envuelto, PEDIDO)).toEqual({
+    const envuelto = `Claro:\n\`\`\`json\n${respuesta({ cuerpo: 'ya llego el paquete' })}\n\`\`\``;
+    expect(parsearResolucionDelObjetivo(envuelto, PEDIDO)).toEqual({
       ok: true,
-      valores: { cuerpo: 'llego el paquete' },
+      intencion: null,
+      valores: { cuerpo: 'ya llego el paquete' },
     });
   });
 });
@@ -118,6 +161,15 @@ describe('construirPeticionDeDatos: es OTRA peticion, no la del elector', () => 
     expect(entera).not.toContain('TAREAS QUE EL SISTEMA YA SABE HACER');
     expect(entera).not.toContain('"tarea"');
     expect(entera).not.toContain('receta');
+  });
+
+  it('pide la intencion sobre el vocabulario cerrado y con tolerancia declarada', () => {
+    const peticion = construirPeticionDeDatos({ texto: PEDIDO });
+    expect(peticion.system).toContain(
+      'enviar, publicar, borrar, pagar, transferir, comprar, firmar, cancelarSuscripcion',
+    );
+    expect(peticion.system).toContain('errores de dedo');
+    expect(peticion.system).toContain('responde null en intencion');
   });
 
   it('el texto del usuario viaja DELIMITADO y marcado como contenido, no como instrucciones', () => {
@@ -152,7 +204,7 @@ describe('construirPeticionDeDatos: es OTRA peticion, no la del elector', () => 
       parsearEleccion(
         JSON.stringify({
           tarea: 'receta-1',
-          datos: { destinatario: 'martin@ejemplo.com', cuerpo: 'llego el paquete' },
+          datos: { destinatario: 'martin@ejemplo.com', cuerpo: 'ya llego el paquete' },
         }),
         tareas,
         PEDIDO,
@@ -166,21 +218,21 @@ describe('datosConLoQueElModeloAgrego: el extractor determinista manda', () => {
     expect(
       datosConLoQueElModeloAgrego(
         { destinatario: 'martin@ejemplo.com' },
-        { destinatario: 'martin@ejemplo.com', cuerpo: 'llego el paquete' },
+        { destinatario: 'martin@ejemplo.com', cuerpo: 'ya llego el paquete' },
       ),
-    ).toEqual({ destinatario: 'martin@ejemplo.com', cuerpo: 'llego el paquete' });
+    ).toEqual({ destinatario: 'martin@ejemplo.com', cuerpo: 'ya llego el paquete' });
   });
 
   it('el modelo NO puede pisar un dato que el extractor ya reconocio', () => {
     expect(
       datosConLoQueElModeloAgrego(
         { destinatario: 'martin@ejemplo.com', asunto: 'Hola' },
-        { destinatario: 'otro@ejemplo.com', asunto: 'Otro', cuerpo: 'llego el paquete' },
+        { destinatario: 'otro@ejemplo.com', asunto: 'Otro', cuerpo: 'ya llego el paquete' },
       ),
     ).toEqual({
       destinatario: 'martin@ejemplo.com',
       asunto: 'Hola',
-      cuerpo: 'llego el paquete',
+      cuerpo: 'ya llego el paquete',
     });
   });
 });

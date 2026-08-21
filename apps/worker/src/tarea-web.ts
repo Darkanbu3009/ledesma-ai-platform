@@ -72,6 +72,7 @@ import {
 } from './trayectoria.js';
 import type { NuevaRecetaWeb, RecetaWeb } from '@ledesma-platform/backend/recetas-web';
 import type {
+  CodigoDeIntencion,
   EstrategiaLocalizacion,
   MarcadorParametro,
   MotivoDeFallaDePlantilla,
@@ -114,6 +115,7 @@ import {
   parsearOfrecimiento,
   plantillaAplicable,
   plantillaDeLaCorrida,
+  verboDeIntencion,
   type IdentidadDePlantilla,
   type OfrecimientoDePlantilla,
   type PlantillaDeLaCorrida,
@@ -121,7 +123,7 @@ import {
 import {
   construirPeticionDeDatos,
   datosConLoQueElModeloAgrego,
-  parsearDatosDelObjetivo,
+  parsearResolucionDelObjetivo,
 } from './datos-del-objetivo.js';
 import {
   aplicarPromociones,
@@ -2797,19 +2799,29 @@ interface VeredictoDeConsumo {
   /** Cuantos origenes tiene la fila que SI matcheo la clave, o null si ninguna. Solo en el miss. */
   origenes?: number | null;
   /**
-   * COMO LE FUE al segundo escalon de los datos (FIX E), y solo aparece cuando se intento: el
-   * extractor determinista no alcanzo y se le pregunto al modelo. Vocabulario cerrado
+   * COMO LE FUE a la interpretacion del objetivo (D1/D5), y solo aparece cuando se intento: lo
+   * determinista no alcanzo y se le pregunto al modelo UNA vez. Vocabulario cerrado
    * (`MotivoDeInterpretacion`): es lo que responde "se intento interpretar y por que no salio".
    */
   interpretacion?: string;
+  /**
+   * D5: la INTENCION que la interpretacion AGREGO (uno de los ocho codigos cerrados). Solo aparece
+   * cuando la regex no habia visto verbo y el modelo mapeo uno. Jamas texto libre.
+   */
+  intencionInterpretada?: string;
+  /**
+   * D5: los NOMBRES de los datos con los que quedo la resolucion (extractor + modelo), del
+   * vocabulario cerrado de marcadores. Nunca los valores.
+   */
+  datosInterpretados?: string[];
 }
 
 /**
- * COMO LE FUE al SEGUNDO ESCALON de los datos. Vocabulario CERRADO, y todos menos `resuelta` terminan
+ * COMO LE FUE a la INTERPRETACION del objetivo. Vocabulario CERRADO, y todos menos `resuelta` terminan
  * igual: la tarea sigue por el motor libre, sin ruido, con el motivo en el diagnostico.
  */
 type MotivoDeInterpretacion =
-  /** No hizo falta: el extractor alcanzo, o el miss no era de los que un dato arregla. Cero tokens. */
+  /** No hizo falta: el extractor alcanzo, o el miss no era de los que la interpretacion arregla. */
   | 'no_intentada'
   /** No hay puerto de consulta cableado en este worker. */
   | 'no_cableada'
@@ -2817,34 +2829,60 @@ type MotivoDeInterpretacion =
   | 'sin_respuesta'
   /** La respuesta no trae el objeto JSON esperado. */
   | 'no_parseable'
-  /** Un nombre fuera de los seis, o un valor vacio, no textual o demasiado largo. */
+  /** Un nombre fuera del vocabulario, un valor vacio/no textual/largo, o una intencion invalida. */
   | 'dato_invalido'
   /** UN VALOR QUE NO ESTA EN EL TEXTO DEL USUARIO. Invalida la interpretacion entera (el ancla). */
   | 'dato_no_anclado'
+  /** Ni la regex ni el modelo resolvieron una intencion: no hay clave de busqueda posible. */
+  | 'sin_intencion'
   /** El modelo no agrego nada que el extractor no tuviera: volver a buscar daria lo mismo. */
   | 'sin_datos_nuevos'
   /** Los datos resueltos no se pueden traducir a la forma que compara la verificacion determinista. */
   | 'no_comparables'
-  /** Se resolvieron datos nuevos y la busqueda se repitio con ellos. */
+  /** Se resolvieron intencion y/o datos nuevos y la busqueda se repitio con ellos. */
   | 'resuelta';
 
 /**
- * LOS MOTIVOS DE MISS QUE UN DATO MAS PODRIA ARREGLAR, y ninguno mas. `sin_plantilla` es no haber
- * encontrado fila para el conjunto declarado; `dato_sin_declarar` es haberla encontrado y que pida un
- * dato que el objetivo no trae. Todos los demas (sin cableado, sin intencion irreversible, clase sin
- * corroborar, dominio ajeno, contrato invalido, sin verificacion) no dependen de los datos, asi que
- * preguntarle al modelo seria gastar tokens en algo que no puede cambiar.
+ * LOS MOTIVOS DE MISS QUE UN DATO MAS PODRIA ARREGLAR. `sin_plantilla` es no haber encontrado fila
+ * para el conjunto declarado; `dato_sin_declarar` es haberla encontrado y que pida un dato que el
+ * objetivo no trae. Los demas motivos que no dependen de los datos ni de la intencion (sin cableado,
+ * clase sin corroborar, dominio ajeno, contrato invalido, sin verificacion) no disparan la consulta:
+ * seria gastar tokens en algo que no puede cambiar.
  */
 const MISS_QUE_UN_DATO_ARREGLA: ReadonlySet<string> = new Set(['sin_plantilla', 'dato_sin_declarar']);
 
 /**
- * EL SEGUNDO ESCALON DE LOS DATOS (FIX E): UNA consulta al modelo para resolver que datos trae el
- * pedido, cuando el extractor determinista no alcanzo para encontrar una plantilla.
+ * ¿Este miss lo puede arreglar la INTERPRETACION (D1/D2)? Son los dos misses que un dato arregla MAS
+ * el `sin_identidad` por falta de verbo: la regex de verbos no vio ninguna intencion en el texto
+ * ("avisale a martin que su pedido esta listo") y el modelo si puede mapearla a un codigo del
+ * vocabulario cerrado. Un `sin_identidad` con verbo detectado no entra aqui: ahi lo que falta son los
+ * dominios, y eso ningun modelo lo arregla.
+ */
+function missQueLaInterpretacionArregla(
+  motivo: string | null,
+  verboBloqueado: string | null,
+): boolean {
+  if (MISS_QUE_UN_DATO_ARREGLA.has(motivo ?? '')) return true;
+  return motivo === 'sin_identidad' && verboBloqueado === null;
+}
+
+/**
+ * LA INTERPRETACION DEL OBJETIVO (D1/D2): UNA consulta al modelo que resuelve DE UNA VEZ la intencion
+ * canonica y todos los datos anclados del pedido, cuando el extractor determinista no alcanzo para
+ * encontrar una plantilla. Ya no es un segundo escalon solo de datos: es el traductor completo del
+ * lenguaje natural del usuario al esquema cerrado de la plataforma.
  *
  * CUANDO CORRE, y son tres condiciones a la vez: las dos vias PROPIAS no resolvieron (si no, ni se
- * llega aqui), la busqueda con los datos del extractor fallo, y fallo por un motivo que un dato mas
- * puede arreglar. Cuando el extractor alcanza, esto NO se llama y la corrida sigue costando cero
- * tokens, igual que hasta hoy.
+ * llega aqui), la busqueda con lo determinista fallo, y fallo por un motivo que la interpretacion
+ * puede arreglar (un dato que falta, o una intencion que la regex no vio). Cuando el extractor y la
+ * regex alcanzan, esto NO se llama y la corrida sigue costando cero tokens, igual que hoy. MAXIMO UNA
+ * llamada por corrida (D6): el resultado se cachea en la corrida y lo comparten el consumo y la
+ * publicacion (D4).
+ *
+ * LA INTENCION SOLO AGREGA (restriccion 2): `verboBloqueado` -- la deteccion determinista -- es el
+ * PISO. Si la regex ya detecto un verbo, la intencion del modelo se IGNORA por completo; solo cuando
+ * la regex no vio ninguno la intencion interpretada convierte la tarea en irreversible (con guardia y
+ * verificacion). No existe la rama en que el modelo apague la guardia.
  *
  * QUE SE REUSA Y QUE NO. Se reusa el PUERTO (`deps.elector`), que es una consulta puntual al modelo
  * sin herramientas, sin historial y sin bucle, con temperatura 0 y deadline propio, y se reusan el
@@ -2853,15 +2891,18 @@ const MISS_QUE_UN_DATO_ARREGLA: ReadonlySet<string> = new Set(['sin_plantilla', 
  * OTRA (ver `construirPeticionDeDatos`) y por ella no viaja ni un id, ni una descripcion, ni nada que
  * el usuario no haya escrito.
  *
- * FALLA CERRADA SIEMPRE: cualquier desenlace que no sea `resuelta` deja los datos como estaban y la
- * tarea sigue por el motor libre, que es la linea base.
+ * FALLA CERRADA SIEMPRE: cualquier desenlace que no sea `resuelta` deja los datos y el verbo como
+ * estaban y la tarea sigue por el motor libre, que es la linea base y que entiende lenguaje natural
+ * por si mismo. Sin reintentos (D6).
  */
-async function interpretarDatosDelObjetivo(
+async function interpretarObjetivo(
   deps: TareaWebDeps,
   job: Job,
   opciones: {
     /** El texto del que salen los datos: el literal del usuario si llego (CAMBIO 3). */
     textoParametros: string;
+    /** El PISO de la guardia: la forma canonica que detecto la regex, o null. */
+    verboBloqueado: string | null;
     /** Lo que el extractor determinista YA reconocio. El modelo solo puede agregar sobre esto. */
     delExtractor: ValoresDeParametros;
     apiKey: string;
@@ -2869,10 +2910,19 @@ async function interpretarDatosDelObjetivo(
   },
 ): Promise<{
   datos: { valores: ValoresDeParametros; parametros: ParametrosDeclarados } | null;
+  /** Intencion que el modelo AGREGO (solo cuando la regex no vio verbo). null en cualquier otro caso. */
+  intencion: CodigoDeIntencion | null;
   motivo: MotivoDeInterpretacion;
 }> {
+  const sinDatos = (
+    motivo: MotivoDeInterpretacion,
+  ): { datos: null; intencion: null; motivo: MotivoDeInterpretacion } => ({
+    datos: null,
+    intencion: null,
+    motivo,
+  });
   const elector = deps.elector;
-  if (!elector) return { datos: null, motivo: 'no_cableada' };
+  if (!elector) return sinDatos('no_cableada');
 
   let respuesta: string;
   try {
@@ -2887,35 +2937,44 @@ async function interpretarDatosDelObjetivo(
       jobId: job.id,
       err: describir(error),
     });
-    return { datos: null, motivo: 'sin_respuesta' };
+    return sinDatos('sin_respuesta');
   }
-  if (respuesta.trim() === '') return { datos: null, motivo: 'sin_respuesta' };
+  if (respuesta.trim() === '') return sinDatos('sin_respuesta');
 
-  const leido = parsearDatosDelObjetivo(respuesta, opciones.textoParametros);
+  const leido = parsearResolucionDelObjetivo(respuesta, opciones.textoParametros);
   if (!leido.ok) {
     deps.logger.info('tarea web: la interpretacion del objetivo no se pudo usar; sigue el motor', {
       jobId: job.id,
       motivo: leido.motivo,
     });
-    return { datos: null, motivo: leido.motivo };
+    return sinDatos(leido.motivo);
+  }
+
+  // LA INTENCION QUE SE AGREGA: solo existe cuando la regex no detecto verbo. Con verbo detectado, la
+  // intencion del modelo ni se mira: el piso manda para la guardia Y para la clave (restriccion 2).
+  const intencion = opciones.verboBloqueado === null ? leido.intencion : null;
+  if (opciones.verboBloqueado === null && intencion === null) {
+    // Ni la regex ni el modelo mapearon una intencion: no hay clave de busqueda posible y la tarea
+    // sigue por el motor libre sin ruido. Nada se pierde: el motor entiende lenguaje natural solo.
+    return sinDatos('sin_intencion');
   }
 
   const valores = datosConLoQueElModeloAgrego(opciones.delExtractor, leido.valores);
-  if (Object.keys(valores).length === Object.keys(opciones.delExtractor).length) {
-    return { datos: null, motivo: 'sin_datos_nuevos' };
-  }
+  const agregoDatos = Object.keys(valores).length > Object.keys(opciones.delExtractor).length;
+  if (!agregoDatos && intencion === null) return sinDatos('sin_datos_nuevos');
   // A la forma que consume la VERIFICACION DETERMINISTA. Si un valor no se puede interpretar como lo
   // que dice ser, no hay con que compararlo contra la pagina y no se usa (misma regla que el camino
   // de tareas propias).
   const parametros = parametrosDeclaradosDesdeValores(valores);
-  if (parametros === null) return { datos: null, motivo: 'no_comparables' };
+  if (parametros === null) return sinDatos('no_comparables');
 
   deps.logger.info('tarea web: el objetivo se interpreto para buscar un procedimiento compartido', {
     jobId: job.id,
-    // Solo los NOMBRES de los datos: cuales se resolvieron explica la decision; los valores no.
+    // Solo los NOMBRES de los datos y el codigo de intencion: los valores no se loguean.
     datos: nombresDeParametrosDeclarados(parametros),
+    intencion,
   });
-  return { datos: { valores, parametros }, motivo: 'resuelta' };
+  return { datos: { valores, parametros }, intencion, motivo: 'resuelta' };
 }
 
 /**
@@ -4223,6 +4282,15 @@ export async function procesarTareaWeb(
     //      propias. Lo que resuelva pasa por las mismas puertas que todo lo demas.
     let parametrosDelObjetivo = extraerParametrosDeclarados(textoParametros);
     let valoresDelObjetivo = valoresDeParametros(parametrosDelObjetivo);
+    // EL VERBO EFECTIVO de la corrida (D2, restriccion 2): la deteccion determinista es el PISO y la
+    // interpretacion solo puede AGREGAR un verbo donde la regex no vio ninguno. Todo lo que viene
+    // despues del peldano de consumo -- la guardia, la barrera, los cortes de cierre y la
+    // publicacion -- habla de este verbo: mas verificacion que hoy, jamas menos.
+    let verboEfectivo = verboBloqueado;
+    // LA RESOLUCION DE LA CORRIDA (D4): se calcula UNA vez aqui y, cuando existe, la reutiliza la
+    // publicacion del cierre exitoso. null = no hubo interpretacion resuelta y la publicacion deriva
+    // sus marcadores con el extractor, exactamente como hoy.
+    let resolucionDeLaCorrida: { valores: ValoresDeParametros } | null = null;
     let veredictoDeConsumo: VeredictoDeConsumo = {
       consumida: false,
       // El unico motivo que se decide antes de mirar la tabla: alguna via propia ya resolvio. En
@@ -4237,9 +4305,14 @@ export async function procesarTareaWeb(
         valores: valoresDelObjetivo,
       });
       let interpretacion: MotivoDeInterpretacion = 'no_intentada';
-      if (consulta.plantilla === null && MISS_QUE_UN_DATO_ARREGLA.has(consulta.veredicto.motivo ?? '')) {
-        const interpretada = await interpretarDatosDelObjetivo(deps, job, {
+      let intencionInterpretada: CodigoDeIntencion | null = null;
+      if (
+        consulta.plantilla === null &&
+        missQueLaInterpretacionArregla(consulta.veredicto.motivo, verboBloqueado)
+      ) {
+        const interpretada = await interpretarObjetivo(deps, job, {
           textoParametros,
+          verboBloqueado,
           delExtractor: valoresDelObjetivo,
           apiKey: credential.apiKey,
           control,
@@ -4251,9 +4324,17 @@ export async function procesarTareaWeb(
           // puedan divergir es lo que impide verificar contra una cosa y escribir otra.
           valoresDelObjetivo = interpretada.datos.valores;
           parametrosDelObjetivo = interpretada.datos.parametros;
+          intencionInterpretada = interpretada.intencion;
+          // LA INTENCION AGREGADA (D2): convierte la corrida en irreversible A EFECTOS DE
+          // VERIFICACION. Nunca al reves: con verbo de la regex, `interpretada.intencion` es null
+          // por construccion y el piso queda intacto.
+          verboEfectivo =
+            verboBloqueado ??
+            (interpretada.intencion !== null ? verboDeIntencion(interpretada.intencion) : null);
+          resolucionDeLaCorrida = { valores: valoresDelObjetivo };
           consulta = await buscarPlantillaAjena(deps, job, activo.sitio, atlas, {
             dominios: dominiosAutorizados,
-            verboBloqueado,
+            verboBloqueado: verboEfectivo,
             valores: valoresDelObjetivo,
           });
         }
@@ -4261,7 +4342,16 @@ export async function procesarTareaWeb(
       veredictoDeConsumo =
         interpretacion === 'no_intentada'
           ? consulta.veredicto
-          : { ...consulta.veredicto, interpretacion };
+          : {
+              ...consulta.veredicto,
+              interpretacion,
+              // D5: el detalle de la interpretacion, en vocabulario cerrado. Solo NOMBRES de datos y
+              // el codigo de intencion: ni un valor del usuario.
+              ...(intencionInterpretada !== null ? { intencionInterpretada } : {}),
+              ...(resolucionDeLaCorrida !== null
+                ? { datosInterpretados: Object.keys(resolucionDeLaCorrida.valores).sort() }
+                : {}),
+            };
       const candidata = consulta.plantilla;
       if (candidata !== null) {
         // EJECUCION DIRECTA, sin ofrecimiento y sin pausa: las puertas tecnicas ya pasaron todas.
@@ -4274,7 +4364,9 @@ export async function procesarTareaWeb(
           candidata,
           {
             politica,
-            verboBloqueado,
+            // El verbo EFECTIVO (piso de la regex + intencion agregada): es lo que la barrera y la
+            // verificacion de la plantilla comparan, y nunca es menos que el de la regex.
+            verboBloqueado: verboEfectivo,
             textoParametros,
             contexto: activo.contexto,
             dominios: dominiosAutorizados,
@@ -4347,7 +4439,11 @@ export async function procesarTareaWeb(
     for (;;) {
       guardia = crearGuardiaDeAccion(deps, job, activo.sitio, activo.sesionExternaId, {
         politica,
-        verboBloqueado,
+        // EL VERBO EFECTIVO (D2, restriccion 2): el de la regex cuando existe (el piso, intacto) y el
+        // de la intencion interpretada solo cuando la regex no vio ninguno. La interpretacion es un
+        // DISPARADOR ADICIONAL de verificacion, jamas un supresor: no hay rama que pase null aqui
+        // cuando la deteccion determinista detecto un verbo.
+        verboBloqueado: verboEfectivo,
         textoParametros,
         // FIX A: el texto del usuario, con el objetivo del modelo conversacional sumado como
         // respaldo (los jobs viejos no traen el literal). Es contra esto, y nunca contra lo que el
@@ -4478,8 +4574,10 @@ export async function procesarTareaWeb(
     //    pide ese marcador, asi que emitirlo es exactamente pararse solo ante la accion.
     //    EXCEPCION: si la senal externa ya aborto, el job dejo de ser 'running' porque su dueno lo
     //    TERMINO desde la consola; ahi no hay nada que diagnosticar.
+    // El corte usa el VERBO EFECTIVO: una intencion que la interpretacion agrego (D2) exige el mismo
+    // cierre veraz que una detectada por la regex. Es un disparador mas, nunca un supresor.
     if (
-      verboBloqueado !== null &&
+      verboEfectivo !== null &&
       !registro.algunaAutorizada() &&
       (desenlace.tipo === 'requiere_aprobacion' || resultado.completado) &&
       control?.signal?.aborted !== true
@@ -4488,13 +4586,13 @@ export async function procesarTareaWeb(
       deps.logger.warn('tarea web: el agente termino sin ejecutar la accion que el objetivo pedia', {
         jobId: job.id,
         connectionId: activo.sitio.id,
-        verbo: verboBloqueado,
+        verbo: verboEfectivo,
         faltantes,
       });
       throw new PermanentExecutionError(
         faltantes === null
-          ? describirAccionNoVerificada(verboBloqueado, resultado, deps.maxPasos)
-          : describirDatosNuncaCompletados(verboBloqueado, faltantes, resultado, deps.maxPasos),
+          ? describirAccionNoVerificada(verboEfectivo, resultado, deps.maxPasos)
+          : describirDatosNuncaCompletados(verboEfectivo, faltantes, resultado, deps.maxPasos),
       );
     }
 
@@ -4517,7 +4615,7 @@ export async function procesarTareaWeb(
     // efecto nunca se confirmo, la tarea NO puede cerrarse como exitosa aunque el agente haya
     // terminado con DONE (por ejemplo, tras recibir el aviso terminal de la guardia). Tampoco se
     // promueve receta de una corrida asi: repetirla repetiria el paso sin confirmar.
-    if (verboBloqueado !== null && registro.algunaSinConfirmar()) {
+    if (verboEfectivo !== null && registro.algunaSinConfirmar()) {
       deps.logger.warn('tarea web: la corrida termino con la accion irreversible sin efecto confirmado', {
         jobId: job.id,
         connectionId: activo.sitio.id,
@@ -4547,7 +4645,9 @@ export async function procesarTareaWeb(
       sitio,
       objetivo,
       pasosDelJob,
-      verboBloqueado,
+      // El verbo EFECTIVO: si la interpretacion agrego una intencion, la receta que quede exige su
+      // paso de verificacion igual que si el verbo hubiera venido de la regex. Nunca exige menos.
+      verboEfectivo,
       dominiosAutorizados,
     );
     // ATLAS DE SITIOS (V040): esta corrida llego hasta aqui, o sea que salio bien Y -- si pedia una

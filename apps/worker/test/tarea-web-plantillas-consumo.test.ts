@@ -1934,3 +1934,178 @@ describe('el segundo escalon: interpretar el objetivo cuando el extractor no alc
     });
   });
 });
+
+// --- INTERPRETACION NATURAL UNIVERSAL (D1/D2) -----------------------------------------------------
+
+/**
+ * CUALQUIER fraseo natural tiene que funcionar: errores de dedo, coloquialismos y desviaciones, sin
+ * que el usuario aprenda ningun formato. La resolucion del objetivo es interpretacion-first con el
+ * extractor como atajo de costo cero, y la intencion tambien se resuelve por interpretacion cuando la
+ * regex de verbos no la ve.
+ *
+ * LO QUE ESTOS TESTS FIJAN:
+ *  - el fraseo con errores de dedo resuelve intencion y datos anclados y encuentra la plantilla;
+ *  - la intencion PURA (sin verbo de la regex) alimenta la clave de busqueda y la corrida entera se
+ *    trata como irreversible (guardia y verificacion incluidas);
+ *  - el piso de la guardia es la deteccion determinista: la interpretacion agrega, jamas suprime.
+ */
+describe('interpretacion natural universal: intencion y datos en una sola llamada', () => {
+  /** Error de dedo incluido ("corre", "q ya"): asi escribe una persona en el telefono. */
+  const PEDIDO_CON_TYPO = 'mandale un corre a martin@ejemplo.com diciendole q ya llego el paquete';
+
+  /** Fraseo que la regex de verbos NO detecta: "avisale" no esta en VERBOS_ACCION_BLOQUEADA. */
+  const PEDIDO_SIN_VERBO_DE_REGEX = 'avisale a martin@ejemplo.com que su pedido esta listo';
+
+  function pasosDeCorreoSimple(): unknown[] {
+    return [
+      pasoEscribir(0, CLASE_DESTINATARIO, 'Destinatarios en Para', {
+        tipo: 'parametro',
+        parametro: 'destinatario',
+      }),
+      pasoEscribir(1, CLASE_CUERPO, 'Cuerpo del mensaje', { tipo: 'parametro', parametro: 'cuerpo' }),
+      pasoVerificar(2),
+      pasoClick(3, CLASE_ENVIAR, 'Enviar'),
+    ];
+  }
+
+  it('el fraseo con error de dedo resuelve intencion y datos y encuentra la plantilla', async () => {
+    const respuesta = JSON.stringify({
+      intencion: 'enviar',
+      datos: { destinatario: 'martin@ejemplo.com', cuerpo: 'ya llego el paquete' },
+    });
+    const elector = makeElector(respuesta);
+    const campos: CampoDeLaPagina[] = [
+      { contexto: 'destinatarios en para', valor: 'martin@ejemplo.com' },
+      { contexto: 'cuerpo del mensaje', valor: 'ya llego el paquete' },
+    ];
+    const deps = conPlantillas(
+      [{ id: 'plantilla-simple', estado: 'candidata', pasos: pasosDeCorreoSimple(), origenes: 2 }],
+      CLASES_DEL_PROCEDIMIENTO,
+      { elector, navegador: makeNavegador(true, campos) },
+    );
+
+    expect(await procesarTareaWeb(deps, makeJob(PEDIDO_CON_TYPO))).toBe('completada');
+    expect(elector.consultar).toHaveBeenCalledTimes(1);
+    expect(deps.motor.ejecutar).not.toHaveBeenCalled();
+  });
+
+  it('la intencion PURA (sin verbo de la regex) alimenta la clave y ejecuta con verificacion', async () => {
+    const respuesta = JSON.stringify({
+      intencion: 'enviar',
+      datos: { destinatario: 'martin@ejemplo.com', cuerpo: 'su pedido esta listo' },
+    });
+    const elector = makeElector(respuesta);
+    const campos: CampoDeLaPagina[] = [
+      { contexto: 'destinatarios en para', valor: 'martin@ejemplo.com' },
+      { contexto: 'cuerpo del mensaje', valor: 'su pedido esta listo' },
+    ];
+    const deps = conPlantillas(
+      [{ id: 'plantilla-simple', estado: 'candidata', pasos: pasosDeCorreoSimple(), origenes: 2 }],
+      CLASES_DEL_PROCEDIMIENTO,
+      { elector, navegador: makeNavegador(true, campos) },
+    );
+
+    expect(await procesarTareaWeb(deps, makeJob(PEDIDO_SIN_VERBO_DE_REGEX))).toBe('completada');
+    // La PRIMERA busqueda ni ocurre (sin verbo no hay identidad): la unica consulta va con la
+    // intencion que resolvio el modelo, sobre el vocabulario cerrado.
+    const plantillas = deps.plantillas as unknown as {
+      repo: { buscarServible: ReturnType<typeof vi.fn> };
+    };
+    expect(plantillas.repo.buscarServible).toHaveBeenCalledTimes(1);
+    expect(plantillas.repo.buscarServible.mock.calls[0]?.[0]).toMatchObject({
+      codigoDeIntencion: 'enviar',
+    });
+    // La VERIFICACION determinista corrio antes del click: la pagina se leyo para comparar.
+    expect(deps.navegador.leerCamposDeLaPagina).toHaveBeenCalled();
+    expect(deps.motor.ejecutar).not.toHaveBeenCalled();
+  });
+
+  it('un fraseo de compra resuelve intencion comprar con el producto anclado', async () => {
+    const CLASE_PRODUCTO = 'escribir|rol:textbox|producto';
+    const CLASE_COMPRAR = 'click|rol:button|comprar';
+    const pasosDeCompra: unknown[] = [
+      pasoEscribir(0, CLASE_PRODUCTO, 'Producto', { tipo: 'parametro', parametro: 'producto' }),
+      pasoVerificar(1),
+      pasoClick(2, CLASE_COMPRAR, 'Comprar'),
+    ];
+    const pedido = 'comprame eso que vi ayer en la tienda del sitio';
+    const respuesta = JSON.stringify({
+      intencion: 'comprar',
+      datos: { producto: 'eso que vi ayer en la tienda del sitio' },
+    });
+    const elector = makeElector(respuesta);
+    const campos: CampoDeLaPagina[] = [
+      { contexto: 'producto', valor: 'eso que vi ayer en la tienda del sitio' },
+    ];
+    const deps = conPlantillas(
+      [{ id: 'plantilla-compra', estado: 'candidata', pasos: pasosDeCompra, origenes: 2 }],
+      [CLASE_PRODUCTO, CLASE_COMPRAR],
+      {
+        elector,
+        navegador: makeNavegador(true, campos),
+        // El nombre accesible que la barrera lee del control final tiene que ser el de la familia
+        // del verbo (comprar), igual que 'Enviar' en los casos de correo.
+        determinista: makeDeterminista([], 'Comprar'),
+      },
+    );
+
+    expect(await procesarTareaWeb(deps, makeJob(pedido))).toBe('completada');
+    const plantillas = deps.plantillas as unknown as {
+      repo: { buscarServible: ReturnType<typeof vi.fn>; registrarEjecucion: ReturnType<typeof vi.fn> };
+    };
+    const claves = plantillas.repo.buscarServible.mock.calls.map(
+      (llamada) => llamada[0] as { codigoDeIntencion: string; marcadoresPosibles: string[] },
+    );
+    // La primera busqueda va sin producto (el extractor exige comillas); la segunda ya lo declara.
+    expect(claves.at(-1)?.codigoDeIntencion).toBe('comprar');
+    expect(claves.at(-1)?.marcadoresPosibles).toContain('producto');
+    expect(plantillas.repo.registrarEjecucion).toHaveBeenCalledWith(
+      'plantilla-compra',
+      true,
+      undefined,
+      HASH_CONSUMIDOR,
+    );
+  });
+
+  it('si el modelo no mapea ninguna intencion, la tarea sigue por el motor sin ruido', async () => {
+    const respuesta = JSON.stringify({ intencion: null, datos: { cuerpo: 'su pedido esta listo' } });
+    const elector = makeElector(respuesta);
+    const deps = conPlantillas(
+      [{ id: 'plantilla-simple', estado: 'candidata', pasos: pasosDeCorreoSimple(), origenes: 2 }],
+      CLASES_DEL_PROCEDIMIENTO,
+      { elector },
+    );
+
+    await correr(deps, makeJob(PEDIDO_SIN_VERBO_DE_REGEX));
+
+    expect(deps.motor.ejecutar).toHaveBeenCalledTimes(1);
+    const veredictos = (deps.logger.info as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (llamada) => llamada[0] === 'tarea web: veredicto del procedimiento compartido',
+    );
+    expect(veredictos.at(-1)?.[1]).toMatchObject({ interpretacion: 'sin_intencion' });
+  });
+
+  it('FAIL-CLOSED: la guardia sigue exigiendo verificacion aunque la interpretacion falle', async () => {
+    // La regex SI detecta el verbo ("mandale"), la interpretacion devuelve basura, y la pagina
+    // muestra OTRO destinatario. Si la interpretacion pudiera suprimir la guardia, el envio saldria;
+    // con el piso intacto, la verificacion DETIENE la accion y la corrida no se cierra como exito.
+    const elector = makeElector('respuesta que no es JSON');
+    const camposConOtroDestinatario: CampoDeLaPagina[] = [
+      { contexto: 'destinatarios en para', valor: 'atacante@ejemplo.com' },
+    ];
+    const deps = makeDeps({
+      motor: makeMotorQueEnvia(),
+      elector,
+      navegador: makeNavegador(false, camposConOtroDestinatario),
+      plantillas: { repo: makePlantillas([]), clave: CLAVE_PLANTILLAS },
+    } as unknown as Partial<TareaWebDeps>);
+
+    await expect(
+      procesarTareaWeb(deps, makeJob('mandale un correo a martin@ejemplo.com diciendole que ya llego')),
+    ).rejects.toThrow();
+
+    // La verificacion corrio (leyo la pagina para comparar) y el elector fallido no la apago.
+    expect(elector.consultar).toHaveBeenCalledTimes(1);
+    expect(deps.navegador.leerCamposDeLaPagina).toHaveBeenCalled();
+  });
+});
