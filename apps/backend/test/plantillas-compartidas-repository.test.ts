@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { PasoPublicable, Sql } from '@ledesma-platform/shared';
 import {
+  DESAJUSTES_PARA_RETIRO,
   FALLOS_PARA_RETIRO,
   MAX_CLASES_POR_DOMINIO,
   MAX_FILAS_DE_DIAGNOSTICO,
@@ -300,19 +301,20 @@ describe('publicar: la SEGUNDA PUERTA (cinturon y tirantes)', () => {
 });
 
 describe('publicar: la superficie del repositorio es CERRADA', () => {
-  it('expone exactamente las tres operaciones del ciclo de vida y ni una mas', () => {
+  it('expone exactamente las operaciones del ciclo de vida y ni una mas', () => {
     const metodos = Object.getOwnPropertyNames(PlantillasCompartidasRepository.prototype).filter(
       (nombre) => nombre !== 'constructor',
     );
-    // `buscarServible`, `diagnosticarMiss` y `registrarEjecucion` son el CONSUMO; no hay ningun
-    // metodo que lea o escriba acotado por dueno, porque una plantilla no tiene dueno (ver la
-    // cabecera del repositorio).
+    // `buscarServible`, `diagnosticarMiss`, `registrarEjecucion` y `registrarDesajuste` son el
+    // CONSUMO; no hay ningun metodo que lea o escriba acotado por dueno, porque una plantilla no
+    // tiene dueno (ver la cabecera del repositorio).
     expect(metodos.sort()).toEqual([
       'buscarServible',
       'clasesCorroboradas',
       'comoRegistro',
       'diagnosticarMiss',
       'publicar',
+      'registrarDesajuste',
       'registrarEjecucion',
       'upsert',
     ]);
@@ -571,6 +573,67 @@ describe('registrarEjecucion: contadores, evidencia de consumo y transiciones', 
   it('devuelve null cuando la fila no existe (el update no toco nada)', async () => {
     const sql = makeSql([[]]);
     const registro = await new PlantillasCompartidasRepository(sql).registrarEjecucion('nope', true);
+    expect(registro).toBeNull();
+  });
+});
+
+describe('registrarDesajuste: retiro acelerado por evidencia estructural (V044, D4)', () => {
+  function filaDeRegistro(estado = 'candidata', estadoPrevio = 'candidata') {
+    return {
+      estado,
+      estado_previo: estadoPrevio,
+      dominios_clave: DOMINIO,
+      codigo_de_intencion: 'enviar',
+      marcadores_clave: 'destinatario',
+    };
+  }
+
+  it('agrega el hash del consumidor SOLO si es nuevo y persiste el motivo, sin tocar contadores de ejecucion', async () => {
+    const sql = makeSql([[filaDeRegistro()]]);
+    await new PlantillasCompartidasRepository(sql).registrarDesajuste('p-1', 'c1');
+    const [texto, valores] = sql.queries[0] as [string, unknown[]];
+    expect(texto).toContain('desajustes_hash = case when desajustes_hash @> ');
+    expect(texto).toContain('else desajustes_hash || ');
+    expect(texto).toContain("ultima_falla_motivo = 'desajuste_de_interfaz'");
+    // NO es una ejecucion: ni fallidas, ni exitosas, ni la racha de retiro por calidad.
+    expect(texto).not.toContain('ejecuciones_fallidas');
+    expect(texto).not.toContain('ejecuciones_exitosas');
+    expect(texto).not.toContain('fallos_consecutivos');
+    expect(valores).toContain('p-1');
+    expect(JSON.stringify(valores)).toContain('c1');
+  });
+
+  it('D4: con DESAJUSTES_PARA_RETIRO consumidores distintos la fila pasa a retirada, en el mismo statement', async () => {
+    const sql = makeSql([[filaDeRegistro('retirada', 'candidata')]]);
+    const registro = await new PlantillasCompartidasRepository(sql).registrarDesajuste('p-1', 'c2');
+    const [texto, valores] = sql.queries[0] as [string, unknown[]];
+    // El conteo se hace sobre la MISMA expresion deduplicada que se persiste: dos desajustes del
+    // MISMO consumidor no pueden llegar al umbral.
+    expect(texto).toContain('when jsonb_array_length( case when desajustes_hash @> ');
+    expect(texto).toContain("then 'retirada' else estado end");
+    expect(valores).toContain(DESAJUSTES_PARA_RETIRO);
+    expect(registro).toMatchObject({ estado: 'retirada', estadoPrevio: 'candidata' });
+  });
+
+  it('el umbral es DOS consumidores distintos, no dos desajustes', () => {
+    expect(DESAJUSTES_PARA_RETIRO).toBe(2);
+  });
+
+  it('devuelve la identidad de la fila para el log, jamas un hash', async () => {
+    const sql = makeSql([[filaDeRegistro()]]);
+    const registro = await new PlantillasCompartidasRepository(sql).registrarDesajuste('p-1', 'c1');
+    expect(registro).toEqual({
+      estado: 'candidata',
+      estadoPrevio: 'candidata',
+      dominiosClave: DOMINIO,
+      codigoDeIntencion: 'enviar',
+      marcadoresClave: 'destinatario',
+    });
+  });
+
+  it('devuelve null cuando la fila no existe (el update no toco nada)', async () => {
+    const sql = makeSql([[]]);
+    const registro = await new PlantillasCompartidasRepository(sql).registrarDesajuste('nope', 'c1');
     expect(registro).toBeNull();
   });
 });

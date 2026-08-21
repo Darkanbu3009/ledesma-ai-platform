@@ -57,6 +57,16 @@ export const UMBRAL_DE_CORROBORACION = 2;
 export const FALLOS_PARA_RETIRO = 3;
 
 /**
+ * CONSUMIDORES DISTINTOS cuya sonda pre-flight tiene que detectar un DESAJUSTE DE INTERFAZ (V044)
+ * para retirar la fila de inmediato. Dos, y la asimetria con FALLOS_PARA_RETIRO es deliberada: la
+ * evidencia estructural (la pagina ya no tiene las clases que el procedimiento declara, sin haber
+ * ejecutado nada) es menos ambigua que un fallo de ejecucion, asi que el retiro llega antes; pero
+ * dos desajustes del MISMO consumidor no bastan, porque ese consumidor puede ser la cohorte
+ * minoritaria de un experimento del sitio y el procedimiento seguir siendo valido para el resto.
+ */
+export const DESAJUSTES_PARA_RETIRO = 2;
+
+/**
  * LOS MOTIVOS IMPUTABLES A LA PLANTILLA (D4): la barrera bloqueo un paso (la fila apunta a otro
  * control) o corrio entera sin efecto (el procedimiento ya no funciona). 'abandonada' y 'sesion'
  * suman `ejecuciones_fallidas` pero NO `fallos_consecutivos`: cortan la racha de retiro, porque hablan
@@ -508,6 +518,52 @@ export class PlantillasCompartidasRepository {
         -- 'corroborada': sin humano en el circuito, una plantilla que falla seguido se retira sola.
         estado = case
           when ${imputable} and fallos_consecutivos + 1 >= ${FALLOS_PARA_RETIRO} then 'retirada'
+          else estado
+        end,
+        ultima_ejecucion_en = now(),
+        actualizada_en = now()
+      where id = ${id}
+      returning estado, (select estado from antes) as estado_previo,
+        dominios_clave, codigo_de_intencion, marcadores_clave
+    `;
+    return this.comoRegistro(filas[0]);
+  }
+
+  /**
+   * DESAJUSTE DE INTERFAZ detectado por la sonda pre-flight de un consumidor (V044, D4). NO es una
+   * ejecucion: no toca `ejecuciones_fallidas` ni `fallos_consecutivos` (no se ejecuto un solo paso).
+   * Lo que hace, en UN solo statement atomico:
+   *  - agrega el hash del consumidor a `desajustes_hash` SOLO si es nuevo (misma tecnica `@>` que
+   *    `origenes_hash` y `consumidores_hash`): el mismo consumidor dos veces cuenta UNA;
+   *  - persiste `ultima_falla_motivo = 'desajuste_de_interfaz'` (V044 extiende el CHECK);
+   *  - con DESAJUSTES_PARA_RETIRO consumidores distintos (contando el actual, ya deduplicado), la
+   *    fila pasa a 'retirada' de inmediato, tambien desde 'corroborada': el sitio cambio para todos.
+   *
+   * Devuelve estado previo y nuevo con la IDENTIDAD de la fila (jamas un hash), igual que
+   * `registrarEjecucion`. El llamador lo trata como best-effort.
+   */
+  async registrarDesajuste(
+    id: string,
+    consumidorHash: string,
+  ): Promise<RegistroDeEjecucion | null> {
+    const consumidor = this.sql.json([consumidorHash] as unknown as Parameters<Sql['json']>[0]);
+    const filas = await this.sql<FilaDeRegistro[]>`
+      with antes as (select estado from plantillas_compartidas where id = ${id})
+      update plantillas_compartidas set
+        desajustes_hash = case
+          when desajustes_hash @> ${consumidor} then desajustes_hash
+          else desajustes_hash || ${consumidor}
+        end,
+        ultima_falla_motivo = 'desajuste_de_interfaz',
+        -- D4: el retiro por evidencia estructural, en el MISMO statement que el contador que lo
+        -- dispara. El conteo es de consumidores DISTINTOS (la pertenencia jsonb deduplica).
+        estado = case
+          when jsonb_array_length(
+            case
+              when desajustes_hash @> ${consumidor} then desajustes_hash
+              else desajustes_hash || ${consumidor}
+            end
+          ) >= ${DESAJUSTES_PARA_RETIRO} then 'retirada'
           else estado
         end,
         ultima_ejecucion_en = now(),
