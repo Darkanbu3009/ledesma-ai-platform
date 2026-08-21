@@ -5,6 +5,7 @@ import { createDemoRegistry } from '../tools/demo-registry.js';
 import { createWebhookExecutor, storedToolsToDefinitions } from '../tools/webhook-tools.js';
 import { createNativeExecutor, nativeToolsToDefinitions, NATIVE_TOOL_NAMES } from '../tools/native-tools.js';
 import {
+  BLOQUE_PEDIDO_LITERAL,
   BLOQUE_SEPARACION_INSTRUCCION_CONTENIDO,
   createSitioToolsExecutor,
   sitioToolsToDefinitions,
@@ -163,10 +164,11 @@ export function assembleAgentRun(params: AssembleAgentRunParams): AssembledAgent
     return Promise.resolve({ content: `Tool desconocida: ${call.name}`, isError: true });
   };
 
-  // System prompt: el del agente, y -- SOLO con las tools de sitios activas -- el bloque de
-  // separacion instruccion-vs-contenido appendeado (7.1d). Sin sitios, byte a byte igual que antes.
+  // System prompt: el del agente, y -- SOLO con las tools de sitios activas -- los bloques de
+  // separacion instruccion-vs-contenido (7.1d) y de pedido literal appendeados. Sin sitios, byte a
+  // byte igual que antes.
   const system = sitiosActivos
-    ? `${agent.systemPrompt ?? ''}${BLOQUE_SEPARACION_INSTRUCCION_CONTENIDO}`.trim()
+    ? `${agent.systemPrompt ?? ''}${BLOQUE_SEPARACION_INSTRUCCION_CONTENIDO}\n${BLOQUE_PEDIDO_LITERAL}`.trim()
     : agent.systemPrompt;
 
   const normalizedRequest: NormalizedRequest = {
