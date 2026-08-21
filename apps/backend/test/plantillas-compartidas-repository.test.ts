@@ -170,12 +170,15 @@ describe('publicar: UNA fila por identidad, con los origenes sumados', () => {
     expect(texto).toContain('else plantillas_compartidas.origenes_hash || excluded.origenes_hash');
   });
 
-  it('los PASOS no se reemplazan al actualizar, al contrario que las estrategias del atlas', async () => {
+  it('los PASOS de una fila SANA no se reemplazan: solo la retirada o la desajustada los adopta', async () => {
     const { sql } = await publicar();
     const [texto] = sql.queries[1] ?? [''];
     const actualizacion = texto.slice(texto.indexOf('do update set'));
     const asignaciones = actualizacion.slice(0, actualizacion.indexOf('returning'));
-    expect(asignaciones).not.toContain('pasos =');
+    // El case: excluded.pasos SOLO cuando la fila estaba retirada o con desajuste registrado; en
+    // cualquier otro estado se conserva el procedimiento con aval.
+    expect(asignaciones).toContain('pasos = case when plantillas_compartidas.estado = \'retirada\'');
+    expect(asignaciones).toContain('then excluded.pasos else plantillas_compartidas.pasos end');
     expect(asignaciones).not.toContain('primera_vez_en');
     expect(asignaciones).toContain('actualizada_en = now()');
   });
@@ -185,24 +188,41 @@ describe('publicar: UNA fila por identidad, con los origenes sumados', () => {
     const [texto] = sql.queries[1] ?? [''];
     expect(texto).not.toContain('ejecuciones_exitosas');
     expect(texto).not.toContain('ejecuciones_fallidas');
-    // `fallos_consecutivos` y `consumidores_hash` SOLO se tocan al rehabilitar una fila retirada
-    // (D5): en cualquier otro estado el case los deja exactamente como estaban.
-    expect(texto).toContain("when plantillas_compartidas.estado = 'retirada' then 0");
-    expect(texto).toContain("else plantillas_compartidas.fallos_consecutivos");
+    // `fallos_consecutivos` y `consumidores_hash` SOLO se tocan al rehabilitar una fila retirada o
+    // desajustada: en cualquier otro estado el case los deja exactamente como estaban.
+    expect(texto).toContain('then 0');
+    expect(texto).toContain('else plantillas_compartidas.fallos_consecutivos');
   });
 });
 
-describe('publicar: la rehabilitacion de una fila retirada (D5)', () => {
+describe('publicar: la rehabilitacion de una fila retirada o desajustada (D5 y D3 de resiliencia)', () => {
   it('una publicacion nueva regresa la retirada a candidata, con racha y consumidores en cero', async () => {
     const { sql } = await publicar();
     const [texto] = sql.queries[1] ?? [''];
     const actualizacion = texto.slice(texto.indexOf('do update set'));
-    // estado: retirada -> candidata; cualquier otro estado se conserva.
-    expect(actualizacion).toContain("estado = case when plantillas_compartidas.estado = 'retirada' then 'candidata' else plantillas_compartidas.estado end");
+    // estado: retirada (o con desajuste registrado) -> candidata; cualquier otro se conserva.
+    expect(actualizacion).toContain("estado = case when plantillas_compartidas.estado = 'retirada'");
+    expect(actualizacion).toContain("then 'candidata' else plantillas_compartidas.estado end");
     // consumidores_hash: la evidencia de consumo era del procedimiento que fallaba.
-    expect(actualizacion).toContain("consumidores_hash = case when plantillas_compartidas.estado = 'retirada' then '[]'::jsonb else plantillas_compartidas.consumidores_hash end");
+    expect(actualizacion).toContain(
+      "then '[]'::jsonb else plantillas_compartidas.consumidores_hash end",
+    );
     // origenes_hash SE CONSERVA: el case de arriba sigue sumando sobre el acumulado, nunca lo vacia.
     expect(actualizacion).not.toContain("origenes_hash = '[]'");
+  });
+
+  it('D3: la identidad desajustada adopta los pasos nuevos y limpia sus desajustes, atomico', async () => {
+    const { sql } = await publicar();
+    const [texto] = sql.queries[1] ?? [''];
+    const actualizacion = texto.slice(texto.indexOf('do update set'));
+    // La condicion del reemplazo es retirada O desajuste registrado, y vive en el MISMO statement.
+    expect(actualizacion).toContain(
+      "or plantillas_compartidas.desajustes_hash <> '[]'::jsonb then excluded.pasos",
+    );
+    expect(actualizacion).toContain(
+      "desajustes_hash = case when plantillas_compartidas.estado = 'retirada'",
+    );
+    expect(actualizacion).toContain("then '[]'::jsonb else plantillas_compartidas.desajustes_hash end");
   });
 
   it('el resultado dice si hubo rehabilitacion, leyendo el estado previo en el mismo statement', async () => {

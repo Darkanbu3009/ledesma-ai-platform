@@ -616,6 +616,17 @@ export class PlantillasCompartidasRepository {
    * `origenes_hash` SE CONSERVA y se le suma el origen actual si es nuevo, igual que siempre. Todo en
    * el MISMO statement del upsert: la transicion es atomica. El CTE `antes` solo lee el estado previo
    * para que el llamador pueda loguear la rehabilitacion con la identidad de la fila.
+   *
+   * REEMPLAZO POR DESAJUSTE (V044, D3 de resiliencia): cuando la fila esta 'retirada' O tiene algun
+   * desajuste de interfaz registrado (la sonda pre-flight comprobo que la pagina ya no tiene sus
+   * clases), los PASOS SI se reemplazan por los de esta publicacion y los desajustes se limpian: el
+   * procedimiento viejo describe una interfaz que ya no existe para al menos un consumidor, y la
+   * publicacion nueva sale de una corrida del motor libre que acaba de funcionar sobre la interfaz
+   * vigente. Una sola corrida convierte conocimiento obsoleto en conocimiento vigente. La fila
+   * vuelve a 'candidata' con la evidencia de consumo en cero: la que tenia era del procedimiento
+   * reemplazado. En una fila SANA (sin desajustes y no retirada) los pasos NO se reemplazan, como
+   * siempre: dejar que la ultima corrida sobreescriba el procedimiento de todos permitiria que una
+   * variante peor (o una manipulada) desplazara a la que ya tenia aval.
    */
   private async upsert(fila: {
     dominiosClave: string;
@@ -643,17 +654,37 @@ export class PlantillasCompartidasRepository {
             then plantillas_compartidas.origenes_hash
           else plantillas_compartidas.origenes_hash || excluded.origenes_hash
         end,
+        -- REEMPLAZO POR DESAJUSTE (D3): la fila retirada o con desajuste registrado adopta el
+        -- procedimiento de esta publicacion; la sana conserva el suyo.
+        pasos = case
+          when plantillas_compartidas.estado = 'retirada'
+            or plantillas_compartidas.desajustes_hash <> '[]'::jsonb
+            then excluded.pasos
+          else plantillas_compartidas.pasos
+        end,
         estado = case
-          when plantillas_compartidas.estado = 'retirada' then 'candidata'
+          when plantillas_compartidas.estado = 'retirada'
+            or plantillas_compartidas.desajustes_hash <> '[]'::jsonb
+            then 'candidata'
           else plantillas_compartidas.estado
         end,
         fallos_consecutivos = case
-          when plantillas_compartidas.estado = 'retirada' then 0
+          when plantillas_compartidas.estado = 'retirada'
+            or plantillas_compartidas.desajustes_hash <> '[]'::jsonb
+            then 0
           else plantillas_compartidas.fallos_consecutivos
         end,
         consumidores_hash = case
-          when plantillas_compartidas.estado = 'retirada' then '[]'::jsonb
+          when plantillas_compartidas.estado = 'retirada'
+            or plantillas_compartidas.desajustes_hash <> '[]'::jsonb
+            then '[]'::jsonb
           else plantillas_compartidas.consumidores_hash
+        end,
+        desajustes_hash = case
+          when plantillas_compartidas.estado = 'retirada'
+            or plantillas_compartidas.desajustes_hash <> '[]'::jsonb
+            then '[]'::jsonb
+          else plantillas_compartidas.desajustes_hash
         end,
         actualizada_en = now()
       returning jsonb_array_length(origenes_hash) as origenes,
