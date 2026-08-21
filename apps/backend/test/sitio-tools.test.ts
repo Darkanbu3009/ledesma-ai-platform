@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Job, JobConsulta } from '@ledesma-platform/shared';
 import {
+  BLOQUE_PEDIDO_LITERAL,
   BLOQUE_SEPARACION_INSTRUCCION_CONTENIDO,
   createSitioToolsExecutor,
   sitioToolsToDefinitions,
@@ -560,6 +561,95 @@ describe('assembleAgentRun con tools de sitios (7.1d)', () => {
         connectionId: CONNECTION_ID,
         objetivo: 'lee mi panel',
       });
+    });
+  });
+
+  /**
+   * FIX (produccion 21 ago 2026): el agente encolaba un objetivo parafraseado y, ante un fallo,
+   * pedia al usuario que reformulara con asunto y formato. El contrato nuevo: el objetivo es el
+   * texto del usuario tal cual (la tool lo declara para que el modelo no lo limpie), el agente no
+   * pide formato nunca, pregunta UNA vez solo por un dato indispensable, reporta fallos en llano y
+   * no usa emojis.
+   */
+  describe('pedido literal del usuario como objetivo (fix parafrasis)', () => {
+    const TURNO_PRODUCCION =
+      'oye escribele a martin.ledesm91@gmail.com nomas pa avisarle q su cosa ya llego';
+
+    function descripcionDeObjetivo(): string {
+      const ejecutar = sitioToolsToDefinitions().find((t) => t.name === SITIO_TOOL_EJECUTAR);
+      const props = (ejecutar?.inputSchema as { properties?: Record<string, { description?: string }> })
+        .properties;
+      return props?.['objetivo']?.description ?? '';
+    }
+
+    it('el turno de produccion viaja LITERAL como objetivo del job (comparacion exacta)', async () => {
+      const deps = makeDeps();
+      const { executeTool } = assembleAgentRun({
+        agent: baseAgent,
+        credential: { apiKey: 'sk-test' },
+        messages: [{ role: 'user', content: [{ type: 'text', text: TURNO_PRODUCCION }] }],
+        nativeTools: {},
+        limits: { maxTokens: 9000, runTimeoutMs: 30_000 },
+        sitios: { context: CTX, deps },
+      });
+      // El modelo, siguiendo el contrato de la tool, pasa el turno tal cual; el ejecutor no debe
+      // alterarlo ni un byte (ni trim, ni ortografia, ni asunto inventado).
+      await executeTool(
+        call(SITIO_TOOL_EJECUTAR, { connection_id: CONNECTION_ID, objetivo: TURNO_PRODUCCION }),
+      );
+      const llamada = (deps.jobs.createJob as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+        payload: { objetivo: string; textoUsuario?: string };
+      };
+      expect(llamada.payload.objetivo).toBe(TURNO_PRODUCCION);
+      expect(llamada.payload.textoUsuario).toBe(TURNO_PRODUCCION);
+      // Y el contrato esta DECLARADO en la tool: el parametro espera el texto del usuario tal cual
+      // y avisa que el sistema ya interpreta lenguaje natural ambiguo (para que el modelo no limpie).
+      const descripcion = descripcionDeObjetivo();
+      expect(descripcion).toMatch(/TAL CUAL/);
+      expect(descripcion).toMatch(/sin corregir ortografia/);
+      expect(descripcion).toMatch(/no\s+inventes asunto/);
+      expect(descripcion).toMatch(/lenguaje natural ambiguo/);
+    });
+
+    it('un dato indispensable faltante se pregunta UNA vez, en lenguaje natural y sin formato', () => {
+      expect(BLOQUE_PEDIDO_LITERAL).toMatch(/dato realmente indispensable/);
+      expect(BLOQUE_PEDIDO_LITERAL).toMatch(/destinatario resoluble/);
+      expect(BLOQUE_PEDIDO_LITERAL).toMatch(/UNA sola\s+vez, sin mencionar formatos/);
+      expect(BLOQUE_PEDIDO_LITERAL).toMatch(
+        /Nunca le pidas al usuario que reformule su pedido, que use rotulos o comillas/,
+      );
+      expect(BLOQUE_PEDIDO_LITERAL).toMatch(/que especifique\s+asunto/);
+    });
+
+    it('un fallo de la tarea se reporta en llano, sin pedir una version mejor redactada', () => {
+      expect(BLOQUE_PEDIDO_LITERAL).toMatch(/cuenta en lenguaje llano que paso segun el resultado reportado/);
+      expect(BLOQUE_PEDIDO_LITERAL).toMatch(/ofrece\s+reintentar/);
+      expect(BLOQUE_PEDIDO_LITERAL).toMatch(
+        /No atribuyas el fallo a como el usuario escribio ni le pidas una version mejor\s+redactada/,
+      );
+    });
+
+    it('la regla de estilo sin emojis esta declarada y ningun texto del modelo trae emojis', () => {
+      expect(BLOQUE_PEDIDO_LITERAL).toMatch(/No uses emojis en tus respuestas/);
+      const emoji = /\p{Extended_Pictographic}/u;
+      const textos = [
+        BLOQUE_PEDIDO_LITERAL,
+        BLOQUE_SEPARACION_INSTRUCCION_CONTENIDO,
+        ...sitioToolsToDefinitions().flatMap((t) => [t.description ?? '', JSON.stringify(t.inputSchema)]),
+      ];
+      for (const texto of textos) expect(texto).not.toMatch(emoji);
+    });
+
+    it('el bloque de pedido literal se appendea al system prompt cuando sitios esta activo', () => {
+      const { input } = assembleAgentRun({
+        agent: baseAgent,
+        credential: { apiKey: 'sk-test' },
+        messages,
+        nativeTools: {},
+        limits: { maxTokens: 9000, runTimeoutMs: 30_000 },
+        sitios: { context: CTX, deps: makeDeps() },
+      });
+      expect(input.request.system).toContain(BLOQUE_PEDIDO_LITERAL.trim());
     });
   });
 
