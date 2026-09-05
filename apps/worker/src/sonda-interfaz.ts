@@ -1,7 +1,6 @@
 import type { PasoDeReceta } from '@ledesma-platform/shared';
 import { claseDeElemento } from './atlas-sitios.js';
-import { AYUDANTES_DOM } from './localizacion.js';
-import { normalizarTexto } from './parametros-objetivo.js';
+import { AYUDANTES_DOM, nombreCoincidePorPrefijo } from './localizacion.js';
 
 /**
  * SONDA DE RECONOCIMIENTO PREVIA (pre-flight), parte PURA: antes de ejecutar cualquier procedimiento
@@ -13,9 +12,9 @@ import { normalizarTexto } from './parametros-objetivo.js';
  * CERO REGLAS POR SITIO. Todo opera sobre el modelo canonico de clases de elemento
  * (`claseDeElemento`, atlas-sitios.ts), que es agnostico al sitio: no hay un selector, un dominio ni
  * una heuristica de ningun sitio concreto en este modulo, y la comparacion de nombres es LA MISMA
- * que ya usa la barrera de identidad (normalizarTexto + prefijo, ver `verificarIdentidadDeElemento`
- * en barrera-identidad.ts). La sonda es una compuerta ADICIONAL: no relaja ni sustituye la barrera
- * ni la verificacion determinista, que siguen corriendo exactamente igual.
+ * FUNCION que usa la barrera de identidad (`nombreCoincidePorPrefijo`, localizacion.ts, ver
+ * `verificarIdentidadDeElemento` en barrera-identidad.ts). La sonda es una compuerta ADICIONAL: no
+ * relaja ni sustituye la barrera ni la verificacion determinista, que siguen corriendo igual.
  *
  * SIN MODELO Y SIN ACCIONES: la unica entrada al DOM es la expresion de SOLO LECTURA de
  * `expresionSondaDeClases`, evaluada en el mundo aislado por el adaptador del navegador (misma
@@ -228,9 +227,12 @@ export function parsearLecturaDeSonda(
 
 /**
  * ¿Que clases FALTAN en la pagina? Una clase esta presente si algun candidato de su eje lleva su
- * nombre COMO PREFIJO tras normalizar: exactamente la comparacion de la barrera de identidad
- * (`normalizarTexto(nombreAccesible).startsWith(declarado)`), porque el nombre de la clase viene
- * truncado a MAX_NOMBRE_ATLAS y el nombre real puede llevar sufijos que la clase no puede tener.
+ * nombre COMO PREFIJO HASTA UN LIMITE DE PALABRA: exactamente la comparacion de la barrera de
+ * identidad, que es la MISMA funcion (`nombreCoincidePorPrefijo`, localizacion.ts). El prefijo hace
+ * falta porque el nombre de la clase viene truncado a MAX_NOMBRE_ATLAS y el nombre real puede
+ * llevar sufijos que la clase no puede tener; el limite de palabra hace falta porque un candidato
+ * que solo CONTINUA la palabra ("Parar reproduccion" para una clase "para") no es ese control, y
+ * darlo por presente aqui es prometer que la barrera lo va a dejar actuar despues.
  */
 export function clasesFaltantes(
   descriptores: readonly DescriptorDeSonda[],
@@ -240,7 +242,7 @@ export function clasesFaltantes(
   descriptores.forEach((descriptor, indice) => {
     const candidatos = lecturas[indice] ?? [];
     const presente = candidatos.some((candidato) =>
-      normalizarTexto(candidato).startsWith(descriptor.nombre),
+      nombreCoincidePorPrefijo(candidato, descriptor.nombre),
     );
     if (!presente) faltantes.push(descriptor.clase);
   });
