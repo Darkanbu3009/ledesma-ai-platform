@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import type { CodigoDeIntencion, EstrategiaLocalizacion, PasoDeReceta } from '@ledesma-platform/shared';
+import {
+  MARCADORES,
+  type CodigoDeIntencion,
+  type EstrategiaLocalizacion,
+  type PasoDeReceta,
+} from '@ledesma-platform/shared';
 import { claveDelAtlas, claseDeElemento, hashDeOrigen } from '../src/atlas-sitios.js';
 import {
   MAX_CLAVES_DE_MARCADORES,
@@ -317,19 +322,12 @@ describe('clavesDeMarcadoresContenidos (la CONTENCION del consumo)', () => {
   });
 
   it('el TOPE real es 2^9, y no depende de lo que el llamador mande', () => {
-    const todos = clavesDeMarcadoresContenidos([
-      'asunto',
-      'cantidad',
-      'cuerpo',
-      'destinatario',
-      'monto',
-      'producto',
-      'fecha',
-      'lugar',
-      'nombre',
-    ]);
+    const todos = clavesDeMarcadoresContenidos([...MARCADORES]);
     expect(todos).toHaveLength(MAX_CLAVES_DE_MARCADORES);
     expect(MAX_CLAVES_DE_MARCADORES).toBe(512);
+    // DERIVADO del vocabulario: si manana hay un marcador mas, el tope lo sigue solo. La version
+    // escrita a mano fue la que se quedo en 2^6 cuando los marcadores pasaron de seis a nueve.
+    expect(MAX_CLAVES_DE_MARCADORES).toBe(2 ** MARCADORES.length);
     // Un nombre que no es uno de los marcadores no puede hacer crecer la lista: se descarta.
     const conBasura = clavesDeMarcadoresContenidos([
       'destinatario',

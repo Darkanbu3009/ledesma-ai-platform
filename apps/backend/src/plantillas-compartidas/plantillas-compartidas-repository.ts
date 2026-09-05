@@ -4,6 +4,7 @@ import {
   esCodigoDeIntencion,
   esMotivoDeFallaDePlantilla,
   esPublicable,
+  MARCADORES,
   marcadoresClave,
   marcadoresDePasosPublicables,
   parsearPasosPublicables,
@@ -218,9 +219,14 @@ interface FilaDeDiagnostico {
 /**
  * TOPE de filas del diagnostico. No es un limite arbitrario: con una identidad de dominios y una
  * intencion fijas, el indice unico de V041 deja como mucho UNA fila por conjunto de marcadores, y los
- * conjuntos posibles son los subconjuntos de los seis marcadores del contrato. 2^6 = 64.
+ * conjuntos posibles son los SUBCONJUNTOS de los marcadores del contrato, o sea 2^N.
+ *
+ * SE DERIVA de `MARCADORES` y no se escribe a mano: cuando el vocabulario crecio de seis a nueve
+ * marcadores, esta constante se quedo en 2^6 = 64 y el diagnostico podia truncar filas que SI
+ * existian, o sea reportar `marcadores_no_contenidos` teniendo la fila delante. Derivarlo es lo
+ * unico que hace imposible que se vuelva a desincronizar en silencio.
  */
-export const MAX_FILAS_DE_DIAGNOSTICO = 64;
+export const MAX_FILAS_DE_DIAGNOSTICO = 2 ** MARCADORES.length;
 
 /** Cuantos marcadores exige una clave ('' = ninguno). El MISMO conteo que hace el `order by`. */
 function marcadoresDeLaClave(clave: string): number {
@@ -320,8 +326,8 @@ export class PlantillasCompartidasRepository {
    * si lo que ELLA exige esta contenido en lo que el consumidor trae; con la igualdad exacta, un dato
    * de mas del consumidor la volvia inencontrable. Sigue siendo IGUALDAD contra una lista, o sea las
    * mismas tres columnas del indice unico de V041 y en el mismo orden: sin migracion, sin columna
-   * nueva y sin un segundo indice. La lista tiene 64 cadenas como maximo (2^6, los subconjuntos de los
-   * seis marcadores del contrato).
+   * nueva y sin un segundo indice. La lista tiene como maximo 2^N cadenas, los subconjuntos de
+   * los N marcadores del contrato (`MARCADORES`, packages/shared: hoy nueve, o sea 512).
    *
    * EL DESEMPATE, porque con contencion pueden calificar varias filas y elegir al azar significaria
    * que la misma tarea corre un procedimiento distinto en cada corrida:
@@ -420,9 +426,9 @@ export class PlantillasCompartidasRepository {
    * puede pagarla cuando ya encontro lo que buscaba. El llamador la trata como best-effort.
    *
    * ES LA MISMA IDENTIDAD SIN EL FILTRO DE MARCADORES: se traen las filas de este conjunto de dominios
-   * y esta intencion (como mucho 64, ver MAX_FILAS_DE_DIAGNOSTICO) y los cuatro cortes se deciden
-   * aqui, en orden. NO se le pregunta nada al hash de origen: `origen_propio` es el corte residual, y
-   * eso mantiene esta consulta todavia mas anonima que la del consumo.
+   * y esta intencion (ver MAX_FILAS_DE_DIAGNOSTICO, que las cubre todas) y los cuatro cortes se
+   * deciden aqui, en orden. NO se le pregunta nada al hash de origen: `origen_propio` es el corte
+   * residual, y eso mantiene esta consulta todavia mas anonima que la del consumo.
    */
   async diagnosticarMiss(clave: {
     dominiosClave: string;
