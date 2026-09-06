@@ -216,33 +216,235 @@ const CIERRES_DE_ACCION: readonly { etiqueta: string; patron: RegExp }[] = [
 ];
 
 /**
- * NAVEGACION Y LECTURA (FIX F): acciones que JAMAS se bloquean, tenga o no cupo consumido la
- * corrida. Existe por la reencarnacion del bug de la etiqueta inicial (commit 81288ca): con el cupo
- * consumido, el matcheo por regex sobre la descripcion libre bloqueo "click the Enviados link in the
- * Gmail left sidebar", que es navegacion de SOLO LECTURA, porque "Enviados" matchea el patron de
- * enviar (y "Sent folder" matchea \bsent\b). Eso impidio al agente verificar si el correo salio.
+ * NAVEGACION Y LECTURA (FIX F, reescrito POR CATEGORIA): acciones que JAMAS se bloquean, tenga o no
+ * cupo consumido la corrida y corra la guardia sin intencion en el modo que corra. Nacio por la
+ * reencarnacion del bug de la etiqueta inicial (commit 81288ca): con el cupo consumido, el matcheo
+ * por regex sobre la descripcion libre bloqueo "click the Enviados link in the Gmail left sidebar",
+ * que es navegacion de SOLO LECTURA, porque "Enviados" matchea el patron de enviar (y "Sent folder"
+ * matchea \bsent\b). Eso impidio al agente verificar si el correo salio.
  *
- * El criterio es DETERMINISTA y deliberadamente estrecho:
- *  - un scroll, una captura o una lectura explicita nunca son la accion irreversible;
- *  - una descripcion que nombra un DESTINO de navegacion (link, folder, sidebar, carpeta, pestana,
- *    bandeja...) es ir a un lugar, no consumar un formulario;
- *  - PERO cualquier GATILLO de accion (button/boton, submit, press/pulsa, un atajo de teclado)
- *    anula la excepcion: "click the Enviar button" y "press Ctrl+Enter to send" NO son navegacion.
- *  - "aria-label" se retira antes de evaluar: nombra COMO se localiza un elemento, no un destino, y
- *    sin retirarlo "click the button with aria-label Enviar" mataria el gatillo con su "label".
+ * POR QUE SE REESCRIBIO. La medicion de la guardia invertida (TAREA_WEB_GUARDIA_SIN_INTENCION) sobre
+ * 21 descripciones de solo lectura reales: la version por sustantivos eximia 6 y dejaba 15 bajo
+ * guardia, y esas 15 son la mayoria de los pasos intermedios de cualquier corrida del motor libre
+ * (navegar a una url, volver atras, buscar, filtrar, abrir el primer correo, esperar a que cargue,
+ * recargar, pasar el cursor por una fila, el boton de buscar, Enter para ejecutar la busqueda, el
+ * engrane de ajustes y cerrar un aviso de cookies). Con la guardia en activa el agente se detendria
+ * en el primer paso de navegacion de casi toda tarea. Ademas 2 de las 6 exenciones eran
+ * ACCIDENTALES: "refresh the inbox" se eximia por la palabra `inbox` y "espera a que cargue la
+ * bandeja" por la palabra `bandeja`. La exencion reconocia SUSTANTIVOS, no la CATEGORIA de la accion.
+ *
+ * EL CRITERIO, en tres piezas, y la primera es un VETO:
+ *
+ *  1. VETO POR CONSUMO O MODIFICACION (hayConsumoOModificacion). Si la descripcion -- o el nombre
+ *     accesible del elemento, cuando el llamador lo trae -- nombra una accion que CONSUMA (los verbos
+ *     de VERBOS_ACCION_BLOQUEADA y los CIERRES_DE_ACCION) o que MODIFIQUE (escribir, guardar, mover,
+ *     archivar, marcar, confirmar...), NO hay exencion posible: "abre el menu y elimina la cuenta" no
+ *     es navegacion por empezar con "abre". Este veto reemplaza al de GATILLOS_DE_ACCION, que miraba
+ *     el MEDIO (boton, tecla) en vez del EFECTO y por eso dejaba bajo guardia "click the Search
+ *     button" y "pulsa Enter para ejecutar la busqueda".
+ *  2. LA NATURALEZA DEL ELEMENTO, cuando el llamador la leyo del DOM (esElementoDeSoloLectura): un
+ *     enlace, una pestana, un elemento de menu o un campo de busqueda son de solo lectura por lo que
+ *     SON, no por como los describio un modelo.
+ *  3. LA CATEGORIA DE LA ACCION en el texto, como refuerzo para el llamador que todavia no tiene el
+ *     elemento resuelto: navegar, volver, recargar, esperar, desplazar, observar, leer, abrir,
+ *     buscar, filtrar, ordenar, pasar el cursor y cerrar un aviso, en espanol y en ingles.
+ *
+ * FALLA CERRADA, sin comodines: lo que no cae en una categoria reconocida sigue bajo guardia. Esta
+ * ampliacion agrega CATEGORIAS, jamas un permiso general, y no existe ni puede existir aqui una regla
+ * por sitio, por dominio ni por lista de textos de una aplicacion concreta.
+ *
+ * "aria-label" se retira antes de evaluar: nombra COMO se localiza un elemento, no lo que la accion
+ * hace, y sin retirarlo el nombre del control se leeria como una etiqueta de navegacion.
  */
-const ACCIONES_DE_SOLO_LECTURA =
-  /\b(?:scroll|desplaz\w*|screenshot|captura de pantalla|lee|leer|read|extrae|extraer|extract)\b/;
-const DESTINOS_DE_NAVEGACION =
-  /\b(?:link|enlace|folder|carpeta|sidebar|barra lateral|menu|tab|pestana|seccion|section|label|etiqueta|bandeja|inbox|nav|navigation)\b/;
-const GATILLOS_DE_ACCION =
-  /\b(?:button|boton|submit|press|pulsa\w*|presiona\w*|ctrl|control|cmd|meta|enter|intro|atajo|shortcut|keyboard|tecla\w*)\b/;
 
-/** ¿La accion descrita es navegacion o lectura de SOLO LECTURA? (FIX F: jamas se bloquea.) */
-export function esNavegacionDeSoloLectura(descripcion: string): boolean {
+/**
+ * ROLES ACCESIBLES de solo lectura POR LO QUE EL ELEMENTO ES. Son los que produce `rolDe`
+ * (AYUDANTES_DOM, localizacion.ts), o sea la MISMA cadena que ya alimenta la percepcion, el grabador
+ * y la barrera de identidad: cero logica de lectura de DOM duplicada.
+ *
+ * Quedan fuera, y es lo que sostiene la asimetria: `button`, `textbox`, `checkbox`, `radio`,
+ * `combobox` y `spinbutton`. Un boton puede consumar un formulario y un campo de texto se escribe;
+ * el unico campo de texto exento es el de BUSQUEDA, que tiene rol propio (`searchbox`).
+ */
+const ROLES_DE_SOLO_LECTURA: ReadonlySet<string> = new Set([
+  'link',
+  'tab',
+  'tablist',
+  'menu',
+  'menubar',
+  'menuitem',
+  'navigation',
+  'searchbox',
+  'article',
+  'heading',
+  'img',
+  'banner',
+  'listitem',
+  'row',
+  'rowheader',
+  'columnheader',
+  'treeitem',
+]);
+
+/** TIPO de control de solo lectura cuando el rol no alcanza (`input[type="search"]`). */
+const TIPOS_DE_SOLO_LECTURA: ReadonlySet<string> = new Set(['search']);
+
+/**
+ * EL ELEMENTO que la accion va a accionar, LEIDO DEL DOM. Todos los campos son opcionales porque no
+ * todo llamador tiene las tres senales, y ausente es siempre el caso conservador (no exime nada).
+ */
+export interface ElementoAccionado {
+  /** Rol accesible del elemento (`rolDe`): link, tab, menuitem, searchbox, button, textbox... */
+  rol?: string | null;
+  /** Tipo del control cuando el rol no alcanza: el `type` de un `input`. */
+  tipo?: string | null;
+  /** Nombre accesible del elemento (`nombreDe`). Entra al VETO, jamas a la exencion. */
+  nombre?: string | null;
+}
+
+/**
+ * ¿El elemento es de solo lectura POR LO QUE ES? Puro: no mira ninguna descripcion. Sin elemento
+ * devuelve false, que es el caso conservador: la exencion la tendra que dar la categoria del texto.
+ */
+export function esElementoDeSoloLectura(elemento?: ElementoAccionado | null): boolean {
+  if (elemento === null || elemento === undefined) return false;
+  const rol = normalizarObjetivo(elemento.rol ?? '').trim();
+  if (rol !== '' && ROLES_DE_SOLO_LECTURA.has(rol)) return true;
+  const tipo = normalizarObjetivo(elemento.tipo ?? '').trim();
+  return tipo !== '' && TIPOS_DE_SOLO_LECTURA.has(tipo);
+}
+
+/**
+ * SUSTANTIVOS DE DESTINO. NO son un criterio de exencion (ahi es donde `inbox` y `bandeja` eximian
+ * por accidente y por eso se retiraron): son el ancla que permite reconocer que una palabra de al
+ * lado es el NOMBRE DE UN LUGAR y no la accion del paso.
+ */
+const SUSTANTIVOS_DE_DESTINO =
+  'links?|enlaces?|folders?|carpetas?|bandejas?|inbox|tabs?|pestanas?|labels?|etiquetas?|' +
+  'listas?|lists?|mensajes?|messages?|correos?|emails?';
+
+/**
+ * UN PARTICIPIO JUNTO A UN SUSTANTIVO DE DESTINO NOMBRA UN LUGAR, no una accion: "Enviados link",
+ * "Sent folder", "la carpeta Enviados", "the sent messages", "la bandeja de Enviados". Es exactamente
+ * el bug original del FIX F, y se retira ANTES del veto para que ese nombre no lo dispare.
+ *
+ * SOLO participios (-ado/-ada/-ido/-ida con sus plurales, -ed, y los irregulares ingleses que
+ * colisionan con la lista de verbos: sent, paid, bought). Un INFINITIVO o un IMPERATIVO junto al
+ * mismo sustantivo SI es la accion del paso ("eliminar mensajes", "borra los correos") y se queda:
+ * retirar cualquier palabra adyacente abriria justo el hueco que este veto existe para cerrar.
+ */
+const PARTICIPIO_DE_DESTINO = '(?:[a-z]+(?:ad[oa]s?|id[oa]s?|ed)|sent|paid|bought)';
+const NOMBRE_ANTES_DEL_DESTINO = new RegExp(
+  `\\b${PARTICIPIO_DE_DESTINO}\\s+(?=(?:${SUSTANTIVOS_DE_DESTINO})\\b)`,
+  'g',
+);
+const NOMBRE_DESPUES_DEL_DESTINO = new RegExp(
+  `(\\b(?:${SUSTANTIVOS_DE_DESTINO})\\b\\s+(?:de\\s+|del\\s+|the\\s+)?)${PARTICIPIO_DE_DESTINO}\\b`,
+  'g',
+);
+
+/**
+ * ORDENAR UNA LISTA no es la accion "ordenar" de la familia comprar. La forma con complemento
+ * ("ordena por fecha", "sort by date") se retira antes del veto, con el mismo mecanismo con el que
+ * normalizarObjetivo ya retira "in order to". "ordena el producto" no lleva complemento de
+ * ordenamiento y sigue siendo la compra que es.
+ */
+const ORDENAMIENTO_CON_COMPLEMENTO =
+  String.raw`\b(?:ordena\w*|ordenar)\s+(?:por|de forma|de manera)\b|\bsort\w*\s+by\b`;
+const FRASE_DE_ORDENAMIENTO = new RegExp(ORDENAMIENTO_CON_COMPLEMENTO, 'g');
+
+/** El texto sobre el que corre el VETO: sin los nombres de destino y sin la frase de ordenamiento. */
+function textoParaElVeto(texto: string): string {
+  return texto
+    .replace(FRASE_DE_ORDENAMIENTO, ' ')
+    .replace(NOMBRE_ANTES_DEL_DESTINO, ' ')
+    .replace(NOMBRE_DESPUES_DEL_DESTINO, '$1 ');
+}
+
+/**
+ * VERBOS QUE MODIFICAN sin consumar una accion de VERBOS_ACCION_BLOQUEADA. Son categorias genericas
+ * de interfaz (guardar, aplicar, activar, archivar, mover, vaciar, revocar, reiniciar, dar de baja,
+ * adjuntar, responder, marcar, descartar, confirmar), no acciones de ningun sitio concreto. Existen
+ * porque la guardia sin intencion nace justo de las peticiones cuyo verbo NO esta en el vocabulario
+ * cerrado de ocho: sin esta lista, "abre el menu y desactiva la cuenta" quedaria exento por "abre".
+ */
+const VERBOS_DE_MODIFICACION =
+  /\b(?:guarda\w*|guardar|sav(?:e|es|ed|ing)|aplica\w*|aplicar|appl(?:y|ies|ied|ying)|activa\w*|activar|enabl(?:e|es|ed|ing)|desactiva\w*|desactivar|disabl(?:e|es|ed|ing)|archiva\w*|archivar|archiv(?:e|es|ed|ing)|mueve\w*|mover|mov(?:e|es|ed|ing)|vacia\w*|vaciar|empt(?:y|ies|ied|ying)|revoca\w*|revocar|revok(?:e|es|ed|ing)|reinicia\w*|reiniciar|restart\w*|reset\w*|de baja|unsubscrib\w*|adjunta\w*|adjuntar|attach\w*|upload\w*|responde\w*|responder|repl(?:y|ies|ied|ying)|marca\w*|marcar|mark(?:s|ed|ing)?|descarta\w*|descartar|discard\w*|confirm\w*)\b/;
+
+/**
+ * ¿La descripcion nombra algo que CONSUMA o MODIFIQUE? Es el veto de la exencion y se evalua sobre el
+ * texto SIN nombres de destino. Reune las cuatro fuentes que ya existen en el modulo (los verbos
+ * bloqueados, los cierres de accion, los verbos de escritura) mas los verbos de modificacion.
+ */
+function hayConsumoOModificacion(texto: string): boolean {
+  const evaluable = textoParaElVeto(texto);
+  if (VERBOS_DE_ESCRITURA.test(evaluable)) return true;
+  if (VERBOS_DE_MODIFICACION.test(evaluable)) return true;
+  if (CIERRES_DE_ACCION.some(({ patron }) => patron.test(evaluable))) return true;
+  return VERBOS_ACCION_BLOQUEADA.some(({ patron }) => patron.test(evaluable));
+}
+
+/**
+ * LAS CATEGORIAS DE SOLO LECTURA, por lo que la accion HACE. Cada entrada lleva su nombre para que se
+ * lea como lo que es -- una taxonomia cerrada de trece categorias -- y no como una bolsa de palabras.
+ */
+const CATEGORIAS_DE_SOLO_LECTURA: readonly { categoria: string; patron: RegExp }[] = [
+  {
+    categoria: 'navegar',
+    patron: /\b(?:navega\w*|navigat\w*|ve a|vete a|ir a|go to|goes to|going to|went to|visit\w*|url|https?)\b/,
+  },
+  {
+    categoria: 'volver',
+    patron: /\b(?:vuelve\w*|volver|regresa\w*|regresar|atras|back)\b/,
+  },
+  {
+    categoria: 'recargar',
+    patron: /\b(?:recarga\w*|recargar|refresca\w*|refrescar|reload\w*|refresh\w*)\b/,
+  },
+  { categoria: 'esperar', patron: /\b(?:espera\w*|esperar|aguarda\w*|aguardar|wait\w*)\b/ },
+  { categoria: 'desplazar', patron: /\b(?:scroll\w*|desplaz\w*)\b/ },
+  {
+    categoria: 'observar',
+    patron: /\b(?:observa\w*|observar|mira\w*|mirar|revisa\w*|revisar|inspecciona\w*|inspeccionar|observ(?:e|es|ed|ing)|inspect\w*|look\w*|view\w*)\b/,
+  },
+  {
+    categoria: 'leer',
+    patron: /\b(?:lee\w*|leer|leyendo|read\w*|extrae\w*|extraer|extract\w*|consulta\w*|consultar|captura de pantalla|screenshot\w*)\b/,
+  },
+  { categoria: 'abrir', patron: /\b(?:abre\w*|abrir|abriendo|open\w*|despliega\w*|desplegar)\b/ },
+  {
+    categoria: 'buscar',
+    patron: /\b(?:busca\w*|buscar|busqueda\w*|buscador\w*|localiza\w*|localizar|encuentra\w*|encontrar|search\w*|find\w*|lookup)\b/,
+  },
+  { categoria: 'filtrar', patron: /\b(?:filtra\w*|filtrar|filtro\w*|filter\w*)\b/ },
+  { categoria: 'ordenar', patron: new RegExp(ORDENAMIENTO_CON_COMPLEMENTO) },
+  { categoria: 'pasar el cursor', patron: /\b(?:hover\w*|cursor)\b|\bmouse over\b/ },
+  {
+    categoria: 'cerrar un aviso',
+    patron: /^(?=[\s\S]*\b(?:cierra\w*|cerrar|close\w*|dismiss\w*|oculta\w*|ocultar)\b)(?=[\s\S]*\b(?:aviso\w*|banner\w*|cookies?|notificacion\w*|notice\w*|popup\w*|pop-up|overlay|consentimiento|consent)\b)/,
+  },
+  {
+    categoria: 'elemento de navegacion',
+    patron: /\b(?:links?|enlaces?|tabs?|pestanas?|menus?|nav|navigation|sidebar|barra lateral|breadcrumb\w*|migas?|carpetas?|folders?|searchbox|search box|caja de busqueda|campo de busqueda)\b/,
+  },
+];
+
+/**
+ * ¿La accion descrita es navegacion o lectura de SOLO LECTURA? (FIX F: jamas se bloquea.)
+ *
+ * `elemento` es lo que el llamador leyo del DOM sobre el control que se va a accionar. Ausente, la
+ * decision la toma la CATEGORIA del texto, que es el caso del motor libre: ahi la guardia se
+ * interpone ANTES de que el motor resuelva el elemento, asi que todavia no hay nada que leer.
+ */
+export function esNavegacionDeSoloLectura(
+  descripcion: string,
+  elemento?: ElementoAccionado | null,
+): boolean {
   const texto = normalizarObjetivo(descripcion).replace(/aria[\s-]?label/g, ' ');
-  if (GATILLOS_DE_ACCION.test(texto)) return false;
-  return ACCIONES_DE_SOLO_LECTURA.test(texto) || DESTINOS_DE_NAVEGACION.test(texto);
+  const nombre = normalizarObjetivo(elemento?.nombre ?? '');
+  if (hayConsumoOModificacion(nombre === '' ? texto : `${texto} ${nombre}`)) return false;
+  if (esElementoDeSoloLectura(elemento)) return true;
+  return CATEGORIAS_DE_SOLO_LECTURA.some(({ patron }) => patron.test(texto));
 }
 
 /**

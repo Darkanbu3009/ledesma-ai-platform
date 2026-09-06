@@ -27,9 +27,9 @@ import { VERBOS_ACCION_BLOQUEADA } from './prompt-tarea-web.js';
  * null, clase null, clase ausente de las corroboradas o verbo que no corresponde: todos bloquean.
  *
  * QUE NO CONSULTA, a proposito: `esNavegacionDeSoloLectura` (prompt-tarea-web.ts). Esa funcion existe
- * para que la navegacion y la lectura JAMAS se bloqueen, y hoy devuelve true en cuanto la descripcion
- * menciona link, folder, sidebar o inbox. Consultarla aqui convertiria su bypass en un bypass de esta
- * barrera: un boton llamado "Mover a la carpeta" quedaria exento de comprobar su identidad. La
+ * para que la navegacion y la lectura JAMAS se bloqueen, y exime toda descripcion que caiga en una de
+ * sus categorias de solo lectura. Consultarla aqui convertiria su exencion en un bypass de esta
+ * barrera: un control llamado "Abrir la carpeta" quedaria exento de comprobar su identidad. La
  * barrera juzga el NOMBRE ACCESIBLE LEIDO DEL DOM, no la descripcion que redacta un modelo.
  *
  * Modulo PURO: sin navegador, sin base y sin reloj. La lectura del DOM la hacen los cableados
