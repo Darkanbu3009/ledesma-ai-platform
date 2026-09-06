@@ -1,5 +1,6 @@
 import {
   esDominioDePaso,
+  esMarcadorDeNucleo,
   esMarcadorParametro,
   MAX_ESPERA_MS,
   MAX_ESTRATEGIAS_POR_PASO,
@@ -497,6 +498,29 @@ export function marcadoresDePasosPublicables(
 }
 
 /**
+ * LOS DEL NUCLEO de una lista de marcadores: los unicos que entran a `marcadores_clave` (D1). Es la
+ * particion de `MARCADORES_NUCLEO` (contrato de recetas) aplicada en el unico lugar donde se
+ * construye la identidad de una plantilla, y es lo que congela el tope de la busqueda por contencion
+ * en 2^(tamano del nucleo) por mucho que crezca el vocabulario abierto.
+ */
+export function marcadoresDeNucleo(marcadores: readonly MarcadorParametro[]): MarcadorParametro[] {
+  return [...new Set(marcadores)].filter(esMarcadorDeNucleo).sort();
+}
+
+/**
+ * LOS ABIERTOS de la misma lista: el complemento exacto del nucleo. Es lo que viaja en la columna
+ * `marcadores_abiertos` (V045), que NO forma parte del indice unico ni de la busqueda por contencion.
+ * Su dato se resuelve al APLICAR la plantilla, con los datos de la corrida del consumidor
+ * (`plantillaAplicable`, apps/worker/src/plantillas-compartidas.ts), que es exactamente el camino que
+ * fecha, lugar y nombre ya siguen hoy.
+ */
+export function marcadoresAbiertos(marcadores: readonly MarcadorParametro[]): MarcadorParametro[] {
+  return [...new Set(marcadores)]
+    .filter((marcador) => esMarcadorParametro(marcador) && !esMarcadorDeNucleo(marcador))
+    .sort();
+}
+
+/**
  * Los DOMINIOS distintos que los pasos de una plantilla nombran. Sirve para comprobar que la
  * plantilla no dice operar en un dominio que su propia identidad no declara.
  */
@@ -533,6 +557,10 @@ export function dominiosClave(dominios: readonly string[]): string {
  * Devuelve '' cuando la plantilla no exige ningun dato, que es un valor legitimo de la columna (por
  * eso es NOT NULL DEFAULT '' en V041: en Postgres dos NULL no colisionan y el indice unico dejaria de
  * agrupar).
+ *
+ * SOLO SE LE PASAN MARCADORES DEL NUCLEO (D1). Es un formateador de conjunto a cadena y no la puerta:
+ * la puerta es `marcadoresDeNucleo`, que corre en los dos unicos lugares donde se construye una clave
+ * (la derivacion de la publicacion y la generacion de subconjuntos del consumo).
  */
 export function marcadoresClave(marcadores: readonly MarcadorParametro[]): string {
   return [...new Set(marcadores)].sort().join('+');

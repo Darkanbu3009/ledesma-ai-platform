@@ -141,6 +141,51 @@ export function esMarcadorParametro(valor: unknown): valor is MarcadorParametro 
 }
 
 /**
+ * EL NUCLEO CERRADO: los marcadores que tienen COMPARACION DETERMINISTA ESCRITA. El criterio de
+ * pertenencia no es curado sino VERIFICABLE: un dato pertenece al nucleo si y solo si
+ * `compararParametros` (apps/worker/src/verificacion.ts) sabe compararlo contra el DOM antes de la
+ * accion irreversible. Son exactamente los seis campos de `ParametrosDeclarados`
+ * (apps/worker/src/parametros-objetivo.ts) y la misma union `NombreDeParametro` con la que se rotula
+ * cada `Comparacion`.
+ *
+ * POR QUE SE PARTE EL VOCABULARIO, y es una medida y no una preferencia: la busqueda de una plantilla
+ * compara `marcadores_clave` contra el conjunto que el consumidor declara Y TODOS SUS SUBCONJUNTOS,
+ * asi que el tope de la lista del `in` es 2^N sobre el numero de marcadores. Con seis son 64 claves;
+ * con nueve, 512; con los que harian falta para cubrir siete familias de interfaz, 2,7 x 10^11. El
+ * indice unico no se degrada por numero de filas sino por el tamano del `in`. Dejando en la clave SOLO
+ * el nucleo, el tope queda congelado POR CONSTRUCCION en 2^(tamano del nucleo) y el vocabulario
+ * abierto puede crecer sin moverlo ni un paso.
+ *
+ * EL TEST QUE FIJA EL CRITERIO vive donde vive la comparacion (apps/worker/test/nucleo-de-marcadores):
+ * DERIVA de `verificarAccion` el conjunto de marcadores que de verdad se comparan y exige que sea
+ * exactamente esta lista. Agregar aqui un marcador sin escribir su comparacion lo hace fallar.
+ */
+export const MARCADORES_NUCLEO: readonly MarcadorParametro[] = [
+  'destinatario',
+  'monto',
+  'producto',
+  'cantidad',
+  'asunto',
+  'cuerpo',
+];
+
+/**
+ * EL VOCABULARIO ABIERTO: todo lo demas. DERIVADO y no escrito a mano, para que nucleo mas abiertos
+ * sea siempre el vocabulario completo y no dos listas que puedan divergir. Sus datos viajan FUERA de
+ * la clave de identidad (columna `marcadores_abiertos`, V045) y se resuelven al APLICAR la plantilla,
+ * exactamente como se resuelven hoy: el paso que los teclea sale del propio procedimiento y su valor,
+ * de los datos de la corrida del consumidor.
+ */
+export const MARCADORES_ABIERTOS: readonly MarcadorParametro[] = MARCADORES.filter(
+  (marcador) => !MARCADORES_NUCLEO.includes(marcador),
+);
+
+/** ¿Tiene este marcador comparacion determinista escrita, o sea pertenece al nucleo cerrado? */
+export function esMarcadorDeNucleo(valor: unknown): valor is MarcadorParametro {
+  return esMarcadorParametro(valor) && MARCADORES_NUCLEO.includes(valor);
+}
+
+/**
  * Lo que un paso de escritura teclea. `parametro` es el caso normal y el unico que puede llevar un
  * dato del usuario: el valor REAL no se guarda nunca (D8), se resuelve en cada corrida con los
  * parametros del objetivo de ESA corrida. `literal` queda para el texto fijo que no depende del

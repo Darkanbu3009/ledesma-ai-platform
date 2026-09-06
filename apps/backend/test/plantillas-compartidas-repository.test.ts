@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { PasoPublicable, Sql } from '@ledesma-platform/shared';
+import type { MarcadorParametro, PasoPublicable, Sql } from '@ledesma-platform/shared';
+import { MARCADORES_NUCLEO } from '@ledesma-platform/shared';
 import {
   DESAJUSTES_PARA_RETIRO,
   MAX_CANDIDATAS_DE_CONSUMO,
@@ -117,18 +118,20 @@ async function publicar(
 }
 
 describe('publicar: lo que la query escribe y lo que NO puede nombrar', () => {
-  it('inserta SOLO la identidad, los pasos y el hash de origen', async () => {
+  it('inserta SOLO la identidad, los datos abiertos, los pasos y el hash de origen', async () => {
     const { resultado, sql } = await publicar();
     expect(resultado).toEqual({ publicada: true, origenes: 1, rehabilitada: false });
     const [texto, valores] = sql.queries[1] ?? ['', []];
     expect(texto).toContain(
-      'insert into plantillas_compartidas (dominios_clave, codigo_de_intencion, marcadores_clave, pasos, origenes_hash)',
+      'insert into plantillas_compartidas (dominios_clave, codigo_de_intencion, marcadores_clave, marcadores_abiertos, pasos, origenes_hash)',
     );
     // Los TRES primeros parametros son la identidad del CTE `antes` (el estado previo, para D5);
-    // despues la identidad del insert, los pasos y el origen.
+    // despues la identidad del insert, los datos abiertos, los pasos y el origen.
     expect(valores.slice(0, 3)).toEqual([DOMINIO, 'enviar', 'destinatario']);
     expect(valores.slice(3, 6)).toEqual([DOMINIO, 'enviar', 'destinatario']);
-    expect(valores[7]).toEqual(['h1']);
+    // V045: la plantilla solo teclea datos del NUCLEO, asi que la columna nace vacia.
+    expect(valores[6]).toEqual([]);
+    expect(valores[8]).toEqual(['h1']);
   });
 
   it('NINGUNA query nombra owner_id, firma, descripcion ni un id rastreable', async () => {
@@ -229,6 +232,204 @@ describe('publicar: la rehabilitacion de una fila retirada o desajustada (D5 y D
   it('el resultado dice si hubo rehabilitacion, leyendo el estado previo en el mismo statement', async () => {
     const { resultado } = await publicar(plantilla(), clasesDelAtlas(), 3, 'retirada');
     expect(resultado).toEqual({ publicada: true, origenes: 3, rehabilitada: true });
+  });
+});
+
+// --- V045: LA CLAVE LLEVA EL NUCLEO, LOS DATOS ABIERTOS VIAJAN FUERA -------------------------------
+
+/** Clase corroborada de un campo de FECHA: el dato abierto que hoy engordaba la clave. */
+const CLASE_FECHA = 'escribir|rol:textbox|fecha';
+
+/** Los mismos pasos, con una escritura de un dato ABIERTO antes de la verificacion. */
+function pasosConFecha(): PasoPublicable[] {
+  const conFecha: PasoPublicable = {
+    idx: 1,
+    accion: 'escribir',
+    dominio: DOMINIO,
+    claseDeElemento: CLASE_FECHA,
+    estrategias: [{ tipo: 'rol', rol: 'textbox', nombre: 'Fecha' }],
+    valor: { tipo: 'parametro', parametro: 'fecha' },
+    teclas: null,
+    esperaMs: null,
+  };
+  const [escribir, verificar, click] = pasos() as PasoPublicable[];
+  const resto = [verificar, click] as PasoPublicable[];
+  return [escribir as PasoPublicable, conFecha, ...resto.map((paso, idx) => ({ ...paso, idx: idx + 2 }))];
+}
+
+describe('publicar: la clave lleva SOLO el nucleo y los abiertos van a su columna (D1, D2)', () => {
+  it('un dato ABIERTO no entra a marcadores_clave: entra a marcadores_abiertos', async () => {
+    const { resultado, sql } = await publicar(
+      { ...plantilla(), pasos: pasosConFecha() },
+      [...clasesDelAtlas(), { clase_de_elemento: CLASE_FECHA }],
+    );
+    expect(resultado).toMatchObject({ publicada: true });
+    const [, valores] = sql.queries[1] ?? ['', []];
+    // La clave sigue siendo la del NUCLEO. Sin la particion seria 'destinatario+fecha', que ademas
+    // habria duplicado el tope de subconjuntos del consumo.
+    expect(valores.slice(3, 6)).toEqual([DOMINIO, 'enviar', 'destinatario']);
+    expect(valores[6]).toEqual(['fecha']);
+  });
+
+  it('el indice unico de V041 no cambia: la columna nueva no es parte de la identidad', async () => {
+    const { sql } = await publicar();
+    const [texto] = sql.queries[1] ?? [''];
+    expect(texto).toContain(
+      'on conflict (dominios_clave, codigo_de_intencion, marcadores_clave) do update set',
+    );
+    expect(texto).not.toContain('on conflict (dominios_clave, codigo_de_intencion, marcadores_abiertos');
+  });
+
+  it('la declaracion de abiertos viaja PEGADA a los pasos: se reemplaza cuando ellos se reemplazan', async () => {
+    const { sql } = await publicar();
+    const [texto] = sql.queries[1] ?? [''];
+    const actualizacion = texto.slice(texto.indexOf('do update set'));
+    expect(actualizacion).toContain(
+      "marcadores_abiertos = case when plantillas_compartidas.estado = 'retirada'",
+    );
+    expect(actualizacion).toContain(
+      'then excluded.marcadores_abiertos else plantillas_compartidas.marcadores_abiertos end',
+    );
+  });
+
+  it('el tope de filas del diagnostico se deriva del NUCLEO: 2^6 y no 2^9', () => {
+    expect(MAX_FILAS_DE_DIAGNOSTICO).toBe(2 ** MARCADORES_NUCLEO.length);
+    expect(MAX_FILAS_DE_DIAGNOSTICO).toBe(64);
+  });
+});
+
+describe('publicar: D6, el codigo puede desplegarse ANTES de la migracion V045', () => {
+  /** Mock de una base SIN la columna: el statement que la nombra falla con SQLSTATE 42703. */
+  function makeSqlSinColumna(resultados: unknown[][] = []): ReturnType<typeof makeSql> {
+    const base = makeSql(resultados);
+    const original = base as unknown as (primero: unknown, ...valores: unknown[]) => unknown;
+    const envuelto = ((primero: unknown, ...valores: unknown[]) => {
+      const respuesta = original(primero, ...valores);
+      if (Array.isArray(primero) && 'raw' in primero) {
+        const texto = (primero as unknown as string[]).join(' ');
+        if (texto.includes('marcadores_abiertos')) {
+          return Promise.reject(
+            Object.assign(new Error('column "marcadores_abiertos" does not exist'), {
+              code: '42703',
+            }),
+          );
+        }
+      }
+      return respuesta;
+    }) as unknown as ReturnType<typeof makeSql>;
+    (envuelto as unknown as { json: (v: unknown) => unknown }).json = (v: unknown) => v;
+    Object.defineProperty(envuelto, 'queries', { get: () => base.queries });
+    return envuelto;
+  }
+
+  it('sin la columna, la publicacion cae al statement de hoy y sigue publicando', async () => {
+    const sql = makeSqlSinColumna([
+      clasesDelAtlas(),
+      [],
+      [{ origenes: 1, estado_previo: null }],
+    ]);
+    const resultado = await new PlantillasCompartidasRepository(sql).publicar(plantilla());
+
+    expect(resultado).toEqual({ publicada: true, origenes: 1, rehabilitada: false });
+    // El ultimo statement es el de siempre: el que NO nombra la columna.
+    const [ultimo] = sql.queries.at(-1) ?? [''];
+    expect(ultimo).toContain(
+      'insert into plantillas_compartidas (dominios_clave, codigo_de_intencion, marcadores_clave, pasos, origenes_hash)',
+    );
+    expect(ultimo).not.toContain('marcadores_abiertos');
+  });
+
+  it('el fallback se RECUERDA: la segunda publicacion ya no intenta la columna', async () => {
+    const sql = makeSqlSinColumna([
+      clasesDelAtlas(),
+      [],
+      [{ origenes: 1, estado_previo: null }],
+      clasesDelAtlas(),
+      [{ origenes: 2, estado_previo: null }],
+    ]);
+    const repo = new PlantillasCompartidasRepository(sql);
+
+    await repo.publicar(plantilla());
+    const trasLaPrimera = sql.queries.length;
+    await repo.publicar(plantilla('h2'));
+
+    // Primera publicacion: clases, intento con columna, fallback. Segunda: clases y upsert, sin
+    // volver a pagar un statement fallido.
+    expect(trasLaPrimera).toBe(3);
+    expect(sql.queries).toHaveLength(5);
+    expect(sql.queries.filter(([texto]) => texto.includes('marcadores_abiertos'))).toHaveLength(1);
+  });
+
+  it('cualquier OTRO error de base sube tal cual (el fallback es solo para la columna)', async () => {
+    const sql = makeSql([clasesDelAtlas()]);
+    const original = sql as unknown as (primero: unknown, ...valores: unknown[]) => unknown;
+    const rompe = ((primero: unknown, ...valores: unknown[]) => {
+      const respuesta = original(primero, ...valores);
+      if (Array.isArray(primero) && 'raw' in primero && String(primero).includes('insert into')) {
+        return Promise.reject(Object.assign(new Error('deadlock detected'), { code: '40P01' }));
+      }
+      return respuesta;
+    }) as unknown as Sql;
+    (rompe as unknown as { json: (v: unknown) => unknown }).json = (v: unknown) => v;
+
+    await expect(new PlantillasCompartidasRepository(rompe).publicar(plantilla())).rejects.toThrow(
+      'deadlock detected',
+    );
+  });
+});
+
+// --- LAS DOS FILAS DE PRODUCCION: NI UNA CAMBIA DE CLAVE -------------------------------------------
+
+/**
+ * Las DOS filas que hoy existen en `plantillas_compartidas`, reconstruidas desde sus valores reales
+ * (medidos por SQL): las dos de mail.google.com / 'enviar', una con marcadores_clave
+ * 'asunto+cuerpo+destinatario' (corroborada, 2 origenes, 3 consumidores) y otra con 'destinatario'
+ * (candidata, 1 origen). Los cuatro marcadores en uso son del NUCLEO, asi que la particion no mueve
+ * ninguna de las dos claves y las dos nacen con `marcadores_abiertos` en '[]'.
+ */
+describe('la migracion no toca una sola fila de produccion', () => {
+  function pasosDeLaFila(marcadores: MarcadorParametro[]): PasoPublicable[] {
+    const escrituras: PasoPublicable[] = marcadores.map((marcador, idx) => ({
+      idx,
+      accion: 'escribir',
+      dominio: DOMINIO,
+      claseDeElemento: CLASE_PARA,
+      estrategias: [{ tipo: 'atributo', atributo: 'aria-label', valor: 'Para' }],
+      valor: { tipo: 'parametro', parametro: marcador },
+      teclas: null,
+      esperaMs: null,
+    }));
+    return [
+      ...escrituras,
+      {
+        idx: escrituras.length,
+        accion: 'click',
+        dominio: DOMINIO,
+        claseDeElemento: CLASE_ENVIAR,
+        estrategias: [{ tipo: 'atributo', atributo: 'aria-label', valor: 'Enviar' }],
+        valor: null,
+        teclas: null,
+        esperaMs: null,
+      },
+    ];
+  }
+
+  it.each([
+    ['asunto+cuerpo+destinatario', ['asunto', 'cuerpo', 'destinatario'] as MarcadorParametro[]],
+    ['destinatario', ['destinatario'] as MarcadorParametro[]],
+  ])('la fila real %s conserva EXACTAMENTE su clave y no declara datos abiertos', async (clave, marcadores) => {
+    const { resultado, sql } = await publicar({
+      ...plantilla(),
+      pasos: pasosDeLaFila(marcadores),
+    });
+
+    expect(resultado).toMatchObject({ publicada: true });
+    const [, valores] = sql.queries[1] ?? ['', []];
+    // La clave del CTE `antes` y la del insert son la MISMA que la fila ya tiene en produccion: el
+    // upsert cae sobre ella y no crea una segunda, asi que no se pierde ni un origen ni un consumidor.
+    expect(valores.slice(0, 3)).toEqual([DOMINIO, 'enviar', clave]);
+    expect(valores.slice(3, 6)).toEqual([DOMINIO, 'enviar', clave]);
+    expect(valores[6]).toEqual([]);
   });
 });
 
@@ -334,11 +535,16 @@ describe('publicar: la superficie del repositorio es CERRADA', () => {
       'buscarServibles',
       'clasesCorroboradas',
       'comoRegistro',
+      'desenlaceDelUpsert',
       'diagnosticarMiss',
       'publicar',
       'registrarDesajuste',
       'registrarEjecucion',
+      // Los dos upserts son EL MISMO statement con y sin `marcadores_abiertos` (V045): el segundo es
+      // el camino de compatibilidad de D6, para un despliegue anterior a la migracion.
       'upsert',
+      'upsertConAbiertos',
+      'upsertConCompatibilidad',
     ]);
   });
 
