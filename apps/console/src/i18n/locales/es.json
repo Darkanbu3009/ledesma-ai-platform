@@ -1952,6 +1952,9 @@
     "otraAccion": {
       "detalle": "La tarea ya habia completado una accion que no se puede deshacer y se detuvo antes de ejecutar otra. Revisa en el sitio lo que alcanzo a hacer y pide la accion restante por separado."
     },
+    "sinEvidencia": {
+      "detalle": "No pudimos comprobar nada en el sitio antes de una accion que no se puede deshacer, porque lo que pediste no traia ningun dato que buscar en la pagina. No se ejecuto nada. Vuelve a pedirlo diciendo sobre que va la accion (a quien, que correo, que archivo)."
+    },
     "sinEfecto": {
       "titulo": "El paso final no se pudo confirmar",
       "detalle": "La tarea avanzo, pero no pudimos confirmar que el paso final surtiera efecto en el sitio. Es posible que haya quedado un borrador o un estado a medias. Revisalo en el sitio antes de volver a pedirla."
@@ -2090,6 +2093,10 @@
   "sitioCambio": {
     "etiqueta": "El sitio cambio",
     "detalle": "El sitio cambio su pagina y tu agente lo noto a tiempo: hizo la tarea por su cuenta y volvio a aprender el procedimiento para la proxima vez."
+  },
+  "guardiaObservacion": {
+    "etiqueta": "Revision en pruebas",
+    "detalle": "El sistema no reconocio del todo que pedia esta tarea, asi que la reviso con su criterio general. Con ese criterio no la habria dejado seguir, pero esta revision todavia esta en pruebas: NO se detuvo nada y la tarea siguio su curso normal."
   },
   "avisoTareaLenta": {
     "titulo": "Esta tarea esta tardando mas de lo normal",

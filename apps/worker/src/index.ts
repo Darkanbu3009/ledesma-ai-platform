@@ -223,6 +223,11 @@ function main(): void {
       // Encenderla ('activa') es un cambio de una linea, y la medicion del modo observacion es lo que
       // decide si conviene.
       barreraIdentidad: config.TAREA_WEB_BARRERA_IDENTIDAD,
+      // GUARDIA CON CRITERIO GENERICO en MODO OBSERVACION por defecto
+      // (TAREA_WEB_GUARDIA_SIN_INTENCION): una intencion que el sistema no reconoce deja de pasar sin
+      // comparar nada, pero en observacion solo se cuenta cuantas corridas habrian sido detenidas.
+      // Pasar a 'activa' es una variable de entorno, no un despliegue nuevo.
+      guardiaSinIntencion: config.TAREA_WEB_GUARDIA_SIN_INTENCION,
       runTimeoutMs: config.TAREA_WEB_TIMEOUT_SECONDS * 1000,
       resolveCredential: (ownerId, credentialId) =>
         resolveStoredCredential(credentialRepo, ownerId, credentialId, config.VAULT_SECRET),

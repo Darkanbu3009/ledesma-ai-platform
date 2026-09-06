@@ -101,6 +101,14 @@ export interface JobSummary {
    * (`desajusteDeInterfaz`), nunca el resultado entero. false en todo lo demas.
    */
   sitioCambio: boolean;
+  /**
+   * La GUARDIA CON CRITERIO GENERICO corrio en MODO OBSERVACION y HABRIA DETENIDO esta tarea; no
+   * detuvo nada y la tarea siguio su curso. Es la telemetria con la que se mide la inversion del
+   * default (una intencion que el sistema no reconoce deja de pasar sin comparar) antes de
+   * encenderla. Escalar derivado de jobs.resultado (`guardiaSinIntencion.habriaDetenido`), nunca el
+   * resultado entero. false en todo lo demas.
+   */
+  guardiaHabriaDetenido: boolean;
 }
 
 /**

@@ -192,3 +192,30 @@ describe('parseEnv (worker): costo de la corrida (screenshots e historial)', () 
     }
   });
 });
+
+/**
+ * MODOS DE DESPLIEGUE de las dos guardias que se encienden por variable de entorno, no por deploy.
+ * Las dos arrancan en OBSERVACION en produccion: evaluan, registran y no cortan nada, que es como se
+ * mide cuantas corridas reales detendrian antes de aplicarlas.
+ */
+describe('parseEnv (worker): modos de la barrera de identidad y de la guardia sin intencion', () => {
+  it('defaults: las dos en observacion', () => {
+    const env = parseEnv(VALID as NodeJS.ProcessEnv);
+    expect(env.TAREA_WEB_BARRERA_IDENTIDAD).toBe('observacion');
+    expect(env.TAREA_WEB_GUARDIA_SIN_INTENCION).toBe('observacion');
+  });
+
+  it('acepta los tres modos de la guardia sin intencion y rechaza cualquier otro', () => {
+    for (const modo of ['apagada', 'observacion', 'activa']) {
+      expect(
+        parseEnv({ ...VALID, TAREA_WEB_GUARDIA_SIN_INTENCION: modo } as NodeJS.ProcessEnv)
+          .TAREA_WEB_GUARDIA_SIN_INTENCION,
+      ).toBe(modo);
+    }
+    for (const modo of ['true', 'activo', '']) {
+      expect(() =>
+        parseEnv({ ...VALID, TAREA_WEB_GUARDIA_SIN_INTENCION: modo } as NodeJS.ProcessEnv),
+      ).toThrow(/Environment validation failed/);
+    }
+  });
+});

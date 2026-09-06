@@ -11,6 +11,7 @@ import {
   ListTree,
   Loader2,
   MessageSquare,
+  ShieldAlert,
   Sparkles,
   Trash2,
   XCircle,
@@ -241,6 +242,19 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
                   {t('sitioCambio.etiqueta')}
                 </span>
               )}
+              {/* GUARDIA EN OBSERVACION (D4): el sistema no reconocio que pedia la tarea y la
+                  comprobo con su criterio general; con ese criterio no habria dejado pasar la
+                  accion. NO se detuvo nada y la etiqueta lo dice con esas palabras, para que nadie
+                  lea un aviso como si fuera un corte. */}
+              {job.guardiaHabriaDetenido === true && (
+                <span
+                  title={t('guardiaObservacion.detalle')}
+                  className="inline-flex flex-none items-center gap-1 rounded-full border border-line bg-line-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted"
+                >
+                  <ShieldAlert className="h-3 w-3" />
+                  {t('guardiaObservacion.etiqueta')}
+                </span>
+              )}
             </div>
 
             {job.conLoAprendido === true && (
@@ -256,6 +270,10 @@ export function JobActivityCard({ job, agentName }: { job: JobActivity; agentNam
 
             {job.sitioCambio === true && (
               <p className="mt-1 text-[12px] text-muted">{t('sitioCambio.detalle')}</p>
+            )}
+
+            {job.guardiaHabriaDetenido === true && (
+              <p className="mt-1 text-[12px] text-muted">{t('guardiaObservacion.detalle')}</p>
             )}
 
             <div className="mt-1.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[12.5px] text-muted">

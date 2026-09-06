@@ -75,6 +75,9 @@ function toJobActivity(
     procedimientoCorroborado: job.procedimientoCorroborado,
     // D6 (resiliencia): el sitio cambio su interfaz y el agente se adapto solo. Solo el escalar.
     sitioCambio: job.sitioCambio,
+    // D4 (guardia sin intencion): la guardia con criterio generico habria detenido esta tarea y, en
+    // modo observacion, no detuvo nada. Solo el escalar.
+    guardiaHabriaDetenido: job.guardiaHabriaDetenido,
     ...(guardado !== undefined && esExitoDelMotor
       ? {
           guardableComoTarea: guardado.tieneExitosa && !guardado.guardada,
