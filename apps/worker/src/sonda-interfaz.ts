@@ -1,4 +1,4 @@
-import type { PasoDeReceta } from '@ledesma-platform/shared';
+import type { DesempateDeIdentidad, PasoDeReceta } from '@ledesma-platform/shared';
 import { claseDeElemento } from './atlas-sitios.js';
 import { AYUDANTES_DOM } from './localizacion.js';
 import { normalizarTexto } from './parametros-objetivo.js';
@@ -64,6 +64,12 @@ export interface DescriptorDeSonda {
   rol: string | null;
   /** Solo eje 'atributo': el atributo del que se lee el valor (aria-label o data-*). */
   atributo: string | null;
+  /**
+   * Solo eje 'rol': el SEGUNDO EJE, cuando la clase lo lleva (`rol:button@data-testid=x`). Con el
+   * puesto, solo cuentan como candidatos los elementos que ademas llevan ese atributo con ese valor:
+   * si no, la sonda daria por presente al control homonimo, que es justo el que no es.
+   */
+  desempate: DesempateDeIdentidad | null;
   /** El nombre de la clase, ya normalizado y truncado por quien la construyo. */
   nombre: string;
 }
@@ -86,15 +92,30 @@ export function parsearClaseDeElemento(clase: string): DescriptorDeSonda | null 
   const eje = clase.slice(primero + 1, segundo);
   const nombre = clase.slice(segundo + 1);
   if (nombre === '') return null;
-  if (eje === 'texto') return { clase, eje: 'texto', rol: null, atributo: null, nombre };
+  if (eje === 'texto') {
+    return { clase, eje: 'texto', rol: null, atributo: null, desempate: null, nombre };
+  }
   if (eje.startsWith('rol:')) {
-    const rol = eje.slice('rol:'.length);
-    return rol === '' ? null : { clase, eje: 'rol', rol, atributo: null, nombre };
+    const cuerpo = eje.slice('rol:'.length);
+    const arroba = cuerpo.indexOf('@');
+    if (arroba < 0) {
+      return cuerpo === ''
+        ? null
+        : { clase, eje: 'rol', rol: cuerpo, atributo: null, desempate: null, nombre };
+    }
+    const rol = cuerpo.slice(0, arroba);
+    const resto = cuerpo.slice(arroba + 1);
+    const igual = resto.indexOf('=');
+    if (rol === '' || igual <= 0) return null;
+    const atributo = resto.slice(0, igual);
+    const valor = resto.slice(igual + 1);
+    if (valor === '' || !esAtributoSondeable(atributo)) return null;
+    return { clase, eje: 'rol', rol, atributo: null, desempate: { atributo, valor }, nombre };
   }
   if (eje.startsWith('atributo:')) {
     const atributo = eje.slice('atributo:'.length);
     if (!esAtributoSondeable(atributo)) return null;
-    return { clase, eje: 'atributo', rol: null, atributo, nombre };
+    return { clase, eje: 'atributo', rol: null, atributo, desempate: null, nombre };
   }
   return null;
 }
@@ -165,6 +186,7 @@ export function expresionSondaDeClases(descriptores: readonly DescriptorDeSonda[
     eje: descriptor.eje,
     rol: descriptor.rol,
     atributo: descriptor.atributo,
+    desempate: descriptor.desempate,
   }));
   return `(() => {
 ${AYUDANTES_DOM}
@@ -178,6 +200,12 @@ ${AYUDANTES_DOM}
       for (const el of document.querySelectorAll('*')) {
         if (candidatos.length >= MAX) break;
         if (rolDe(el) !== d.rol) continue;
+        // Con segundo eje, el elemento tiene que llevar ademas ESE atributo con ESE valor: sin esto
+        // el homonimo (el otro boton "Eliminar ambiente") contaria como si fuera este control.
+        if (d.desempate) {
+          const suyo = el.getAttribute ? el.getAttribute(d.desempate.atributo) : null;
+          if (suyo === null || String(suyo).trim() !== d.desempate.valor) continue;
+        }
         const nombre = nombreDe(el);
         if (nombre !== '') candidatos.push(nombre.slice(0, CORTE));
       }

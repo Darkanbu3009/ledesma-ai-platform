@@ -46,9 +46,108 @@
  */
 export type EstrategiaLocalizacion =
   | { tipo: 'atributo'; atributo: string; valor: string }
-  | { tipo: 'rol'; rol: string; nombre: string }
+  | { tipo: 'rol'; rol: string; nombre: string; desempate?: DesempateDeIdentidad | null }
   | { tipo: 'texto'; texto: string }
   | { tipo: 'xpath'; xpath: string };
+
+/**
+ * EL SEGUNDO EJE de la identidad de un control: el atributo que lo distingue de OTRO control que en
+ * su misma pagina lleva el MISMO rol y el MISMO nombre accesible.
+ *
+ * Solo lo pone quien LEE el DOM (estrategiasDe, apps/worker/src/localizacion.ts), porque solo ahi se
+ * sabe cuantos controles homonimos habia. Sobre `desempate` el campo tiene TRES estados y cada uno
+ * dice algo distinto:
+ *
+ *  - AUSENTE: el rol y el nombre YA distinguen al control en su pagina. Es el caso normal y el de
+ *    toda estrategia persistida antes de este campo, asi que su clase de elemento no cambia.
+ *  - un objeto: NO distinguen, y este atributo si. La clase lleva los dos ejes.
+ *  - `null`: NO distinguen y NINGUN atributo admisible los distingue. El control NO TIENE IDENTIDAD
+ *    (falla cerrada): dos controles distintos jamas comparten clase, ni siquiera al precio de que
+ *    ninguno de los dos la tenga.
+ */
+export interface DesempateDeIdentidad {
+  atributo: string;
+  valor: string;
+}
+
+/**
+ * TOPE de un texto que forma parte de la IDENTIDAD de un elemento (el nombre de una clase o el valor
+ * de su eje). Es el mismo tope de MAX_NOMBRE_ATLAS (apps/worker/src/atlas-sitios.ts), definido aqui
+ * porque las dos reglas de admision de abajo lo necesitan y las usan los dos lados.
+ */
+export const MAX_TEXTO_DE_IDENTIDAD = 60;
+
+/**
+ * ¿Este texto LEIDO DE LA PAGINA (nombre accesible, aria-label o texto visible) puede ser la
+ * IDENTIDAD de un control? Es la regla generica que impide que un DATO DE LA TAREA o el CONTENIDO de
+ * la pagina acaben dentro de una clase de elemento, que es lo que viaja a las dos tablas GLOBALES
+ * (aprendizaje_sitios y el nombre de las ranuras de plantillas_compartidas).
+ *
+ * Tres condiciones, y ninguna nombra un sitio ni un patron de sitio:
+ *
+ *  1. NO FUE RECORTADO. Un rotulo de control es corto; un texto que hay que cortar a
+ *     MAX_TEXTO_DE_IDENTIDAD es un FRAGMENTO de contenido de pagina (el caso medido: una fila
+ *     virtualizada cuyo texto visible concatena las celdas de un registro ajeno a la tarea).
+ *  2. TIENE AL MENOS UNA LETRA. Un texto sin letras no nombra una funcion, es un valor: el numero de
+ *     un dia de calendario, un importe, un contador.
+ *  3. NO TIENE NINGUN DIGITO. Un rotulo describe QUE HACE el control ("Enviar", "Redactar",
+ *     "Eliminar ambiente"); los digitos entran con el DATO (importes, fechas, identificadores de
+ *     registro) o con el ESTADO de la pagina (contadores), que ademas cambia entre sesiones y entre
+ *     usuarios y por tanto no puede sostener una identidad estable.
+ *
+ * EL CRITERIO ES ASIMETRICO A PROPOSITO, igual que el de la censura (apps/worker/src/censura.ts): un
+ * falso positivo pierde una clase legitima que lleva un digito ("Direccion linea 2") y el control
+ * pasa a no tener identidad, o sea que su paso escala al motor libre y se vuelve a aprender; un falso
+ * negativo escribe el dato de un usuario en una tabla global que se le sirve a todos los demas. Lo
+ * primero cuesta una corrida; lo segundo no se puede deshacer.
+ */
+export function esNombreDeIdentidad(texto: string): boolean {
+  const limpio = texto.replace(/\s+/g, ' ').trim();
+  if (limpio === '' || limpio.length > MAX_TEXTO_DE_IDENTIDAD) return false;
+  if (!/\p{L}/u.test(limpio)) return false;
+  return !/\p{Nd}/u.test(limpio);
+}
+
+/**
+ * ¿El VALOR de un atributo `data-*` puede ser la IDENTIDAD de un control? Es la otra mitad de la
+ * regla, y es DISTINTA de la de arriba porque la amenaza es distinta: un `data-*` no lo renderiza la
+ * pagina, lo escribe quien la programo, asi que un digito suelto ahi es parte de un nombre de gancho
+ * ("eliminar-ambiente-2") y no un dato; lo que si aparece son IDENTIFICADORES (de sesion, de
+ * registro, generados), que rompen R4 porque cambian entre sesiones y entre usuarios, e importes y
+ * fechas, que son datos.
+ *
+ * Se admite el valor cuyo texto es de FORMA DE NOMBRE: acotado, con al menos una letra, y con cada
+ * uno de sus tramos alfanumericos siendo o bien solo letras, o bien un numero de UNO O DOS digitos.
+ * Eso deja pasar `eliminar-ambiente-produccion`, `checkout-pay` y `fila-2`, y descarta por su sola
+ * forma `s_01JQ8Z9WQ2K3` (id de sesion), `a1b2c3d4-e5f6-7890-abcd-ef1234567890` (uuid),
+ * `a3f9c2b18e4d5670` (hash), `12500.00` (importe), `2026-09-12` (fecha) y `0ahUKEwi1` (token por
+ * impresion), sin conocer ni un solo sitio.
+ */
+/**
+ * ¿El valor de ESTE atributo puede ser identidad? Reparte entre las dos reglas de arriba segun la
+ * FUENTE del texto, que es lo que decide la amenaza: `aria-label` es el nombre accesible, o sea texto
+ * que la pagina le muestra a un lector de pantalla y donde entra el dato ("Eliminar factura 4471");
+ * un `data-*` lo escribe quien programo el sitio y ahi lo que hay que descartar son identificadores.
+ */
+export function esAtributoDeIdentidad(atributo: string, valor: string): boolean {
+  return atributo === 'aria-label' ? esNombreDeIdentidad(valor) : esValorDeIdentidad(valor);
+}
+
+export function esValorDeIdentidad(valor: string): boolean {
+  const limpio = valor.replace(/\s+/g, ' ').trim();
+  if (limpio === '' || limpio.length > MAX_TEXTO_DE_IDENTIDAD) return false;
+  // La barra es el SEPARADOR de la clase de elemento y este valor puede ir dentro de su eje
+  // (`rol:button@data-testid=<valor>`): con una barra dentro, el eje y el nombre dejarian de leerse.
+  if (limpio.includes('|')) return false;
+  if (!/\p{L}/u.test(limpio)) return false;
+  for (const tramo of limpio.split(/[^\p{L}\p{Nd}]+/u)) {
+    if (tramo === '') continue;
+    if (/^\p{L}+$/u.test(tramo)) continue;
+    if (/^\p{Nd}{1,2}$/u.test(tramo)) continue;
+    return false;
+  }
+  return true;
+}
 
 /**
  * Orden de INTENTO de las estrategias al CREAR un paso (D1). Es el orden con el que se promueve una
@@ -207,6 +306,27 @@ function comoTextoAcotado(valor: unknown): string | null {
 }
 
 /**
+ * Valida el `desempate` de una estrategia de rol. Devuelve `undefined` (que el llamador convierte en
+ * rechazo) ante cualquier forma que no sea `null` o un atributo admisible con su valor: un desempate
+ * mal formado NO puede degradarse a "sin desempate", porque eso volveria a fusionar la identidad de
+ * dos controles distintos, que es justo lo que este campo existe para impedir.
+ *
+ * SOLO `data-*`, ni siquiera los otros atributos estables: `id` y `name` llevan identificadores por
+ * sesion o por registro, y `aria-label` no puede desempatar por construccion (de ahi sale el nombre
+ * accesible, asi que si fuera distinto los controles no serian homonimos).
+ */
+function parsearDesempate(crudo: unknown): DesempateDeIdentidad | null | undefined {
+  if (crudo === null) return null;
+  if (typeof crudo !== 'object') return undefined;
+  const objeto = crudo as Record<string, unknown>;
+  const atributo = comoTextoAcotado(objeto.atributo)?.toLowerCase();
+  const valor = comoTextoAcotado(objeto.valor);
+  if (atributo === undefined || valor === null) return undefined;
+  if (!/^data-[a-z0-9-]{1,40}$/.test(atributo) || !esValorDeIdentidad(valor)) return undefined;
+  return { atributo, valor };
+}
+
+/**
  * Valida UNA estrategia. Devuelve null ante cualquier cosa que no sea exactamente una de las cuatro
  * formas con sus campos completos: el llamador rechaza la receta entera.
  */
@@ -224,7 +344,11 @@ export function parsearEstrategia(crudo: unknown): EstrategiaLocalizacion | null
       const rol = comoTextoAcotado(objeto.rol);
       const nombre = comoTextoAcotado(objeto.nombre);
       if (rol === null || nombre === null) return null;
-      return { tipo: 'rol', rol, nombre };
+      // El desempate solo se copia si viene; una estrategia sin el (toda la persistida hasta hoy)
+      // sale exactamente igual que antes, que es lo que deja intacto el conocimiento ya aprendido.
+      if (!('desempate' in objeto)) return { tipo: 'rol', rol, nombre };
+      const desempate = parsearDesempate(objeto.desempate);
+      return desempate === undefined ? null : { tipo: 'rol', rol, nombre, desempate };
     }
     case 'texto': {
       const texto = comoTextoAcotado(objeto.texto);

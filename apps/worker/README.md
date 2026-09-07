@@ -247,6 +247,23 @@ variable, la clave se deriva de `VAULT_SECRET` con una etiqueta de separacion de
 secreto de la boveda. Configurar la variable despues solo hace que los origenes se cuenten de nuevo
 desde cero.
 
+**La CLASE DE ELEMENTO es la identidad del control** (`accion|eje|nombre`, `claseDeElemento`) y es la
+clave de esta tabla y el nombre de las ranuras de las plantillas compartidas, asi que tiene dos reglas
+que no se pueden relajar sin abrir un agujero en las dos tablas globales a la vez:
+
+- **Dos controles distintos jamas comparten clase.** Cuando el rol y el nombre accesible NO distinguen
+  al control de otro que estaba en su misma pagina, la clase lleva un SEGUNDO EJE con el atributo que
+  si lo distingue: `click|rol:button@data-testid=eliminar-produccion|eliminar ambiente`. Quien mide los
+  homonimos es la lectura del DOM (`estrategiasDe`, `src/localizacion.ts`), que para eso consulta TODOS
+  los `data-*` del elemento aunque solo emita los de `ATRIBUTOS_A_LEER` como estrategia. Un homonimo
+  sin ningun atributo admisible que lo distinga se queda SIN clase: falla cerrada.
+- **Ningun texto que sea o pueda ser un dato entra a una clase.** La regla es generica (nunca una lista
+  por sitio): un nombre leido de la pagina tiene que caber en 60 caracteres sin recortarse, tener al
+  menos una letra y no llevar ningun digito; el valor de un `data-*` tiene que tener forma de nombre y
+  no de identificador. Ver `esNombreDeIdentidad` y `esValorDeIdentidad` en el contrato de recetas, y
+  `docs/auditorias/13-clase-de-elemento-desempate-y-privacidad.md` para el criterio completo y el SQL
+  de deteccion de lo ya escrito.
+
 **El atlas NO depende de `TAREA_WEB_OBSERVADOR_PASOS`**: el camino por RECETA lo alimenta con las
 ganadoras que informa el ejecutor determinista, y el camino del MOTOR LIBRE con lo que lee la
 PERCEPCION. La percepcion abre una conexion CDP despues de cada paso que toca la pagina, y en esa

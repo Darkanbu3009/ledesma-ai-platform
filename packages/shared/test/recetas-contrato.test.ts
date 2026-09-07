@@ -1,10 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
   dominiosDePasos,
+  esAtributoDeIdentidad,
   esAtributoEstable,
+  esNombreDeIdentidad,
+  esValorDeIdentidad,
   marcadoresDeParametros,
   MAX_ESPERA_MS,
   MAX_PASOS_RECETA,
+  MAX_TEXTO_DE_IDENTIDAD,
   ordenarEstrategias,
   parsearEstrategia,
   parsearPasosDeReceta,
@@ -271,5 +275,153 @@ describe('que datos necesita una receta (marcadoresDeParametros)', () => {
   it('una receta que solo teclea texto fijo no necesita ningun dato', () => {
     const pasos = parsearPasosDeReceta([pasoEscribir(0, { tipo: 'literal', texto: 'x' })]);
     expect(marcadoresDeParametros(pasos ?? [])).toEqual([]);
+  });
+});
+
+/**
+ * LAS DOS REGLAS DE ADMISION DE IDENTIDAD. Son la unica defensa GENERICA (sin una sola regla por
+ * sitio) contra que un DATO DE LA TAREA o el CONTENIDO de una pagina acabe dentro de la clase de un
+ * elemento, que es lo que viaja a las dos tablas GLOBALES del aprendizaje colectivo.
+ *
+ * Los casos de abajo son los MEDIDOS sobre fixtures en la investigacion que motivo el fix: el importe
+ * de la factura de un tercero dentro de un texto visible, el numero del dia de un calendario como
+ * nombre del control, y el identificador de sesion dentro de un data-*.
+ */
+describe('esNombreDeIdentidad: lo que se lee de la pagina', () => {
+  it('admite el rotulo de un control', () => {
+    for (const nombre of [
+      'Enviar',
+      'Redactar',
+      'Eliminar ambiente',
+      'Enviar (Ctrl-Intro)',
+      'Destinatarios en Para',
+      'Cuerpo del mensaje',
+    ]) {
+      expect(esNombreDeIdentidad(nombre)).toBe(true);
+    }
+  });
+
+  it('rechaza lo que lleva un dato dentro, aunque el rotulo sea real', () => {
+    // El numero del dia de un calendario: el nombre ES el valor que la tarea eligio.
+    expect(esNombreDeIdentidad('12')).toBe(false);
+    // Un importe de un tercero, suelto o dentro del texto concatenado de una fila.
+    expect(esNombreDeIdentidad('$ 12.500,00')).toBe(false);
+    expect(esNombreDeIdentidad('Distribuidora Andina SRL $ 12.500,00 Vencida')).toBe(false);
+    // Un contador: cambia entre sesiones, asi que no puede sostener una identidad estable (R4).
+    expect(esNombreDeIdentidad('Bandeja de entrada (3)')).toBe(false);
+    // Sin una sola letra no hay rotulo, hay valor.
+    expect(esNombreDeIdentidad('(2)')).toBe(false);
+  });
+
+  it('rechaza lo que no cabe: recortarlo guardaria un FRAGMENTO de contenido de pagina', () => {
+    expect(esNombreDeIdentidad('a'.repeat(MAX_TEXTO_DE_IDENTIDAD))).toBe(true);
+    expect(esNombreDeIdentidad('a'.repeat(MAX_TEXTO_DE_IDENTIDAD + 1))).toBe(false);
+  });
+});
+
+describe('esValorDeIdentidad: lo que escribio quien programo el sitio', () => {
+  it('admite un gancho con forma de nombre, con o sin un numero corto', () => {
+    for (const valor of ['eliminar-ambiente-produccion', 'checkout-pay', 'fila-2', 'btn_del_env']) {
+      expect(esValorDeIdentidad(valor)).toBe(true);
+    }
+  });
+
+  it('rechaza por su FORMA todo lo que es un identificador, un importe o una fecha', () => {
+    for (const valor of [
+      's_01JQ8Z9WQ2K3',
+      'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+      'a3f9c2b18e4d5670',
+      '0ahUKEwi1',
+      '12500.00',
+      '2026-09-12',
+      '4471',
+    ]) {
+      expect(esValorDeIdentidad(valor)).toBe(false);
+    }
+  });
+
+  it('rechaza la barra: es el separador de la clase y partiria su eje en dos', () => {
+    expect(esValorDeIdentidad('a|b')).toBe(false);
+  });
+});
+
+describe('esAtributoDeIdentidad: cada atributo con la regla de su fuente', () => {
+  it('aria-label se juzga como texto de pagina (es el nombre accesible)', () => {
+    expect(esAtributoDeIdentidad('aria-label', 'Eliminar ambiente')).toBe(true);
+    expect(esAtributoDeIdentidad('aria-label', 'Eliminar factura 4471')).toBe(false);
+  });
+
+  it('data-* se juzga como gancho: un numero corto no lo descalifica', () => {
+    expect(esAtributoDeIdentidad('data-testid', 'fila-2')).toBe(true);
+    expect(esAtributoDeIdentidad('data-testid', 'fila-4471')).toBe(false);
+  });
+});
+
+describe('desempate: el segundo eje viaja con la estrategia y no se puede degradar', () => {
+  it('una estrategia SIN el campo sale exactamente igual que siempre', () => {
+    expect(parsearEstrategia({ tipo: 'rol', rol: 'button', nombre: 'Enviar' })).toEqual({
+      tipo: 'rol',
+      rol: 'button',
+      nombre: 'Enviar',
+    });
+  });
+
+  it('conserva el desempate admisible y el null (homonimo sin nada que lo distinga)', () => {
+    expect(
+      parsearEstrategia({
+        tipo: 'rol',
+        rol: 'button',
+        nombre: 'Eliminar ambiente',
+        desempate: { atributo: 'data-testid', valor: 'eliminar-produccion' },
+      }),
+    ).toEqual({
+      tipo: 'rol',
+      rol: 'button',
+      nombre: 'Eliminar ambiente',
+      desempate: { atributo: 'data-testid', valor: 'eliminar-produccion' },
+    });
+    expect(
+      parsearEstrategia({ tipo: 'rol', rol: 'button', nombre: 'Eliminar', desempate: null }),
+    ).toEqual({ tipo: 'rol', rol: 'button', nombre: 'Eliminar', desempate: null });
+  });
+
+  it('un desempate mal formado RECHAZA la estrategia y no se degrada a "sin desempate"', () => {
+    // Degradarlo volveria a fusionar la identidad de dos controles distintos, que es el defecto.
+    for (const desempate of [
+      { atributo: 'data-testid' },
+      { atributo: 'onclick', valor: 'x' },
+      { atributo: 'data-testid', valor: 'fila-4471' },
+      'data-testid=x',
+    ]) {
+      expect(
+        parsearEstrategia({ tipo: 'rol', rol: 'button', nombre: 'Eliminar', desempate }),
+      ).toBeNull();
+    }
+  });
+});
+
+describe('desempate: solo un data-*, y por que no valen los otros atributos estables', () => {
+  it('id y name quedan fuera: llevan identificadores por sesion o por registro', () => {
+    for (const atributo of ['id', 'name']) {
+      expect(
+        parsearEstrategia({
+          tipo: 'rol',
+          rol: 'button',
+          nombre: 'Eliminar',
+          desempate: { atributo, valor: 'eliminar-produccion' },
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it('aria-label tampoco: de ahi sale el nombre, asi que no puede distinguir dos homonimos', () => {
+    expect(
+      parsearEstrategia({
+        tipo: 'rol',
+        rol: 'button',
+        nombre: 'Eliminar',
+        desempate: { atributo: 'aria-label', valor: 'Eliminar produccion' },
+      }),
+    ).toBeNull();
   });
 });
