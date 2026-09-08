@@ -137,6 +137,108 @@ describe('verificarIdentidadDeElemento: falla cerrada sin excepcion', () => {
   });
 });
 
+/**
+ * EL LIMITE DE PALABRA DE LA COMPARACION DE LA CLASE (FIX defecto 1). La clase se comparaba contra
+ * el nombre accesible del DOM con un `startsWith` pelado, asi que cualquier control cuyo nombre
+ * CONTINUARA la palabra de la clase pasaba por el mismo control: una clase "para" -- que el atlas
+ * escribe de verdad, `claseDeElemento('escribir', [{rol:'textbox', nombre:'Para'}])` -- daba por
+ * buena una barra "Parar reproduccion", y una clase "eliminar" un boton "Eliminares".
+ *
+ * El criterio pasa a ser el MISMO que el del resolutor de estrategias dentro de la pagina
+ * (`nombreCoincidePorPrefijo`, localizacion.ts): el prefijo vale si el resto empieza en un caracter
+ * no alfanumerico o si lo unico que sobra es la `s` del plural. Tenerlos distintos significaba que
+ * la barrera aceptaba identidades que el resolutor jamas habria resuelto.
+ */
+describe('verificarIdentidadDeElemento: el limite de palabra de la clase', () => {
+  /** La clase declara `deLaClase` y en el DOM hay `enElDom`. Aisla la comprobacion (a). */
+  function porClase(deLaClase: string, enElDom: string) {
+    return verificarIdentidadDeElemento(
+      entrada({
+        claseDeclarada: claseDeBoton(deLaClase),
+        clasesCorroboradas: new Set([claseDeBoton(deLaClase)]),
+        // El paso NO es el irreversible: lo que se mide es la clase, no la familia del verbo.
+        esPasoIrreversible: false,
+        nombreAccesible: enElDom,
+      }),
+    );
+  }
+
+  const PERMITIR = { tipo: 'permitir' } as const;
+  const CLASE_DISTINTA = { tipo: 'bloquear', motivo: 'clase_distinta' } as const;
+
+  it('clase "eliminar" contra "Eliminares": BLOQUEA (el resto continua la palabra)', () => {
+    expect(porClase('eliminar', 'Eliminares')).toEqual(CLASE_DISTINTA);
+  });
+
+  it('clase "para" contra "Parar reproduccion": BLOQUEA (el caso que el DOM ya fijaba)', () => {
+    expect(porClase('para', 'Parar reproduccion')).toEqual(CLASE_DISTINTA);
+  });
+
+  it('clase "enviar" contra "Enviarme una copia": BLOQUEA (otro control, otra accion)', () => {
+    expect(porClase('enviar', 'Enviarme una copia')).toEqual(CLASE_DISTINTA);
+  });
+
+  it('clase "eliminar" contra "Eliminar ambiente": permite (sobra un espacio)', () => {
+    expect(porClase('eliminar', 'Eliminar ambiente')).toEqual(PERMITIR);
+  });
+
+  /**
+   * MEDICION QUE NO CAMBIA, y hay que dejarla escrita porque la investigacion la reporto como el
+   * caso a bloquear: "Eliminar TODOS los ambientes" YA respeta el limite de palabra (lo que sobra
+   * empieza en un espacio), asi que este veredicto es 'permitir' antes y despues del fix. Lo que
+   * separa "Eliminar ambiente" de "Eliminar TODOS los ambientes" es el ALCANCE de la accion, no la
+   * identidad del control, y ningun criterio de prefijo lo puede ver: el prefijo que si distingue
+   * los dos nombres tambien rechazaria "Enviar (Ctrl-Enter)" contra la clase "enviar", que es el
+   * caso real de produccion por el que la comparacion es por prefijo y no por igualdad.
+   * Quien acota el alcance es la familia del verbo (comprobacion (b)) y la verificacion
+   * determinista, no esta comparacion.
+   */
+  it('clase "eliminar" contra "Eliminar TODOS los ambientes": permite, igual que antes', () => {
+    expect(porClase('eliminar', 'Eliminar TODOS los ambientes')).toEqual(PERMITIR);
+  });
+
+  it('el plural queda fijado tal como lo define el resolutor: solo la "s" que sobra sola', () => {
+    // "destinatario" contra "Destinatarios en Para" es el caso real de Gmail: la s va seguida de un
+    // no alfanumerico. "Eliminars" es la s al final. "Eliminares" ya no: hay letra despues de la s.
+    expect(porClase('destinatario', 'Destinatarios en Para')).toEqual(PERMITIR);
+    expect(porClase('eliminar', 'Eliminars')).toEqual(PERMITIR);
+    expect(porClase('eliminar', 'Eliminares')).toEqual(CLASE_DISTINTA);
+  });
+
+  it('el sufijo real del boton Enviar de Gmail sigue pasando', () => {
+    expect(porClase('enviar', 'Enviar (Ctrl-Enter)')).toEqual(PERMITIR);
+  });
+
+  /**
+   * REGRESION CONTRA LAS CLASES REALES. Son las que el atlas tiene escritas para mail.google.com
+   * (las seis de la corrida de referencia, atlas-sitios.test.ts, mas la variante de eje 'texto' del
+   * boton Redactar), con el nombre accesible que la percepcion lee de verdad en el DOM. El
+   * endurecimiento no puede cambiarles el veredicto: sus nombres son palabras completas.
+   */
+  it('las clases reales de mail.google.com conservan su veredicto', () => {
+    const reales: Array<[string, string]> = [
+      ['click|rol:button|redactar', 'Redactar'],
+      ['click|texto|redactar', 'Redactar'],
+      ['click|atributo:aria-label|destinatarios en para', 'Destinatarios en Para'],
+      ['escribir|atributo:aria-label|destinatarios en para', 'Destinatarios en Para'],
+      ['escribir|atributo:aria-label|asunto', 'Asunto'],
+      ['escribir|atributo:aria-label|cuerpo del mensaje', 'Cuerpo del mensaje'],
+      ['click|atributo:aria-label|enviar', 'Enviar (Ctrl-Enter)'],
+    ];
+    for (const [clase, nombreAccesible] of reales) {
+      const veredicto = verificarIdentidadDeElemento(
+        entrada({
+          claseDeclarada: clase,
+          clasesCorroboradas: new Set([clase]),
+          esPasoIrreversible: false,
+          nombreAccesible,
+        }),
+      );
+      expect(veredicto, clase).toEqual(PERMITIR);
+    }
+  });
+});
+
 describe('verificarIdentidadDeElemento: el paso que NO es el irreversible', () => {
   it('con la clase corroborada, pasa sin exigir nombre accesible (no se lee el DOM)', () => {
     expect(

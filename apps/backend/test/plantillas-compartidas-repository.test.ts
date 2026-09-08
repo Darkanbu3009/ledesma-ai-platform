@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { PasoPublicable, Sql } from '@ledesma-platform/shared';
+import { MARCADORES, type PasoPublicable, type Sql } from '@ledesma-platform/shared';
 import {
   DESAJUSTES_PARA_RETIRO,
   MAX_CANDIDATAS_DE_CONSUMO,
@@ -762,5 +762,37 @@ describe('diagnosticarMiss: donde se corto la lectura del consumo', () => {
     expect(texto).not.toContain('owner_id');
     // Solo el LARGO del arreglo, que es un conteo y no un identificador.
     expect(texto).toContain('jsonb_array_length(origenes_hash) as origenes');
+  });
+});
+
+/**
+ * EL TOPE DEL DIAGNOSTICO SE DERIVA DEL VOCABULARIO (FIX defecto 2). La constante decia 2^6 = 64
+ * desde que los marcadores eran seis; hoy son nueve y los conjuntos posibles para una identidad de
+ * (dominios, intencion) son 2^9 = 512. Con el tope viejo, en cuanto la tabla pasara de 64 filas de
+ * la misma identidad el `limit` podia dejar fuera la fila que SI casaba y el diagnostico habria
+ * reportado `marcadores_no_contenidos` teniendola delante.
+ *
+ * Este test falla si el vocabulario crece y el tope no lo sigue.
+ */
+describe('MAX_FILAS_DE_DIAGNOSTICO: derivado del vocabulario, no escrito a mano', () => {
+  it('cubre TODOS los subconjuntos de los marcadores del contrato', () => {
+    expect(MAX_FILAS_DE_DIAGNOSTICO).toBe(2 ** MARCADORES.length);
+  });
+
+  it('con los NUEVE marcadores de hoy son 512, y ya no los 64 de cuando eran seis', () => {
+    expect(MARCADORES).toHaveLength(9);
+    expect(MAX_FILAS_DE_DIAGNOSTICO).toBe(512);
+    expect(MAX_FILAS_DE_DIAGNOSTICO).toBeGreaterThan(64);
+  });
+
+  it('el limite que viaja a la query es esa constante, no un numero suelto', async () => {
+    const sql = makeSql([[]]);
+    await new PlantillasCompartidasRepository(sql).diagnosticarMiss({
+      dominiosClave: 'mail.google.com',
+      codigoDeIntencion: 'enviar',
+      marcadoresPosibles: ['', 'destinatario'],
+    });
+    const [, valores] = sql.queries[0] as [string, unknown[]];
+    expect(valores).toContain(2 ** MARCADORES.length);
   });
 });

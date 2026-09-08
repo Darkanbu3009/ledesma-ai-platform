@@ -18,7 +18,8 @@ import { claseDeElemento } from '../src/atlas-sitios.js';
  *    separadores; el nombre puede contener el separador);
  *  - el criterio GENERICO de observabilidad: solo lo anterior (inclusive) al primer paso que puede
  *    mutar la pagina, medido sobre DOS procedimientos con formas reales distintas;
- *  - la comparacion de presencia es la MISMA de la barrera de identidad (normalizarTexto + prefijo);
+ *  - la comparacion de presencia es la MISMA FUNCION de la barrera de identidad (prefijo hasta un
+ *    limite de palabra, `nombreCoincidePorPrefijo`);
  *  - la lectura es tolerante: cualquier basura deja la sonda no evaluable, jamas un desajuste.
  */
 
@@ -193,6 +194,22 @@ describe('clasesFaltantes: la misma comparacion que la barrera de identidad', ()
   it('con acentos en la pagina y la clase normalizada, sigue siendo presencia (cero falsos desajustes)', () => {
     const conAcento = descriptoresDeSonda(['click|rol:button|configuracion']);
     expect(clasesFaltantes(conAcento, [['Configuración avanzada']])).toEqual([]);
+  });
+
+  /**
+   * EL LIMITE DE PALABRA (FIX defecto 1), y aqui importa tanto como en la barrera: dar por PRESENTE
+   * un control que solo continua la palabra es prometer que la barrera lo va a dejar actuar
+   * despues, y la barrera ya no lo hace. Los dos lados consultan la MISMA funcion.
+   */
+  it('un candidato que solo CONTINUA la palabra de la clase no cuenta como presencia', () => {
+    expect(clasesFaltantes(descriptores, [['Enviarme una copia']])).toEqual([
+      'click|rol:button|enviar',
+    ]);
+    const para = descriptoresDeSonda(['escribir|rol:textbox|para']);
+    expect(clasesFaltantes(para, [['Parar reproduccion']])).toEqual(['escribir|rol:textbox|para']);
+    // El plural sigue siendo presencia, como siempre: es el caso real del campo Para de Gmail.
+    const destinatario = descriptoresDeSonda(['escribir|rol:textbox|destinatario']);
+    expect(clasesFaltantes(destinatario, [['Destinatarios en Para']])).toEqual([]);
   });
 });
 

@@ -6,6 +6,7 @@ import {
   esDominioDePaso,
   esMarcadorParametro,
   esPublicable,
+  MARCADORES,
   marcadorDeRanura,
   marcadoresClave,
   marcadoresDePasosPublicables,
@@ -249,12 +250,15 @@ export interface IdentidadDePlantilla {
 }
 
 /**
- * TOPE REAL de claves que un consumidor puede generar: los subconjuntos del conjunto de NUEVE, que
- * son los marcadores del contrato de recetas (`MARCADORES`, packages/shared). 2^9 = 512, y es una
- * cota del VOCABULARIO CERRADO, no un limite configurable: no hay objetivo, por raro que sea, que
- * produzca una lista mas larga. En la practica un objetivo declara pocos y la lista real es corta.
+ * TOPE REAL de claves que un consumidor puede generar: los subconjuntos del conjunto de marcadores
+ * del contrato de recetas (`MARCADORES`, packages/shared), o sea 2^N. Hoy son nueve, 2^9 = 512. Es
+ * una cota del VOCABULARIO CERRADO, no un limite configurable: no hay objetivo, por raro que sea,
+ * que produzca una lista mas larga. En la practica un objetivo declara pocos y la lista es corta.
+ *
+ * SE DERIVA de la lista y no se escribe a mano, por lo mismo que MAX_FILAS_DE_DIAGNOSTICO en el
+ * backend: la version escrita a mano se quedo en 2^6 cuando el vocabulario paso a nueve.
  */
-export const MAX_CLAVES_DE_MARCADORES = 512;
+export const MAX_CLAVES_DE_MARCADORES = 2 ** MARCADORES.length;
 
 /**
  * MARCADORES OMITIBLES (D3b): los datos que una plantilla puede pedir y el consumidor puede NO
@@ -293,8 +297,9 @@ export function esMarcadorOmitible(marcador: MarcadorParametro): boolean {
  * `dato_sin_declarar`.
  */
 export function clavesDeMarcadoresContenidos(marcadores: readonly MarcadorParametro[]): string[] {
-  // El filtro acota el largo de la lista a 2^6 pase lo que pase: el conjunto de entrada llega de un
-  // `Object.keys` con un cast, y de esta funcion depende que la consulta no crezca sin techo.
+  // El filtro acota el largo de la lista a MAX_CLAVES_DE_MARCADORES pase lo que pase: el conjunto
+  // de entrada llega de un `Object.keys` con un cast, y de esta funcion depende que la consulta no
+  // crezca sin techo.
   const unicos = [...new Set(marcadores)].filter(esMarcadorParametro).sort();
   let subconjuntos: MarcadorParametro[][] = [[]];
   for (const marcador of unicos) {

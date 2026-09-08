@@ -123,7 +123,14 @@ export type MarcadorParametro =
   | 'lugar'
   | 'nombre';
 
-const MARCADORES: readonly MarcadorParametro[] = [
+/**
+ * EL VOCABULARIO CERRADO de marcadores, en su orden canonico. Se EXPORTA porque su TAMANO es una
+ * cota que otros modulos necesitan derivar y no volver a escribir a mano: los conjuntos de
+ * marcadores que una plantilla puede exigir son los subconjuntos de esta lista, o sea 2^N (ver
+ * MAX_CLAVES_DE_MARCADORES en el worker y MAX_FILAS_DE_DIAGNOSTICO en el backend). Cuando la lista
+ * paso de seis a nueve, las copias escritas a mano se quedaron en 2^6.
+ */
+export const MARCADORES: readonly MarcadorParametro[] = [
   'destinatario',
   'monto',
   'producto',

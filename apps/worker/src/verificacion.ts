@@ -2,6 +2,7 @@ import {
   serializarDetencion,
   type CampoFaltante,
   type DetencionDeVerificacion,
+  type MarcadorParametro,
   type PoliticaDeEjecucion,
 } from '@ledesma-platform/shared';
 import {
@@ -136,11 +137,72 @@ const PARAMETRO_REQUERIDO_POR_VERBO: Readonly<Record<string, CampoFaltante>> = {
   transfer: 'monto',
 };
 
+/** Los marcadores que se reconocen por el CONTEXTO de un campo. `producto` no: ver mas abajo. */
+type MarcadorDeContexto = Extract<
+  MarcadorParametro,
+  'destinatario' | 'monto' | 'cantidad' | 'asunto' | 'cuerpo'
+>;
+
+/**
+ * LOS VOCABULARIOS DE CONTEXTO, uno por marcador comparable: las palabras que, dentro del contexto
+ * de un campo, lo delatan como el destinatario, el monto, la cantidad, el asunto o el cuerpo.
+ *
+ * VIVEN COMO LISTA Y NO COMO REGEX ESCRITA A MANO porque no son solo de este modulo: la tabla que
+ * mapea el NOMBRE DE CLASE de una ranura a su marcador (MARCADOR_POR_NOMBRE_DE_CLASE,
+ * packages/shared/src/plantillas/contrato.ts) declara estar sembrada de estos mismos vocabularios,
+ * y las dos copias habian divergido en silencio: la verificacion trataba un campo "Correo
+ * electronico" como destinatario y la tabla no le daba marcador, asi que ese campo se comparaba
+ * como destinatario pero no se podia publicar como ranura de destinatario. Exportarlos permite que
+ * un test compare los dos lados termino por termino (simetria-vocabularios.test.ts) y que una
+ * divergencia futura falle en CI en vez de descubrirse con una investigacion.
+ *
+ * NO ENTRA aqui el vocabulario de REMITENTE: no nombra un marcador, es la EXCLUSION que impide
+ * comparar la direccion del propio usuario como si fuera un destinatario.
+ */
+export const VOCABULARIO_DE_CONTEXTO: Readonly<Record<MarcadorDeContexto, readonly string[]>> = {
+  destinatario: [
+    'to',
+    'para',
+    'destinatario',
+    'destinatarios',
+    'recipient',
+    'recipients',
+    'cc',
+    'bcc',
+    'cco',
+    'correo',
+    'email',
+    'e-mail',
+    'mail',
+  ],
+  monto: [
+    'monto',
+    'importe',
+    'total',
+    'precio',
+    'price',
+    'amount',
+    'pago',
+    'payment',
+    'cobro',
+    'cargo',
+    'subtotal',
+  ],
+  cantidad: ['cantidad', 'cant', 'quantity', 'qty', 'unidades', 'units', 'piezas'],
+  asunto: ['asunto', 'subject', 'subjectbox', 'titulo', 'title'],
+  cuerpo: ['cuerpo', 'mensaje', 'message', 'body', 'texto', 'contenido', 'content', 'redaccion'],
+};
+
+/** El patron de un vocabulario: la palabra completa, sobre el contexto ya normalizado del campo. */
+function patronDeContexto(terminos: readonly string[]): RegExp {
+  return new RegExp(`\\b(${terminos.join('|')})\\b`);
+}
+
 /**
  * Contexto de un campo que lo delata como DESTINATARIO de la accion (para/to/cc/bcc/correo). Se
  * evalua sobre el contexto NORMALIZADO del campo.
  */
-const CONTEXTO_DESTINATARIO = /\b(to|para|destinatario|destinatarios|recipient|recipients|cc|bcc|cco|correo|email|e-mail|mail)\b/;
+const CONTEXTO_DESTINATARIO = patronDeContexto(VOCABULARIO_DE_CONTEXTO.destinatario);
 
 /**
  * Contexto de un campo que es el REMITENTE, no el destinatario. Se excluye explicitamente: la
@@ -150,20 +212,20 @@ const CONTEXTO_DESTINATARIO = /\b(to|para|destinatario|destinatarios|recipient|r
 const CONTEXTO_REMITENTE = /\b(from|remitente|reply[-\s]?to|sender|responder a)\b/;
 
 /** Contexto de un campo de DINERO: ahi un numero pelado (sin simbolo) si es un monto, en MXN. */
-const CONTEXTO_MONTO = /\b(monto|importe|total|precio|price|amount|pago|payment|cobro|cargo|subtotal)\b/;
+const CONTEXTO_MONTO = patronDeContexto(VOCABULARIO_DE_CONTEXTO.monto);
 
 /** Contexto de un campo de CANTIDAD (numero de unidades). */
-const CONTEXTO_CANTIDAD = /\b(cantidad|cant|quantity|qty|unidades|units|piezas)\b/;
+const CONTEXTO_CANTIDAD = patronDeContexto(VOCABULARIO_DE_CONTEXTO.cantidad);
 
 /** Contexto de un campo de ASUNTO (el titulo de un mensaje). */
-const CONTEXTO_ASUNTO = /\b(asunto|subject|subjectbox|titulo|title)\b/;
+const CONTEXTO_ASUNTO = patronDeContexto(VOCABULARIO_DE_CONTEXTO.asunto);
 
 /**
  * Contexto de un campo de CUERPO de mensaje. Incluye los nombres que usan los redactores modernos
  * (contenteditable con aria-label "Cuerpo del mensaje" / "Message Body"), que es donde el agente
  * escribe el texto en un sitio de correo real.
  */
-const CONTEXTO_CUERPO = /\b(cuerpo|mensaje|message|body|texto|contenido|content|redaccion)\b/;
+const CONTEXTO_CUERPO = patronDeContexto(VOCABULARIO_DE_CONTEXTO.cuerpo);
 
 /** Tolerancia de la comparacion numerica de montos (medio centavo). */
 const TOLERANCIA_MONTO = 0.005;
