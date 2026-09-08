@@ -104,6 +104,11 @@ export function textoDeDetencion(detencion: DetencionDeVerificacion): TextoDeDet
       return { titulo, detalle: i18n.t('verificacion.otraAccion.detalle') };
     case 'politicaNoDisponible':
       return { titulo, detalle: i18n.t('politica.noDisponible.detalle') };
+    case 'sinEvidenciaParaComparar':
+      // El sistema no pudo comprobar NADA antes de una accion que no se puede deshacer: no reconocio
+      // que se pedia, o lo pedido no traia ningun dato que se pueda buscar en la pagina. Se dice eso
+      // y que hacer, sin nombrar verbos, campos ni mecanica interna.
+      return { titulo, detalle: i18n.t('verificacion.sinEvidencia.detalle') };
   }
 }
 

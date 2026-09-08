@@ -1951,6 +1951,9 @@
     "otraAccion": {
       "detalle": "The task had already completed one action that cannot be undone and stopped before doing another. Check on the site what was done and ask for the remaining action separately."
     },
+    "sinEvidencia": {
+      "detalle": "We could not check anything on the site before an action that cannot be undone, because what you asked for had no detail to look for on the page. Nothing was done. Ask again saying what the action is about (who, which email, which file)."
+    },
     "sinEfecto": {
       "titulo": "The final step could not be confirmed",
       "detalle": "The task made progress, but we could not confirm that the final step took effect on the site. A draft or a half-finished state may remain. Check the site before asking for it again."
@@ -2089,6 +2092,10 @@
   "sitioCambio": {
     "etiqueta": "The site changed",
     "detalle": "The site changed its page and your agent noticed in time: it did the task on its own and relearned the procedure for next time."
+  },
+  "guardiaObservacion": {
+    "etiqueta": "Check in testing",
+    "detalle": "The system did not fully recognize what this task was asking for, so it reviewed it with its general criteria. Under those criteria it would not have let the task go on, but this check is still in testing: nothing was stopped and the task ran as usual."
   },
   "avisoTareaLenta": {
     "titulo": "This task is taking longer than usual",

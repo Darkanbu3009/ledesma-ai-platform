@@ -47,6 +47,58 @@ import type { PasoCensurado } from './trayectoria.js';
 export type PoliticaVigente = PoliticaDeEjecucion;
 
 /**
+ * MODO de la GUARDIA SIN INTENCION RECONOCIDA (TAREA_WEB_GUARDIA_SIN_INTENCION). Mismo patron de
+ * despliegue que la barrera de identidad (ModoBarreraIdentidad, barrera-identidad.ts): el veredicto
+ * se calcula igual en los tres modos y solo 'activa' lo aplica.
+ *
+ *  - 'apagada': ni se exige comparacion; el comportamiento es el anterior a este cambio, carater por
+ *    caracter (cero comparaciones sigue siendo 'ejecutar').
+ *  - 'observacion' (default en produccion): se evalua y se REGISTRA cuantas corridas HABRIAN sido
+ *    detenidas, y no se detiene ninguna.
+ *  - 'activa': la detencion por cero comparaciones corta la corrida como cualquier otra.
+ */
+export type ModoGuardiaSinIntencion = 'apagada' | 'observacion' | 'activa';
+
+/**
+ * ¿Este veredicto es la detencion NUEVA por cero comparaciones (D2)? Es la unica que el modo puede
+ * revertir: cualquier otra detencion (politica, tope, dato que no coincide) es anterior a este
+ * cambio y se aplica en los tres modos, porque revertirla seria relajar lo que ya protegia.
+ */
+export function esDetencionSinEvidencia(veredicto: Veredicto): boolean {
+  return veredicto.tipo === 'detener' && veredicto.detencion.motivo === 'sinEvidenciaParaComparar';
+}
+
+/**
+ * COMO SE LEE en la trayectoria una accion que la guardia evaluo con el CRITERIO GENERICO (D4): la
+ * corrida no declara una intencion del vocabulario cerrado, asi que no hay familia de verbo contra
+ * la que juzgar el control, y lo que se juzga es lo unico que hay: los datos que el objetivo si
+ * declaro y la politica del usuario.
+ *
+ * `habriaDetenido` es la unica forma de distinguir las dos cosas que llegan aqui como 'ejecutar': la
+ * accion que paso de verdad y la que paso porque el modo observacion revirtio su detencion. Por eso
+ * el veredicto solo no alcanza y este resumen no mira el modo: fuera de 'activa' ese flag es lo que
+ * queda dicho, y en 'activa' es siempre false porque ahi la detencion no se revierte.
+ *
+ * `exito` es true salvo en una detencion EFECTIVA: en observacion la accion siguio su camino y marcar
+ * el paso como fallido leeria como si algo no hubiera corrido. Mismo criterio que resumenDeIdentidad,
+ * y por la misma razon: es la etiqueta que la consola agrupa en /actividad.
+ */
+export function resumenDeGuardiaSinIntencion(entrada: {
+  veredicto: Veredicto;
+  habriaDetenido: boolean;
+}): { etiqueta: string; exito: boolean } {
+  if (entrada.habriaDetenido) {
+    return { etiqueta: 'guardia_generica:habria_detenido', exito: true };
+  }
+  if (entrada.veredicto.tipo === 'detener') {
+    return { etiqueta: 'guardia_generica:detenida', exito: false };
+  }
+  return entrada.veredicto.tipo === 'incompleto'
+    ? { etiqueta: 'guardia_generica:incompleta', exito: true }
+    : { etiqueta: 'guardia_generica:permitida', exito: true };
+}
+
+/**
  * PUERTO de lectura de la politica del owner. Lo implementa PoliticasEjecucionRepository (V034),
  * cableado en index.ts; los tests pasan fakes. Devuelve null si el usuario nunca configuro nada
  * (se usan los defaults SIN crear la fila, D3).
@@ -306,6 +358,7 @@ function textosDeLaPagina(pagina: EstadoDeLaPagina): string[] {
  *  5. un monto comprometido supera el tope configurado;
  *  6. algun parametro declarado tiene en pantalla un valor DISTINTO del pedido;
  *  6.5. el campo de un parametro declarado existe pero no se pudo leer -> 'noLeible' (CAMBIO 2);
+ *  6.6. no se comparo NI UN dato contra la pagina y la accion no es de solo lectura (D2);
  *  7. algun parametro declarado todavia no esta en pantalla -> 'incompleto' (la tarea sigue).
  */
 export function verificarAccion(entrada: {
@@ -316,6 +369,12 @@ export function verificarAccion(entrada: {
   parametros: ParametrosDeclarados;
   /** Foto del DOM. null = no se pudo leer. */
   pagina: EstadoDeLaPagina | null;
+  /**
+   * D2: esta accion NO es de solo lectura, asi que no puede resolverse con CERO comparaciones. Lo
+   * decide el llamador, que es quien sabe si la accion esta exenta (esNavegacionDeSoloLectura) y en
+   * que modo corre la guardia. Ausente o false = comportamiento anterior a este cambio, exacto.
+   */
+  exigeComparacion?: boolean;
 }): Veredicto {
   const { politica, parametros, pagina } = entrada;
 
@@ -407,6 +466,22 @@ export function verificarAccion(entrada: {
       },
       comparaciones,
     };
+  }
+
+  // 6.6. CERO COMPARACIONES SOBRE UNA ACCION QUE NO ES DE SOLO LECTURA (D2). Hasta aqui, un objetivo
+  //      que no declara ningun dato comparable llegaba al paso 7 con la lista vacia, sin faltantes y
+  //      con cero declarados, y salia con veredicto 'ejecutar': la verificacion decia que si sin
+  //      haber comparado nada contra la pagina. Es el hueco que la medicion encontro en las familias
+  //      que no exigen parametro (borrar, publicar) y en toda intencion que el sistema no reconoce.
+  //      Una accion irreversible sobre la que no se pudo comparar NADA no se ejecuta.
+  //
+  //      VA ANTES DEL PASO 7 y no dentro: la invariante comparaciones.length >= declarados sigue
+  //      exactamente como estaba, solo que ya no puede alcanzarla el caso de cero.
+  if (entrada.exigeComparacion === true && comparaciones.length === 0) {
+    return detener({
+      motivo: 'sinEvidenciaParaComparar',
+      detalle: 'el objetivo no declara ningun dato que se pueda comparar contra la pagina',
+    });
   }
 
   // 7. TODOS LOS PARAMETROS DECLARADOS O NINGUNA ACCION (CAMBIO 1). La verificacion solo se supera
