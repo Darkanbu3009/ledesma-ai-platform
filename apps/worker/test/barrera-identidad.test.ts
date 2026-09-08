@@ -158,12 +158,16 @@ describe('verificarIdentidadDeElemento: el paso que NO es el irreversible', () =
 
 /**
  * FIX C: la barrera NO consulta esNavegacionDeSoloLectura (prompt-tarea-web.ts). Esa funcion existe
- * para que la navegacion y la lectura JAMAS se bloqueen y hoy devuelve true en cuanto la descripcion
- * menciona link, folder, sidebar, carpeta o inbox sin un gatillo de accion. Consultarla aqui
- * convertiria su bypass en un bypass de esta barrera.
+ * para que la navegacion y la lectura JAMAS se bloqueen y exime toda descripcion que caiga en una de
+ * sus categorias de solo lectura. Consultarla aqui convertiria su exencion en un bypass de esta
+ * barrera: un control llamado "Abrir la carpeta" quedaria exento de comprobar su identidad.
+ *
+ * El nombre de la prueba cambio con la reescritura por categoria: "Mover a la carpeta" ya NO esta
+ * exento (mover es un verbo de modificacion y lo veta), y lo que este bloque necesita es un nombre
+ * que SI lo este. "Abrir la carpeta" lo esta por su categoria (abrir), no por un sustantivo.
  */
 describe('la barrera no consulta esNavegacionDeSoloLectura', () => {
-  const NOMBRE_EXENTO = 'Mover a la carpeta';
+  const NOMBRE_EXENTO = 'Abrir la carpeta';
 
   it('ese nombre SI esta exento para esNavegacionDeSoloLectura', () => {
     expect(esNavegacionDeSoloLectura(NOMBRE_EXENTO)).toBe(true);

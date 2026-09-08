@@ -316,8 +316,8 @@ el DOM, y leerlo por accion costaria una conexion CDP en cada uno de los ~28 pas
 para producir un veredicto sin contenido.
 
 **No consulta `esNavegacionDeSoloLectura`**, y es deliberado: esa funcion existe para que la
-navegacion y la lectura jamas se bloqueen, y devuelve `true` en cuanto la descripcion menciona link,
-folder, sidebar o inbox. Consultarla convertiria su bypass en un bypass de esta barrera.
+navegacion y la lectura jamas se bloqueen, y exime toda descripcion que caiga en una de sus
+categorias de solo lectura. Consultarla convertiria su exencion en un bypass de esta barrera.
 
 **Los tres modos:**
 
@@ -372,15 +372,23 @@ barrera de identidad necesita la familia del verbo para saber que buscar en el D
 nombre accesible que leer ni clase que comparar contra el atlas. Evaluarla igual produciria
 `clase_no_corroborada` en TODAS las acciones: un bloqueo general disfrazado de criterio.
 
-**La unica exencion es `esNavegacionDeSoloLectura`** (`src/prompt-tarea-web.ts`), y **es el riesgo
+**La unica exencion es `esNavegacionDeSoloLectura`** (`src/prompt-tarea-web.ts`), y **era el riesgo
 principal de encender el modo activo**. Esa funcion se diseno con la asimetria INVERSA (para el FIX F,
-donde lo caro era bloquear una navegacion), asi que es estrecha a proposito: medida sobre 21
-descripciones de solo lectura reales exime 6 y deja 15 bajo guardia. Entre las que NO reconoce:
-`navigate to <url>`, `go back`, `search for ...` / `busca ...`, `filter by ...` / `filtra ...`,
-`open the first email` / `abre el primer correo`, `wait for the page to load`, `recarga la pagina`,
-`hover over ...`, `click the Search button`, `press Enter to run the search`, `dismiss the cookie
-banner`. Dos de las exenciones ademas son accidentales (`refresh the inbox` pasa solo por "inbox";
-`espera a que cargue la bandeja`, solo por "bandeja"). Por eso el default es `observacion`.
+donde lo caro era bloquear una navegacion) y reconocia SUSTANTIVOS, no la categoria de la accion:
+medida sobre 21 descripciones de solo lectura reales eximia 6 y dejaba 15 bajo guardia
+(`navigate to <url>`, `go back`, `search for ...` / `busca ...`, `filter by ...` / `filtra ...`,
+`open the first email`, `wait for the page to load`, `recarga la pagina`, `hover over ...`,
+`click the Search button`, `press Enter to run the search`, `abre el engrane de ajustes`,
+`dismiss the cookie banner`), y dos de las seis exenciones eran accidentales (`refresh the inbox`
+pasaba solo por "inbox"; `espera a que cargue la bandeja`, solo por "bandeja"). Esas 15 son la mayoria
+de los pasos intermedios de cualquier corrida del motor libre, asi que el modo activo se habria
+detenido en el primer paso de navegacion de casi toda tarea.
+
+**La exencion se reescribio POR CATEGORIA** (ver la seccion siguiente): la misma bateria de 21 exime
+ahora 21, y una segunda bateria de 20 pasos intermedios reales de las trazas del repo queda partida en
+10 exentos (navegacion, busqueda, apertura, lectura) y 10 bajo guardia (los que consuman o
+modifiquen), sin ninguno fuera de objetivo. El default sigue siendo `observacion` hasta que la
+medicion en produccion lo confirme.
 
 **Los tres modos:**
 
@@ -409,6 +417,50 @@ en las corridas con verbo (ahi la verificacion ya leia en ese punto) y cero en l
 **Medicion sobre los fixtures:** en modo activo, 7 de 1341 tests del worker cambian de veredicto
 (6 son `comprar`/`publicar`/`borrar` con cero datos declarados, 1 es un objetivo sin verbo). En
 `observacion` y en `apagada`, cero.
+
+### La exencion de solo lectura, por categoria (`esNavegacionDeSoloLectura`)
+
+`esNavegacionDeSoloLectura` (`src/prompt-tarea-web.ts`) es lo que hace que la navegacion y la lectura
+JAMAS se bloqueen, y es lo que decide si la guardia sin intencion puede encenderse sin detener el
+trabajo legitimo del motor libre. Reconoce la CATEGORIA de la accion, no sustantivos sueltos.
+
+**El criterio, en tres piezas, y la primera es un veto:**
+
+1. **Veto por consumo o modificacion.** Si la descripcion (o el nombre accesible del elemento, cuando
+   el llamador lo trae) nombra una accion que CONSUMA (`VERBOS_ACCION_BLOQUEADA`, `CIERRES_DE_ACCION`)
+   o que MODIFIQUE (escribir, guardar, aplicar, activar, desactivar, archivar, mover, vaciar, revocar,
+   reiniciar, dar de baja, adjuntar, responder, marcar, descartar, confirmar), no hay exencion posible:
+   `abre el menu y elimina la cuenta` no es navegacion por empezar con "abre". Reemplaza al veto por
+   `GATILLOS_DE_ACCION`, que miraba el MEDIO (boton, tecla) en vez del EFECTO y por eso dejaba bajo
+   guardia `click the Search button` y `pulsa Enter para ejecutar la busqueda`.
+2. **La naturaleza del elemento**, cuando el llamador la leyo del DOM (`esElementoDeSoloLectura`): un
+   `link`, una `tab`, un `menuitem`, un `searchbox` o un `input[type=search]` son de solo lectura por
+   lo que SON. Los roles salen de `rolDe` (`src/localizacion.ts`), la misma cadena que ya alimenta la
+   percepcion, el grabador y la barrera de identidad. Quedan fuera `button`, `textbox`, `checkbox`,
+   `radio`, `combobox` y `spinbutton`.
+3. **La categoria de la accion en el texto**, para el llamador que todavia no tiene el elemento: trece
+   categorias en ES y EN (navegar, volver, recargar, esperar, desplazar, observar, leer, abrir,
+   buscar, filtrar, ordenar, pasar el cursor, cerrar un aviso) mas el elemento de navegacion nombrado.
+
+**El nombre de un destino no es la accion.** Un PARTICIPIO junto a un sustantivo de destino nombra un
+lugar (`Enviados link`, `Sent folder`, `la carpeta Enviados`, `the sent messages`) y se retira antes
+del veto: es el bug original del FIX F. Solo participios: un infinitivo o un imperativo junto al mismo
+sustantivo (`eliminar mensajes`, `borra los correos`) SI es la accion del paso y se queda.
+
+**Falla cerrada, sin comodines.** Lo que no cae en una categoria reconocida sigue bajo guardia. No hay
+ni puede haber una regla por sitio, por dominio ni por lista de textos de una aplicacion concreta.
+
+**Medicion (`test/exencion-solo-lectura.test.ts`):** las 21 descripciones de solo lectura reales de la
+auditoria pasaron de 6 exentas / 15 bajo guardia a 21 / 0. Las 20 de pasos intermedios reales de las
+trazas del repo pasaron de 9 exentos (uno de ellos un hueco: `abre el menu y elimina la cuenta`) y 3
+casos fuera de objetivo, a 10 exentos / 10 bajo guardia y cero fuera de objetivo.
+
+**Donde se lee el elemento, y donde todavia no.** En el motor libre la guardia se interpone en
+`revisar(accion)` ANTES de que el motor resuelva el elemento (Stagehand lo resuelve dentro de `act`,
+despues del veredicto), asi que ahi decide la categoria del texto y el parametro `elemento` viaja
+ausente. Alimentarlo exigiria un `observe` previo a cada `act`: una inferencia y una lectura de DOM
+mas por accion (~28 por corrida). El parametro existe para el llamador que SI tenga el elemento leido
+del DOM, sin que ninguno pague ese costo mientras no lo tenga.
 
 ### Costo por corrida (`TAREA_WEB_SCREENSHOTS` y `TAREA_WEB_HISTORIAL_PASOS`)
 

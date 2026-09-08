@@ -464,8 +464,11 @@ describe('politica del usuario (D3)', () => {
   });
 
   it('el tope tambien mira los montos de los CAMPOS, no solo el del objetivo', () => {
+    // El verbo del objetivo ("confirmar pedido") es de la familia comprar, que SI maneja dinero: por
+    // eso los montos leidos de los campos entran a la comparacion contra el tope (D4).
     const veredicto = verificar({
       objetivo: 'confirma el pedido',
+      verbo: 'confirmar pedido',
       pagina: pagina([{ contexto: 'input text total a pagar', valor: '$ 40,000.00' }]),
       politica: { ...POLITICA_PERMISIVA, topeMontoSinConfirmacion: 5000 },
     });

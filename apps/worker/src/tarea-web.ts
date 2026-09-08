@@ -1661,10 +1661,12 @@ function crearGuardiaDeAccion(
        * clase que comparar contra el atlas. Evaluarla igual produciria 'clase_no_corroborada' en
        * todas las acciones: un bloqueo general disfrazado de criterio, no una comprobacion.
        *
-       * LA UNICA EXENCION es esNavegacionDeSoloLectura (D1). Es estrecha a proposito y por eso el
-       * default de produccion es observacion: su asimetria se diseno al reves de la de aqui, y hoy
-       * deja bajo guardia descripciones que son de solo lectura ("busca el correo de ana", "open the
-       * first email"). El modo activo se enciende cuando la medicion diga que ya no cuesta corridas.
+       * LA UNICA EXENCION es esNavegacionDeSoloLectura (D1), que reconoce la CATEGORIA de la accion
+       * (navegar, volver, recargar, esperar, desplazar, observar, leer, abrir, buscar, filtrar,
+       * ordenar, pasar el cursor, cerrar un aviso) y veta cualquier descripcion que consuma o
+       * modifique. Se le pasa SOLO la descripcion: aqui la guardia se interpone ANTES de que el motor
+       * resuelva el elemento, asi que el parametro `elemento` de esa funcion todavia no tiene con
+       * que llenarse y decide la categoria del texto.
        *
        * FUERA DE 'activa' NO DETIENE NADA, sea cual sea el veredicto. Toda esta rama es
        * comportamiento NUEVO: hasta hoy una corrida sin verbo no podia detenerse aqui por ningun

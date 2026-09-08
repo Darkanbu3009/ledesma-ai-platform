@@ -433,11 +433,20 @@ describe('intencion reconocida sin parametro exigido: cero comparaciones no ejec
 // -------------------------------------------------------------------------------------------------
 
 describe('navegacion y lectura reconocidas: pasan sin guardia en los dos modos', () => {
+  // Las cuatro primeras ya pasaban con la exencion por sustantivos. Las seis siguientes son pasos
+  // intermedios que ANTES quedaban bajo guardia y que la exencion por categoria reconoce: son la
+  // razon por la que el modo activo detendria el trabajo legitimo del motor libre.
   const SOLO_LECTURA = [
     'lee el resumen de la bandeja',
     'scroll down to see more messages',
     'click the Enviados link in the Gmail left sidebar',
     'extract the list of unread messages',
+    'busca el correo de ana',
+    'filtra por mensajes no leidos',
+    'open the first email',
+    'click the Search button',
+    'pulsa Enter para ejecutar la busqueda',
+    'cierra el aviso de cookies',
   ];
 
   for (const modo of ['observacion', 'activa'] as const) {

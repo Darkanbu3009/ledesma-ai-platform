@@ -14,6 +14,7 @@ import {
   type ParametrosDeclarados,
 } from './parametros-objetivo.js';
 import { censurarValor } from './censura.js';
+import { VERBOS_ACCION_BLOQUEADA } from './prompt-tarea-web.js';
 import type { PasoCensurado } from './trayectoria.js';
 
 /**
@@ -223,6 +224,31 @@ const TOLERANCIA_MONTO = 0.005;
 /** Moneda del tope configurable. Un monto en otra moneda no es comparable contra un limite en MXN. */
 const MONEDA_DEL_TOPE = 'MXN';
 
+/**
+ * FAMILIAS DE INTENCION QUE MANEJAN DINERO (D4). Fuera de ellas, un campo de dinero LEGIBLE EN
+ * PANTALLA no dispara nada: el tope acota lo que la accion COMPROMETE, y una corrida que no paga, no
+ * transfiere y no compra no compromete el numero que la pagina muestre.
+ *
+ * EL DEFECTO QUE CIERRA, encontrado por la misma medicion que amplio la exencion de solo lectura: el
+ * tope por defecto es 0 (POLITICA_EJECUCION_DEFAULT, contrato.ts) y la comparacion es `> tope`, asi
+ * que CUALQUIER monto mayor que cero lo excede. Con la guardia sin intencion en modo activo, la
+ * corrida de un objetivo que no toca dinero llegaba aqui con los montos que montosEnCampos lee de la
+ * pagina (un total, un precio, un subtotal en un campo del sitio) y se detenia con topeExcedido sin
+ * tener nada que ver con pagar.
+ *
+ * QUE NO SE RELAJA. El monto que el USUARIO declaro en su objetivo (`parametros.monto`) se compara
+ * SIEMPRE, en cualquier familia y tambien sin intencion reconocida: ese numero no es un campo legible
+ * de la pagina, es lo que la persona pidio comprometer, y dejar de compararlo si seria un hueco.
+ */
+const FAMILIAS_CON_DINERO: ReadonlySet<string> = new Set(['pagar', 'transferir', 'comprar']);
+
+/** ¿El verbo del objetivo pertenece a una familia que mueve dinero? Sin verbo, jamas. */
+function laIntencionManejaDinero(verbo: string | null): boolean {
+  if (verbo === null) return false;
+  const familia = VERBOS_ACCION_BLOQUEADA.find((v) => v.verbo === verbo)?.accion;
+  return familia !== undefined && FAMILIAS_CON_DINERO.has(familia);
+}
+
 /** Detencion sin comparaciones (los criterios que ni llegan a comparar: politica y dato faltante). */
 function detener(detencion: DetencionDeVerificacion): Veredicto {
   return { tipo: 'detener', detencion, comparaciones: [] };
@@ -249,6 +275,10 @@ function camposDeDestinatario(campos: CampoDeLaPagina[]): CampoDeLaPagina[] {
  *
  * El texto libre de la pagina NO entra aca a proposito: los precios de un catalogo dispararian el
  * tope en cada tarea. El tope acota lo que la accion COMPROMETE, no lo que la pagina muestra.
+ *
+ * D4: quien decide si estos montos se COMPARAN contra el tope es verificarAccion, y solo lo hace
+ * cuando la intencion del usuario maneja dinero. Un campo de dinero legible en una corrida que no
+ * paga, no transfiere y no compra no es algo que la accion comprometa.
  */
 export function montosEnCampos(campos: CampoDeLaPagina[]): MontoDeclarado[] {
   const montos: MontoDeclarado[] = [];
@@ -293,7 +323,8 @@ function textosDeLaPagina(pagina: EstadoDeLaPagina): string[] {
  *  2. el dominio esta excluido;
  *  3. la accion exige un dato que el objetivo nunca declaro;
  *  4. no se pudo leer la pagina (nunca se ejecuta a ciegas) -> 'noLeible';
- *  5. un monto comprometido supera el tope configurado;
+ *  5. un monto comprometido supera el tope configurado (los de los campos, solo si la intencion
+ *     maneja dinero: ver FAMILIAS_CON_DINERO);
  *  6. algun parametro declarado tiene en pantalla un valor DISTINTO del pedido;
  *  6.5. el campo de un parametro declarado existe pero no se pudo leer -> 'noLeible' (CAMBIO 2);
  *  6.6. no se comparo NI UN dato contra la pagina y la accion no es de solo lectura (D2);
@@ -351,10 +382,18 @@ export function verificarAccion(entrada: {
     });
   }
 
-  // 5. TOPE: los montos que la accion comprometeria (los del objetivo y los de los campos). Un monto
-  //    en una moneda distinta a la del tope NO es comparable contra un limite en MXN: se detiene
-  //    (falla cerrada), nunca se asume que "30 USD" cabe en un tope de 500.
-  const montos = [...(parametros.monto ? [parametros.monto] : []), ...montosEnCampos(pagina.campos)];
+  // 5. TOPE: los montos que la accion comprometeria. Un monto en una moneda distinta a la del tope NO
+  //    es comparable contra un limite en MXN: se detiene (falla cerrada), nunca se asume que "30 USD"
+  //    cabe en un tope de 500.
+  //
+  //    D4: los montos LEIDOS DE LOS CAMPOS solo entran cuando la intencion del usuario mueve dinero.
+  //    Fuera de esas familias un total o un precio visible en pantalla no es algo que la accion
+  //    comprometa, y con el tope por defecto en 0 detenia corridas que no tenian nada que ver con
+  //    pagar. El monto que el objetivo DECLARA se compara siempre (ver FAMILIAS_CON_DINERO).
+  const montos = [
+    ...(parametros.monto ? [parametros.monto] : []),
+    ...(laIntencionManejaDinero(entrada.verbo) ? montosEnCampos(pagina.campos) : []),
+  ];
   for (const monto of montos) {
     const superaElTope = monto.valor > politica.topeMontoSinConfirmacion;
     const monedaDistinta = monto.moneda !== null && monto.moneda !== MONEDA_DEL_TOPE;
