@@ -1,3 +1,4 @@
+import { nombreCoincidePorPrefijo } from './localizacion.js';
 import { normalizarTexto } from './parametros-objetivo.js';
 import { VERBOS_ACCION_BLOQUEADA } from './prompt-tarea-web.js';
 
@@ -186,9 +187,15 @@ export function verificarIdentidadDeElemento(entrada: EntradaDeIdentidad): Vered
   if (nombreAccesible !== null) {
     const declarado = nombreDeLaClase(claseDeclarada);
     if (declarado === null) return { tipo: 'bloquear', motivo: 'clase_no_corroborada' };
-    // Por PREFIJO: el nombre de la clase viene truncado a MAX_NOMBRE_ATLAS y el aria-label real lleva
-    // sufijos que la clase no puede tener ("Enviar" contra "Enviar (Ctrl-Enter)").
-    if (!normalizarTexto(nombreAccesible).startsWith(declarado)) {
+    // Por PREFIJO Y HASTA UN LIMITE DE PALABRA (`nombreCoincidePorPrefijo`, localizacion.ts): el
+    // nombre de la clase viene truncado a MAX_NOMBRE_ATLAS y el aria-label real lleva sufijos que
+    // la clase no puede tener ("Enviar" contra "Enviar (Ctrl-Enter)"), pero el prefijo NO puede
+    // cortar una palabra por la mitad. Con `startsWith` pelado, una clase "para" daba por buena una
+    // barra "Parar reproduccion" y una clase "enviar" un boton "Enviarme una copia": otro control,
+    // otra accion y el mismo veredicto 'permitir'. El criterio es EL MISMO con el que el resolutor
+    // de estrategias encuentra el elemento dentro de la pagina; tenerlo distinto a cada lado
+    // significaba que la barrera aceptaba identidades que el resolutor jamas habria resuelto.
+    if (!nombreCoincidePorPrefijo(nombreAccesible, declarado)) {
       return { tipo: 'bloquear', motivo: 'clase_distinta' };
     }
   }

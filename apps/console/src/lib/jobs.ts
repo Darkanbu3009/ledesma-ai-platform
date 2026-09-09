@@ -57,6 +57,11 @@ export interface JobActivity {
    */
   sitioCambio?: boolean;
   /**
+   * La guardia con criterio generico corrio en MODO OBSERVACION y HABRIA detenido esta tarea: no se
+   * detuvo nada. Lo deriva el backend de jobs.resultado; aqui solo se pinta.
+   */
+  guardiaHabriaDetenido?: boolean;
+  /**
    * La tarea web termino con exito corriendo con el motor y su registro alcanza para GUARDARLA como
    * tarea aprendida (todavia sin guardar). Lo deriva el backend; ausente = no ofrecer el boton.
    */

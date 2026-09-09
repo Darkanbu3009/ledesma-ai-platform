@@ -123,7 +123,20 @@ export type MarcadorParametro =
   | 'lugar'
   | 'nombre';
 
-const MARCADORES: readonly MarcadorParametro[] = [
+/**
+ * EL VOCABULARIO COMPLETO de marcadores, en su orden canonico: es lo que un paso de receta puede
+ * teclear y lo que la interpretacion del objetivo puede resolver. Se EXPORTA porque otros modulos
+ * necesitan recorrerlo y derivar de el en vez de volver a escribirlo a mano.
+ *
+ * NO ES LA COTA DE LA BUSQUEDA. Desde V045 el vocabulario esta PARTIDO (ver `MARCADORES_NUCLEO`
+ * abajo) y la clave de identidad de una plantilla solo lleva el nucleo, asi que los conjuntos que
+ * `marcadores_clave` puede tomar son los subconjuntos del NUCLEO y no los de esta lista: es de
+ * `MARCADORES_NUCLEO.length` de donde se derivan MAX_CLAVES_DE_MARCADORES (worker) y
+ * MAX_FILAS_DE_DIAGNOSTICO (backend). Derivarlas -- de la lista que corresponda -- es lo que impide
+ * que se vuelvan a desincronizar: cuando esta lista paso de seis a nueve, las copias escritas a mano
+ * se quedaron en 2^6.
+ */
+export const MARCADORES: readonly MarcadorParametro[] = [
   'destinatario',
   'monto',
   'producto',

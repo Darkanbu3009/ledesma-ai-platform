@@ -27,6 +27,7 @@ import {
   detectarAccionQueExigeVerificacion,
   detectarControlDeVentana,
   detectarVerboBloqueado,
+  esNavegacionDeSoloLectura,
   type DesenlaceTareaWeb,
 } from './prompt-tarea-web.js';
 import {
@@ -48,12 +49,15 @@ import {
   accionSurtioEfecto,
   construirPasoDeBloqueo,
   construirPasoDeVerificacion,
+  esDetencionSinEvidencia,
   formularioVerificadoPresente,
   mensajeDeDetencion,
   mensajeDeIncompleto,
+  resumenDeGuardiaSinIntencion,
   verificarAccion,
   type CampoDeLaPagina,
   type EstadoDeLaPagina,
+  type ModoGuardiaSinIntencion,
   type PoliticaVigente,
   type RepositorioPoliticasParaWorker,
   type Veredicto,
@@ -770,6 +774,11 @@ export interface TareaWebDeps {
    * 'apagada': la barrera ni se evalua y la ejecucion por receta corre exactamente como antes.
    */
   barreraIdentidad?: ModoBarreraIdentidad | undefined;
+  /**
+   * GUARDIA CON CRITERIO GENERICO (TAREA_WEB_GUARDIA_SIN_INTENCION, verificacion.ts). Ausente =
+   * 'apagada': ni se evalua y la corrida se comporta exactamente como antes de este cambio.
+   */
+  guardiaSinIntencion?: ModoGuardiaSinIntencion | undefined;
   /** Deadline de pared de la tarea, en ms (TAREA_WEB_TIMEOUT_SECONDS * 1000). */
   runTimeoutMs: number;
   /** Resuelve y descifra la credencial del owner (la key del modelo sale de la boveda). */
@@ -1129,6 +1138,10 @@ function detencionPorDatosIncompletos(faltantes: string[]): Extract<Veredicto, {
  *
  * El modelo no participa de ninguno de los tres insumos: la politica sale de la base, los parametros
  * del texto del usuario y los valores del DOM leido en un mundo aislado.
+ *
+ * ES TAMBIEN el unico punto donde se aplica el MODO de la guardia sin intencion (D3): los cuatro
+ * caminos que comparan pasan por aqui, asi que la exigencia de D2 y su reversion en modo observacion
+ * se escriben una sola vez y ningun camino puede quedarse atras.
  */
 async function resolverVerificacion(
   deps: TareaWebDeps,
@@ -1148,21 +1161,95 @@ async function resolverVerificacion(
      * contra lo que se va a hacer. Ausente = el extractor determinista de siempre.
      */
     parametros?: ParametrosDeclarados | null | undefined;
+    /**
+     * D2: la accion que se va a verificar NO es de solo lectura, asi que cero comparaciones no puede
+     * resolver 'ejecutar'. Lo pasan los cuatro caminos que preceden a una accion; la exencion de
+     * navegacion y lectura ya se resolvio antes de llegar aqui.
+     */
+    exigeComparacion?: boolean;
   },
-): Promise<{ veredicto: Veredicto; pagina: EstadoDeLaPagina | null }> {
+): Promise<ResolucionDeVerificacion> {
   if (opciones.politica === null) {
-    return { veredicto: detencionDirecta('politicaNoDisponible'), pagina: null };
+    return { veredicto: detencionDirecta('politicaNoDisponible'), pagina: null, habriaDetenido: false };
   }
+  const modo = deps.guardiaSinIntencion ?? 'apagada';
   const pagina = await leerEstadoDeLaPagina(deps, job, sesionExternaId);
-  return {
-    veredicto: verificarAccion({
-      politica: opciones.politica,
-      dominio: sitio.dominio,
-      verbo: opciones.verboBloqueado,
-      parametros: opciones.parametros ?? extraerParametrosDeclarados(opciones.textoParametros),
-      pagina,
-    }),
+  const veredicto = verificarAccion({
+    politica: opciones.politica,
+    dominio: sitio.dominio,
+    verbo: opciones.verboBloqueado,
+    parametros: opciones.parametros ?? extraerParametrosDeclarados(opciones.textoParametros),
     pagina,
+    exigeComparacion: opciones.exigeComparacion === true && modo !== 'apagada',
+  });
+  // MODO OBSERVACION (D3): el veredicto se calcula IGUAL y no detiene nada. Solo se revierte la
+  // detencion NUEVA de D2; cualquier otra es anterior a este cambio y se aplica en los tres modos.
+  if (modo !== 'activa' && esDetencionSinEvidencia(veredicto)) {
+    deps.logger.warn(
+      'tarea web: la guardia con criterio generico HABRIA detenido la accion (modo observacion); no se detuvo nada',
+      { jobId: job.id, connectionId: sitio.id, dominio: sitio.dominio, verbo: opciones.verboBloqueado },
+    );
+    return { veredicto: { tipo: 'ejecutar', comparaciones: [] }, pagina, habriaDetenido: true };
+  }
+  return { veredicto, pagina, habriaDetenido: false };
+}
+
+/**
+ * El resultado de una verificacion mas la telemetria de D3: `habriaDetenido` es true cuando el modo
+ * observacion revirtio una detencion por cero comparaciones. El veredicto que sale ya es el que hay
+ * que aplicar, en cualquiera de los tres modos: ningun llamador vuelve a mirar el modo.
+ */
+interface ResolucionDeVerificacion {
+  veredicto: Veredicto;
+  pagina: EstadoDeLaPagina | null;
+  habriaDetenido: boolean;
+}
+
+/**
+ * LO QUE EL MODO OBSERVACION MIDE (D3), acumulado a lo largo de TODA la corrida (los tres caminos y
+ * los tramos multisitio escriben aca). Es el numero que responde la unica pregunta que decide si el
+ * modo activo se puede encender: cuantas acciones reales habria detenido este cambio.
+ */
+export interface ObservacionDeLaGuardia {
+  /**
+   * Acciones que la regla nueva HABRIA detenido y no detuvo. Cuenta por los DOS caminos: el criterio
+   * generico de una corrida sin intencion reconocida y la exigencia de comparar de una intencion
+   * reconocida que no exige parametros.
+   */
+  habriaDetenido: number;
+  /**
+   * Acciones que la guardia juzgo CON EL CRITERIO GENERICO, es decir, las de una corrida sin
+   * intencion reconocida y no exentas. Una corrida con verbo no suma aqui: ahi juzga la verificacion
+   * de siempre, que ya corria antes de este cambio.
+   */
+  evaluadas: number;
+}
+
+/** El acumulador de una corrida, en cero. */
+function crearObservacionDeLaGuardia(): ObservacionDeLaGuardia {
+  return { habriaDetenido: 0, evaluadas: 0 };
+}
+
+/**
+ * EL ESCALAR de la observacion para jobs.resultado (D4), del que /actividad deriva su aviso en
+ * lenguaje llano. Solo viaja cuando hubo algo que contar: una corrida que no toco la guardia generica
+ * deja el resultado exactamente como antes de este cambio.
+ *
+ * Vocabulario CERRADO y numeros: ni un dato del usuario, ni una descripcion del modelo, ni nada leido
+ * de la pagina. Lo escriben SOLO los cierres exitosos: en modo activo una detencion cierra la corrida
+ * por otro camino y su motivo ya viaja en el last_error.
+ */
+function escalarDeLaObservacion(
+  observacion: ObservacionDeLaGuardia,
+  modo: ModoGuardiaSinIntencion,
+): { guardiaSinIntencion?: { modo: string; evaluadas: number; habriaDetenido: number } } {
+  if (observacion.evaluadas === 0 && observacion.habriaDetenido === 0) return {};
+  return {
+    guardiaSinIntencion: {
+      modo,
+      evaluadas: observacion.evaluadas,
+      habriaDetenido: observacion.habriaDetenido,
+    },
   };
 }
 
@@ -1258,6 +1345,47 @@ function construirPasoDeIdentidad(
     accion: {
       tipo: etiqueta,
       instruccion: `barrera de identidad sobre la accion del motor: ${censurarTexto(accion)}`,
+      metodo: null,
+      argumentos,
+    },
+    selector: null,
+    valorCensurado: null,
+    estrategias: [],
+    url: null,
+    exito,
+  };
+}
+
+/**
+ * PASO SINTETICO de la GUARDIA CON CRITERIO GENERICO en la traza (D4), hermano del de la barrera de
+ * identidad y con el mismo criterio de lectura: en observacion la etiqueta dice HABRIA_DETENIDO y el
+ * paso queda con exito true, porque la accion siguio su camino y marcarlo fallido leeria como si algo
+ * no hubiera corrido.
+ *
+ * `argumentos` lleva VOCABULARIO CERRADO y nada mas: el motivo de la detencion y, en observacion, la
+ * constancia de que no se detuvo nada. Ni un dato del usuario ni nada leido de la pagina.
+ */
+function construirPasoDeGuardiaGenerica(
+  accion: string,
+  resolucion: ResolucionDeVerificacion,
+): PasoCensurado {
+  const { etiqueta, exito } = resumenDeGuardiaSinIntencion(resolucion);
+  const argumentos: string[] = [];
+  if (resolucion.veredicto.tipo === 'detener') {
+    argumentos.push(resolucion.veredicto.detencion.motivo);
+  } else if (resolucion.habriaDetenido) {
+    // El modo ya revirtio la detencion de D2 a 'ejecutar', asi que el motivo hay que nombrarlo aqui:
+    // es el mismo del contrato con la consola, no una etiqueta nueva.
+    argumentos.push('sinEvidenciaParaComparar');
+  }
+  if (resolucion.habriaDetenido) argumentos.push('modo observacion: no se detuvo nada');
+  return {
+    idx: 0,
+    accion: {
+      tipo: etiqueta,
+      instruccion:
+        'guardia sin intencion reconocida: la accion se evaluo con el criterio generico: ' +
+        censurarTexto(accion),
       metodo: null,
       argumentos,
     },
@@ -1367,6 +1495,11 @@ function crearGuardiaDeAccion(
      * Ausente = la barrera NO se evalua y la guardia se comporta exactamente como antes.
      */
     barreraIdentidad?: BarreraDeIdentidadParaGuardia | undefined;
+    /**
+     * TELEMETRIA de la guardia con criterio generico (D3), COMPARTIDA por toda la corrida: una tarea
+     * multisitio crea una guardia por tramo y lo que se reporta al final es la corrida entera.
+     */
+    observacion?: ObservacionDeLaGuardia | undefined;
   },
 ): GuardiaDeTareaWeb {
   const verificaciones: VerificacionEnLaTraza[] = [];
@@ -1389,6 +1522,15 @@ function crearGuardiaDeAccion(
   const bloquear = (veredicto: Extract<Veredicto, { tipo: 'detener' }>): VeredictoDeGuardia => {
     mensajeDeBloqueo = mensajeDeDetencion(veredicto);
     return { tipo: 'bloquear', mensaje: mensajeDeBloqueo };
+  };
+  /**
+   * TELEMETRIA DE OBSERVACION (D3) sobre la accion IRREVERSIBLE del objetivo: cuando el modo revirtio
+   * una detencion por cero comparaciones, queda contada. `evaluadas` no sube por este camino: el
+   * criterio generico no fue el que juzgo esta accion, la verificacion de siempre si.
+   */
+  const contarObservacion = (habriaDetenido: boolean): void => {
+    if (!habriaDetenido || opciones.observacion === undefined) return;
+    opciones.observacion.habriaDetenido += 1;
   };
 
   return {
@@ -1505,6 +1647,93 @@ function crearGuardiaDeAccion(
         });
         return bloquear(detencionPorIdentidad(resultado.motivo));
       };
+      /**
+       * GUARDIA CON CRITERIO GENERICO, para la corrida cuya INTENCION EL SISTEMA NO RECONOCE (D1).
+       *
+       * QUE JUZGA. Lo unico que hay cuando no hay verbo: la POLITICA del usuario (acciones apagadas,
+       * dominio excluido, tope de monto), que la pagina se pueda leer, y la COMPARACION de los datos
+       * que el objetivo SI declaro. Es la misma verificacion determinista de siempre -- no hay un
+       * criterio nuevo ni mas laxo -- corriendo donde antes no corria nada.
+       *
+       * QUE NO JUZGA, y es la limitacion honesta de este camino: la IDENTIDAD del control. La barrera
+       * necesita la familia del verbo para saber que buscar en el DOM (nombresDeLaFamilia devuelve la
+       * lista vacia sin verbo), asi que sin intencion reconocida no hay nombre accesible que leer ni
+       * clase que comparar contra el atlas. Evaluarla igual produciria 'clase_no_corroborada' en
+       * todas las acciones: un bloqueo general disfrazado de criterio, no una comprobacion.
+       *
+       * LA UNICA EXENCION es esNavegacionDeSoloLectura (D1). Es estrecha a proposito y por eso el
+       * default de produccion es observacion: su asimetria se diseno al reves de la de aqui, y hoy
+       * deja bajo guardia descripciones que son de solo lectura ("busca el correo de ana", "open the
+       * first email"). El modo activo se enciende cuando la medicion diga que ya no cuesta corridas.
+       *
+       * FUERA DE 'activa' NO DETIENE NADA, sea cual sea el veredicto. Toda esta rama es
+       * comportamiento NUEVO: hasta hoy una corrida sin verbo no podia detenerse aqui por ningun
+       * motivo, ni siquiera por la politica del usuario, asi que aplicar cualquiera de ellos en
+       * observacion cambiaria el desenlace de corridas reales, que es justo lo que el modo evita.
+       *
+       * DEVUELVE null salvo que haya que cortar: en observacion cuenta, registra y deja pasar.
+       */
+      const revisarSinIntencion = async (): Promise<VeredictoDeGuardia | null> => {
+        const modo = deps.guardiaSinIntencion ?? 'apagada';
+        if (modo === 'apagada') return null;
+        // Navegacion y lectura reconocidas: pasan sin guardia y SIN paso en la traza. Son la mayoria
+        // de las acciones de una corrida y anotarlas una por una haria ilegible la tarjeta.
+        if (esNavegacionDeSoloLectura(accion)) return null;
+        let resolucion: ResolucionDeVerificacion;
+        try {
+          resolucion = await resolverVerificacion(deps, job, sitio, sesionExternaId, {
+            politica: opciones.politica,
+            // NULL a proposito: sin verbo no hay parametro exigido y no se inventa uno.
+            verboBloqueado: null,
+            textoParametros: opciones.textoParametros,
+            exigeComparacion: true,
+          });
+        } catch (error) {
+          // Falla CERRADA, igual que el resto de la guardia: si la comprobacion no se pudo completar,
+          // la accion no pasa. Se arma como cualquier otra detencion para que cuente y quede en la
+          // traza tambien en observacion, donde ademas no detiene nada.
+          deps.logger.error('tarea web: la guardia con criterio generico fallo', {
+            jobId: job.id,
+            connectionId: sitio.id,
+            err: describir(error),
+          });
+          resolucion = {
+            veredicto: detencionDirecta('politicaNoDisponible'),
+            pagina: null,
+            habriaDetenido: false,
+          };
+        }
+        // EN OBSERVACION todo veredicto de detencion es un "habria": el que el modo ya revirtio
+        // (cero comparaciones) y los que este camino nunca aplico hasta hoy (politica, tope, dato
+        // que no coincide, pagina ilegible).
+        const habriaDetenido =
+          modo !== 'activa' && (resolucion.habriaDetenido || resolucion.veredicto.tipo === 'detener');
+        const observacion = opciones.observacion;
+        if (observacion !== undefined) {
+          observacion.evaluadas += 1;
+          if (habriaDetenido) observacion.habriaDetenido += 1;
+        }
+        verificaciones.push({
+          accionesPrevias,
+          paso: construirPasoDeGuardiaGenerica(accion, { ...resolucion, habriaDetenido }),
+        });
+        if (modo !== 'activa') return null;
+        // INCOMPLETO NO DETIENE por este camino, y es deliberado: sin intencion reconocida no se
+        // sabe cual de las acciones es la que consuma, y bloquear cada una hasta que todos los datos
+        // esten en pantalla dejaria a la corrida sin forma de escribirlos (el dato llega a la pagina
+        // justamente actuando). Sigue siendo mas estricto que el `return permitir` de antes: lo que
+        // no pasa es una accion sin NADA que comparar, o con un dato que NO COINCIDE.
+        if (resolucion.veredicto.tipo !== 'detener') return null;
+        deps.logger.warn('tarea web: la guardia con criterio generico detuvo la accion', {
+          jobId: job.id,
+          connectionId: sitio.id,
+          dominio: sitio.dominio,
+          motivo: resolucion.veredicto.detencion.motivo,
+        });
+        // No pasa por registrarRechazo: el paso de arriba YA dejo la decision en la traza, con su
+        // motivo y con exito false. Dos pasos para el mismo rechazo leerian como dos rechazos.
+        return bloquear(resolucion.veredicto);
+      };
       // CONTROLES DE VENTANA DEL FORMULARIO (FIX A): pantalla completa, expandir, minimizar,
       // restaurar y cerrar quedan fuera del alcance del agente salvo que el objetivo del usuario los
       // pida. Se evalua ANTES que todo lo demas -- el corte por objetivo sin verbo bloqueado incluido
@@ -1523,7 +1752,18 @@ function crearGuardiaDeAccion(
         );
         return { tipo: 'rechazar', mensaje: MENSAJE_CONTROL_DE_VENTANA };
       }
-      if (opciones.verboBloqueado === null) return permitir({ tipo: 'permitir' });
+      // SIN INTENCION RECONOCIDA, LA GUARDIA NO DEJA PASAR SIN COMPARAR (D1). Aqui estaba el
+      // `return permitir` incondicional: un objetivo cuya intencion no cae en el vocabulario cerrado
+      // de ocho verbos dejaba pasar TODAS sus acciones sin comparar una sola contra la pagina. De 16
+      // peticiones realistas medidas sobre siete familias de interfaz, 16 caian por aqui (desactiva,
+      // archiva, revoca, da de baja, vacia la papelera, reinicia). Una intencion que el sistema no
+      // reconoce jamas puede resultar en tratar la accion como reversible: hay guardia con criterio
+      // generico, nunca ausencia de guardia.
+      if (opciones.verboBloqueado === null) {
+        const corte = await revisarSinIntencion();
+        if (corte !== null) return corte;
+        return permitir({ tipo: 'permitir' });
+      }
       if (opciones.control?.signal?.aborted === true) {
         // NO cuenta como bloqueo de la guardia (`bloqueo()` sigue en null): no es una detencion de
         // la verificacion, es una cancelacion del dueno, y su cierre ya lo escribio quien cancelo.
@@ -1576,11 +1816,21 @@ function crearGuardiaDeAccion(
           return { tipo: 'rechazar', mensaje: MENSAJE_BLOQUEO_TERMINAL };
         }
         try {
-          const { veredicto, pagina } = await resolverVerificacion(deps, job, sitio, sesionExternaId, {
-            politica: opciones.politica,
-            verboBloqueado: opciones.verboBloqueado,
-            textoParametros: opciones.textoParametros,
-          });
+          const { veredicto, pagina, habriaDetenido } = await resolverVerificacion(
+            deps,
+            job,
+            sitio,
+            sesionExternaId,
+            {
+              politica: opciones.politica,
+              verboBloqueado: opciones.verboBloqueado,
+              textoParametros: opciones.textoParametros,
+              // D2 tambien sobre la intencion RECONOCIDA: llegar aqui ya significa que esta accion es
+              // la irreversible del objetivo, asi que no es de solo lectura por construccion.
+              exigeComparacion: true,
+            },
+          );
+          contarObservacion(habriaDetenido);
           // DOBLE SEGURIDAD (FIX A): si el formulario con los datos verificados YA NO esta, la
           // accion probablemente surtio efecto con retraso. NO se reintenta (seria el doble envio);
           // la corrida termina pidiendole al usuario que verifique el resultado en el sitio.
@@ -1630,11 +1880,21 @@ function crearGuardiaDeAccion(
         }
       }
       try {
-        const { veredicto, pagina } = await resolverVerificacion(deps, job, sitio, sesionExternaId, {
-          politica: opciones.politica,
-          verboBloqueado: opciones.verboBloqueado,
-          textoParametros: opciones.textoParametros,
-        });
+        const { veredicto, pagina, habriaDetenido } = await resolverVerificacion(
+          deps,
+          job,
+          sitio,
+          sesionExternaId,
+          {
+            politica: opciones.politica,
+            verboBloqueado: opciones.verboBloqueado,
+            textoParametros: opciones.textoParametros,
+            // D2 sobre la intencion RECONOCIDA: es el hueco que la medicion encontro en borrar y en
+            // publicar, que no exigen ningun parametro y resolvian 'ejecutar' sin comparar nada.
+            exigeComparacion: true,
+          },
+        );
+        contarObservacion(habriaDetenido);
         // El resultado queda como UN PASO de la trayectoria (valores comparados + veredicto), ya
         // censurado, en el punto exacto del flujo en que se comparo.
         verificaciones.push({ accionesPrevias, paso: construirPasoDeVerificacion(veredicto) });
@@ -2232,6 +2492,8 @@ async function ejecutarPorReceta(
     datos?: { valores: ValoresDeParametros; parametros: ParametrosDeclarados } | undefined;
     /** ATLAS DE SITIOS (V040): pistas de localizacion del dominio. Ausente = como antes de V040. */
     atlas?: LectorDelAtlas | null | undefined;
+    /** TELEMETRIA de la guardia con criterio generico (D3), compartida por toda la corrida. */
+    observacion?: ObservacionDeLaGuardia | undefined;
   },
 ): Promise<DesenlaceDelCaminoPorReceta> {
   const recetas = deps.recetas;
@@ -2262,7 +2524,7 @@ async function ejecutarPorReceta(
       // La verificacion corre contra el DOM del sitio en el que la receta esta AHORA, con el
       // dominio de ESE sitio (la politica del usuario se aplica por dominio).
       const sitioActivo = opciones.gestor?.porDominio(activo.dominio) ?? sitio;
-      const { veredicto } = await resolverVerificacion(
+      const { veredicto, habriaDetenido } = await resolverVerificacion(
         deps,
         job,
         sitioActivo,
@@ -2271,10 +2533,16 @@ async function ejecutarPorReceta(
           politica: opciones.politica,
           verboBloqueado: opciones.verboBloqueado,
           textoParametros: opciones.textoParametros,
+          // D2: este paso precede a la accion irreversible que la receta aprendio (D7), asi que no
+          // es de solo lectura y cero comparaciones no puede resolver 'ejecutar'.
+          exigeComparacion: true,
           // Los datos que la eleccion resolvio son los MISMOS que se comparan contra la pagina.
           parametros: opciones.datos?.parametros ?? null,
         },
       );
+      if (habriaDetenido && opciones.observacion !== undefined) {
+        opciones.observacion.habriaDetenido += 1;
+      }
       if (veredicto.tipo === 'ejecutar') return { tipo: 'ejecutar' };
       return {
         tipo: 'detener',
@@ -3514,6 +3782,8 @@ async function ejecutarPorPlantilla(
     parametros: ParametrosDeclarados;
     control?: ControlDeTareaWeb | undefined;
     atlas?: LectorDelAtlas | null | undefined;
+    /** TELEMETRIA de la guardia con criterio generico (D3), compartida por toda la corrida. */
+    observacion?: ObservacionDeLaGuardia | undefined;
   },
 ): Promise<DesenlaceDelCaminoPorReceta> {
   const determinista = deps.determinista;
@@ -3528,7 +3798,7 @@ async function ejecutarPorPlantilla(
     navegador: determinista,
     escalador: ESCALADOR_DESHABILITADO,
     verificar: async (activo): Promise<VeredictoDeVerificacion> => {
-      const { veredicto, pagina } = await resolverVerificacion(
+      const { veredicto, pagina, habriaDetenido } = await resolverVerificacion(
         deps,
         job,
         sitio,
@@ -3537,6 +3807,10 @@ async function ejecutarPorPlantilla(
           politica: opciones.politica,
           verboBloqueado: opciones.verboBloqueado,
           textoParametros: opciones.textoParametros,
+          // D2: el paso `verificar` de una plantilla precede a su accion irreversible, igual que en
+          // una receta propia. Cero comparaciones no puede resolver 'ejecutar' sobre un
+          // procedimiento que ademas descubrio otra cuenta.
+          exigeComparacion: true,
           // LOS DATOS DE ESTA CORRIDA, que son los MISMOS que la plantilla teclea. Con los del
           // extractor determinista es exactamente lo que esta funcion calcularia sola; con los que
           // resolvio el modelo (FIX E) es lo unico que hace que se compare contra la pagina lo que se
@@ -3545,6 +3819,9 @@ async function ejecutarPorPlantilla(
         },
       );
       foto.antes = pagina;
+      if (habriaDetenido && opciones.observacion !== undefined) {
+        opciones.observacion.habriaDetenido += 1;
+      }
       if (veredicto.tipo === 'ejecutar') return { tipo: 'ejecutar' };
       return {
         tipo: 'detener',
@@ -4357,6 +4634,10 @@ export async function procesarTareaWeb(
   // ESTADO POR SITIO del cupo de accion irreversible. Vive fuera de las guardias porque una tarea
   // multisitio crea una guardia por tramo y el cupo NO se reabre al volver a un sitio ya visitado.
   const registro: RegistroDeSitios = crearRegistroDeSitios();
+  // TELEMETRIA DE LA GUARDIA SIN INTENCION (D3): la comparte la corrida entera -- los tres caminos y
+  // todos los tramos multisitio -- porque lo que se reporta al final es cuantas acciones de ESTA
+  // tarea habrian sido detenidas, no cuantas de un tramo.
+  const observacion = crearObservacionDeLaGuardia();
 
   // ATLAS DE SITIOS (V040): lo que la plataforma ya observo de la ESTRUCTURA de los dominios que esta
   // tarea autoriza, ya filtrado por la regla de corroboracion contra el origen de esta corrida. Se lee
@@ -4451,6 +4732,7 @@ export async function procesarTareaWeb(
         // abandona y la tarea la termina el motor.
         gestor,
         atlas,
+        observacion,
         ...(elegida !== null
           ? { datos: { valores: elegida.valores, parametros: elegida.parametros } }
           : {}),
@@ -4622,6 +4904,7 @@ export async function procesarTareaWeb(
             parametros: parametrosDelObjetivo,
             control,
             atlas,
+            observacion,
           },
         );
         if (porPlantilla.tipo === 'completada') {
@@ -4639,6 +4922,8 @@ export async function procesarTareaWeb(
             // D6 (resiliencia): una variante coexistente se descarto por desajuste antes de que
             // esta se ejecutara. El sitio cambio para parte de sus usuarios y el agente lo noto.
             ...(huboDesajusteDeInterfaz ? { desajusteDeInterfaz: true } : {}),
+            // D4 (guardia sin intencion): la misma constancia que deja el cierre por motor.
+            ...escalarDeLaObservacion(observacion, deps.guardiaSinIntencion ?? 'apagada'),
           });
           return 'completada';
         }
@@ -4712,6 +4997,9 @@ export async function procesarTareaWeb(
           clasesCorroboradas: (dominio: string): ReadonlySet<string> =>
             atlas?.clasesCorroboradas(dominio) ?? new Set<string>(),
         },
+        // GUARDIA SIN INTENCION RECONOCIDA (TAREA_WEB_GUARDIA_SIN_INTENCION): el acumulador de la
+        // corrida entera, no el del tramo. El modo lo lee la guardia de `deps`.
+        observacion,
       });
       const enCurso = activo;
       try {
@@ -5004,6 +5292,9 @@ export async function procesarTareaWeb(
       // sola (motor libre + reaprendizaje). Es el escalar del que la tarjeta de /actividad deriva su
       // aviso en lenguaje llano; ausente cuando no hubo desajuste, para no tocar ningun resultado.
       ...(huboDesajusteDeInterfaz ? { desajusteDeInterfaz: true } : {}),
+      // D4 (guardia sin intencion): cuantas acciones evaluo el criterio generico y cuantas HABRIA
+      // detenido. Ausente cuando no evaluo ninguna, para no tocar el resultado de las demas.
+      ...escalarDeLaObservacion(observacion, deps.guardiaSinIntencion ?? 'apagada'),
     });
     deps.logger.info('tarea web completada dentro de la sesion del sitio', {
       jobId: job.id,

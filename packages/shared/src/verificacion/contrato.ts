@@ -87,6 +87,10 @@ export const MODELO_SIN_ACCESO_PREFIX = 'MODELO_SIN_ACCESO:';
  *    encadenan verificaciones dentro de la misma corrida.
  *  - politicaNoDisponible: no se pudieron leer las preferencias del usuario. Se detiene (nunca se
  *    asume permiso) y se le pide reintentar.
+ *  - sinEvidenciaParaComparar: la accion NO es de solo lectura y el sistema no pudo comparar NI UN
+ *    dato contra la pagina, porque el objetivo no declaro ninguno que se pueda leer del sitio. Es la
+ *    inversion del default: antes, cero comparaciones se leia como "todo en orden" y la accion
+ *    pasaba; hoy una accion sobre la que no se comparo nada no se ejecuta.
  */
 export type MotivoDetencion =
   | 'noCoincide'
@@ -96,7 +100,8 @@ export type MotivoDetencion =
   | 'sitioExcluido'
   | 'accionesDesactivadas'
   | 'otraAccion'
-  | 'politicaNoDisponible';
+  | 'politicaNoDisponible'
+  | 'sinEvidenciaParaComparar';
 
 const MOTIVOS: readonly MotivoDetencion[] = [
   'noCoincide',
@@ -107,6 +112,7 @@ const MOTIVOS: readonly MotivoDetencion[] = [
   'accionesDesactivadas',
   'otraAccion',
   'politicaNoDisponible',
+  'sinEvidenciaParaComparar',
 ];
 
 /** Dato que la accion necesitaba y el objetivo no declaro. Nombres de NEGOCIO, no de campo del DOM. */

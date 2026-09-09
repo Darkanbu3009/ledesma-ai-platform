@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { MarcadorParametro, PasoPublicable, Sql } from '@ledesma-platform/shared';
-import { MARCADORES_NUCLEO } from '@ledesma-platform/shared';
+import { MARCADORES, MARCADORES_NUCLEO } from '@ledesma-platform/shared';
 import {
   DESAJUSTES_PARA_RETIRO,
   MAX_CANDIDATAS_DE_CONSUMO,
@@ -968,5 +968,41 @@ describe('diagnosticarMiss: donde se corto la lectura del consumo', () => {
     expect(texto).not.toContain('owner_id');
     // Solo el LARGO del arreglo, que es un conteo y no un identificador.
     expect(texto).toContain('jsonb_array_length(origenes_hash) as origenes');
+  });
+});
+
+/**
+ * EL TOPE DEL DIAGNOSTICO SE DERIVA, NO SE ESCRIBE A MANO (FIX defecto 2). La constante decia 2^6 =
+ * 64 escrito a mano desde que los marcadores eran seis, y cuando el vocabulario paso a nueve el
+ * `limit` podia dejar fuera la fila que SI casaba: el diagnostico habria reportado
+ * `marcadores_no_contenidos` teniendola delante.
+ *
+ * DE QUE SE DERIVA (D5, V045): del NUCLEO CERRADO, porque desde la particion `marcadores_clave` no
+ * puede llevar otra cosa (D1). Los conjuntos posibles para una identidad de (dominios, intencion)
+ * vuelven a ser 2^6 = 64, y ampliar el vocabulario ABIERTO ya no los mueve.
+ *
+ * Este test falla si lo que la clave puede llevar crece y el tope no lo sigue.
+ */
+describe('MAX_FILAS_DE_DIAGNOSTICO: derivado del nucleo, no escrito a mano', () => {
+  it('cubre TODOS los subconjuntos de lo que marcadores_clave puede llevar', () => {
+    expect(MAX_FILAS_DE_DIAGNOSTICO).toBe(2 ** MARCADORES_NUCLEO.length);
+  });
+
+  it('son los SEIS del nucleo (64), no los nueve del vocabulario completo (512)', () => {
+    expect(MARCADORES_NUCLEO).toHaveLength(6);
+    expect(MARCADORES).toHaveLength(9);
+    expect(MAX_FILAS_DE_DIAGNOSTICO).toBe(64);
+    expect(MAX_FILAS_DE_DIAGNOSTICO).toBeLessThan(2 ** MARCADORES.length);
+  });
+
+  it('el limite que viaja a la query es esa constante, no un numero suelto', async () => {
+    const sql = makeSql([[]]);
+    await new PlantillasCompartidasRepository(sql).diagnosticarMiss({
+      dominiosClave: 'mail.google.com',
+      codigoDeIntencion: 'enviar',
+      marcadoresPosibles: ['', 'destinatario'],
+    });
+    const [, valores] = sql.queries[0] as [string, unknown[]];
+    expect(valores).toContain(2 ** MARCADORES_NUCLEO.length);
   });
 });

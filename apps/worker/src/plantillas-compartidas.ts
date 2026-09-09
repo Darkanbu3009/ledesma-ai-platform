@@ -275,11 +275,16 @@ export interface IdentidadDePlantilla {
 
 /**
  * TOPE REAL de claves que un consumidor puede generar: los subconjuntos del NUCLEO CERRADO
- * (`MARCADORES_NUCLEO`, packages/shared), o sea 2^6 = 64. Se DERIVA del tamano del nucleo y no del
- * vocabulario completo (D5): el vocabulario abierto puede crecer todo lo que haga falta para cubrir
- * mas familias de interfaz sin mover este tope ni un paso, porque sus marcadores no entran a la clave
- * ni a la generacion de subconjuntos. Es una cota estructural, no un limite configurable: no hay
- * objetivo, por raro que sea, que produzca una lista mas larga.
+ * (`MARCADORES_NUCLEO`, packages/shared), o sea 2^6 = 64. Es una cota estructural, no un limite
+ * configurable: no hay objetivo, por raro que sea, que produzca una lista mas larga. En la practica
+ * un objetivo declara pocos y la lista es corta.
+ *
+ * SE DERIVA de la lista y no se escribe a mano, por lo mismo que MAX_FILAS_DE_DIAGNOSTICO en el
+ * backend: la version escrita a mano se quedo en 2^6 cuando el vocabulario paso a nueve.
+ *
+ * Y SE DERIVA DEL NUCLEO Y NO DEL VOCABULARIO COMPLETO (D5): desde V045 la clave solo lleva
+ * marcadores del nucleo (D1), asi que el vocabulario ABIERTO puede crecer todo lo que haga falta
+ * para cubrir mas familias de interfaz sin mover este tope ni un paso.
  */
 export const MAX_CLAVES_DE_MARCADORES = 2 ** MARCADORES_NUCLEO.length;
 
@@ -321,9 +326,9 @@ export function esMarcadorOmitible(marcador: MarcadorParametro): boolean {
  * (D1), asi que la fila se encuentra y es `plantillaAplicable` quien exige su dato al aplicarla.
  */
 export function clavesDeMarcadoresContenidos(marcadores: readonly MarcadorParametro[]): string[] {
-  // EL FILTRO ES DEL NUCLEO (D1) y acota el largo de la lista a 2^6 pase lo que pase: el conjunto de
-  // entrada llega de un `Object.keys` con un cast, puede traer marcadores abiertos y hasta basura, y
-  // de esta funcion depende que la consulta no crezca sin techo.
+  // EL FILTRO ES DEL NUCLEO (D1) y acota el largo de la lista a MAX_CLAVES_DE_MARCADORES pase lo que
+  // pase: el conjunto de entrada llega de un `Object.keys` con un cast, puede traer marcadores
+  // abiertos y hasta basura, y de esta funcion depende que la consulta no crezca sin techo.
   const unicos = [...new Set(marcadores)].filter(esMarcadorDeNucleo).sort();
   let subconjuntos: MarcadorParametro[][] = [[]];
   for (const marcador of unicos) {

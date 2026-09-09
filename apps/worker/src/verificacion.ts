@@ -2,6 +2,7 @@ import {
   serializarDetencion,
   type CampoFaltante,
   type DetencionDeVerificacion,
+  type MarcadorParametro,
   type PoliticaDeEjecucion,
 } from '@ledesma-platform/shared';
 import {
@@ -44,6 +45,58 @@ import type { PasoCensurado } from './trayectoria.js';
 
 /** La politica vigente durante una tarea (los tres ajustes de D3). */
 export type PoliticaVigente = PoliticaDeEjecucion;
+
+/**
+ * MODO de la GUARDIA SIN INTENCION RECONOCIDA (TAREA_WEB_GUARDIA_SIN_INTENCION). Mismo patron de
+ * despliegue que la barrera de identidad (ModoBarreraIdentidad, barrera-identidad.ts): el veredicto
+ * se calcula igual en los tres modos y solo 'activa' lo aplica.
+ *
+ *  - 'apagada': ni se exige comparacion; el comportamiento es el anterior a este cambio, carater por
+ *    caracter (cero comparaciones sigue siendo 'ejecutar').
+ *  - 'observacion' (default en produccion): se evalua y se REGISTRA cuantas corridas HABRIAN sido
+ *    detenidas, y no se detiene ninguna.
+ *  - 'activa': la detencion por cero comparaciones corta la corrida como cualquier otra.
+ */
+export type ModoGuardiaSinIntencion = 'apagada' | 'observacion' | 'activa';
+
+/**
+ * ¿Este veredicto es la detencion NUEVA por cero comparaciones (D2)? Es la unica que el modo puede
+ * revertir: cualquier otra detencion (politica, tope, dato que no coincide) es anterior a este
+ * cambio y se aplica en los tres modos, porque revertirla seria relajar lo que ya protegia.
+ */
+export function esDetencionSinEvidencia(veredicto: Veredicto): boolean {
+  return veredicto.tipo === 'detener' && veredicto.detencion.motivo === 'sinEvidenciaParaComparar';
+}
+
+/**
+ * COMO SE LEE en la trayectoria una accion que la guardia evaluo con el CRITERIO GENERICO (D4): la
+ * corrida no declara una intencion del vocabulario cerrado, asi que no hay familia de verbo contra
+ * la que juzgar el control, y lo que se juzga es lo unico que hay: los datos que el objetivo si
+ * declaro y la politica del usuario.
+ *
+ * `habriaDetenido` es la unica forma de distinguir las dos cosas que llegan aqui como 'ejecutar': la
+ * accion que paso de verdad y la que paso porque el modo observacion revirtio su detencion. Por eso
+ * el veredicto solo no alcanza y este resumen no mira el modo: fuera de 'activa' ese flag es lo que
+ * queda dicho, y en 'activa' es siempre false porque ahi la detencion no se revierte.
+ *
+ * `exito` es true salvo en una detencion EFECTIVA: en observacion la accion siguio su camino y marcar
+ * el paso como fallido leeria como si algo no hubiera corrido. Mismo criterio que resumenDeIdentidad,
+ * y por la misma razon: es la etiqueta que la consola agrupa en /actividad.
+ */
+export function resumenDeGuardiaSinIntencion(entrada: {
+  veredicto: Veredicto;
+  habriaDetenido: boolean;
+}): { etiqueta: string; exito: boolean } {
+  if (entrada.habriaDetenido) {
+    return { etiqueta: 'guardia_generica:habria_detenido', exito: true };
+  }
+  if (entrada.veredicto.tipo === 'detener') {
+    return { etiqueta: 'guardia_generica:detenida', exito: false };
+  }
+  return entrada.veredicto.tipo === 'incompleto'
+    ? { etiqueta: 'guardia_generica:incompleta', exito: true }
+    : { etiqueta: 'guardia_generica:permitida', exito: true };
+}
 
 /**
  * PUERTO de lectura de la politica del owner. Lo implementa PoliticasEjecucionRepository (V034),
@@ -136,11 +189,72 @@ const PARAMETRO_REQUERIDO_POR_VERBO: Readonly<Record<string, CampoFaltante>> = {
   transfer: 'monto',
 };
 
+/** Los marcadores que se reconocen por el CONTEXTO de un campo. `producto` no: ver mas abajo. */
+type MarcadorDeContexto = Extract<
+  MarcadorParametro,
+  'destinatario' | 'monto' | 'cantidad' | 'asunto' | 'cuerpo'
+>;
+
+/**
+ * LOS VOCABULARIOS DE CONTEXTO, uno por marcador comparable: las palabras que, dentro del contexto
+ * de un campo, lo delatan como el destinatario, el monto, la cantidad, el asunto o el cuerpo.
+ *
+ * VIVEN COMO LISTA Y NO COMO REGEX ESCRITA A MANO porque no son solo de este modulo: la tabla que
+ * mapea el NOMBRE DE CLASE de una ranura a su marcador (MARCADOR_POR_NOMBRE_DE_CLASE,
+ * packages/shared/src/plantillas/contrato.ts) declara estar sembrada de estos mismos vocabularios,
+ * y las dos copias habian divergido en silencio: la verificacion trataba un campo "Correo
+ * electronico" como destinatario y la tabla no le daba marcador, asi que ese campo se comparaba
+ * como destinatario pero no se podia publicar como ranura de destinatario. Exportarlos permite que
+ * un test compare los dos lados termino por termino (simetria-vocabularios.test.ts) y que una
+ * divergencia futura falle en CI en vez de descubrirse con una investigacion.
+ *
+ * NO ENTRA aqui el vocabulario de REMITENTE: no nombra un marcador, es la EXCLUSION que impide
+ * comparar la direccion del propio usuario como si fuera un destinatario.
+ */
+export const VOCABULARIO_DE_CONTEXTO: Readonly<Record<MarcadorDeContexto, readonly string[]>> = {
+  destinatario: [
+    'to',
+    'para',
+    'destinatario',
+    'destinatarios',
+    'recipient',
+    'recipients',
+    'cc',
+    'bcc',
+    'cco',
+    'correo',
+    'email',
+    'e-mail',
+    'mail',
+  ],
+  monto: [
+    'monto',
+    'importe',
+    'total',
+    'precio',
+    'price',
+    'amount',
+    'pago',
+    'payment',
+    'cobro',
+    'cargo',
+    'subtotal',
+  ],
+  cantidad: ['cantidad', 'cant', 'quantity', 'qty', 'unidades', 'units', 'piezas'],
+  asunto: ['asunto', 'subject', 'subjectbox', 'titulo', 'title'],
+  cuerpo: ['cuerpo', 'mensaje', 'message', 'body', 'texto', 'contenido', 'content', 'redaccion'],
+};
+
+/** El patron de un vocabulario: la palabra completa, sobre el contexto ya normalizado del campo. */
+function patronDeContexto(terminos: readonly string[]): RegExp {
+  return new RegExp(`\\b(${terminos.join('|')})\\b`);
+}
+
 /**
  * Contexto de un campo que lo delata como DESTINATARIO de la accion (para/to/cc/bcc/correo). Se
  * evalua sobre el contexto NORMALIZADO del campo.
  */
-const CONTEXTO_DESTINATARIO = /\b(to|para|destinatario|destinatarios|recipient|recipients|cc|bcc|cco|correo|email|e-mail|mail)\b/;
+const CONTEXTO_DESTINATARIO = patronDeContexto(VOCABULARIO_DE_CONTEXTO.destinatario);
 
 /**
  * Contexto de un campo que es el REMITENTE, no el destinatario. Se excluye explicitamente: la
@@ -150,20 +264,20 @@ const CONTEXTO_DESTINATARIO = /\b(to|para|destinatario|destinatarios|recipient|r
 const CONTEXTO_REMITENTE = /\b(from|remitente|reply[-\s]?to|sender|responder a)\b/;
 
 /** Contexto de un campo de DINERO: ahi un numero pelado (sin simbolo) si es un monto, en MXN. */
-const CONTEXTO_MONTO = /\b(monto|importe|total|precio|price|amount|pago|payment|cobro|cargo|subtotal)\b/;
+const CONTEXTO_MONTO = patronDeContexto(VOCABULARIO_DE_CONTEXTO.monto);
 
 /** Contexto de un campo de CANTIDAD (numero de unidades). */
-const CONTEXTO_CANTIDAD = /\b(cantidad|cant|quantity|qty|unidades|units|piezas)\b/;
+const CONTEXTO_CANTIDAD = patronDeContexto(VOCABULARIO_DE_CONTEXTO.cantidad);
 
 /** Contexto de un campo de ASUNTO (el titulo de un mensaje). */
-const CONTEXTO_ASUNTO = /\b(asunto|subject|subjectbox|titulo|title)\b/;
+const CONTEXTO_ASUNTO = patronDeContexto(VOCABULARIO_DE_CONTEXTO.asunto);
 
 /**
  * Contexto de un campo de CUERPO de mensaje. Incluye los nombres que usan los redactores modernos
  * (contenteditable con aria-label "Cuerpo del mensaje" / "Message Body"), que es donde el agente
  * escribe el texto en un sitio de correo real.
  */
-const CONTEXTO_CUERPO = /\b(cuerpo|mensaje|message|body|texto|contenido|content|redaccion)\b/;
+const CONTEXTO_CUERPO = patronDeContexto(VOCABULARIO_DE_CONTEXTO.cuerpo);
 
 /** Tolerancia de la comparacion numerica de montos (medio centavo). */
 const TOLERANCIA_MONTO = 0.005;
@@ -244,6 +358,7 @@ function textosDeLaPagina(pagina: EstadoDeLaPagina): string[] {
  *  5. un monto comprometido supera el tope configurado;
  *  6. algun parametro declarado tiene en pantalla un valor DISTINTO del pedido;
  *  6.5. el campo de un parametro declarado existe pero no se pudo leer -> 'noLeible' (CAMBIO 2);
+ *  6.6. no se comparo NI UN dato contra la pagina y la accion no es de solo lectura (D2);
  *  7. algun parametro declarado todavia no esta en pantalla -> 'incompleto' (la tarea sigue).
  */
 export function verificarAccion(entrada: {
@@ -254,6 +369,12 @@ export function verificarAccion(entrada: {
   parametros: ParametrosDeclarados;
   /** Foto del DOM. null = no se pudo leer. */
   pagina: EstadoDeLaPagina | null;
+  /**
+   * D2: esta accion NO es de solo lectura, asi que no puede resolverse con CERO comparaciones. Lo
+   * decide el llamador, que es quien sabe si la accion esta exenta (esNavegacionDeSoloLectura) y en
+   * que modo corre la guardia. Ausente o false = comportamiento anterior a este cambio, exacto.
+   */
+  exigeComparacion?: boolean;
 }): Veredicto {
   const { politica, parametros, pagina } = entrada;
 
@@ -345,6 +466,22 @@ export function verificarAccion(entrada: {
       },
       comparaciones,
     };
+  }
+
+  // 6.6. CERO COMPARACIONES SOBRE UNA ACCION QUE NO ES DE SOLO LECTURA (D2). Hasta aqui, un objetivo
+  //      que no declara ningun dato comparable llegaba al paso 7 con la lista vacia, sin faltantes y
+  //      con cero declarados, y salia con veredicto 'ejecutar': la verificacion decia que si sin
+  //      haber comparado nada contra la pagina. Es el hueco que la medicion encontro en las familias
+  //      que no exigen parametro (borrar, publicar) y en toda intencion que el sistema no reconoce.
+  //      Una accion irreversible sobre la que no se pudo comparar NADA no se ejecuta.
+  //
+  //      VA ANTES DEL PASO 7 y no dentro: la invariante comparaciones.length >= declarados sigue
+  //      exactamente como estaba, solo que ya no puede alcanzarla el caso de cero.
+  if (entrada.exigeComparacion === true && comparaciones.length === 0) {
+    return detener({
+      motivo: 'sinEvidenciaParaComparar',
+      detalle: 'el objetivo no declara ningun dato que se pueda comparar contra la pagina',
+    });
   }
 
   // 7. TODOS LOS PARAMETROS DECLARADOS O NINGUNA ACCION (CAMBIO 1). La verificacion solo se supera

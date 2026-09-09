@@ -234,9 +234,17 @@ interface FilaDeDiagnostico {
 /**
  * TOPE de filas del diagnostico. No es un limite arbitrario: con una identidad de dominios y una
  * intencion fijas, el indice unico de V041 deja como mucho UNA fila por conjunto de marcadores, y los
- * conjuntos posibles son los subconjuntos del NUCLEO CERRADO (`MARCADORES_NUCLEO`, packages/shared),
- * porque `marcadores_clave` no guarda otra cosa (D1). 2^6 = 64. Se DERIVA del tamano del nucleo y no
- * del vocabulario completo (D5): ampliar el vocabulario abierto no mueve este tope.
+ * conjuntos posibles son los SUBCONJUNTOS de lo que `marcadores_clave` puede llevar, o sea 2^N.
+ *
+ * SE DERIVA y no se escribe a mano: cuando el vocabulario crecio de seis a nueve marcadores, esta
+ * constante se quedo en 2^6 = 64 y el diagnostico podia truncar filas que SI existian, o sea
+ * reportar `marcadores_no_contenidos` teniendo la fila delante. Derivarlo es lo unico que hace
+ * imposible que se vuelva a desincronizar en silencio.
+ *
+ * LA N ES LA DEL NUCLEO CERRADO (`MARCADORES_NUCLEO`, packages/shared) y no la del vocabulario
+ * completo (D5): desde V045 `marcadores_clave` no guarda otra cosa que marcadores del nucleo (D1),
+ * asi que los conjuntos posibles vuelven a ser 2^6 = 64. Ampliar el vocabulario ABIERTO no mueve
+ * este tope, que es justamente lo que la particion consigue.
  */
 export const MAX_FILAS_DE_DIAGNOSTICO = 2 ** MARCADORES_NUCLEO.length;
 
@@ -341,8 +349,9 @@ export class PlantillasCompartidasRepository {
    * si lo que ELLA exige esta contenido en lo que el consumidor trae; con la igualdad exacta, un dato
    * de mas del consumidor la volvia inencontrable. Sigue siendo IGUALDAD contra una lista, o sea las
    * mismas tres columnas del indice unico de V041 y en el mismo orden: sin migracion, sin columna
-   * nueva y sin un segundo indice. La lista tiene 64 cadenas como maximo (2^6, los subconjuntos de los
-   * seis marcadores del contrato).
+   * nueva y sin un segundo indice. La lista tiene como maximo 2^N cadenas, los subconjuntos de
+   * los N marcadores del NUCLEO CERRADO (`MARCADORES_NUCLEO`, packages/shared: seis, o sea 64), que
+   * desde V045 es lo unico que `marcadores_clave` puede llevar (D1).
    *
    * EL DESEMPATE, porque con contencion pueden calificar varias filas y elegir al azar significaria
    * que la misma tarea corre un procedimiento distinto en cada corrida:
@@ -441,9 +450,9 @@ export class PlantillasCompartidasRepository {
    * puede pagarla cuando ya encontro lo que buscaba. El llamador la trata como best-effort.
    *
    * ES LA MISMA IDENTIDAD SIN EL FILTRO DE MARCADORES: se traen las filas de este conjunto de dominios
-   * y esta intencion (como mucho 64, ver MAX_FILAS_DE_DIAGNOSTICO) y los cuatro cortes se deciden
-   * aqui, en orden. NO se le pregunta nada al hash de origen: `origen_propio` es el corte residual, y
-   * eso mantiene esta consulta todavia mas anonima que la del consumo.
+   * y esta intencion (ver MAX_FILAS_DE_DIAGNOSTICO, que las cubre todas) y los cuatro cortes se
+   * deciden aqui, en orden. NO se le pregunta nada al hash de origen: `origen_propio` es el corte
+   * residual, y eso mantiene esta consulta todavia mas anonima que la del consumo.
    */
   async diagnosticarMiss(clave: {
     dominiosClave: string;

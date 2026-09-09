@@ -236,6 +236,22 @@ export const MAX_CLASE_CHARS = 160;
  * no puede tener ("Destinatarios en Para" cuando el campo se llama "destinatario", "Enviar
  * (Ctrl-Enter)" cuando el boton se llama "Enviar"). El ORDEN IMPORTA: gana el primer patron que
  * matchea, asi que los mas especificos van antes ("cantidad a pagar" es un monto, no una cantidad).
+ *
+ * LA SIEMBRA ES AHORA UNA OBLIGACION Y NO UNA INTENCION. Las dos copias habian divergido: la
+ * verificacion trataba un campo "Correo electronico" como destinatario y aqui no habia marcador
+ * para el, asi que ese campo se comparaba como destinatario pero no se podia publicar como ranura
+ * de destinatario. Hoy TODO termino de VOCABULARIO_DE_CONTEXTO (apps/worker/src/verificacion.ts)
+ * tiene su patron aqui, salvo las divergencias DELIBERADAS de TERMINOS_SIN_MARCADOR_DELIBERADO
+ * (abajo, cada una con su motivo), y un test compara los dos lados termino por termino.
+ *
+ * EN EL OTRO SENTIDO la tabla si dice mas que los vocabularios, y es deliberado:
+ *  - nombres de VARIAS PALABRAS que una lista de terminos sueltos no puede expresar ("cantidad a
+ *    pagar" es dinero aunque empiece con la palabra de otro marcador);
+ *  - `producto`, que la verificacion no busca por el contexto de un campo sino en los valores y el
+ *    texto de la pagina (ver `textosDeLaPagina`), asi que no tiene vocabulario de contexto;
+ *  - `fecha`, `lugar` y `nombre`, los tres marcadores de la interpretacion natural: entran por el
+ *    nombre de clase de una ranura y por la interpretacion del objetivo, y el extractor
+ *    determinista no los conoce NI DEBE conocerlos (ver MarcadorParametro, contrato de recetas).
  */
 const MARCADOR_POR_NOMBRE_DE_CLASE: ReadonlyArray<{
   patron: RegExp;
@@ -246,8 +262,17 @@ const MARCADOR_POR_NOMBRE_DE_CLASE: ReadonlyArray<{
   { patron: /^monto\b/, marcador: 'monto' },
   { patron: /^importe\b/, marcador: 'monto' },
   { patron: /^amount\b/, marcador: 'monto' },
-  // ASUNTO. "titulo" queda FUERA con el mismo criterio que PATRON_ASUNTO en parametros-objetivo.ts:
-  // en un objetivo de compra nombra al producto.
+  { patron: /^subtotal\b/, marcador: 'monto' },
+  { patron: /^total\b/, marcador: 'monto' },
+  { patron: /^precio\b/, marcador: 'monto' },
+  { patron: /^price\b/, marcador: 'monto' },
+  { patron: /^pago\b/, marcador: 'monto' },
+  { patron: /^payment\b/, marcador: 'monto' },
+  { patron: /^cobro\b/, marcador: 'monto' },
+  { patron: /^cargo\b/, marcador: 'monto' },
+  // ASUNTO. "titulo" y "title" quedan FUERA a proposito, con el mismo criterio que PATRON_ASUNTO en
+  // parametros-objetivo.ts: en un objetivo de compra nombran al producto. Ver
+  // TERMINOS_SIN_MARCADOR_DELIBERADO, que es donde esa divergencia esta declarada.
   { patron: /^asunto\b/, marcador: 'asunto' },
   { patron: /^subject/, marcador: 'asunto' },
   // CUERPO del mensaje. "Cuerpo del mensaje" y "Message Body" son los dos nombres reales de Gmail.
@@ -255,15 +280,31 @@ const MARCADOR_POR_NOMBRE_DE_CLASE: ReadonlyArray<{
   { patron: /^message body\b/, marcador: 'cuerpo' },
   { patron: /^body\b/, marcador: 'cuerpo' },
   { patron: /^mensaje\b/, marcador: 'cuerpo' },
-  // DESTINATARIO. "Destinatarios en Para" es el nombre real del campo Para de Gmail.
+  { patron: /^message\b/, marcador: 'cuerpo' },
+  { patron: /^texto\b/, marcador: 'cuerpo' },
+  { patron: /^contenido\b/, marcador: 'cuerpo' },
+  { patron: /^content\b/, marcador: 'cuerpo' },
+  { patron: /^redaccion\b/, marcador: 'cuerpo' },
+  // DESTINATARIO. "Destinatarios en Para" es el nombre real del campo Para de Gmail; "Correo
+  // electronico" es como se llama el campo en casi cualquier formulario que no sea de correo.
   { patron: /^destinatarios?\b/, marcador: 'destinatario' },
   { patron: /^recipients?\b/, marcador: 'destinatario' },
   { patron: /^para\b/, marcador: 'destinatario' },
   { patron: /^to\b/, marcador: 'destinatario' },
+  { patron: /^cc\b/, marcador: 'destinatario' },
+  { patron: /^bcc\b/, marcador: 'destinatario' },
+  { patron: /^cco\b/, marcador: 'destinatario' },
+  { patron: /^correo\b/, marcador: 'destinatario' },
+  { patron: /^e-?mail\b/, marcador: 'destinatario' },
+  { patron: /^mail\b/, marcador: 'destinatario' },
   // CANTIDAD de unidades.
   { patron: /^cantidad\b/, marcador: 'cantidad' },
+  { patron: /^cant\b/, marcador: 'cantidad' },
   { patron: /^quantity\b/, marcador: 'cantidad' },
   { patron: /^qty\b/, marcador: 'cantidad' },
+  { patron: /^unidades\b/, marcador: 'cantidad' },
+  { patron: /^units\b/, marcador: 'cantidad' },
+  { patron: /^piezas\b/, marcador: 'cantidad' },
   // PRODUCTO.
   { patron: /^producto\b/, marcador: 'producto' },
   { patron: /^product\b/, marcador: 'producto' },
@@ -279,6 +320,45 @@ const MARCADOR_POR_NOMBRE_DE_CLASE: ReadonlyArray<{
   { patron: /^location\b/, marcador: 'lugar' },
   { patron: /^nombre\b/, marcador: 'nombre' },
   { patron: /^name\b/, marcador: 'nombre' },
+];
+
+/**
+ * LAS DIVERGENCIAS DELIBERADAS con los vocabularios de contexto de la verificacion determinista
+ * (VOCABULARIO_DE_CONTEXTO, apps/worker/src/verificacion.ts): terminos que ALLA nombran un marcador
+ * y que AQUI, a proposito, no mapean a ninguno.
+ *
+ * POR QUE LA LISTA EXISTE en vez de un comentario suelto: el test de simetria exige que todo
+ * termino de aquellos vocabularios tenga marcador aqui, y una excepcion sin declarar es
+ * indistinguible de un olvido, que es exactamente como se colo la divergencia que motivo este fix.
+ * Declararla obliga a escribir el motivo, y hace que quitar el termino del vocabulario de alla, o
+ * darle marcador aqui, rompa el test hasta que alguien decida cual de los dos lados tiene razon.
+ *
+ * LA ASIMETRIA DE FONDO, y es la que justifica que una excepcion pueda ser correcta: alla el
+ * vocabulario sirve para LEER un campo de la pagina y compararlo (incluir de mas es conservador: se
+ * compara algo mas), aqui sirve para ESCRIBIR el dato del usuario en el hueco de una plantilla
+ * ajena (incluir de mas es teclear el dato en el campo equivocado).
+ */
+export const TERMINOS_SIN_MARCADOR_DELIBERADO: ReadonlyArray<{
+  /** El termino, tal como aparece en el vocabulario de la verificacion. */
+  termino: string;
+  /** El marcador que la verificacion le da y que esta tabla NO le da. */
+  marcadorEnLaVerificacion: MarcadorParametro;
+  motivo: string;
+}> = [
+  {
+    termino: 'titulo',
+    marcadorEnLaVerificacion: 'asunto',
+    motivo:
+      'en un objetivo de compra nombra al producto ("el libro con titulo X"), mismo criterio con ' +
+      'el que PATRON_ASUNTO lo deja fuera del extractor (parametros-objetivo.ts, worker). ' +
+      'Leer un campo "Titulo" como asunto para compararlo es inocuo; llenarlo con el asunto del ' +
+      'consumidor escribiria el dato equivocado en el campo del producto.',
+  },
+  {
+    termino: 'title',
+    marcadorEnLaVerificacion: 'asunto',
+    motivo: 'el mismo caso que "titulo", en ingles.',
+  },
 ];
 
 /**

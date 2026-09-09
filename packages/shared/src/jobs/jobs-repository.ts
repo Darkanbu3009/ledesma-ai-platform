@@ -141,6 +141,11 @@ interface JobSummaryRow {
    * corrida se adapto sola (D6 de resiliencia). Solo el escalar.
    */
   resultado_desajuste: string | null;
+  /**
+   * `resultado->'guardiaSinIntencion'->>'habriaDetenido'`: cuantas acciones de esta corrida habria
+   * detenido la guardia con criterio generico si el modo hubiera sido 'activa'. Solo el numero.
+   */
+  resultado_guardia_habria: string | null;
 }
 
 function rowToSummary(row: JobSummaryRow): JobSummary {
@@ -177,7 +182,18 @@ function rowToSummary(row: JobSummaryRow): JobSummary {
     // D6 (resiliencia): el sitio cambio su interfaz, la sonda lo detecto a tiempo y la corrida se
     // adapto sola. Es de lo que la consola deriva su aviso en lenguaje llano.
     sitioCambio: row.resultado_desajuste === 'true',
+    // D4 (guardia sin intencion): la guardia con criterio generico corrio en MODO OBSERVACION y
+    // habria detenido esta corrida. NO se detuvo nada: el escalar existe para que eso se pueda decir
+    // en /actividad con esas palabras, y para poder medir el cambio antes de encenderlo.
+    guardiaHabriaDetenido: numeroDelEscalar(row.resultado_guardia_habria) > 0,
   };
+}
+
+/** Un escalar numerico del JSON de resultado. 0 cuando no viene, no es numero o es negativo. */
+function numeroDelEscalar(valor: string | null): number {
+  if (valor === null) return 0;
+  const numero = Number(valor);
+  return Number.isFinite(numero) && numero > 0 ? numero : 0;
 }
 
 /**
@@ -312,7 +328,8 @@ export class JobsRepository {
               scheduled_for, created_at, started_at, finished_at,
               resultado->>'via' as resultado_via, resultado->>'reparada' as resultado_reparada,
               resultado->'plantillaAjena'->>'estado' as resultado_plantilla_estado,
-              resultado->>'desajusteDeInterfaz' as resultado_desajuste
+              resultado->>'desajusteDeInterfaz' as resultado_desajuste,
+              resultado->'guardiaSinIntencion'->>'habriaDetenido' as resultado_guardia_habria
             from jobs
             where owner_id = ${ownerId}
               and (payload->>'kind' is distinct from ${PROMOVER_TRAYECTORIA_JOB_KIND})
@@ -324,7 +341,8 @@ export class JobsRepository {
               scheduled_for, created_at, started_at, finished_at,
               resultado->>'via' as resultado_via, resultado->>'reparada' as resultado_reparada,
               resultado->'plantillaAjena'->>'estado' as resultado_plantilla_estado,
-              resultado->>'desajusteDeInterfaz' as resultado_desajuste
+              resultado->>'desajusteDeInterfaz' as resultado_desajuste,
+              resultado->'guardiaSinIntencion'->>'habriaDetenido' as resultado_guardia_habria
             from jobs
             where owner_id = ${ownerId} and status = ${status}
               and (payload->>'kind' is distinct from ${PROMOVER_TRAYECTORIA_JOB_KIND})
@@ -346,7 +364,8 @@ export class JobsRepository {
         scheduled_for, created_at, started_at, finished_at,
         resultado->>'via' as resultado_via, resultado->>'reparada' as resultado_reparada,
               resultado->'plantillaAjena'->>'estado' as resultado_plantilla_estado,
-              resultado->>'desajusteDeInterfaz' as resultado_desajuste
+              resultado->>'desajusteDeInterfaz' as resultado_desajuste,
+              resultado->'guardiaSinIntencion'->>'habriaDetenido' as resultado_guardia_habria
       from jobs
       where id = ${id} and owner_id = ${ownerId}
     `;
