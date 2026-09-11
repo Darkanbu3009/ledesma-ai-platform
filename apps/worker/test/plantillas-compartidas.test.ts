@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   MARCADORES,
+  MARCADORES_NUCLEO,
   type CodigoDeIntencion,
   type EstrategiaLocalizacion,
   type PasoDeReceta,
@@ -321,13 +322,16 @@ describe('clavesDeMarcadoresContenidos (la CONTENCION del consumo)', () => {
     expect(claves).toHaveLength(16);
   });
 
-  it('el TOPE real es 2^9, y no depende de lo que el llamador mande', () => {
+  it('el TOPE real es 2^6 (el NUCLEO), y no depende de lo que el llamador mande', () => {
+    // Se le mandan LOS NUEVE del vocabulario: los TRES abiertos no engordan la lista, porque no
+    // entran a la clave (D1) y por tanto tampoco a los subconjuntos. Con ellos dentro eran 2^9 = 512.
     const todos = clavesDeMarcadoresContenidos([...MARCADORES]);
     expect(todos).toHaveLength(MAX_CLAVES_DE_MARCADORES);
-    expect(MAX_CLAVES_DE_MARCADORES).toBe(512);
-    // DERIVADO del vocabulario: si manana hay un marcador mas, el tope lo sigue solo. La version
-    // escrita a mano fue la que se quedo en 2^6 cuando los marcadores pasaron de seis a nueve.
-    expect(MAX_CLAVES_DE_MARCADORES).toBe(2 ** MARCADORES.length);
+    expect(MAX_CLAVES_DE_MARCADORES).toBe(64);
+    // DERIVADO, no escrito a mano: si manana hay un marcador de NUCLEO mas, el tope lo sigue solo.
+    // La version escrita a mano fue la que se quedo en 2^6 cuando el vocabulario paso a nueve.
+    expect(MAX_CLAVES_DE_MARCADORES).toBe(2 ** MARCADORES_NUCLEO.length);
+    expect(MAX_CLAVES_DE_MARCADORES).toBeLessThan(2 ** MARCADORES.length);
     // Un nombre que no es uno de los marcadores no puede hacer crecer la lista: se descarta.
     const conBasura = clavesDeMarcadoresContenidos([
       'destinatario',
@@ -337,7 +341,7 @@ describe('clavesDeMarcadoresContenidos (la CONTENCION del consumo)', () => {
     expect(conBasura).toEqual(['', 'destinatario']);
   });
 
-  it('la identidad del consumo lleva la clave exacta Y las claves contenidas mas los omitibles', () => {
+  it('la identidad del consumo lleva la clave del nucleo Y las claves contenidas mas los omitibles', () => {
     const identidad = identidadDeConsumo({
       dominios: [DOMINIO],
       verboBloqueado: 'enviar',
@@ -346,8 +350,10 @@ describe('clavesDeMarcadoresContenidos (la CONTENCION del consumo)', () => {
     expect(identidad).toEqual({
       dominiosClave: DOMINIO,
       codigoDeIntencion: 'enviar',
-      // La clave exacta se conserva para el diagnostico: es lo que el objetivo declaro.
+      // La clave exacta del NUCLEO se conserva para el diagnostico: es lo que se busco.
       marcadoresClave: 'cuerpo+destinatario',
+      // D2: este objetivo no declara ningun dato abierto.
+      marcadoresAbiertos: [],
       // D3b: los candidatos incluyen el marcador OMITIBLE 'asunto' aunque no este declarado: una
       // plantilla que ademas pide asunto se encuentra y su paso se omite, no se inventa.
       marcadoresPosibles: [

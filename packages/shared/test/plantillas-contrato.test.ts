@@ -3,12 +3,17 @@ import {
   dominiosClave,
   esPublicable,
   marcadorDeRanura,
+  marcadoresAbiertos,
   marcadoresClave,
+  marcadoresDeNucleo,
   marcadoresDePasosPublicables,
   parsearPasosPublicables,
   CODIGOS_DE_INTENCION,
+  MARCADORES_ABIERTOS,
+  MARCADORES_NUCLEO,
   esCodigoDeIntencion,
   type EstrategiaLocalizacion,
+  type MarcadorParametro,
   type PasoParaPublicar,
 } from '../src/index.js';
 
@@ -534,6 +539,42 @@ describe('la IDENTIDAD de una plantilla', () => {
   it('marcadores_clave es cadena vacia cuando la plantilla no exige ningun dato', () => {
     expect(marcadoresClave([])).toBe('');
     expect(marcadoresClave(['monto', 'destinatario', 'monto'])).toBe('destinatario+monto');
+  });
+
+  it('la clave lleva SOLO el nucleo y los datos abiertos salen aparte (D1, D2)', () => {
+    // El nucleo es el vocabulario con comparacion determinista escrita; los abiertos, el resto. La
+    // particion es total y no se solapa (lo fija apps/worker/test/nucleo-de-marcadores.test.ts, que
+    // DERIVA el nucleo de la comparacion que corre de verdad).
+    expect([...MARCADORES_NUCLEO]).toEqual([
+      'destinatario',
+      'monto',
+      'producto',
+      'cantidad',
+      'asunto',
+      'cuerpo',
+    ]);
+    expect([...MARCADORES_ABIERTOS]).toEqual(['fecha', 'lugar', 'nombre']);
+
+    const exigidos: MarcadorParametro[] = ['fecha', 'destinatario', 'cuerpo'];
+    expect(marcadoresClave(marcadoresDeNucleo(exigidos))).toBe('cuerpo+destinatario');
+    expect(marcadoresAbiertos(exigidos)).toEqual(['fecha']);
+    // El complemento es exacto: ningun marcador se pierde ni se cuenta dos veces.
+    expect([...marcadoresDeNucleo(exigidos), ...marcadoresAbiertos(exigidos)].sort()).toEqual(
+      [...new Set(exigidos)].sort(),
+    );
+  });
+
+  it('LAS DOS FILAS DE PRODUCCION conservan su clave exacta y no declaran datos abiertos', () => {
+    // Reconstruidas desde sus valores reales (mail.google.com / 'enviar'): la corroborada con
+    // asunto+cuerpo+destinatario y la candidata con destinatario. Los cuatro marcadores en uso son
+    // del nucleo, asi que la particion no mueve ni una de las dos claves.
+    for (const reales of [
+      ['asunto', 'cuerpo', 'destinatario'] as MarcadorParametro[],
+      ['destinatario'] as MarcadorParametro[],
+    ]) {
+      expect(marcadoresClave(marcadoresDeNucleo(reales))).toBe(marcadoresClave(reales));
+      expect(marcadoresAbiertos(reales)).toEqual([]);
+    }
   });
 
   it('los ocho codigos de intencion son los del CHECK de V041 y nada mas', () => {

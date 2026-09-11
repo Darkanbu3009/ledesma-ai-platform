@@ -3112,6 +3112,8 @@ async function publicar(
     dominios: plantilla.dominiosClave,
     intencion: plantilla.codigoDeIntencion,
     marcadores: plantilla.marcadoresClave,
+    // D2: los datos abiertos que el procedimiento pide y que viajan FUERA de la clave.
+    abiertos: plantilla.marcadoresAbiertos.join('+'),
     pasos: plantilla.pasos.length,
   });
   return { publicada: true, motivo: null, submotivo: null, idx: null, clases };
@@ -3176,11 +3178,15 @@ interface VeredictoDeConsumo {
    * LA CLAVE CON LA QUE SE BUSCO, sus tres partes. Solo viaja en el miss ('sin_plantilla'), que es
    * cuando hace falta para saber que se pregunto.
    *
-   * NO ABRE NINGUN CANAL: los tres componentes son vocabulario CERRADO de la plataforma (uno de los
-   * ocho codigos de intencion, un subconjunto de los seis marcadores y los hostnames que el propio
-   * usuario conecto). Ni un caracter sale de `plantillas_compartidas` ni del texto de nadie.
+   * NO ABRE NINGUN CANAL: los componentes son vocabulario CERRADO de la plataforma (uno de los ocho
+   * codigos de intencion, un subconjunto de los marcadores y los hostnames que el propio usuario
+   * conecto). Ni un caracter sale de `plantillas_compartidas` ni del texto de nadie.
+   *
+   * `marcadores` son los DEL NUCLEO, que es con los que se busco de verdad (D1); `abiertos` son los
+   * datos abiertos que el objetivo trae y que NO participan de la busqueda (D2). Separarlos es lo que
+   * permite leer un miss sin auditar: un corte por marcadores solo puede venir de los del nucleo.
    */
-  clave?: { dominios: string; intencion: string; marcadores: string };
+  clave?: { dominios: string; intencion: string; marcadores: string; abiertos: string };
   /** En cual de los filtros se corto la busqueda (`CorteDelConsumo`). Solo en el miss. */
   corte?: string;
   /** Cuantos origenes tiene la fila que SI matcheo la clave, o null si ninguna. Solo en el miss. */
@@ -3523,9 +3529,12 @@ async function veredictoDelMiss(
     clave: {
       dominios: identidad.dominiosClave,
       intencion: identidad.codigoDeIntencion,
-      // El conjunto EXACTO que el objetivo declara. Los subconjuntos con los que se busco de verdad
-      // se derivan de este sin ambiguedad, asi que no hace falta repetirlos.
+      // El conjunto EXACTO del nucleo que el objetivo declara. Los subconjuntos con los que se busco
+      // de verdad se derivan de este sin ambiguedad, asi que no hace falta repetirlos.
       marcadores: identidad.marcadoresClave,
+      // Los datos ABIERTOS del objetivo, que no entraron a la busqueda: quedan a la vista para que un
+      // miss no se confunda con un corte por marcadores, que solo el nucleo puede provocar.
+      abiertos: identidad.marcadoresAbiertos.join('+'),
     },
   };
   if (!repo.diagnosticarMiss) return veredicto;
