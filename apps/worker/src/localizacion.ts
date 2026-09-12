@@ -173,7 +173,9 @@ function porAtributo(estrategia, ademas) {
 // Nombre accesible matcheado POR PREFIJO: el nombre buscado puede ser un recorte del real
 // ("Enviar" encuentra "Enviar (Ctrl+Intro)", "destinatario" encuentra "Destinatarios en Para").
 // El prefijo solo vale si termina en un limite de palabra o si al nombre real solo le sobra el
-// plural: "Para" NO encuentra "Parar reproduccion".
+// plural: "Para" NO encuentra "Parar reproduccion". Es el GEMELO EN LA PAGINA de
+// nombreCoincidePorPrefijo (abajo): misma decision sobre el resto, con el normalizador de aqui.
+// Un test compara los dos lados caso por caso (localizacion-dom.test.ts).
 function nombreCoincide(delElemento, buscado) {
   const nombre = claveDeNombre(delElemento);
   const objetivo = claveDeNombre(buscado);
@@ -303,6 +305,42 @@ ${AYUDANTES_DOM}
   if (!el || el.nodeType !== 1) return '';
   return JSON.stringify(estrategiasDe(el));
 })()`;
+}
+
+/**
+ * EL LIMITE DE PALABRA del matcheo POR PREFIJO de un nombre accesible, para el codigo que corre EN
+ * ESTE PROCESO. Es el MISMO criterio que aplica `nombreCoincide` dentro de la pagina (abajo, en
+ * `expresionResolverElemento`), extraido aqui porque los dos lugares de la plataforma que comparan
+ * un nombre por prefijo tienen que decidir igual: el resolutor de estrategias, que busca el
+ * elemento en el DOM, y la barrera de identidad (barrera-identidad.ts), que compara la clase contra
+ * el nombre que hay en el DOM antes de dejar actuar.
+ *
+ * POR QUE NO SE REUSA `nombreCoincide` TAL CUAL: esa funcion viaja como TEXTO dentro de la
+ * expresion que se evalua en el mundo aislado de la pagina y normaliza con `claveDeNombre`, el
+ * normalizador de dentro de la pagina. Aqui la normalizacion es `normalizarTexto`. Lo unico que las
+ * dos comparaciones comparten -- y lo unico que tienen que compartir -- es la DECISION sobre lo que
+ * sobra, que es lo que vive aqui.
+ *
+ * EL CRITERIO: el prefijo vale si el nombre real es identico, si lo que sobra empieza en un
+ * caracter que no es letra ni digito ("enviar" contra "Enviar (Ctrl-Enter)") o si lo unico que
+ * sobra es una `s` de plural, sola o seguida de un no alfanumerico ("destinatario" contra
+ * "Destinatarios en Para"). Lo que NO vale es que el resto CONTINUE la palabra: "para" no es
+ * "Parar reproduccion" y "eliminar" no es "Eliminares".
+ *
+ * NOMBRE TRUNCADO: el nombre de una clase del atlas viene cortado a MAX_NOMBRE_ATLAS (60), asi que
+ * un nombre real mas largo que eso puede quedar partido a mitad de palabra y dejar de coincidir
+ * consigo mismo. Es la direccion SEGURA del error (la barrera bloquea, la sonda declara desajuste)
+ * y por eso no se excepciona: relajar el limite para los nombres largos seria devolverle el agujero
+ * al unico caso que no se puede distinguir de una deriva real.
+ */
+export function nombreCoincidePorPrefijo(nombreLeido: string, nombreBuscado: string): boolean {
+  const nombre = normalizarTexto(nombreLeido);
+  const objetivo = normalizarTexto(nombreBuscado);
+  if (nombre === '' || objetivo === '') return false;
+  if (nombre === objetivo) return true;
+  if (!nombre.startsWith(objetivo)) return false;
+  const resto = nombre.slice(objetivo.length);
+  return /^[^\p{L}\p{N}]/u.test(resto) || /^s(?:[^\p{L}\p{N}]|$)/u.test(resto);
 }
 
 /**

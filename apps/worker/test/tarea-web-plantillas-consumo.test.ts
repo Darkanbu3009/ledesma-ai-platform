@@ -16,7 +16,9 @@ import type {
 import type { EscaladorDePaso, InstruccionDePaso, NavegadorDeterminista } from '../src/ejecutor-receta.js';
 import type { PeticionDeEleccion } from '../src/eleccion-tarea.js';
 import {
+  marcadoresAbiertos,
   marcadoresClave,
+  marcadoresDeNucleo,
   marcadoresDePasosPublicables,
   parsearPasosPublicables,
 } from '@ledesma-platform/shared';
@@ -484,11 +486,14 @@ interface FilaDePlantilla {
 
 /**
  * `marcadores_clave` de unos pasos publicables, con la MISMA derivacion que hace el repositorio antes
- * del insert: es lo que la plantilla EXIGE, y lo que la contencion compara contra lo que el
- * consumidor declara.
+ * del insert: es lo que la plantilla EXIGE del NUCLEO, y lo que la contencion compara contra lo que el
+ * consumidor declara. Los marcadores ABIERTOS no entran (D1): viajan en `marcadores_abiertos` y su
+ * dato lo exige `plantillaAplicable` al aplicar la plantilla, no la busqueda.
  */
 function marcadoresDePasos(pasos: unknown): string {
-  return marcadoresClave(marcadoresDePasosPublicables(parsearPasosPublicables(pasos) ?? []));
+  return marcadoresClave(
+    marcadoresDeNucleo(marcadoresDePasosPublicables(parsearPasosPublicables(pasos) ?? [])),
+  );
 }
 
 /** El mismo calculo sobre una fila de la tabla. */
@@ -2321,6 +2326,118 @@ describe('simetria D4: la misma frase natural publica y encuentra bajo la misma 
 
     expect(await procesarTareaWeb(consumidor, makeJob(FRASE_NATURAL))).toBe('completada');
     expect(consumidor.motor.ejecutar).not.toHaveBeenCalled();
+  });
+});
+
+// --- V045: EL NUCLEO EN LA CLAVE, LOS DATOS ABIERTOS FUERA ----------------------------------------
+
+/**
+ * La CLAVE de identidad lleva SOLO los marcadores del NUCLEO (los que tienen comparacion determinista
+ * escrita). Un dato ABIERTO -- fecha, lugar, nombre -- viaja aparte y su valor lo resuelve el
+ * consumidor AL APLICAR la plantilla, que es exactamente el camino que esos tres ya seguian: entran
+ * por la interpretacion del objetivo y por el nombre de clase de una ranura, nunca por el extractor.
+ *
+ * Lo que esto arregla: antes, un procedimiento que tecleara una fecha publicaba bajo
+ * 'cuerpo+destinatario+fecha' y duplicaba el tope de subconjuntos de TODA busqueda. Ahora publica bajo
+ * 'cuerpo+destinatario', se encuentra igual, y el dato que falta lo sigue exigiendo la misma puerta
+ * fail-closed de siempre.
+ */
+describe('un dato ABIERTO no entra a la clave y se resuelve al aplicar la plantilla', () => {
+  const CLASE_FECHA = 'escribir|rol:textbox|fecha';
+  const CLASES_CON_FECHA = [...CLASES_DEL_PROCEDIMIENTO, CLASE_FECHA];
+
+  const FRASE = 'mandale un correo a martin@ejemplo.com diciendole que llego el paquete el 12 de marzo';
+  const RESOLUCION = JSON.stringify({
+    intencion: 'enviar',
+    datos: {
+      destinatario: 'martin@ejemplo.com',
+      cuerpo: 'llego el paquete',
+      fecha: '12 de marzo',
+    },
+  });
+  const CAMPOS: CampoDeLaPagina[] = [
+    { contexto: 'destinatarios en para', valor: 'martin@ejemplo.com' },
+    { contexto: 'cuerpo del mensaje', valor: 'llego el paquete' },
+  ];
+
+  /** El procedimiento teclea dos datos del nucleo y UNO abierto antes de enviar. */
+  function pasosConFecha(): unknown[] {
+    return [
+      pasoEscribir(0, CLASE_DESTINATARIO, 'Destinatarios en Para', {
+        tipo: 'parametro',
+        parametro: 'destinatario',
+      }),
+      pasoEscribir(1, CLASE_CUERPO, 'Cuerpo del mensaje', { tipo: 'parametro', parametro: 'cuerpo' }),
+      pasoEscribir(2, CLASE_FECHA, 'Fecha', { tipo: 'parametro', parametro: 'fecha' }),
+      pasoVerificar(3),
+      pasoClick(4, CLASE_ENVIAR, 'Enviar'),
+    ];
+  }
+
+  function exigidos(): ReturnType<typeof marcadoresDePasosPublicables> {
+    return marcadoresDePasosPublicables(parsearPasosPublicables(pasosConFecha()) ?? []);
+  }
+
+  it('la clave publicada es la del NUCLEO y la fecha queda en los marcadores abiertos', () => {
+    expect(marcadoresDePasos(pasosConFecha())).toBe('cuerpo+destinatario');
+    expect(marcadoresAbiertos(exigidos())).toEqual(['fecha']);
+    // Sin la particion, la clave habria sido esta otra, y con ella el tope de subconjuntos de toda
+    // busqueda pasaba de 2^6 a 2^7 por un dato que nada compara contra la pagina.
+    expect(marcadoresClave(exigidos())).toBe('cuerpo+destinatario+fecha');
+  });
+
+  it('se APLICA con el dato abierto resuelto de los valores de la corrida, como cualquier otro', () => {
+    const veredicto = plantillaAplicable({
+      pasos: pasosConFecha(),
+      dominio: DOMINIO,
+      valores: {
+        destinatario: 'martin@ejemplo.com',
+        cuerpo: 'llego el paquete',
+        fecha: '12 de marzo',
+      },
+      verboBloqueado: 'enviar',
+      clasesCorroboradas: new Set(CLASES_CON_FECHA),
+    });
+    expect(veredicto.aplica).toBe(true);
+    if (!veredicto.aplica) return;
+    expect(veredicto.marcadores).toEqual(['cuerpo', 'destinatario', 'fecha']);
+    expect(veredicto.pasos).toHaveLength(5);
+  });
+
+  it('el corte fail-closed no se relaja: sin la fecha declarada, la plantilla NO aplica', () => {
+    const veredicto = plantillaAplicable({
+      pasos: pasosConFecha(),
+      dominio: DOMINIO,
+      valores: { destinatario: 'martin@ejemplo.com', cuerpo: 'llego el paquete' },
+      verboBloqueado: 'enviar',
+      clasesCorroboradas: new Set(CLASES_CON_FECHA),
+    });
+    expect(veredicto).toMatchObject({ aplica: false, motivo: 'dato_sin_declarar', idx: 2 });
+  });
+
+  it('extremo a extremo: se encuentra por la clave del nucleo y corre sin motor libre', async () => {
+    const deps = conPlantillas(
+      [{ id: 'plantilla-con-fecha', estado: 'candidata', pasos: pasosConFecha(), origenes: 2 }],
+      CLASES_CON_FECHA,
+      {
+        elector: makeElector(RESOLUCION),
+        navegador: makeNavegador(true, CAMPOS),
+        determinista: makeDeterminista([], 'Enviar'),
+      },
+    );
+
+    expect(await procesarTareaWeb(deps, makeJob(FRASE))).toBe('completada');
+    expect(deps.motor.ejecutar).not.toHaveBeenCalled();
+    // La busqueda pregunto por los subconjuntos del NUCLEO: ninguna clave nombra la fecha.
+    const plantillas = deps.plantillas as unknown as {
+      repo: { buscarServible: ReturnType<typeof vi.fn> };
+    };
+    const claves = plantillas.repo.buscarServible.mock.calls.map(
+      (llamada) => (llamada[0] as { marcadoresPosibles: string[] }).marcadoresPosibles,
+    );
+    const ultima = claves.at(-1) ?? [];
+    expect(ultima).toContain('cuerpo+destinatario');
+    expect(ultima.some((clave) => clave.includes('fecha'))).toBe(false);
   });
 });
 

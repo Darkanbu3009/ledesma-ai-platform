@@ -617,6 +617,9 @@ describe('JobsRepository', () => {
         // D6 (resiliencia): false salvo cuando la sonda detecto que el sitio cambio y la corrida
         // se adapto sola.
         sitioCambio: false,
+        // D4 (guardia sin intencion): false salvo cuando la guardia con criterio generico corrio en
+        // modo observacion y habria detenido la corrida.
+        guardiaHabriaDetenido: false,
       });
       // Explicito: el resumen no filtra datos sensibles ni redundantes. `resultado` entero jamas
       // sale del repositorio: solo los booleanos derivados de arriba.
@@ -666,6 +669,33 @@ describe('JobsRepository', () => {
       ]);
       const texto = sqlText(sql);
       expect(texto).toContain("resultado->>'desajusteDeInterfaz' as resultado_desajuste");
+    });
+
+    it('D4 (guardia sin intencion): el contador viaja como escalar y se mapea a guardiaHabriaDetenido', async () => {
+      const sql = makeSqlReturning([
+        makeSummaryRow({
+          id: 'j-habria',
+          payload_kind: 'tarea_web',
+          resultado_guardia_habria: '2',
+        }),
+        // Evaluada pero sin ninguna que detener: la etiqueta NO se enciende.
+        makeSummaryRow({
+          id: 'j-cero',
+          payload_kind: 'tarea_web',
+          resultado_guardia_habria: '0',
+        }),
+        makeSummaryRow({ id: 'j-normal', payload_kind: 'tarea_web' }),
+      ]);
+      const jobs = await new JobsRepository(sql).listByOwner('user-1', { limit: 10, offset: 0 });
+      expect(jobs.map((j) => [j.id, j.guardiaHabriaDetenido])).toEqual([
+        ['j-habria', true],
+        ['j-cero', false],
+        ['j-normal', false],
+      ]);
+      const texto = sqlText(sql);
+      expect(texto).toContain(
+        "resultado->'guardiaSinIntencion'->>'habriaDetenido' as resultado_guardia_habria",
+      );
     });
   });
 

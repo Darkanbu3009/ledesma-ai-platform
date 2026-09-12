@@ -108,6 +108,7 @@ Este proceso **no se despliega** aun; solo debe compilar y poder correrse localm
 | `TAREA_WEB_SCREENSHOTS` | no | `cambios` | Cuando se captura la pantalla: `siempre`, `cambios` o `minimo` (ver abajo). |
 | `TAREA_WEB_HISTORIAL_PASOS` | no | `8` | Pasos de conversacion que se reenvian al modelo en cada llamada (3..40). |
 | `TAREA_WEB_BARRERA_IDENTIDAD` | no | `observacion` | Barrera de identidad del elemento: `apagada`, `observacion` o `activa` (ver abajo). |
+| `TAREA_WEB_GUARDIA_SIN_INTENCION` | no | `observacion` | Guardia con criterio generico cuando el sistema no reconoce la intencion: `apagada`, `observacion` o `activa` (ver abajo). |
 | `ATLAS_SITIOS_SECRET` | no | derivado de `VAULT_SECRET` | Secreto del HMAC de origen del atlas de sitios (32+, ver abajo). |
 | `WORKER_POLL_INTERVAL_MS` | no | `5000` | Cada cuanto consulta la cola. |
 | `LOG_LEVEL` | no | `info` | Nivel de log. |
@@ -359,6 +360,72 @@ aislado. En el motor libre eso son 1 conexion en una corrida de 28 pasos (2 si e
 unico reintento), sobre las 2 que la guardia ya abre en ese mismo punto para la verificacion
 determinista: +50 % en la accion irreversible, 0 en las otras 27. Un fallo de la barrera queda como
 `identidad:no_evaluable` y jamas cambia el desenlace del paso ni del job.
+
+### Guardia sin intencion reconocida (`TAREA_WEB_GUARDIA_SIN_INTENCION`)
+
+**La inversion del default.** La guardia solo comparaba cuando la deteccion determinista encontraba un
+verbo del vocabulario cerrado de ocho familias en el texto del usuario. Sin verbo hacia
+`return permitir(...)` sin comparar nada, y de 16 peticiones realistas escritas para siete familias de
+interfaz, 16 caian por ahi (`desactiva`, `archiva`, `revoca`, `da de baja`, `vacia la papelera`,
+`reinicia`). Ademas, de las ocho familias reconocidas solo tres exigen un parametro
+(`PARAMETRO_REQUERIDO_POR_VERBO`: `enviar`->destinatario, `pagar` y `transferir`->monto): en las otras
+cinco (`publicar`, `borrar`, `comprar`, `firmar`, `cancelar suscripcion`) un objetivo que no declaraba
+ningun dato llegaba al paso 7 de `verificarAccion` con la lista de comparaciones VACIA y salia con
+veredicto `ejecutar`.
+
+**La regla que esto implementa.** Una intencion que el sistema no reconoce NUNCA puede resultar en
+tratar la accion como reversible: hay guardia con criterio generico, nunca ausencia de guardia. Y una
+accion irreversible sobre la que no se pudo comparar NADA contra la pagina no se ejecuta
+(`sinEvidenciaParaComparar`, motivo nuevo del contrato de `DETENIDA_VERIFICACION`).
+
+**Que juzga el criterio generico**, y es la verificacion determinista de siempre corriendo donde antes
+no corria nada: la politica del usuario (acciones irreversibles apagadas, dominio excluido, tope de
+monto), que la pagina se pueda leer, y la comparacion de los datos que el objetivo SI declaro. No hay
+criterio nuevo ni mas laxo.
+
+**Que NO juzga, y es la limitacion honesta del camino sin verbo:** la IDENTIDAD del control. La
+barrera de identidad necesita la familia del verbo para saber que buscar en el DOM
+(`nombresDeLaFamilia` devuelve la lista vacia sin verbo), asi que sin intencion reconocida no hay
+nombre accesible que leer ni clase que comparar contra el atlas. Evaluarla igual produciria
+`clase_no_corroborada` en TODAS las acciones: un bloqueo general disfrazado de criterio.
+
+**La unica exencion es `esNavegacionDeSoloLectura`** (`src/prompt-tarea-web.ts`), y **es el riesgo
+principal de encender el modo activo**. Esa funcion se diseno con la asimetria INVERSA (para el FIX F,
+donde lo caro era bloquear una navegacion), asi que es estrecha a proposito: medida sobre 21
+descripciones de solo lectura reales exime 6 y deja 15 bajo guardia. Entre las que NO reconoce:
+`navigate to <url>`, `go back`, `search for ...` / `busca ...`, `filter by ...` / `filtra ...`,
+`open the first email` / `abre el primer correo`, `wait for the page to load`, `recarga la pagina`,
+`hover over ...`, `click the Search button`, `press Enter to run the search`, `dismiss the cookie
+banner`. Dos de las exenciones ademas son accidentales (`refresh the inbox` pasa solo por "inbox";
+`espera a que cargue la bandeja`, solo por "bandeja"). Por eso el default es `observacion`.
+
+**Los tres modos:**
+
+- `observacion` (default): evalua, CUENTA y registra su veredicto como paso sintetico de la
+  trayectoria (`guardia_generica:permitida`, `guardia_generica:habria_detenido`,
+  `guardia_generica:incompleta`), y **NO DETIENE NADA**. El contador de la corrida entera viaja en
+  `jobs.resultado.guardiaSinIntencion` (`modo`, `evaluadas`, `habriaDetenido`), del que /actividad
+  deriva su aviso en lenguaje llano ("Revision en pruebas", i18n ES/EN). Es el modo con el que se mide
+  cuantas corridas reales detendria antes de encenderla.
+- `activa`: la detencion viaja por el veredicto `bloquear` que la guardia YA tiene y la corrida cierra
+  por el mismo camino que cualquier otra detencion de la verificacion (`DETENIDA_VERIFICACION` con
+  motivo `sinEvidenciaParaComparar`). No hay un cierre nuevo.
+- `apagada`: ni se evalua. El comportamiento es el anterior a este cambio, caracter por caracter.
+
+**Que NO cambia en ningun modo.** El camino de `enviar`, que es todo el trafico real de hoy: ese verbo
+exige destinatario, asi que siempre hay al menos una comparacion y la regla no puede dispararse sobre
+el. Hay un test de regresion que corre la traza real de un envio en los tres modos y exige veredicto,
+acciones ejecutadas y pasos de trayectoria identicos. Tampoco cambia una verificacion `incompleto`:
+por el camino sin intencion NO detiene (sin saber cual accion consuma, bloquear cada una hasta que
+todos los datos esten en pantalla dejaria a la corrida sin forma de escribirlos), y sigue siendo mas
+estricto que el `return permitir` de antes.
+
+**El costo.** Una lectura del DOM por accion NO EXENTA de una corrida sin intencion reconocida; cero
+en las corridas con verbo (ahi la verificacion ya leia en ese punto) y cero en las acciones exentas.
+
+**Medicion sobre los fixtures:** en modo activo, 7 de 1341 tests del worker cambian de veredicto
+(6 son `comprar`/`publicar`/`borrar` con cero datos declarados, 1 es un objetivo sin verbo). En
+`observacion` y en `apagada`, cero.
 
 ### Costo por corrida (`TAREA_WEB_SCREENSHOTS` y `TAREA_WEB_HISTORIAL_PASOS`)
 

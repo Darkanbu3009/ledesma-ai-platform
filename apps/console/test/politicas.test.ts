@@ -153,6 +153,7 @@ describe('textoDeDetencion (ES)', () => {
       { motivo: 'accionesDesactivadas' as const },
       { motivo: 'otraAccion' as const },
       { motivo: 'politicaNoDisponible' as const },
+      { motivo: 'sinEvidenciaParaComparar' as const },
     ];
     for (const detencion of motivos) {
       const { titulo, detalle } = textoDeDetencion(detencion);
@@ -178,6 +179,27 @@ describe('textoDeDetencion (EN)', () => {
     expect(textoDeDetencion({ motivo: 'noLeible', campo: 'destinatario' }).detalle).toBe(
       'We could not read who to send it to on the site to check it. Nothing was done.',
     );
+    // El motivo NUEVO (guardia sin intencion reconocida) tambien tiene su texto en ingles: si
+    // faltara, i18n devolveria la clave cruda y el usuario leeria "verificacion.sinEvidencia.detalle".
+    const sinEvidencia = textoDeDetencion({ motivo: 'sinEvidenciaParaComparar' });
+    expect(sinEvidencia.detalle).toContain('Nothing was done');
+    expect(sinEvidencia.detalle).not.toContain('sinEvidencia');
+  });
+});
+
+/**
+ * EL MOTIVO NUEVO de la inversion del default: el sistema no pudo comprobar NADA antes de una accion
+ * que no se puede deshacer. El texto tiene que decir eso, decir que no se ejecuto nada y decir que
+ * hacer, sin nombrar verbos, campos ni nada de la mecanica interna.
+ */
+describe('textoDeDetencion: sin evidencia para comparar (ES)', () => {
+  it('dice que no se comprobo nada, que no se ejecuto nada y que hacer', async () => {
+    await i18n.changeLanguage('es');
+    const { titulo, detalle } = textoDeDetencion({ motivo: 'sinEvidenciaParaComparar' });
+    expect(titulo).toBe('La tarea se detuvo antes de ejecutar');
+    expect(detalle).toContain('No se ejecuto nada');
+    expect(detalle).toContain('Vuelve a pedirlo');
+    expect(detalle).not.toContain('sinEvidencia');
   });
 });
 

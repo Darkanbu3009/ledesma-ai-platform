@@ -1,11 +1,19 @@
-import type { MotivoDeFallaDePlantilla, PasoPublicable, Sql } from '@ledesma-platform/shared';
+import type {
+  MarcadorParametro,
+  MotivoDeFallaDePlantilla,
+  PasoPublicable,
+  Sql,
+} from '@ledesma-platform/shared';
 import {
   dominiosDePasosPublicables,
   esCodigoDeIntencion,
   esMotivoDeFallaDePlantilla,
   esPublicable,
+  marcadoresAbiertos,
   marcadoresClave,
+  marcadoresDeNucleo,
   marcadoresDePasosPublicables,
+  MARCADORES_NUCLEO,
   parsearPasosPublicables,
 } from '@ledesma-platform/shared';
 
@@ -79,6 +87,14 @@ const MOTIVOS_IMPUTABLES: ReadonlySet<MotivoDeFallaDePlantilla> = new Set<Motivo
 
 /** Tope de clases que la comprobacion trae por dominio. Un dominio real no tiene mil controles. */
 export const MAX_CLASES_POR_DOMINIO = 500;
+
+/**
+ * SQLSTATE de Postgres para "la columna no existe". Es lo que responde la base cuando el codigo se
+ * desplego antes de aplicar V045 a mano en el editor de Supabase, que es como se aplican todas las
+ * migraciones de este repo. Se usa para caer al statement de hoy (D6) y para nada mas: cualquier otro
+ * error de base sube tal cual, igual que hasta ahora.
+ */
+const COLUMNA_INEXISTENTE = '42703';
 
 /**
  * CANDIDATAS que la lectura del consumo devuelve para que la sonda pre-flight elija (D5 de
@@ -218,9 +234,19 @@ interface FilaDeDiagnostico {
 /**
  * TOPE de filas del diagnostico. No es un limite arbitrario: con una identidad de dominios y una
  * intencion fijas, el indice unico de V041 deja como mucho UNA fila por conjunto de marcadores, y los
- * conjuntos posibles son los subconjuntos de los seis marcadores del contrato. 2^6 = 64.
+ * conjuntos posibles son los SUBCONJUNTOS de lo que `marcadores_clave` puede llevar, o sea 2^N.
+ *
+ * SE DERIVA y no se escribe a mano: cuando el vocabulario crecio de seis a nueve marcadores, esta
+ * constante se quedo en 2^6 = 64 y el diagnostico podia truncar filas que SI existian, o sea
+ * reportar `marcadores_no_contenidos` teniendo la fila delante. Derivarlo es lo unico que hace
+ * imposible que se vuelva a desincronizar en silencio.
+ *
+ * LA N ES LA DEL NUCLEO CERRADO (`MARCADORES_NUCLEO`, packages/shared) y no la del vocabulario
+ * completo (D5): desde V045 `marcadores_clave` no guarda otra cosa que marcadores del nucleo (D1),
+ * asi que los conjuntos posibles vuelven a ser 2^6 = 64. Ampliar el vocabulario ABIERTO no mueve
+ * este tope, que es justamente lo que la particion consigue.
  */
-export const MAX_FILAS_DE_DIAGNOSTICO = 64;
+export const MAX_FILAS_DE_DIAGNOSTICO = 2 ** MARCADORES_NUCLEO.length;
 
 /** Cuantos marcadores exige una clave ('' = ninguno). El MISMO conteo que hace el `order by`. */
 function marcadoresDeLaClave(clave: string): number {
@@ -296,13 +322,16 @@ export class PlantillasCompartidasRepository {
     }
 
     // 5. LOS MARCADORES se DERIVAN de los pasos, no se reciben: es la unica forma de que la clave de
-    //    identidad no pueda contradecir lo que la plantilla va a pedir de verdad al ejecutarse.
-    const marcadores = marcadoresClave(marcadoresDePasosPublicables(veredicto.pasos));
+    //    identidad no pueda contradecir lo que la plantilla va a pedir de verdad al ejecutarse. Y se
+    //    PARTEN: a la CLAVE solo los del nucleo (D1, el tope combinatorio queda congelado en 2^6), y
+    //    los ABIERTOS a su propia columna (D2), que no es parte del indice unico ni de la busqueda.
+    const exigidos = marcadoresDePasosPublicables(veredicto.pasos);
 
-    return this.upsert({
+    return this.upsertConCompatibilidad({
       dominiosClave: plantilla.dominiosClave,
       codigoDeIntencion: plantilla.codigoDeIntencion,
-      marcadoresClave: marcadores,
+      marcadoresClave: marcadoresClave(marcadoresDeNucleo(exigidos)),
+      marcadoresAbiertos: marcadoresAbiertos(exigidos),
       pasos: veredicto.pasos,
       origenHash: plantilla.origenHash,
     });
@@ -320,8 +349,9 @@ export class PlantillasCompartidasRepository {
    * si lo que ELLA exige esta contenido en lo que el consumidor trae; con la igualdad exacta, un dato
    * de mas del consumidor la volvia inencontrable. Sigue siendo IGUALDAD contra una lista, o sea las
    * mismas tres columnas del indice unico de V041 y en el mismo orden: sin migracion, sin columna
-   * nueva y sin un segundo indice. La lista tiene 64 cadenas como maximo (2^6, los subconjuntos de los
-   * seis marcadores del contrato).
+   * nueva y sin un segundo indice. La lista tiene como maximo 2^N cadenas, los subconjuntos de
+   * los N marcadores del NUCLEO CERRADO (`MARCADORES_NUCLEO`, packages/shared: seis, o sea 64), que
+   * desde V045 es lo unico que `marcadores_clave` puede llevar (D1).
    *
    * EL DESEMPATE, porque con contencion pueden calificar varias filas y elegir al azar significaria
    * que la misma tarea corre un procedimiento distinto en cada corrida:
@@ -420,9 +450,9 @@ export class PlantillasCompartidasRepository {
    * puede pagarla cuando ya encontro lo que buscaba. El llamador la trata como best-effort.
    *
    * ES LA MISMA IDENTIDAD SIN EL FILTRO DE MARCADORES: se traen las filas de este conjunto de dominios
-   * y esta intencion (como mucho 64, ver MAX_FILAS_DE_DIAGNOSTICO) y los cuatro cortes se deciden
-   * aqui, en orden. NO se le pregunta nada al hash de origen: `origen_propio` es el corte residual, y
-   * eso mantiene esta consulta todavia mas anonima que la del consumo.
+   * y esta intencion (ver MAX_FILAS_DE_DIAGNOSTICO, que las cubre todas) y los cuatro cortes se
+   * deciden aqui, en orden. NO se le pregunta nada al hash de origen: `origen_propio` es el corte
+   * residual, y eso mantiene esta consulta todavia mas anonima que la del consumo.
    */
   async diagnosticarMiss(clave: {
     dominiosClave: string;
@@ -633,7 +663,128 @@ export class PlantillasCompartidasRepository {
   }
 
   /**
+   * EL UPSERT CON COMPATIBILIDAD HACIA ATRAS (D6). Escribe `marcadores_abiertos` cuando la columna
+   * existe y, si todavia no existe (el codigo se desplego antes de correr V045 a mano en el editor de
+   * Supabase), cae al statement de HOY, que no la nombra: la publicacion sigue funcionando exactamente
+   * como antes en vez de romperse por una migracion pendiente.
+   *
+   * El fallback se RECUERDA para el resto del proceso: sin eso, cada publicacion pagaria un statement
+   * fallido. Y solo cubre el error de COLUMNA INEXISTENTE (42703); cualquier otro fallo de base sube
+   * como siempre. Una vez aplicada la migracion, el proceso siguiente vuelve a escribir la columna.
+   */
+  private conMarcadoresAbiertos = true;
+
+  private async upsertConCompatibilidad(fila: {
+    dominiosClave: string;
+    codigoDeIntencion: string;
+    marcadoresClave: string;
+    marcadoresAbiertos: MarcadorParametro[];
+    pasos: PasoPublicable[];
+    origenHash: string;
+  }): Promise<ResultadoDePublicacion> {
+    if (this.conMarcadoresAbiertos) {
+      try {
+        return await this.upsertConAbiertos(fila);
+      } catch (error) {
+        if ((error as { code?: unknown }).code !== COLUMNA_INEXISTENTE) throw error;
+        this.conMarcadoresAbiertos = false;
+      }
+    }
+    return this.upsert(fila);
+  }
+
+  /**
+   * EL MISMO UPSERT de abajo, palabra por palabra, MAS la columna `marcadores_abiertos` (V045): el
+   * insert la escribe y el `on conflict` la trata EXACTAMENTE como a `pasos`, porque es una
+   * declaracion DE esos pasos. Una fila sana conserva la suya (como conserva su procedimiento) y una
+   * retirada o desajustada adopta la de esta publicacion junto con los pasos que la producen. Que las
+   * dos se muevan juntas es lo que impide que la columna diga una cosa y el procedimiento otra.
+   *
+   * NO TOCA EL INDICE UNICO de V041: sus tres columnas siguen siendo (dominios_clave,
+   * codigo_de_intencion, marcadores_clave), y `marcadores_abiertos` queda deliberadamente fuera de la
+   * identidad. Dos plantillas del mismo sitio, la misma intencion y los mismos datos de nucleo siguen
+   * siendo UNA fila.
+   */
+  private async upsertConAbiertos(fila: {
+    dominiosClave: string;
+    codigoDeIntencion: string;
+    marcadoresClave: string;
+    marcadoresAbiertos: MarcadorParametro[];
+    pasos: PasoPublicable[];
+    origenHash: string;
+  }): Promise<ResultadoDePublicacion> {
+    const pasos = this.sql.json(fila.pasos as unknown as Parameters<Sql['json']>[0]);
+    const abiertos = this.sql.json(fila.marcadoresAbiertos as unknown as Parameters<Sql['json']>[0]);
+    const origen = this.sql.json([fila.origenHash] as unknown as Parameters<Sql['json']>[0]);
+    const filas = await this.sql<FilaDeConteo[]>`
+      with antes as (
+        select estado from plantillas_compartidas
+        where dominios_clave = ${fila.dominiosClave}
+          and codigo_de_intencion = ${fila.codigoDeIntencion}
+          and marcadores_clave = ${fila.marcadoresClave}
+      )
+      insert into plantillas_compartidas
+        (dominios_clave, codigo_de_intencion, marcadores_clave, marcadores_abiertos, pasos, origenes_hash)
+      values
+        (${fila.dominiosClave}, ${fila.codigoDeIntencion}, ${fila.marcadoresClave}, ${abiertos}, ${pasos}, ${origen})
+      on conflict (dominios_clave, codigo_de_intencion, marcadores_clave) do update set
+        origenes_hash = case
+          when plantillas_compartidas.origenes_hash @> excluded.origenes_hash
+            then plantillas_compartidas.origenes_hash
+          else plantillas_compartidas.origenes_hash || excluded.origenes_hash
+        end,
+        -- REEMPLAZO POR DESAJUSTE (D3): la fila retirada o con desajuste registrado adopta el
+        -- procedimiento de esta publicacion; la sana conserva el suyo.
+        pasos = case
+          when plantillas_compartidas.estado = 'retirada'
+            or plantillas_compartidas.desajustes_hash <> '[]'::jsonb
+            then excluded.pasos
+          else plantillas_compartidas.pasos
+        end,
+        -- La declaracion de datos abiertos viaja PEGADA a los pasos que la producen.
+        marcadores_abiertos = case
+          when plantillas_compartidas.estado = 'retirada'
+            or plantillas_compartidas.desajustes_hash <> '[]'::jsonb
+            then excluded.marcadores_abiertos
+          else plantillas_compartidas.marcadores_abiertos
+        end,
+        estado = case
+          when plantillas_compartidas.estado = 'retirada'
+            or plantillas_compartidas.desajustes_hash <> '[]'::jsonb
+            then 'candidata'
+          else plantillas_compartidas.estado
+        end,
+        fallos_consecutivos = case
+          when plantillas_compartidas.estado = 'retirada'
+            or plantillas_compartidas.desajustes_hash <> '[]'::jsonb
+            then 0
+          else plantillas_compartidas.fallos_consecutivos
+        end,
+        consumidores_hash = case
+          when plantillas_compartidas.estado = 'retirada'
+            or plantillas_compartidas.desajustes_hash <> '[]'::jsonb
+            then '[]'::jsonb
+          else plantillas_compartidas.consumidores_hash
+        end,
+        desajustes_hash = case
+          when plantillas_compartidas.estado = 'retirada'
+            or plantillas_compartidas.desajustes_hash <> '[]'::jsonb
+            then '[]'::jsonb
+          else plantillas_compartidas.desajustes_hash
+        end,
+        actualizada_en = now()
+      returning jsonb_array_length(origenes_hash) as origenes,
+        (select estado from antes) as estado_previo
+    `;
+    return this.desenlaceDelUpsert(filas);
+  }
+
+  /**
    * El insert con su `on conflict`. Separado para que `publicar` se lea como la lista de puertas.
+   *
+   * ES EL CAMINO DE COMPATIBILIDAD (D6): identico al de hoy y sin nombrar `marcadores_abiertos`, para
+   * que un despliegue anterior a V045 publique exactamente como publicaba. Ver
+   * `upsertConCompatibilidad`, que es quien decide cual de los dos corre.
    *
    * REHABILITACION (D5): una publicacion NUEVA del motor libre sobre la identidad de una fila
    * 'retirada' la regresa a 'candidata' con la racha de fallos en 0 y los consumidores en '[]' (la
@@ -715,6 +866,14 @@ export class PlantillasCompartidasRepository {
       returning jsonb_array_length(origenes_hash) as origenes,
         (select estado from antes) as estado_previo
     `;
+    return this.desenlaceDelUpsert(filas);
+  }
+
+  /**
+   * El desenlace que devuelven LOS DOS upserts, para que el camino con columna y el de compatibilidad
+   * no puedan reportar cosas distintas de la misma escritura.
+   */
+  private desenlaceDelUpsert(filas: FilaDeConteo[]): ResultadoDePublicacion {
     return {
       publicada: true,
       origenes: Number(filas[0]?.origenes ?? 1),

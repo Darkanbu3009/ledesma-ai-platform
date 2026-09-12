@@ -4,11 +4,15 @@ import {
   dominiosClave,
   esCodigoDeIntencion,
   esDominioDePaso,
+  esMarcadorDeNucleo,
   esMarcadorParametro,
   esPublicable,
   marcadorDeRanura,
+  marcadoresAbiertos,
   marcadoresClave,
+  marcadoresDeNucleo,
   marcadoresDePasosPublicables,
+  MARCADORES_NUCLEO,
   nombreDeLaClase,
   parsearPasosPublicables,
   tienePasoDeVerificacion,
@@ -158,8 +162,17 @@ export interface PlantillaDeLaCorrida {
   /** Conjunto de dominios ordenado, deduplicado y unido con '+'. */
   dominiosClave: string;
   codigoDeIntencion: CodigoDeIntencion;
-  /** Conjunto de marcadores exigidos, ordenado y unido con '+', o ''. */
+  /**
+   * Conjunto de marcadores DEL NUCLEO que los pasos exigen, ordenado y unido con '+', o '' (D1). Solo
+   * el nucleo: es lo que fija el tope combinatorio de la busqueda por contencion.
+   */
   marcadoresClave: string;
+  /**
+   * Los marcadores ABIERTOS que los pasos exigen (D2). NO forman parte de la identidad ni de la
+   * busqueda: viajan aparte, se declaran en `marcadores_abiertos` y su dato lo resuelve el consumidor
+   * al aplicar la plantilla. Vacio en toda plantilla que solo teclea datos del nucleo.
+   */
+  marcadoresAbiertos: MarcadorParametro[];
   pasos: PasoPublicable[];
 }
 
@@ -213,14 +226,17 @@ export function plantillaDeLaCorrida(entrada: {
     return { publicable: false, motivo: veredicto.motivo, idx: veredicto.idx };
   }
 
+  // Los marcadores se derivan de los pasos QUE SALIERON de la puerta, no de los que entraron: es lo
+  // que garantiza que la identidad diga exactamente lo que la plantilla va a pedir. Y se PARTEN: al
+  // nucleo la clave (D1), a su propia lista los abiertos (D2).
+  const exigidos = marcadoresDePasosPublicables(veredicto.pasos);
   return {
     publicable: true,
     plantilla: {
       dominiosClave: clave,
       codigoDeIntencion: codigo,
-      // Los marcadores se derivan de los pasos QUE SALIERON de la puerta, no de los que entraron: es
-      // lo que garantiza que la clave de identidad diga exactamente lo que la plantilla va a pedir.
-      marcadoresClave: marcadoresClave(marcadoresDePasosPublicables(veredicto.pasos)),
+      marcadoresClave: marcadoresClave(marcadoresDeNucleo(exigidos)),
+      marcadoresAbiertos: marcadoresAbiertos(exigidos),
       pasos: veredicto.pasos,
     },
   };
@@ -242,19 +258,35 @@ export function plantillaDeLaCorrida(entrada: {
 export interface IdentidadDePlantilla {
   dominiosClave: string;
   codigoDeIntencion: CodigoDeIntencion;
-  /** El conjunto EXACTO que el objetivo del consumidor declara. Es lo que se busco, para el log. */
+  /**
+   * Los marcadores DEL NUCLEO que el objetivo del consumidor declara, como clave (D1). Es lo que se
+   * busco de verdad, y lo que viaja al diagnostico del miss.
+   */
   marcadoresClave: string;
+  /**
+   * Los marcadores ABIERTOS que ese mismo objetivo declara (D2). NO participan de la busqueda: viajan
+   * para que el diagnostico de un miss distinga un dato del nucleo que falta (que si pudo cortar la
+   * busqueda) de un dato abierto que el objetivo trae (que no puede haberla cortado).
+   */
+  marcadoresAbiertos: MarcadorParametro[];
   /** Ese conjunto Y TODOS SUS SUBCONJUNTOS: las claves que una plantilla puede tener para aplicar. */
   marcadoresPosibles: string[];
 }
 
 /**
- * TOPE REAL de claves que un consumidor puede generar: los subconjuntos del conjunto de NUEVE, que
- * son los marcadores del contrato de recetas (`MARCADORES`, packages/shared). 2^9 = 512, y es una
- * cota del VOCABULARIO CERRADO, no un limite configurable: no hay objetivo, por raro que sea, que
- * produzca una lista mas larga. En la practica un objetivo declara pocos y la lista real es corta.
+ * TOPE REAL de claves que un consumidor puede generar: los subconjuntos del NUCLEO CERRADO
+ * (`MARCADORES_NUCLEO`, packages/shared), o sea 2^6 = 64. Es una cota estructural, no un limite
+ * configurable: no hay objetivo, por raro que sea, que produzca una lista mas larga. En la practica
+ * un objetivo declara pocos y la lista es corta.
+ *
+ * SE DERIVA de la lista y no se escribe a mano, por lo mismo que MAX_FILAS_DE_DIAGNOSTICO en el
+ * backend: la version escrita a mano se quedo en 2^6 cuando el vocabulario paso a nueve.
+ *
+ * Y SE DERIVA DEL NUCLEO Y NO DEL VOCABULARIO COMPLETO (D5): desde V045 la clave solo lleva
+ * marcadores del nucleo (D1), asi que el vocabulario ABIERTO puede crecer todo lo que haga falta
+ * para cubrir mas familias de interfaz sin mover este tope ni un paso.
  */
-export const MAX_CLAVES_DE_MARCADORES = 512;
+export const MAX_CLAVES_DE_MARCADORES = 2 ** MARCADORES_NUCLEO.length;
 
 /**
  * MARCADORES OMITIBLES (D3b): los datos que una plantilla puede pedir y el consumidor puede NO
@@ -290,12 +322,14 @@ export function esMarcadorOmitible(marcador: MarcadorParametro): boolean {
  *
  * LO QUE NO CAMBIA: una plantilla que exige un marcador que el consumidor NO tiene sigue sin aplicar.
  * No esta entre estas claves, y si por algun camino llegara, `plantillaAplicable` la rechaza igual con
- * `dato_sin_declarar`.
+ * `dato_sin_declarar`. Los marcadores ABIERTOS son justamente ese ultimo caso: no entran a la clave
+ * (D1), asi que la fila se encuentra y es `plantillaAplicable` quien exige su dato al aplicarla.
  */
 export function clavesDeMarcadoresContenidos(marcadores: readonly MarcadorParametro[]): string[] {
-  // El filtro acota el largo de la lista a 2^6 pase lo que pase: el conjunto de entrada llega de un
-  // `Object.keys` con un cast, y de esta funcion depende que la consulta no crezca sin techo.
-  const unicos = [...new Set(marcadores)].filter(esMarcadorParametro).sort();
+  // EL FILTRO ES DEL NUCLEO (D1) y acota el largo de la lista a MAX_CLAVES_DE_MARCADORES pase lo que
+  // pase: el conjunto de entrada llega de un `Object.keys` con un cast, puede traer marcadores
+  // abiertos y hasta basura, y de esta funcion depende que la consulta no crezca sin techo.
+  const unicos = [...new Set(marcadores)].filter(esMarcadorDeNucleo).sort();
   let subconjuntos: MarcadorParametro[][] = [[]];
   for (const marcador of unicos) {
     subconjuntos = [...subconjuntos, ...subconjuntos.map((previo) => [...previo, marcador])];
@@ -331,7 +365,10 @@ export function identidadDeConsumo(entrada: {
   return {
     dominiosClave: clave,
     codigoDeIntencion: codigo,
-    marcadoresClave: marcadoresClave(entrada.marcadores),
+    // D1: la clave lleva SOLO el nucleo, que es lo unico que las filas guardan en `marcadores_clave`.
+    marcadoresClave: marcadoresClave(marcadoresDeNucleo(entrada.marcadores)),
+    // D2: los abiertos que este objetivo trae, fuera de la busqueda y solo para el diagnostico.
+    marcadoresAbiertos: marcadoresAbiertos(entrada.marcadores),
     // D3b: los candidatos de CONTENCION se generan sobre declarados UNION omitibles. Una plantilla
     // que ademas exige un marcador omitible ('asunto') tiene que poder encontrarse aunque el
     // consumidor no lo declare: su paso se va a omitir, no a inventar. El corte fail-closed de los

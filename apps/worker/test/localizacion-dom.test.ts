@@ -5,6 +5,7 @@ import {
   expresionLeerEstrategias,
   expresionResolverElemento,
   leerElementoResuelto,
+  nombreCoincidePorPrefijo,
 } from '../src/localizacion.js';
 import {
   expresionLocalizarBotonPorAriaLabel,
@@ -134,5 +135,47 @@ describe('ayudantes de DOM compartidos: una sola definicion', () => {
       { tipo: 'rol', rol: 'button', nombre: 'Enviar' },
     ]);
     expect(resuelto?.usada).toBe('rol');
+  });
+});
+
+/**
+ * EL MISMO CRITERIO A LOS DOS LADOS (FIX defecto 1). El limite de palabra del matcheo por prefijo
+ * vive en DOS runtimes: `nombreCoincide`, que viaja como texto y corre DENTRO de la pagina, y
+ * `nombreCoincidePorPrefijo`, que corre en este proceso y es lo que consultan la barrera de
+ * identidad y la sonda de reconocimiento. No pueden ser la misma funcion (la de la pagina normaliza
+ * con `claveDeNombre`, la de aqui con `normalizarTexto`), asi que este test los corre CASO POR CASO
+ * -- el de la pagina de verdad, sobre un DOM -- y exige el mismo veredicto.
+ *
+ * Los casos NO llevan acentos a proposito: quitarlos es lo unico que `normalizarTexto` hace de mas,
+ * y esa diferencia es deliberada (dentro de la pagina se compara contra el DOM tal cual).
+ */
+describe('el limite de palabra del prefijo: la pagina y el proceso deciden igual', () => {
+  const CASOS: Array<[string, string, boolean]> = [
+    // [nombre real del elemento, nombre buscado, coincide]
+    ['Enviar', 'Enviar', true],
+    ['Enviar (Ctrl+Intro)', 'Enviar', true],
+    ['Destinatarios en Para', 'destinatario', true],
+    ['Eliminar ambiente', 'eliminar', true],
+    ['Eliminar TODOS los ambientes', 'eliminar', true],
+    ['Eliminars', 'eliminar', true],
+    ['Parar reproduccion', 'Para', false],
+    ['Eliminares', 'eliminar', false],
+    ['Enviarme una copia', 'enviar', false],
+    ['Archivar', 'enviar', false],
+  ];
+
+  it('la pagina resuelve exactamente cuando el criterio de este proceso dice que si', () => {
+    for (const [real, buscado, coincide] of CASOS) {
+      const resuelto = resolver(`<div role="button" aria-label="${real}">x</div>`, [
+        { tipo: 'rol', rol: 'button', nombre: buscado },
+      ]);
+      expect(resuelto !== null, `${buscado} contra ${real} (pagina)`).toBe(coincide);
+      expect(nombreCoincidePorPrefijo(real, buscado), `${buscado} contra ${real}`).toBe(coincide);
+    }
+  });
+
+  it('sin nombre a alguno de los dos lados no hay coincidencia', () => {
+    expect(nombreCoincidePorPrefijo('', 'enviar')).toBe(false);
+    expect(nombreCoincidePorPrefijo('Enviar', '   ')).toBe(false);
   });
 });

@@ -134,6 +134,24 @@ const EnvSchema = z.object({
   //   la clase del elemento es pura (las clases corroboradas del dominio ya se leyeron al arrancar la
   //   tarea) y el nombre accesible se lee SOLO en la accion irreversible.
   TAREA_WEB_BARRERA_IDENTIDAD: z.enum(['apagada', 'observacion', 'activa']).default('observacion'),
+  //   TAREA_WEB_GUARDIA_SIN_INTENCION: la GUARDIA CON CRITERIO GENERICO (verificacion.ts), que cierra
+  //   la INVERSION DEL DEFAULT: hasta ahora, un objetivo cuya intencion no cae en el vocabulario
+  //   cerrado de ocho verbos dejaba pasar TODAS las acciones sin comparar nada (tarea-web.ts, el
+  //   `return permitir` sin verbo), y una intencion reconocida que no exige parametros (borrar,
+  //   publicar) resolvia 'ejecutar' con CERO comparaciones. Las dos cosas tratan como reversible algo
+  //   que el sistema no entendio.
+  //     'observacion' (default): EVALUA y REGISTRA cuantas acciones HABRIAN sido detenidas (paso
+  //       guardia_generica:habria_detenido en la trayectoria y el escalar del que /actividad deriva
+  //       su aviso), y NO DETIENE NINGUNA. Es el modo con el que se MIDE el cambio antes de aplicarlo.
+  //     'activa': la detencion por cero comparaciones corta la corrida como cualquier otra
+  //       (DETENIDA_VERIFICACION con motivo sinEvidenciaParaComparar).
+  //     'apagada': ni se evalua; el comportamiento es el anterior a este cambio, caracter por caracter.
+  //   QUE NO CAMBIA EN NINGUN MODO: la navegacion y la lectura reconocidas (esNavegacionDeSoloLectura)
+  //   quedan exentas, y el camino de `enviar` no se toca -- ese verbo exige destinatario, asi que
+  //   siempre hay al menos una comparacion y esta regla no puede dispararse sobre el.
+  TAREA_WEB_GUARDIA_SIN_INTENCION: z
+    .enum(['apagada', 'observacion', 'activa'])
+    .default('observacion'),
   //   TAREA_WEB_HISTORIAL_PASOS: cuantos pasos de ida y vuelta se reenvian al modelo en cada
   //   llamada. El objetivo original va SIEMPRE, este numero acota solo la conversacion posterior.
   //   Sin la ventana, el bucle reenvia la corrida entera en cada paso y el costo crece con el

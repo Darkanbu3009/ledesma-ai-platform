@@ -1,8 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { JSDOM } from 'jsdom';
-import { esPublicable } from '@ledesma-platform/shared';
+import { esPublicable, nombreDeLaClase } from '@ledesma-platform/shared';
 import { claseDeElemento, estrategiasParaElAtlas } from '../src/atlas-sitios.js';
-import { AYUDANTES_DOM, sanearEstrategias } from '../src/localizacion.js';
+import {
+  AYUDANTES_DOM,
+  nombreCoincidePorPrefijo,
+  sanearEstrategias,
+} from '../src/localizacion.js';
+import { parsearClaseDeElemento } from '../src/sonda-interfaz.js';
 import { plantillaAplicable } from '../src/plantillas-compartidas.js';
 
 /**
@@ -85,9 +90,18 @@ describe('R1: dos controles distintos jamas comparten clase', () => {
   it('el NOMBRE de la clase sigue siendo el nombre accesible, que es lo que compara la barrera', () => {
     // El segundo eje va DENTRO del eje y no pegado al nombre justamente para esto: si fuera parte del
     // nombre, la barrera de identidad compararia "eliminar ambiente@..." contra el nombre del DOM y
-    // bloquearia siempre un control legitimo.
+    // bloquearia siempre un control legitimo. Se comprueba con LA MISMA lectura del nombre que hacen
+    // la barrera y la publicacion, y con la MISMA comparacion por prefijo que aplica la barrera.
     const clase = claseLeida(DOS_ELIMINAR, '[data-testid="eliminar-ambiente-pruebas"]') ?? '';
-    expect(clase.slice(clase.indexOf('|', clase.indexOf('|') + 1) + 1)).toBe('eliminar ambiente');
+    expect(nombreDeLaClase(clase)).toBe('eliminar ambiente');
+    expect(nombreCoincidePorPrefijo('Eliminar ambiente', nombreDeLaClase(clase) ?? '')).toBe(true);
+    // Y la sonda de pre-flight sabe leer el segundo eje en vez de fallar abierta.
+    expect(parsearClaseDeElemento(clase)).toMatchObject({
+      eje: 'rol',
+      rol: 'button',
+      desempate: { atributo: 'data-testid', valor: 'eliminar-ambiente-pruebas' },
+      nombre: 'eliminar ambiente',
+    });
   });
 
   it('sin ningun atributo que los distinga NINGUNO de los dos tiene clase (falla cerrada)', () => {
