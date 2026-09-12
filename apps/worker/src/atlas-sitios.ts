@@ -1,5 +1,8 @@
 import { createHmac } from 'node:crypto';
 import {
+  esAtributoDeIdentidad,
+  esNombreDeIdentidad,
+  MAX_TEXTO_DE_IDENTIDAD,
   parsearEstrategia,
   type AccionDeReceta,
   type EstrategiaLocalizacion,
@@ -55,8 +58,12 @@ import type { PasoCensurado } from './trayectoria.js';
  *    y no describe la estructura del sitio para nadie mas.
  */
 
-/** Tope de caracteres de un nombre accesible, un texto visible o el valor de un atributo. */
-export const MAX_NOMBRE_ATLAS = 60;
+/**
+ * Tope de caracteres de un nombre accesible, un texto visible o el valor de un atributo. Es el MISMO
+ * tope con el que el contrato admite un texto como identidad, definido una sola vez alli: si fueran
+ * dos numeros, un nombre podria pasar la regla de admision y despues recortarse igual.
+ */
+export const MAX_NOMBRE_ATLAS = MAX_TEXTO_DE_IDENTIDAD;
 
 /** Cuantas estrategias guarda una entrada, la ganadora primero. */
 export const MAX_ESTRATEGIAS_ATLAS = 4;
@@ -90,10 +97,20 @@ function esAtributoDeAtlas(atributo: string): boolean {
   return atributo === 'aria-label' || /^data-[a-z0-9-]{1,40}$/.test(atributo);
 }
 
-/** ¿Esta estrategia es de las que el atlas puede guardar? */
+/**
+ * ¿Esta estrategia es de las que el atlas puede guardar? Ademas del TIPO admitido, su texto tiene que
+ * poder ser identidad: lo que se guarda en `aprendizaje_sitios.estrategias` es tan GLOBAL como la
+ * clase, asi que un nombre accesible o un texto visible con un dato dentro no puede entrar por esa
+ * puerta aunque la clase salga limpia de otro eje (invariante 1, anonimato estructural).
+ */
 function esEstrategiaDeAtlas(estrategia: EstrategiaLocalizacion): boolean {
-  if (estrategia.tipo === 'rol' || estrategia.tipo === 'texto') return true;
-  return estrategia.tipo === 'atributo' && esAtributoDeAtlas(estrategia.atributo);
+  if (estrategia.tipo === 'rol') return esNombreDeIdentidad(estrategia.nombre);
+  if (estrategia.tipo === 'texto') return esNombreDeIdentidad(estrategia.texto);
+  if (estrategia.tipo !== 'atributo') return false;
+  return (
+    esAtributoDeAtlas(estrategia.atributo) &&
+    esAtributoDeIdentidad(estrategia.atributo, estrategia.valor)
+  );
 }
 
 /** El texto que una estrategia expone (el unico campo que puede llevar algo leido del sitio). */
@@ -173,6 +190,25 @@ export function estrategiasParaElAtlas(
  * Sin ninguno de los tres NO hay clase y el elemento no entra al atlas: un elemento que solo se sabe
  * localizar por su posicion en el DOM no es una estructura, es una coincidencia.
  *
+ * EL SEGUNDO EJE (R1). Cuando el rol y el nombre NO DISTINGUEN al control de otro que estaba en su
+ * misma pagina, la clase lleva ADEMAS el atributo que si lo distingue, dentro del eje:
+ * `click|rol:button@data-testid=eliminar-produccion|eliminar ambiente`. Va en el EJE y no pegado al
+ * nombre a proposito: el nombre de la clase se sigue leyendo igual (`nombreDeLaClase`), asi que la
+ * barrera de identidad lo compara contra el nombre accesible del DOM y el marcador de una ranura
+ * sigue saliendo del nombre, exactamente como antes. Quien mide los homonimos es la LECTURA del DOM
+ * (`estrategiasDe`, localizacion.ts); aqui solo se lee lo que midio, que es lo que mantiene esta
+ * funcion PURA y, sobre todo, reproducible: la misma lista de estrategias da siempre la misma clase,
+ * que es de lo que dependen `plantillaAplicable` y la barrera al recalcularla.
+ *
+ * TODA ESTRATEGIA PERSISTIDA HASTA HOY viene sin esa medicion, o sea "el eje distingue", asi que su
+ * clase es exactamente la de siempre: ninguna fila del atlas ni ningun paso de plantilla cambia de
+ * forma por este cambio.
+ *
+ * QUE NO PUEDE SER IDENTIDAD (R2 y R3), con la regla generica del contrato: un nombre leido de la
+ * pagina que lleve un dato dentro (`esNombreDeIdentidad`) y el valor de un atributo con forma de
+ * identificador (`esValorDeIdentidad`) NO forman clase. El eje se salta y se prueba el siguiente; si
+ * ninguno queda, el elemento no tiene identidad y no entra a ninguna tabla global.
+ *
  * El nombre va NORMALIZADO (minusculas, sin acentos, espacios colapsados: la misma normalizacion con
  * la que se compara cualquier otro texto en el worker) y truncado a MAX_NOMBRE_ATLAS. La misma
  * funcion la usan el agregador y los dos inyectores: si divergieran, lo que escribe un camino no lo
@@ -184,18 +220,29 @@ export function claseDeElemento(
 ): string | null {
   if (!ACCIONES_CON_ELEMENTO.has(accion)) return null;
   for (const estrategia of estrategias) {
-    if (!esEstrategiaDeAtlas(estrategia)) continue;
-    const nombre = normalizarTexto(textoDeEstrategia(estrategia)).slice(0, MAX_NOMBRE_ATLAS);
+    if (estrategia.tipo !== 'rol') continue;
+    // Homonimo sin nada que lo distinga: el control NO tiene identidad, y tampoco la buscan los ejes
+    // de abajo (comparten con su homonimo el aria-label y el texto, que es de donde sale el nombre).
+    if (estrategia.desempate === null) return null;
+    if (!esNombreDeIdentidad(estrategia.nombre)) continue;
+    const nombre = normalizarTexto(estrategia.nombre).slice(0, MAX_NOMBRE_ATLAS);
     if (nombre === '') continue;
-    if (estrategia.tipo === 'rol') return `${accion}|rol:${normalizarTexto(estrategia.rol)}|${nombre}`;
+    const eje = `rol:${normalizarTexto(estrategia.rol)}`;
+    const desempate = estrategia.desempate;
+    if (desempate === undefined || desempate === null) return `${accion}|${eje}|${nombre}`;
+    // El valor del desempate va TAL CUAL, sin normalizar, al reves que el nombre: el nombre se
+    // compara contra texto leido de la pagina (y por eso se normaliza) y el valor se compara contra
+    // un atributo, que en el DOM distingue mayusculas y es lo que matchea `porAtributo`.
+    return `${accion}|${eje}@${desempate.atributo}=${desempate.valor}|${nombre}`;
   }
   for (const estrategia of estrategias) {
     if (estrategia.tipo !== 'atributo' || !esAtributoDeAtlas(estrategia.atributo)) continue;
+    if (!esAtributoDeIdentidad(estrategia.atributo, estrategia.valor)) continue;
     const nombre = normalizarTexto(estrategia.valor).slice(0, MAX_NOMBRE_ATLAS);
     if (nombre !== '') return `${accion}|atributo:${estrategia.atributo}|${nombre}`;
   }
   for (const estrategia of estrategias) {
-    if (estrategia.tipo !== 'texto') continue;
+    if (estrategia.tipo !== 'texto' || !esNombreDeIdentidad(estrategia.texto)) continue;
     const nombre = normalizarTexto(estrategia.texto).slice(0, MAX_NOMBRE_ATLAS);
     if (nombre !== '') return `${accion}|texto|${nombre}`;
   }

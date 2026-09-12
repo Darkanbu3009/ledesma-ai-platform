@@ -1,12 +1,16 @@
 import {
+  esAtributoDeIdentidad,
   esDominioDePaso,
   esMarcadorDeNucleo,
   esMarcadorParametro,
+  esNombreDeIdentidad,
   MAX_ESPERA_MS,
   MAX_ESTRATEGIAS_POR_PASO,
   MAX_PASOS_RECETA,
   MAX_TEXTO_PASO_CHARS,
+  parsearEstrategia,
   type AccionDeReceta,
+  type DesempateDeIdentidad,
   type EstrategiaLocalizacion,
   type MarcadorParametro,
   type ValorDePaso,
@@ -127,9 +131,13 @@ export type ValorPublicable =
  * recetas los admita, y es la misma exclusion que hace `esAtributoDeAtlas`: son justamente los que
  * llevan identificadores por cuenta o por sesion (el caso Gmail que motivo V038: ids como :u3, :q9),
  * y el identificador de la fila de un usuario no tiene nada que hacer en una tabla global.
+ *
+ * El `desempate` del rol viaja con el paso porque la clase que la plantilla DECLARA se recalcula de
+ * estas mismas estrategias al consumirla (`plantillaAplicable`): sin el, el consumidor derivaria la
+ * clase sin segundo eje y la plantilla no aplicaria nunca.
  */
 export type EstrategiaPublicable =
-  | { tipo: 'rol'; rol: string; nombre: string }
+  | { tipo: 'rol'; rol: string; nombre: string; desempate?: DesempateDeIdentidad | null }
   | { tipo: 'texto'; texto: string }
   | { tipo: 'atributo'; atributo: string; valor: string };
 
@@ -207,8 +215,13 @@ export interface PasoPublicable {
   esperaMs: number | null;
 }
 
-/** Tope de longitud de una clase de elemento (`accion|eje|nombre`, con el nombre ya truncado a 60). */
-export const MAX_CLASE_CHARS = 160;
+/**
+ * Tope de longitud de una clase de elemento (`accion|eje|nombre`, con el nombre acotado a 60). El eje
+ * puede llevar un SEGUNDO EJE (`rol:button@data-testid=...`), que suma el nombre del atributo mas su
+ * valor: sin este margen, la clase de un control homonimo con un `data-*` largo pasaria de este tope
+ * y su plantilla se rechazaria por una razon que no tiene nada que ver con lo que declara.
+ */
+export const MAX_CLASE_CHARS = 280;
 
 /**
  * MAPEO CLASE -> MARCADOR de las ranuras. Tabla CERRADA y deliberadamente pequena: es la unica pieza
@@ -404,27 +417,25 @@ function comoTextoAcotado(valor: unknown, tope: number = MAX_TEXTO_PASO_CHARS): 
  * de recetas si admite) devuelve null y con eso el llamador rechaza la plantilla ENTERA.
  */
 export function parsearEstrategiaPublicable(crudo: unknown): EstrategiaPublicable | null {
-  if (typeof crudo !== 'object' || crudo === null) return null;
-  const objeto = crudo as Record<string, unknown>;
-  switch (objeto.tipo) {
+  // La MISMA regla de admision de identidad que aplica el atlas a la otra tabla global: un nombre
+  // accesible, un texto visible o el valor de un atributo que lleve un dato o un identificador
+  // dentro no se publica, aunque el tipo de estrategia sea de los admitidos.
+  const estrategia = parsearEstrategia(crudo);
+  if (estrategia === null || estrategia.tipo === 'xpath') return null;
+  switch (estrategia.tipo) {
     case 'atributo': {
-      const atributo = comoTextoAcotado(objeto.atributo)?.toLowerCase();
-      const valor = comoTextoAcotado(objeto.valor);
-      if (atributo === undefined || valor === null || !esAtributoPublicable(atributo)) return null;
-      return { tipo: 'atributo', atributo, valor };
+      if (!esAtributoPublicable(estrategia.atributo)) return null;
+      if (!esAtributoDeIdentidad(estrategia.atributo, estrategia.valor)) return null;
+      return { tipo: 'atributo', atributo: estrategia.atributo, valor: estrategia.valor };
     }
     case 'rol': {
-      const rol = comoTextoAcotado(objeto.rol);
-      const nombre = comoTextoAcotado(objeto.nombre);
-      if (rol === null || nombre === null) return null;
-      return { tipo: 'rol', rol, nombre };
+      if (!esNombreDeIdentidad(estrategia.nombre)) return null;
+      const { rol, nombre, desempate } = estrategia;
+      if (desempate === undefined) return { tipo: 'rol', rol, nombre };
+      return { tipo: 'rol', rol, nombre, desempate };
     }
-    case 'texto': {
-      const texto = comoTextoAcotado(objeto.texto);
-      return texto === null ? null : { tipo: 'texto', texto };
-    }
-    default:
-      return null;
+    case 'texto':
+      return esNombreDeIdentidad(estrategia.texto) ? { tipo: 'texto', texto: estrategia.texto } : null;
   }
 }
 
@@ -821,7 +832,15 @@ export function esPublicable(
         teniaAtributoNoEstructural = true;
         continue;
       }
-      estrategias.push(estrategia);
+      // Se DESCARTA igual que el xpath, y por el mismo motivo con el que el atlas la descarta de su
+      // tabla: un nombre o un valor con un dato dentro no describe el sitio para nadie mas. Descartar
+      // la ESTRATEGIA no descarta el PASO; si al paso no le queda ninguna, mas abajo se rechaza.
+      const publicable = parsearEstrategiaPublicable(estrategia);
+      if (publicable === null) {
+        teniaAtributoNoEstructural = teniaAtributoNoEstructural || estrategia.tipo === 'atributo';
+        continue;
+      }
+      estrategias.push(publicable);
     }
 
     // 4 y 5. IDENTIDAD ESTRUCTURAL, solo exigible donde hay elemento (ver PasoPublicable).

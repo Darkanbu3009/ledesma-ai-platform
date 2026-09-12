@@ -176,21 +176,27 @@ describe('paranoia de valores: nada que se haya tecleado llega al atlas', () => 
     expect(estrategiasParaElAtlas([largo], [valor])).toEqual([]);
   });
 
-  it('trunca a 60 caracteres el nombre accesible, el texto visible y el valor del atributo', () => {
+  // CAMBIO DE COMPORTAMIENTO (fix de clase, desempate y privacidad): un texto que NO CABE en
+  // MAX_NOMBRE_ATLAS ya no se RECORTA, se DESCARTA. Recortar guardaba un FRAGMENTO de lo que hubiera
+  // en la pagina, que es como un texto visible que concatena las celdas de un registro ajeno a la
+  // tarea entraba a una tabla global; un rotulo de control de verdad no necesita 60 caracteres.
+  it('lo que no cabe en 60 caracteres NO se recorta: no entra', () => {
     const largo = 'A'.repeat(200);
-    const limpias = estrategiasParaElAtlas(
-      [
-        { tipo: 'rol', rol: 'button', nombre: largo },
-        { tipo: 'texto', texto: largo },
-        { tipo: 'atributo', atributo: 'data-testid', valor: largo },
-      ],
-      [],
-    );
-    expect(limpias).toHaveLength(3);
-    for (const estrategia of limpias) {
-      expect(JSON.stringify(estrategia)).not.toContain('A'.repeat(MAX_NOMBRE_ATLAS + 1));
-    }
-    expect(limpias[0]).toEqual({ tipo: 'rol', rol: 'button', nombre: 'A'.repeat(60) });
+    expect(
+      estrategiasParaElAtlas(
+        [
+          { tipo: 'rol', rol: 'button', nombre: largo },
+          { tipo: 'texto', texto: largo },
+          { tipo: 'atributo', atributo: 'data-testid', valor: largo },
+        ],
+        [],
+      ),
+    ).toEqual([]);
+    // Y lo que cabe entra tal cual, sin tocar: el tope es de admision, no de recorte.
+    const justo = 'A'.repeat(MAX_NOMBRE_ATLAS);
+    expect(estrategiasParaElAtlas([{ tipo: 'rol', rol: 'button', nombre: justo }], [])).toEqual([
+      { tipo: 'rol', rol: 'button', nombre: justo },
+    ]);
   });
 
   it('sin ninguna estrategia utilizable NO se produce entrada (el atlas prefiere no saber)', () => {

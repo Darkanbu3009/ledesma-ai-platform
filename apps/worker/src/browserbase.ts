@@ -375,7 +375,10 @@ ${AYUDANTES_DOM}
   };
   const conLayout = !!(document.body && document.body.getBoundingClientRect
     && document.body.getBoundingClientRect().width > 0);
-  const visible = (el) => {
+  // Visibilidad PROPIA del localizador, con nombre propio para no tapar la \`visible\` de los
+  // ayudantes (la del resolutor, que es solo de caja): esta mira ademas los atributos de ocultamiento
+  // de los ancestros y tolera un documento sin layout, que es lo que necesita el test de DOM.
+  const visibleParaLocalizar = (el) => {
     if (ocultoPorAtributos(el)) return false;
     if (!conLayout) return true;
     const caja = el.getBoundingClientRect();
@@ -389,7 +392,7 @@ ${AYUDANTES_DOM}
     const plano = claveDeNombre(nombre);
     if (!prefijos.some((p) => p !== '' && plano.indexOf(p) === 0)) continue;
     candidatos += 1;
-    if (elegido === null && visible(el)) {
+    if (elegido === null && visibleParaLocalizar(el)) {
       elegido = { ariaLabel: nombre.slice(0, 120), rol: rolDe(el) };
     }
   }

@@ -1,9 +1,12 @@
 import {
   esAtributoEstable,
+  esValorDeIdentidad,
   MAX_ESTRATEGIAS_POR_PASO,
+  MAX_TEXTO_DE_IDENTIDAD,
   MAX_TEXTO_PASO_CHARS,
   ordenarEstrategias,
   parsearEstrategia,
+  type DesempateDeIdentidad,
   type EstrategiaLocalizacion,
 } from '@ledesma-platform/shared';
 import { censurarValor, VALOR_CENSURADO } from './censura.js';
@@ -41,7 +44,10 @@ import { normalizarTexto } from './parametros-objetivo.js';
  * QUE UNA SOLA COPIA IMPORTA: la clase de elemento del atlas (claseDeElemento, atlas-sitios.ts) sale
  * del rol y del nombre que devuelven estas funciones. Dos implementaciones del nombre accesible
  * producirian dos clases distintas para el MISMO control, y lo que escribiera un camino no lo
- * encontraria el otro.
+ * encontraria el otro. Por lo mismo viven aqui los TRES RESOLUTORES (`porAtributo`, `porRol`,
+ * `porTexto`): la lectura los usa para no emitir una estrategia que no resuelve a este elemento, y el
+ * resolutor los usa para resolver. Una segunda copia haria que se leyera con un criterio y se
+ * resolviera con otro.
  *
  * `rolDe` y `nombreDe` son una aproximacion DELIBERADA del calculo de nombre accesible del estandar:
  * cubren los casos que un formulario real usa (aria-label, aria-labelledby, label asociado,
@@ -142,20 +148,142 @@ function porXpath(xpath) {
     return r && r.singleNodeValue && r.singleNodeValue.nodeType === 1 ? r.singleNodeValue : null;
   } catch (e) { return null; }
 }
+// LOS TRES RESOLUTORES viven aqui, y no dentro de expresionResolverElemento, porque los usan DOS
+// lados que no pueden divergir: el que RESUELVE un elemento a partir de una lista de estrategias y el
+// que LEE las estrategias de un elemento. La lectura los usa para preguntarse, por cada estrategia
+// que va a emitir, si el resolutor volveria a caer en ESTE elemento: una estrategia que resuelve a
+// otro (o a ninguno, por ambigua) no localiza nada y no puede ser la identidad de nadie.
+//
+// El segundo argumento (ademas) es el elemento que se esta LEYENDO: cuenta como visible aunque no
+// tenga caja (un control recien desmontado), para que la lectura no se quede sin estrategias por eso.
+function visible(el, ademas) {
+  if (!el || el.nodeType !== 1) return false;
+  if (ademas !== undefined && el === ademas) return true;
+  if (!el.getBoundingClientRect) return false;
+  const caja = el.getBoundingClientRect();
+  return caja.width > 0 && caja.height > 0;
+}
+function porAtributo(estrategia, ademas) {
+  const seleccion = '[' + estrategia.atributo + '="' + String(estrategia.valor).replace(/(["\\\\])/g, '\\\\$1') + '"]';
+  let encontrados;
+  try { encontrados = document.querySelectorAll(seleccion); } catch (e) { return null; }
+  const vivos = Array.prototype.filter.call(encontrados, (el) => visible(el, ademas));
+  return vivos.length === 1 ? vivos[0] : null;
+}
+// Nombre accesible matcheado POR PREFIJO: el nombre buscado puede ser un recorte del real
+// ("Enviar" encuentra "Enviar (Ctrl+Intro)", "destinatario" encuentra "Destinatarios en Para").
+// El prefijo solo vale si termina en un limite de palabra o si al nombre real solo le sobra el
+// plural: "Para" NO encuentra "Parar reproduccion". Es el GEMELO EN LA PAGINA de
+// nombreCoincidePorPrefijo (abajo): misma decision sobre el resto, con el normalizador de aqui.
+// Un test compara los dos lados caso por caso (localizacion-dom.test.ts).
+function nombreCoincide(delElemento, buscado) {
+  const nombre = claveDeNombre(delElemento);
+  const objetivo = claveDeNombre(buscado);
+  if (nombre === '' || objetivo === '') return false;
+  if (nombre === objetivo) return true;
+  if (nombre.indexOf(objetivo) !== 0) return false;
+  const resto = nombre.slice(objetivo.length);
+  return /^[^\\p{L}\\p{N}]/u.test(resto) || /^s(?:[^\\p{L}\\p{N}]|$)/u.test(resto);
+}
+function porRol(estrategia, ademas) {
+  const candidatos = [];
+  for (const el of document.querySelectorAll('*')) {
+    if (!visible(el, ademas)) continue;
+    if (rolDe(el) === estrategia.rol && nombreCoincide(nombreDe(el), estrategia.nombre)) candidatos.push(el);
+  }
+  if (candidatos.length === 1) return candidatos[0];
+  // Con varios candidatos por prefijo, la coincidencia EXACTA desempata; sin exacta unica, nada.
+  const exactos = candidatos.filter((el) => claveDeNombre(nombreDe(el)) === claveDeNombre(estrategia.nombre));
+  return exactos.length === 1 ? exactos[0] : null;
+}
+function porTexto(estrategia, ademas) {
+  const candidatos = [];
+  for (const el of document.querySelectorAll('*')) {
+    if (!visible(el, ademas)) continue;
+    if (textoDe(el) !== estrategia.texto) continue;
+    // El mas PROFUNDO con ese texto exacto: el ancestro tambien lo contiene y clicar el ancestro
+    // puede caer en otra zona de la pagina.
+    if (Array.prototype.some.call(el.querySelectorAll('*'), (h) => textoDe(h) === estrategia.texto)) {
+      continue;
+    }
+    candidatos.push(el);
+  }
+  return candidatos.length === 1 ? candidatos[0] : null;
+}
 const ATRIBUTOS_A_LEER = ['data-testid','data-test','data-qa','data-cy','id','name','aria-label'];
+// ATRIBUTOS DE DESEMPATE: los ganchos de prueba convencionales primero y despues TODO data-* del
+// elemento, en orden alfabetico para que dos lecturas elijan el mismo. Se consultan SOLO para
+// desempatar dos controles homonimos: no se emiten como estrategia, asi que un data-* de analitica,
+// de estado o con un identificador dentro no engorda cada paso ni entra por si solo a ninguna tabla.
+// Quedan FUERA 'id' y 'name' (llevan identificadores por sesion o por registro, el caso Gmail de
+// V038) y 'aria-label' (es de donde sale el nombre accesible: si distinguiera, no serian homonimos).
+const ATRIBUTOS_DE_DESEMPATE = ['data-testid','data-test','data-qa','data-cy'];
+const MAX_DESEMPATES = 4;
+const MAX_TEXTO_DE_IDENTIDAD = ${MAX_TEXTO_DE_IDENTIDAD};
+function atributosDeDesempate(el) {
+  const nombres = ATRIBUTOS_DE_DESEMPATE.slice();
+  const otros = [];
+  if (el.attributes) {
+    for (const atributo of el.attributes) {
+      const nombre = String(atributo.name || '').toLowerCase();
+      if (nombre.indexOf('data-') === 0 && nombres.indexOf(nombre) === -1) otros.push(nombre);
+    }
+  }
+  otros.sort();
+  return nombres.concat(otros);
+}
+/** Los controles VISIBLES de la pagina que llevan el mismo rol y exactamente el mismo nombre. */
+function homonimosDe(el, rol, nombre) {
+  const otros = [];
+  const clave = claveDeNombre(nombre);
+  for (const candidato of document.querySelectorAll('*')) {
+    if (candidato === el || !visible(candidato)) continue;
+    if (rolDe(candidato) === rol && claveDeNombre(nombreDe(candidato)) === clave) otros.push(candidato);
+  }
+  return otros;
+}
+/** Los atributos cuyo valor tiene ESTE elemento y NO tiene ninguno de sus homonimos. */
+function distintivosDe(el, homonimos) {
+  const distintivos = [];
+  for (const atributo of atributosDeDesempate(el)) {
+    if (distintivos.length >= MAX_DESEMPATES) break;
+    const crudo = el.getAttribute ? el.getAttribute(atributo) : null;
+    const valor = crudo === null ? '' : String(crudo).trim();
+    if (valor === '' || valor.length > MAX_TEXTO_DE_IDENTIDAD) continue;
+    let compartido = false;
+    for (const otro of homonimos) {
+      const suyo = otro.getAttribute ? otro.getAttribute(atributo) : null;
+      if (suyo !== null && String(suyo).trim() === valor) { compartido = true; break; }
+    }
+    if (!compartido) distintivos.push({ atributo: atributo, valor: valor });
+  }
+  return distintivos;
+}
 function estrategiasDe(el) {
   const estrategias = [];
   for (const atributo of ATRIBUTOS_A_LEER) {
     const valor = el.getAttribute ? el.getAttribute(atributo) : null;
-    if (valor && valor.trim() !== '') {
-      estrategias.push({ tipo: 'atributo', atributo: atributo, valor: valor.trim() });
-    }
+    if (!valor || valor.trim() === '') continue;
+    const estrategia = { tipo: 'atributo', atributo: atributo, valor: valor.trim() };
+    if (porAtributo(estrategia, el) === el) estrategias.push(estrategia);
   }
   const rol = rolDe(el);
   const nombre = nombreDe(el);
-  if (rol !== '' && nombre !== '') estrategias.push({ tipo: 'rol', rol: rol, nombre: nombre });
+  if (rol !== '' && nombre !== '') {
+    const estrategia = { tipo: 'rol', rol: rol, nombre: nombre };
+    // El rol y el nombre NO distinguen a este control de otro que hay en la misma pagina: se anotan
+    // los atributos que si lo hacen y quien lee decide con cual (o que no hay identidad). La lista
+    // viaja aparte de la estrategia porque es una MEDICION de la pagina, no una forma de localizar.
+    if (porRol(estrategia, el) !== el) {
+      estrategia.distintivos = distintivosDe(el, homonimosDe(el, rol, nombre));
+    }
+    estrategias.push(estrategia);
+  }
   const texto = textoDe(el);
-  if (texto !== '' && texto.length <= 120) estrategias.push({ tipo: 'texto', texto: texto });
+  if (texto !== '' && texto.length <= 120) {
+    const estrategia = { tipo: 'texto', texto: texto };
+    if (porTexto(estrategia, el) === el) estrategias.push(estrategia);
+  }
   estrategias.push({ tipo: 'xpath', xpath: xpathDe(el) });
   return estrategias;
 }
@@ -234,58 +362,6 @@ export function expresionResolverElemento(estrategias: EstrategiaLocalizacion[])
   return `(() => {
 ${AYUDANTES_DOM}
   const especificacion = JSON.parse(${JSON.stringify(especificacion)});
-  function visible(el) {
-    if (!el || el.nodeType !== 1 || !el.getBoundingClientRect) return false;
-    const caja = el.getBoundingClientRect();
-    return caja.width > 0 && caja.height > 0;
-  }
-  function porAtributo(estrategia) {
-    const seleccion = '[' + estrategia.atributo + '="' + String(estrategia.valor).replace(/(["\\\\])/g, '\\\\$1') + '"]';
-    let encontrados;
-    try { encontrados = document.querySelectorAll(seleccion); } catch (e) { return null; }
-    const vivos = Array.prototype.filter.call(encontrados, visible);
-    return vivos.length === 1 ? vivos[0] : null;
-  }
-  // Nombre accesible matcheado POR PREFIJO: el nombre buscado puede ser un recorte del real
-  // ("Enviar" encuentra "Enviar (Ctrl+Intro)", "destinatario" encuentra "Destinatarios en Para").
-  // El prefijo solo vale si termina en un limite de palabra o si al nombre real solo le sobra el
-  // plural: "Para" NO encuentra "Parar reproduccion". Es el GEMELO EN LA PAGINA de
-  // nombreCoincidePorPrefijo (arriba): misma decision sobre el resto, con el normalizador de aqui.
-  // Un test compara los dos lados caso por caso (localizacion-dom.test.ts).
-  function nombreCoincide(delElemento, buscado) {
-    const nombre = claveDeNombre(delElemento);
-    const objetivo = claveDeNombre(buscado);
-    if (nombre === '' || objetivo === '') return false;
-    if (nombre === objetivo) return true;
-    if (nombre.indexOf(objetivo) !== 0) return false;
-    const resto = nombre.slice(objetivo.length);
-    return /^[^\\p{L}\\p{N}]/u.test(resto) || /^s(?:[^\\p{L}\\p{N}]|$)/u.test(resto);
-  }
-  function porRol(estrategia) {
-    const candidatos = [];
-    for (const el of document.querySelectorAll('*')) {
-      if (!visible(el)) continue;
-      if (rolDe(el) === estrategia.rol && nombreCoincide(nombreDe(el), estrategia.nombre)) candidatos.push(el);
-    }
-    if (candidatos.length === 1) return candidatos[0];
-    // Con varios candidatos por prefijo, la coincidencia EXACTA desempata; sin exacta unica, nada.
-    const exactos = candidatos.filter((el) => claveDeNombre(nombreDe(el)) === claveDeNombre(estrategia.nombre));
-    return exactos.length === 1 ? exactos[0] : null;
-  }
-  function porTexto(estrategia) {
-    const candidatos = [];
-    for (const el of document.querySelectorAll('*')) {
-      if (!visible(el)) continue;
-      if (textoDe(el) !== estrategia.texto) continue;
-      // El mas PROFUNDO con ese texto exacto: el ancestro tambien lo contiene y clicar el ancestro
-      // puede caer en otra zona de la pagina.
-      if (Array.prototype.some.call(el.querySelectorAll('*'), (h) => textoDe(h) === estrategia.texto)) {
-        continue;
-      }
-      candidatos.push(el);
-    }
-    return candidatos.length === 1 ? candidatos[0] : null;
-  }
   let elegido = null;
   let usada = null;
   let indice = -1;
@@ -383,6 +459,30 @@ function textoDeEstrategia(estrategia: EstrategiaLocalizacion): string {
 }
 
 /**
+ * EL DESEMPATE que corresponde a los `distintivos` que midio la pagina. La pagina MIDE (cuales de sus
+ * atributos no comparte con sus homonimos, que es lo unico que solo ella sabe) y aqui se JUZGA con la
+ * regla de admision del contrato (`esValorDeIdentidad`), que tiene una sola copia: un valor con forma
+ * de identificador de sesion, de registro, de fecha o de importe no puede sostener una identidad
+ * estable entre sesiones ni entre usuarios, asi que no desempata.
+ *
+ * `null` = la pagina midio homonimos y NINGUN atributo admisible los distingue: el control se queda
+ * sin identidad (falla cerrada) en vez de compartirla con otro.
+ */
+function desempateDeDistintivos(crudo: unknown): DesempateDeIdentidad | null {
+  if (!Array.isArray(crudo)) return null;
+  for (const item of crudo) {
+    if (typeof item !== 'object' || item === null) continue;
+    const { atributo, valor } = item as Record<string, unknown>;
+    if (typeof atributo !== 'string' || typeof valor !== 'string') continue;
+    const nombre = atributo.trim().toLowerCase();
+    const texto = valor.trim();
+    if (!esAtributoEstable(nombre) || !esValorDeIdentidad(texto)) continue;
+    return { atributo: nombre, valor: texto };
+  }
+  return null;
+}
+
+/**
  * SANEA lo que vuelve del navegador: valida cada estrategia contra el contrato, DESCARTA las que la
  * censura toca (una estrategia con un dato sensible dentro no se guarda: no localizaria nada y solo
  * serviria para filtrarlo), quita duplicadas, las ordena y las acota.
@@ -401,9 +501,17 @@ export function sanearEstrategias(crudo: string): EstrategiaLocalizacion[] {
   const saneadas: EstrategiaLocalizacion[] = [];
   const vistas = new Set<string>();
   for (const item of parseado) {
-    const estrategia = parsearEstrategia(item);
+    let estrategia = parsearEstrategia(item);
     if (estrategia === null) continue;
     if (estrategia.tipo === 'atributo' && !esAtributoEstable(estrategia.atributo)) continue;
+    // La MEDICION de la pagina (`distintivos`) se convierte aqui en el campo del contrato: es el
+    // unico punto donde entra, asi que ninguna otra fuente puede fabricar un desempate.
+    if (estrategia.tipo === 'rol' && typeof item === 'object' && item !== null) {
+      const medido = (item as Record<string, unknown>).distintivos;
+      if (medido !== undefined) {
+        estrategia = { ...estrategia, desempate: desempateDeDistintivos(medido) };
+      }
+    }
     const texto = textoDeEstrategia(estrategia);
     if (texto.length > MAX_TEXTO_PASO_CHARS) continue;
     // La censura decide: si toco el texto, la estrategia se cae entera.

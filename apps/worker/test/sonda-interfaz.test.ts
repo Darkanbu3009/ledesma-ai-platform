@@ -85,6 +85,7 @@ describe('parsearClaseDeElemento: el formato canonico de claseDeElemento', () =>
       eje: 'rol',
       rol: 'button',
       atributo: null,
+      desempate: null,
       nombre: 'enviar',
     });
     expect(parsearClaseDeElemento('escribir|atributo:aria-label|para')).toMatchObject({
